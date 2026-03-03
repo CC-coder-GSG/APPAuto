@@ -1,41 +1,79 @@
-<!doctype html><html><head><meta charset="utf-8"/><title>APPAuto</title><link rel="stylesheet" href="/static/style.css"></head>
-<body><div class="container">
-<div class="card row" style="justify-content:space-between"><h1>测试协作与流程管控</h1><div><span id="me" class="badge"></span> <button class="secondary" onclick="logout()">退出</button></div></div>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>APPAuto</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+  <div class="card row" style="justify-content:space-between">
+    <h1>测试协作与流程管控</h1>
+    <div><span id="me" class="badge"></span> <button class="secondary" onclick="logout()">退出</button></div>
+  </div>
 
-<div id="adminPanel" class="card hidden"><h2>用户管理（管理员）</h2><div class="row"><input id="newUser" placeholder="用户名"><input id="newPass" placeholder="初始密码"><button onclick="createUser()">添加用户</button></div><div id="userList" class="muted"></div></div>
+  <div class="card row">
+    <button onclick="showTab('core')">核心流程</button>
+    <button onclick="showTab('retest')">复测工作台</button>
+    <button onclick="showTab('stage5')">整体测试</button>
+  </div>
 
-<div class="card"><h2>版本与需求</h2><div class="row"><input id="majorNo" placeholder="大版本号 4030"><button onclick="createMajor()">新增大版本</button><input id="minorNo" placeholder="子版本号 40300097"><input id="minorParent" placeholder="父大版本ID"><button onclick="createMinor()">新增子版本</button></div>
-<div class="row"><input id="rid" placeholder="内部ID"><input id="rno" placeholder="r#xxxx"><input id="rtitle" placeholder="需求名称"><input id="rmajor" placeholder="大版本ID"><button onclick="createReq()">新增需求</button></div></div>
+  <div id="tab-core">
+    <div id="adminPanel" class="card hidden"><h2>用户管理（管理员）</h2><div class="row"><input id="newUser" placeholder="用户名"><input id="newPass" placeholder="初始密码"><button onclick="createUser()">添加用户</button></div><div id="userList" class="muted"></div></div>
+    <div class="card"><h2>版本与需求</h2><div class="row"><input id="majorNo" placeholder="大版本号 4030"><button onclick="createMajor()">新增大版本</button><input id="minorNo" placeholder="子版本号 40300097"><input id="minorParent" placeholder="父大版本ID"><button onclick="createMinor()">新增子版本</button></div>
+    <div class="row"><input id="rid" placeholder="内部ID"><input id="rno" placeholder="r#xxxx"><input id="rtitle" placeholder="需求名称"><input id="rmajor" placeholder="大版本ID"><button onclick="createReq()">新增需求</button></div></div>
+    <div class="card"><h2>阶段一+二+三</h2><div class="row"><input id="assignMajor" placeholder="大版本ID"><input id="testMinor" placeholder="子版本ID"><button onclick="loadReqs()">加载需求</button><button onclick="publishAssign()">发布分配</button><button onclick="pushCase()">推送用例</button><button onclick="pushTest()">推送测试</button></div><table><thead><tr><th>需求</th><th>负责人</th></tr></thead><tbody id="reqTable"></tbody></table></div>
+  </div>
 
-<div class="card"><h2>阶段一：分配</h2><div class="row"><input id="assignMajor" placeholder="大版本ID"><button onclick="loadReqs()">加载需求</button><button onclick="publishAssign()">一键发布/更新分配</button></div><table><thead><tr><th>需求</th><th>负责人</th></tr></thead><tbody id="reqTable"></tbody></table></div>
+  <div id="tab-retest" class="hidden">
+    <div class="card"><h2>阶段四：交叉复测工作台</h2><div class="row"><input id="retestMajor" placeholder="大版本ID"><button onclick="loadRetest()">加载复测池</button><button onclick="pushRetest()">📢 推送复测结果</button></div>
+      <table><thead><tr><th>需求</th><th>原测试人</th><th>复测</th></tr></thead><tbody id="retestTable"></tbody></table>
+    </div>
+  </div>
 
-<div class="card"><h2>阶段二：用例</h2><div class="row"><button onclick="pushCase()">📢 推送用例编写进度</button></div><div class="muted">在分配表内填写 u# 并勾选完成。取消会确认并触发回滚接口。</div></div>
-
-<div class="card"><h2>阶段三：测试</h2><div class="row"><input id="testMinor" placeholder="子版本ID"><button onclick="pushTest()">📢 推送测试进度</button></div><div id="testBoard"></div></div>
-
-<div class="card"><h2>导出</h2><div class="row"><input id="exMajor" placeholder="大版本ID(可空)"><input id="exMinor" placeholder="子版本ID(可空)"><button onclick="exp('csv')">⬇️ 导出CSV</button><button onclick="exp('xlsx')">⬇️ 导出XLSX</button></div></div>
+  <div id="tab-stage5" class="hidden">
+    <div class="card"><h2>阶段五：版本整体测试与回归</h2><div class="row"><input id="stage5Major" placeholder="大版本ID"><input id="stage5Minor" placeholder="当前子版本ID"><button onclick="loadStage5()">加载全景</button><button onclick="pushStage5()">推送整体测试状态</button></div>
+      <div id="stage5Req" class="muted"></div>
+      <table><thead><tr><th>Bug池</th><th>回归输入</th><th>测试完毕</th></tr></thead><tbody id="stage5BugTable"></tbody></table>
+      <h3>➕ 新增问题</h3><div class="row"><input id="s5BugId" placeholder="b#xxxx"><select id="s5SourceType"><option value="manual">manual</option><option value="requirement">requirement</option><option value="case">case</option><option value="legacy_bug">legacy_bug</option></select><input id="s5SourceRef" placeholder="来源编号(可空)"><input id="s5ReqId" placeholder="关联需求ID(可空)"><button onclick="addStage5Issue()">新增问题并推送</button></div>
+    </div>
+  </div>
 </div>
 <script>
-const token=localStorage.getItem('token');if(!token) location.href='/login';
-const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};let users=[];let reqs=[];
-async function api(url,opt={}){opt.headers={...(opt.headers||{}),Authorization:'Bearer '+token};const r=await fetch(url,opt);if(r.status===401){logout();return}return r}
-async function init(){const meR=await api('/auth/me');const me=await meR.json();document.getElementById('me').innerText=me.username+'('+me.role+')';if(me.role==='admin'){adminPanel.classList.remove('hidden');await refreshUsers();}}
+const token = localStorage.getItem('token'); if(!token) location.href='/login';
+const H = {'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+let users=[], reqs=[], retestRows=[], stage5Rows=[];
+async function api(url,opt={}){opt.headers={...(opt.headers||{}),Authorization:'Bearer '+token}; const r=await fetch(url,opt); if(r.status===401){logout(); throw new Error('unauthorized')} return r}
+function showTab(t){['core','retest','stage5'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden')); document.getElementById('tab-'+t).classList.remove('hidden')}
 function logout(){localStorage.removeItem('token');location.href='/login'}
+
+async function init(){const me=await (await api('/auth/me')).json(); document.getElementById('me').innerText=me.username+'('+me.role+')'; if(me.role==='admin'){adminPanel.classList.remove('hidden'); await refreshUsers();}}
 async function refreshUsers(){const r=await api('/users');users=await r.json();userList.innerText=users.map(x=>`${x.id}:${x.username}`).join(' , ')}
 async function createUser(){await api('/users',{method:'POST',headers:H,body:JSON.stringify({username:newUser.value,password:newPass.value})});refreshUsers()}
 async function createMajor(){await api('/versions',{method:'POST',headers:H,body:JSON.stringify({version_no:majorNo.value,version_type:'major'})})}
 async function createMinor(){await api('/versions',{method:'POST',headers:H,body:JSON.stringify({version_no:minorNo.value,version_type:'minor',parent_id:Number(minorParent.value)})})}
 async function createReq(){await api('/requirements',{method:'POST',headers:H,body:JSON.stringify({internal_id:rid.value,zentao_req_id:rno.value,title:rtitle.value,major_version_id:Number(rmajor.value)})})}
-async function loadReqs(){const m=assignMajor.value;const r=await api('/requirements?major_version_id='+m);reqs=await r.json();renderReqs();renderTests()}
-function renderReqs(){reqTable.innerHTML=reqs.map(r=>`<tr><td>${r.zentao_req_id} ${r.title}<div><input id='u_${r.id}' value='${(r.case_ids||[]).join(',')}' placeholder='u#123,u#124'><label><input type='checkbox' ${r.case_completed?'checked':''} onchange='toggleCase(${r.id},this.checked)'>✅完成用例</label></div></td><td><select id='o_${r.id}'><option value=''>未分配</option>${users.map(u=>`<option value='${u.id}' ${r.owner_id===u.id?'selected':''}>${u.username}</option>`).join('')}</select></td></tr>`).join('')}
+
+async function loadReqs(){const m=Number(assignMajor.value);const r=await api('/requirements?major_version_id='+m);reqs=await r.json();renderReqs()}
+function renderReqs(){reqTable.innerHTML=reqs.map(r=>`<tr><td>${r.zentao_req_id} ${r.title}<div><input id='u_${r.id}' value='${(r.case_ids||[]).join(',')}' placeholder='u#1,u#2'><label><input type='checkbox' ${r.case_completed?'checked':''} onchange='toggleCase(${r.id},this.checked)'>✅用例完成</label><label><input id='t_${r.id}' type='checkbox' ${r.test_completed?'checked':''} onchange='confirmTest(${r.id},this.checked)'>✅测试完成</label></div></td><td><select id='o_${r.id}'><option value=''>未分配</option>${users.map(u=>`<option value='${u.id}' ${r.owner_id===u.id?'selected':''}>${u.username}</option>`).join('')}</select><div class='row'><input id='b_${r.id}' placeholder='b#9901'><select id='s_${r.id}'><option>无关联发现</option>${(r.case_ids||[]).map(u=>`<option>${u}</option>`).join('')}</select></div></td></tr>`).join('')}
 async function publishAssign(){const assignments=reqs.map(r=>({requirement_id:r.id,owner_id:Number(document.getElementById('o_'+r.id).value)||null}));await api('/requirements/assign-and-publish',{method:'POST',headers:H,body:JSON.stringify({major_version_id:Number(assignMajor.value),assignments})});alert('已发布')}
 async function toggleCase(id,checked){if(!checked){if(!confirm('确认取消已完成状态吗？')){loadReqs();return;} await api(`/requirements/${id}/case-rollback`,{method:'POST'});}const text=document.getElementById('u_'+id).value.split(',').map(s=>s.trim()).filter(Boolean);await api(`/requirements/${id}/cases`,{method:'PUT',headers:H,body:JSON.stringify({case_ids:text,case_completed:checked})});loadReqs()}
+async function confirmTest(id,checked){if(!checked){if(!confirm('确认取消测试完成吗？')){loadReqs();return;} await api(`/requirements/${id}/test-rollback`,{method:'POST'});}await api(`/requirements/${id}/test-execution`,{method:'PUT',headers:H,body:JSON.stringify({minor_version_id:Number(testMinor.value),bug_id:document.getElementById('b_'+id).value||null,source_case_id:document.getElementById('s_'+id).value,result_status:'passed',test_completed:checked})})}
 async function pushCase(){await api('/push/case-progress',{method:'POST',headers:H,body:JSON.stringify({major_version_id:Number(assignMajor.value)})});alert('已推送')}
-function renderTests(){const list=reqs.filter(x=>x.case_completed);testBoard.innerHTML=list.map(r=>`<div class='card'><b>${r.zentao_req_id}</b> ${r.title} [${(r.case_ids||[]).join(',')}]
-<div class='row'><input id='b_${r.id}' placeholder='b#9901'><select id='s_${r.id}'><option>无关联发现</option>${(r.case_ids||[]).map(u=>`<option>${u}</option>`).join('')}</select><select id='rs_${r.id}'><option>passed</option><option>failed</option></select><label><input id='t_${r.id}' type='checkbox' ${r.test_completed?'checked':''} onchange='confirmTest(${r.id},this.checked)'>✅测试完成</label><button onclick='saveTest(${r.id})'>保存</button></div></div>`).join('')}
-async function confirmTest(id,checked){if(!checked){if(!confirm('确认取消测试完成吗？')){loadReqs();return;} await api(`/requirements/${id}/test-rollback`,{method:'POST'});}await saveTest(id,checked)}
-async function saveTest(id,checked){const done=(checked!==undefined)?checked:document.getElementById('t_'+id).checked;await api(`/requirements/${id}/test-execution`,{method:'PUT',headers:H,body:JSON.stringify({minor_version_id:Number(testMinor.value),bug_id:document.getElementById('b_'+id).value||null,source_case_id:document.getElementById('s_'+id).value,result_status:document.getElementById('rs_'+id).value,test_completed:done})})}
-async function pushTest(){await api(`/push/test-progress?minor_version_id=${Number(testMinor.value)}&major_version_id=${Number(assignMajor.value)}`,{method:'POST'});alert('已推送')}
-function exp(fmt){const q=new URLSearchParams({format:fmt});if(exMajor.value)q.set('major_version_id',exMajor.value);if(exMinor.value)q.set('minor_version_id',exMinor.value);window.open('/export?'+q.toString(),'_blank')}
+async function pushTest(){await api(`/push/test-progress?minor_version_id=${Number(testMinor.value)}&major_version_id=${Number(assignMajor.value)}`,{method:'POST'});alert('已推送（含交叉复测提醒）')}
+
+async function loadRetest(){const major=Number(retestMajor.value);const r=await api('/retest/workbench?major_version_id='+major);retestRows=await r.json();retestTable.innerHTML=retestRows.map(x=>`<tr><td>${x.zentao_req_id} ${x.title}</td><td>${x.owner||''}</td><td><label><input type='checkbox' ${x.retest_completed?'checked':''} onchange='toggleRetest(${x.id},this.checked)'>✅复测完成</label></td></tr>`).join('')}
+async function toggleRetest(id,checked){await api(`/requirements/${id}/retest`,{method:'PUT',headers:H,body:JSON.stringify({retest_completed:checked})})}
+async function pushRetest(){await api(`/push/retest-result?major_version_id=${Number(retestMajor.value)}`,{method:'POST'});alert('复测结果已推送')}
+
+async function loadStage5(){const major=Number(stage5Major.value);const data=await (await api('/stage5/overview?major_version_id='+major)).json();stage5Req.innerText='需求全景：'+data.requirements.map(r=>`${r.zentao_req_id} 用例[${(r.case_ids||[]).join(',')}] 历史Bug[${(r.history_bug_ids||[]).join(',')}]`).join(' | ');stage5Rows=data.bug_pool;renderStage5Bugs()}
+function renderStage5Bugs(){stage5BugTable.innerHTML=stage5Rows.map(b=>`<tr><td>${b.bug_id} (${b.source_type}:${b.source_ref||''})</td><td><input id='n_${b.id}' placeholder='若回归失败填新 b#' value='${b.newly_found_bug_id||''}' ${b.test_done?'disabled':''}></td><td><label><input id='c_${b.id}' type='checkbox' ${b.test_done?'checked':''} onchange='onStage5Check(${b.id})'>测试完毕</label><button onclick='saveStage5(${b.id})'>保存</button></td></tr>`).join('')}
+function onStage5Check(id){const checked=document.getElementById('c_'+id).checked;const input=document.getElementById('n_'+id);if(checked){input.disabled=true;}else{input.disabled=false;}}
+async function saveStage5(id){const checked=document.getElementById('c_'+id).checked;const input=document.getElementById('n_'+id);const newBug=input.value.trim()||null;if(!checked && newBug){alert('未勾选测试完毕时，不能提交新Bug，请先完成测试勾选');return;}await api(`/stage5/bugs/${id}/result`,{method:'PUT',headers:H,body:JSON.stringify({minor_version_id:Number(stage5Minor.value),test_done:checked,newly_found_bug_id:newBug})});loadStage5()}
+async function addStage5Issue(){await api('/stage5/issues',{method:'POST',headers:H,body:JSON.stringify({major_version_id:Number(stage5Major.value),requirement_id:s5ReqId.value?Number(s5ReqId.value):null,source_type:s5SourceType.value,source_ref:s5SourceRef.value||null,bug_id:s5BugId.value,minor_version_id:Number(stage5Minor.value)})});alert('已新增并推送');loadStage5()}
+async function pushStage5(){const major=Number(stage5Major.value),minor=Number(stage5Minor.value);const res=await (await api(`/stage5/push-status?major_version_id=${major}&minor_version_id=${minor}`,{method:'POST'})).json();alert('已推送，剩余未闭环:'+res.remaining)}
+
 init();
-</script></body></html>
+</script>
+</body>
+</html>

@@ -23,6 +23,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.database import SessionLocal, get_db
 from app.init_db import init_db
 from app.models import (
+    BugSourceType,
+    BugTracking,
     Requirement,
     RequirementStatus,
     TestCase,
@@ -122,6 +124,25 @@ class TestExecutionPayload(BaseModel):
 
 class ProgressPushPayload(BaseModel):
     major_version_id: int
+
+
+class RetestPayload(BaseModel):
+    retest_completed: bool
+
+
+class Stage5ResultPayload(BaseModel):
+    minor_version_id: int
+    test_done: bool
+    newly_found_bug_id: Optional[str] = None
+
+
+class Stage5IssueCreatePayload(BaseModel):
+    major_version_id: int
+    requirement_id: Optional[int] = None
+    source_type: BugSourceType = BugSourceType.MANUAL
+    source_ref: Optional[str] = None
+    bug_id: str
+    minor_version_id: Optional[int] = None
 
 
 def _create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -420,7 +441,7 @@ def list_requirements(
     _ = current_user
     rows = (
         db.query(Requirement)
-        .options(joinedload(Requirement.owner), joinedload(Requirement.test_cases))
+        .options(joinedload(Requirement.owner), joinedload(Requirement.retester), joinedload(Requirement.test_cases))
         .filter(Requirement.major_version_id == major_version_id)
         .order_by(Requirement.id.asc())
         .all()
@@ -435,6 +456,8 @@ def list_requirements(
             "owner_id": r.owner_id,
             "case_completed": r.case_completed,
             "test_completed": r.test_completed,
+            "retest_completed": r.retest_completed,
+            "retested_by": r.retester.username if r.retester else None,
             "status": r.status,
             "case_ids": [c.zentao_case_id for c in r.test_cases],
         }
@@ -528,7 +551,7 @@ async def push_case_progress(
 ):
     reqs = (
         db.query(Requirement)
-        .options(joinedload(Requirement.owner), joinedload(Requirement.test_cases))
+        .options(joinedload(Requirement.owner), joinedload(Requirement.retester), joinedload(Requirement.test_cases))
         .filter(Requirement.major_version_id == payload.major_version_id)
         .order_by(Requirement.id.asc())
         .all()
@@ -652,7 +675,7 @@ def upsert_test_execution(
 async def push_test_progress(
     minor_version_id: int,
     major_version_id: int,
-    _: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     minor = db.query(Version).filter(Version.id == minor_version_id, Version.version_type == VersionType.MINOR).first()
@@ -676,6 +699,11 @@ async def push_test_progress(
             lines.append(f"- {r.zentao_req_id} | {state} | 结果:{exec_row.result_status} | Bug:{bug} | 来源用例:{src}")
         else:
             lines.append(f"- {r.zentao_req_id} | {state} | 结果:untested | Bug:无 | 来源用例:无")
+
+    other_members = db.query(User).filter(User.id != current_user.id).order_by(User.username.asc()).all()
+    if other_members:
+        mentions = " ".join([f"@{u.username}" for u in other_members])
+        lines.append(f"\n以上需求已测试完毕，请其他人前往系统进行交叉复测！{mentions}")
 
     await _send_wechat_markdown("\n".join(lines))
     return {"message": "Test progress pushed"}
@@ -751,3 +779,271 @@ def export_data(
         filename=out_path.name,
         media_type=media_type,
     )
+
+
+def _seed_stage5_bug_pool(db: Session, major_version_id: int, actor_id: int | None = None) -> None:
+    exists = db.query(BugTracking).filter(BugTracking.major_version_id == major_version_id).first()
+    if exists:
+        return
+
+    reqs = (
+        db.query(Requirement)
+        .options(joinedload(Requirement.test_cases), joinedload(Requirement.test_executions))
+        .filter(Requirement.major_version_id == major_version_id)
+        .all()
+    )
+    for req in reqs:
+        for exe in req.test_executions:
+            if exe.bug_id:
+                db.add(
+                    BugTracking(
+                        major_version_id=major_version_id,
+                        requirement_id=req.id,
+                        source_type=BugSourceType.REQUIREMENT,
+                        source_ref=exe.source_case_id,
+                        bug_id=exe.bug_id,
+                        latest_minor_version_id=exe.minor_version_id,
+                        created_by_id=actor_id,
+                    )
+                )
+
+
+@app.get("/retest/workbench")
+def get_retest_workbench(
+    major_version_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    rows = (
+        db.query(Requirement)
+        .options(joinedload(Requirement.owner), joinedload(Requirement.test_cases), joinedload(Requirement.retester))
+        .filter(
+            Requirement.major_version_id == major_version_id,
+            Requirement.test_completed.is_(True),
+            Requirement.owner_id.isnot(None),
+            Requirement.owner_id != current_user.id,
+        )
+        .order_by(Requirement.id.asc())
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "zentao_req_id": r.zentao_req_id,
+            "title": r.title,
+            "owner": r.owner.username if r.owner else None,
+            "case_ids": [c.zentao_case_id for c in r.test_cases],
+            "retest_completed": r.retest_completed,
+            "retested_by": r.retester.username if r.retester else None,
+        }
+        for r in rows
+    ]
+
+
+@app.put("/requirements/{requirement_id}/retest")
+def submit_retest(
+    requirement_id: int,
+    payload: RetestPayload,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    if not req.test_completed:
+        raise HTTPException(status_code=400, detail="Requirement has not completed test yet")
+    if req.owner_id == current_user.id:
+        raise HTTPException(status_code=403, detail="Self-tested requirement cannot be cross-retested by self")
+
+    req.retest_completed = payload.retest_completed
+    req.retested_by_id = current_user.id if payload.retest_completed else None
+    req.retested_at = datetime.utcnow() if payload.retest_completed else None
+    db.commit()
+    return {"message": "Retest status updated"}
+
+
+@app.post("/push/retest-result")
+async def push_retest_result(
+    major_version_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    rows = (
+        db.query(Requirement)
+        .filter(
+            Requirement.major_version_id == major_version_id,
+            Requirement.retest_completed.is_(True),
+            Requirement.retested_by_id == current_user.id,
+        )
+        .order_by(Requirement.id.asc())
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=400, detail="No retested requirements by current user")
+
+    lines = ["## 阶段四：交叉复测播报"]
+    for req in rows:
+        lines.append(f"✅ [{req.zentao_req_id}] 需求已由 [{current_user.username}] 复测通过，顺利闭环！")
+    await _send_wechat_markdown("\n".join(lines))
+
+    return {"message": "Retest results pushed", "count": len(rows)}
+
+
+@app.get("/stage5/overview")
+def stage5_overview(
+    major_version_id: int,
+    _: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    total = db.query(Requirement).filter(Requirement.major_version_id == major_version_id).count()
+    retested = (
+        db.query(Requirement)
+        .filter(Requirement.major_version_id == major_version_id, Requirement.retest_completed.is_(True))
+        .count()
+    )
+    if total > 0 and total != retested:
+        raise HTTPException(status_code=400, detail="Not all requirements finished cross-retest")
+
+    _seed_stage5_bug_pool(db, major_version_id)
+    db.commit()
+
+    reqs = (
+        db.query(Requirement)
+        .options(joinedload(Requirement.test_cases), joinedload(Requirement.test_executions))
+        .filter(Requirement.major_version_id == major_version_id)
+        .order_by(Requirement.id.asc())
+        .all()
+    )
+    bugs = (
+        db.query(BugTracking)
+        .filter(BugTracking.major_version_id == major_version_id)
+        .order_by(BugTracking.id.asc())
+        .all()
+    )
+
+    return {
+        "major_version_id": major_version_id,
+        "requirements": [
+            {
+                "id": r.id,
+                "zentao_req_id": r.zentao_req_id,
+                "title": r.title,
+                "case_ids": [c.zentao_case_id for c in r.test_cases],
+                "history_bug_ids": [e.bug_id for e in r.test_executions if e.bug_id],
+            }
+            for r in reqs
+        ],
+        "bug_pool": [
+            {
+                "id": b.id,
+                "bug_id": b.bug_id,
+                "source_type": b.source_type.value,
+                "source_ref": b.source_ref,
+                "requirement_id": b.requirement_id,
+                "latest_minor_version_id": b.latest_minor_version_id,
+                "test_done": b.test_done,
+                "newly_found_bug_id": b.newly_found_bug_id,
+                "closed": b.closed,
+            }
+            for b in bugs
+        ],
+    }
+
+
+@app.put("/stage5/bugs/{bug_track_id}/result")
+async def submit_stage5_result(
+    bug_track_id: int,
+    payload: Stage5ResultPayload,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    bug = db.query(BugTracking).filter(BugTracking.id == bug_track_id).first()
+    if not bug:
+        raise HTTPException(status_code=404, detail="Bug tracking item not found")
+
+    if payload.newly_found_bug_id and not B_PATTERN.match(payload.newly_found_bug_id):
+        raise HTTPException(status_code=400, detail="Invalid newly_found_bug_id format")
+
+    bug.latest_minor_version_id = payload.minor_version_id
+    bug.test_done = payload.test_done
+    bug.newly_found_bug_id = payload.newly_found_bug_id
+    bug.closed = payload.test_done and (not payload.newly_found_bug_id)
+    bug.closed_by_id = current_user.id if bug.closed else None
+
+    if payload.newly_found_bug_id:
+        db.add(
+            BugTracking(
+                major_version_id=bug.major_version_id,
+                requirement_id=bug.requirement_id,
+                source_type=BugSourceType.LEGACY_BUG,
+                source_ref=bug.bug_id,
+                bug_id=payload.newly_found_bug_id,
+                latest_minor_version_id=payload.minor_version_id,
+                created_by_id=current_user.id,
+            )
+        )
+
+    db.commit()
+    await _send_wechat_markdown(
+        f"阶段五整体测试更新：Bug[{bug.bug_id}] 在包[{payload.minor_version_id}] 已提交结果，状态={'通过' if bug.closed else '未闭环'}"
+    )
+    return {"message": "Stage5 result updated"}
+
+
+@app.post("/stage5/issues")
+async def add_stage5_issue(
+    payload: Stage5IssueCreatePayload,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    if not B_PATTERN.match(payload.bug_id):
+        raise HTTPException(status_code=400, detail="bug_id must be like b#xxxx")
+
+    item = BugTracking(
+        major_version_id=payload.major_version_id,
+        requirement_id=payload.requirement_id,
+        source_type=payload.source_type,
+        source_ref=payload.source_ref,
+        bug_id=payload.bug_id,
+        latest_minor_version_id=payload.minor_version_id,
+        created_by_id=current_user.id,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+
+    await _send_wechat_markdown(
+        f"➕ 新增问题：[{payload.bug_id}] 已录入问题池，来源={payload.source_type.value} {payload.source_ref or ''}"
+    )
+    return {"id": item.id, "message": "Issue added"}
+
+
+@app.post("/stage5/push-status")
+async def push_stage5_status(
+    major_version_id: int,
+    minor_version_id: int,
+    _: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    bugs = (
+        db.query(BugTracking)
+        .filter(BugTracking.major_version_id == major_version_id)
+        .order_by(BugTracking.id.asc())
+        .all()
+    )
+    lines = [f"## 阶段五：整体测试进度（包 {minor_version_id}）"]
+    remaining = 0
+    for b in bugs:
+        closed = b.closed and b.latest_minor_version_id == minor_version_id and not b.newly_found_bug_id
+        if not closed:
+            remaining += 1
+        lines.append(
+            f"- {b.bug_id} | {'✅已验证通过' if closed else '❗待回归/失败'} | 新Bug:{b.newly_found_bug_id or '无'}"
+        )
+
+    if bugs and remaining == 0:
+        major = db.query(Version).filter(Version.id == major_version_id).first()
+        lines.append(f"\n🎉 【大版本 {major.version_no if major else major_version_id}】整体测试完美通关，符合发布标准！")
+
+    await _send_wechat_markdown("\n".join(lines))
+    return {"message": "Stage5 status pushed", "remaining": remaining}
