@@ -1,0 +1,50 @@
+:root{--bg:#f5f7fb;--card:#fff;--text:#1f2937;--muted:#6b7280;--primary:#2563eb;--ok:#16a34a;--danger:#dc2626;--line:#e5e7eb}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--text)}
+.container{max-width:1200px;margin:24px auto;padding:0 16px}
+.card{background:var(--card);border-radius:10px;padding:16px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+h1,h2,h3{margin:0 0 10px}
+input,select,button,textarea{padding:8px;border:1px solid #d1d5db;border-radius:8px}
+button{background:var(--primary);color:#fff;border:none;cursor:pointer}
+button.secondary{background:#4b5563}
+button.danger{background:var(--danger)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--muted)}
+.badge{padding:2px 8px;border-radius:999px;background:#e5e7eb}
+.hidden{display:none}
+.login{max-width:360px;margin:100px auto}
+
+table{width:100%;border-collapse:collapse}
+th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left}
+
+.toast-wrap{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:9999}
+.toast{min-width:280px;padding:12px 16px;border-radius:10px;color:#fff;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.2);opacity:0;transform:translateY(-8px);animation:toastIn .2s ease forwards}
+.toast.success{background:var(--ok)}
+.toast.error{background:var(--danger)}
+@keyframes toastIn{to{opacity:1;transform:translateY(0)}}
+@keyframes toastOut{to{opacity:0;transform:translateY(-8px)}}
+.toast.hide{animation:toastOut .2s ease forwards}
+
+.prefix-input{display:flex;align-items:center;border:1px solid #d1d5db;border-radius:8px;overflow:hidden;background:#fff}
+.prefix-input span{padding:8px 10px;background:#f3f4f6;color:#374151;border-right:1px solid #e5e7eb}
+.prefix-input input{border:0;outline:none}
+.warn{color:#b91c1c;font-weight:700}
+
+/* mine tree cards */
+.mine-req-card{border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:12px;background:#fff}
+.mine-req-head{font-weight:700;margin-bottom:8px}
+.case-item{padding:8px;border-radius:8px;background:#f8fafc;margin-bottom:8px}
+.case-bugs{margin-top:6px;padding-left:20px;border-left:2px solid #eee}
+.bug-chip{display:inline-block;background:#fee2e2;color:#991b1b;border-radius:999px;padding:2px 8px;margin:2px 6px 2px 0;font-size:12px}
+.free-bug-box{margin-top:10px;padding:8px;border:1px dashed #d1d5db;border-radius:8px}
+
+/* report center */
+.metrics-grid{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:12px;margin-bottom:14px}
+.metric-card{background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px}
+.metric-title{color:#1d4ed8;font-size:13px}
+.metric-value{font-size:30px;font-weight:700;margin-top:4px}
+#reportChart{width:100%;height:420px;background:#fff;border:1px solid #e5e7eb;border-radius:10px}
+
+@media (max-width: 900px){
+  .metrics-grid{grid-template-columns:1fr}
+}
