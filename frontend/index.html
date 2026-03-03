@@ -1,0 +1,202 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>APPAuto</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="toast-wrap" id="toastWrap"></div>
+<div class="container">
+  <div class="card row" style="justify-content:space-between">
+    <h1>测试协作系统</h1>
+    <div><span id="me" class="badge"></span> <button class="secondary" onclick="logout()">退出</button></div>
+  </div>
+
+  <div class="card row" id="tabs">
+    <button id="tabAssignBtn" onclick="showTab('assign')">任务分配台</button>
+    <button id="tabMineBtn" onclick="showTab('mine')">我的工作台</button>
+    <button onclick="showTab('retest')">复测工作台</button>
+    <button onclick="showTab('stage5')">整体测试</button>
+    <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
+  </div>
+
+  <section id="tab-assign" class="hidden card">
+    <h2>任务分配台（仅管理员）</h2>
+    <div class="row"><label>大版本</label><select id="assignMajorSelect"></select><button onclick="loadAssignBoard()">加载</button><button onclick="publishAssign()">一键发布/更新分配</button></div>
+    <table><thead><tr><th>需求</th><th>负责人</th></tr></thead><tbody id="assignTable"></tbody></table>
+  </section>
+
+  <section id="tab-mine" class="card">
+    <h2>我的工作台</h2>
+    <div class="row"><label>大版本</label><select id="mineMajorSelect"></select><label>子版本</label><select id="mineMinorSelect"></select><button onclick="loadMyWorkbench()">加载我的需求</button><button onclick="pushCase()">推送用例进度</button><button onclick="pushTest()">推送测试进度</button></div>
+    <table><thead><tr><th>需求</th><th>操作</th></tr></thead><tbody id="mineTable"></tbody></table>
+  </section>
+
+  <section id="tab-retest" class="hidden card">
+    <h2>复测工作台</h2>
+    <div class="row"><label>大版本</label><select id="retestMajorSelect"></select><button onclick="loadRetest()">加载</button><button onclick="pushRetest()">📢 推送复测结果</button></div>
+    <table><thead><tr><th>需求</th><th>原负责人</th><th>复测</th></tr></thead><tbody id="retestTable"></tbody></table>
+  </section>
+
+  <section id="tab-stage5" class="hidden card">
+    <h2>整体测试阶段</h2>
+    <div class="row"><label>大版本</label><select id="s5MajorSelect"></select><label>子版本</label><select id="s5MinorSelect"></select><button onclick="loadStage5()">加载全景</button><button onclick="pushStage5()">推送整体测试状态</button></div>
+    <div id="stage5Req" class="muted"></div>
+    <table><thead><tr><th>Bug池</th><th>新Bug</th><th>测试完毕</th></tr></thead><tbody id="s5Table"></tbody></table>
+    <h3>➕ 新增问题</h3>
+    <div class="row">
+      <div class="prefix-input"><span>b#</span><input id="newBugNum" inputmode="numeric" oninput="digitsOnly(this)"></div>
+      <select id="newSourceType"><option value="manual">manual</option><option value="requirement">requirement</option><option value="case">case</option><option value="legacy_bug">legacy_bug</option></select>
+      <input id="newSourceRef" placeholder="来源编号(可空)">
+      <select id="newReqSelect"><option value="">关联需求(可空)</option></select>
+      <button onclick="addIssue()">新增问题</button>
+    </div>
+  </section>
+
+  <section id="tab-data" class="hidden card">
+    <h2>数据管理台（仅管理员）</h2>
+
+    <div class="card">
+      <h3>新增版本</h3>
+      <div class="row">
+        <input id="createVersionNo" placeholder="版本号 (如 4030 / 40300097)">
+        <select id="createVersionType" onchange="toggleCreateVersionParent()">
+          <option value="major">major</option>
+          <option value="minor">minor</option>
+        </select>
+        <select id="createVersionParent" disabled>
+          <option value="">父大版本（minor必选）</option>
+        </select>
+        <button onclick="createVersion()">创建版本</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>新增用户</h3>
+      <div class="row">
+        <input id="createUsername" placeholder="用户名">
+        <input id="createPassword" type="password" placeholder="密码">
+        <button onclick="createUser()">创建用户</button>
+      </div>
+    </div>
+
+    <p class="warn">危险操作：删除大版本会级联删除其下需求/用例/Bug。</p>
+    <div class="row"><button onclick="loadDataOverview()">刷新数据</button></div>
+    <div class="row" style="align-items:flex-start">
+      <div style="flex:1"><h3>版本</h3><div id="dataVersions"></div></div>
+      <div style="flex:1"><h3>需求</h3><div id="dataReqs"></div></div>
+      <div style="flex:1"><h3>Bug</h3><div id="dataBugs"></div></div>
+    </div>
+  </section>
+</div>
+<script>
+const token=localStorage.getItem('token'); if(!token) location.href='/login';
+const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+let currentUser=null, users=[], versions=[], myReqs=[], assignReqs=[], stage5Rows=[];
+
+function showMessage(msg,type='success'){const w=document.getElementById('toastWrap');const d=document.createElement('div');d.className=`toast ${type}`;d.innerText=msg;w.appendChild(d);setTimeout(()=>{d.classList.add('hide');setTimeout(()=>d.remove(),220)},3000)}
+function digitsOnly(el){el.value=(el.value||'').replace(/\D/g,'')}
+function withPrefix(prefix,num){if(!num) return null; return `${prefix}${String(num).replace(/\D/g,'')}`}
+function logout(){localStorage.removeItem('token');location.href='/login'}
+function confirmPush(){return confirm('确定要向企微群发送吗？')}
+function showTab(name){['assign','mine','retest','stage5','data'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));document.getElementById('tab-'+name).classList.remove('hidden')}
+
+async function api(url,opt={}){opt.headers={...(opt.headers||{}),Authorization:'Bearer '+token};const r=await fetch(url,opt);if(r.status===401){logout();throw new Error('401')}if(!r.ok){let t='操作失败';try{const j=await r.json();t=j.detail||t}catch{};throw new Error(t)}return r}
+
+async function init(){
+  currentUser=await (await api('/auth/me')).json();
+  document.getElementById('me').innerText=`${currentUser.username}(${currentUser.role})`;
+  await loadVersions();
+  if(currentUser.role==='admin'){await loadUsers(); document.getElementById('tabAssignBtn').classList.remove('hidden'); document.getElementById('tabDataBtn').classList.remove('hidden'); showTab('assign');}
+  else{document.getElementById('tabAssignBtn').classList.add('hidden');document.getElementById('tabDataBtn').classList.add('hidden');showTab('mine');}
+}
+
+async function loadUsers(){users=await (await api('/users')).json()}
+async function loadVersions(){versions=await (await api('/versions')).json();fillVersionSelects();fillCreateVersionParent();toggleCreateVersionParent()}
+function fillVersionSelects(){
+  const majors=versions.filter(v=>v.version_type==='major');
+  const minors=versions.filter(v=>v.version_type==='minor');
+  ['assignMajorSelect','mineMajorSelect','retestMajorSelect','s5MajorSelect'].forEach(id=>fillSelect(id,majors));
+  ['mineMinorSelect','s5MinorSelect'].forEach(id=>fillSelect(id,minors));
+}
+function fillSelect(id,list){const el=document.getElementById(id); if(!el) return; el.innerHTML=list.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('')}
+
+function fillCreateVersionParent(){
+  const parentSel=document.getElementById('createVersionParent');
+  if(!parentSel) return;
+  const majors=versions.filter(v=>v.version_type==='major');
+  parentSel.innerHTML='<option value="">父大版本（minor必选）</option>'+majors.map(v=>`<option value="${v.id}">${v.version_no}</option>`).join('');
+}
+function toggleCreateVersionParent(){
+  const type=document.getElementById('createVersionType')?.value;
+  const parent=document.getElementById('createVersionParent');
+  if(!parent) return;
+  parent.disabled = type!=='minor';
+  if(type!=='minor') parent.value='';
+}
+
+async function createVersion(){
+  try{
+    const version_no=(document.getElementById('createVersionNo').value||'').trim();
+    const version_type=document.getElementById('createVersionType').value;
+    const parentRaw=document.getElementById('createVersionParent').value;
+    const parent_id=version_type==='minor' ? Number(parentRaw) : null;
+    if(!version_no){showMessage('请填写版本号','error');return}
+    if(version_type==='minor' && !parentRaw){showMessage('minor 版本必须选择父大版本','error');return}
+    await api('/versions',{method:'POST',headers:H,body:JSON.stringify({version_no,version_type,parent_id})});
+    document.getElementById('createVersionNo').value='';
+    document.getElementById('createVersionType').value='major';
+    toggleCreateVersionParent();
+    await loadVersions();
+    await loadDataOverview();
+    showMessage('创建版本成功','success');
+  }catch(err){showMessage(err.message||'创建版本失败','error')}
+}
+
+async function createUser(){
+  try{
+    const username=(document.getElementById('createUsername').value||'').trim();
+    const password=(document.getElementById('createPassword').value||'').trim();
+    if(!username || !password){showMessage('请填写用户名和密码','error');return}
+    await api('/users',{method:'POST',headers:H,body:JSON.stringify({username,password})});
+    document.getElementById('createUsername').value='';
+    document.getElementById('createPassword').value='';
+    await loadUsers();
+    showMessage('创建用户成功','success');
+  }catch(err){showMessage(err.message||'创建用户失败','error')}
+}
+
+async function loadAssignBoard(){const majorId=Number(assignMajorSelect.value);assignReqs=await (await api('/requirements?major_version_id='+majorId)).json();assignTable.innerHTML=assignReqs.map(r=>`<tr><td>${r.zentao_req_id} ${r.title}</td><td><select id='o_${r.id}'><option value=''>未分配</option>${users.map(u=>`<option value='${u.id}' ${u.id===r.owner_id?'selected':''}>${u.username}</option>`).join('')}</select></td></tr>`).join('')}
+async function publishAssign(){if(!confirmPush()) return; const majorId=Number(assignMajorSelect.value);const assignments=assignReqs.map(r=>({requirement_id:r.id,owner_id:Number(document.getElementById('o_'+r.id).value)||null}));await api('/requirements/assign-and-publish',{method:'POST',headers:H,body:JSON.stringify({major_version_id:majorId,assignments})});showMessage('分配发布成功')}
+
+async function loadMyWorkbench(){const majorId=Number(mineMajorSelect.value);myReqs=await (await api('/requirements/my-workbench?major_version_id='+majorId)).json();mineTable.innerHTML=myReqs.map(r=>`<tr><td>${r.zentao_req_id} ${r.title}</td><td><div class='row'><div class='prefix-input'><span>u#</span><input id='u_${r.id}' value='${(r.case_ids||[]).map(x=>x.replace('u#','')).join(',')}' placeholder='123,124' oninput="this.value=this.value.replace(/[^0-9,]/g,'')"></div><label><input type='checkbox' ${r.case_completed?'checked':''} onchange='toggleCase(${r.id},this.checked)'>✅用例完成</label><div class='prefix-input'><span>b#</span><input id='b_${r.id}' inputmode='numeric' oninput='digitsOnly(this)'></div><label><input type='checkbox' ${r.test_completed?'checked':''} onchange='toggleTest(${r.id},this.checked)'>✅测试完成</label></div></td></tr>`).join('')}
+async function toggleCase(id,checked){if(!checked && !confirm('确认取消已完成状态吗？')){loadMyWorkbench();return}const raw=(document.getElementById('u_'+id).value||'').split(',').map(v=>v.trim()).filter(Boolean);const cases=raw.map(v=>withPrefix('u#',v));await api(`/requirements/${id}/cases`,{method:'PUT',headers:H,body:JSON.stringify({case_ids:cases,case_completed:checked})});showMessage('用例状态已更新')}
+async function toggleTest(id,checked){if(!checked && !confirm('确认取消测试完成吗？')){loadMyWorkbench();return}const bugId=withPrefix('b#',document.getElementById('b_'+id).value);await api(`/requirements/${id}/test-execution`,{method:'PUT',headers:H,body:JSON.stringify({minor_version_id:Number(mineMinorSelect.value),bug_id:bugId,source_case_id:'无关联发现',result_status:'passed',test_completed:checked})});showMessage('测试状态已更新')}
+async function pushCase(){if(!confirmPush()) return; await api('/push/case-progress',{method:'POST',headers:H,body:JSON.stringify({major_version_id:Number(mineMajorSelect.value)})});showMessage('用例进度已推送')}
+async function pushTest(){if(!confirmPush()) return; await api(`/push/test-progress?minor_version_id=${Number(mineMinorSelect.value)}&major_version_id=${Number(mineMajorSelect.value)}`,{method:'POST'});showMessage('测试进度已推送')}
+
+async function loadRetest(){const data=await (await api('/retest/workbench?major_version_id='+Number(retestMajorSelect.value))).json();retestTable.innerHTML=data.map(x=>`<tr><td>${x.zentao_req_id} ${x.title}</td><td>${x.owner||''}</td><td><label><input type='checkbox' ${x.retest_completed?'checked':''} onchange='setRetest(${x.id},this.checked)'>✅复测完成</label></td></tr>`).join('')}
+async function setRetest(id,v){await api(`/requirements/${id}/retest`,{method:'PUT',headers:H,body:JSON.stringify({retest_completed:v})});showMessage('复测状态已更新')}
+async function pushRetest(){if(!confirmPush()) return; await api(`/push/retest-result?major_version_id=${Number(retestMajorSelect.value)}`,{method:'POST'});showMessage('复测结果已推送')}
+
+async function loadStage5(){const majorId=Number(s5MajorSelect.value);const data=await (await api('/stage5/overview?major_version_id='+majorId)).json();const reqMap=data.requirements;newReqSelect.innerHTML='<option value="">关联需求(可空)</option>'+reqMap.map(r=>`<option value='${r.id}'>${r.zentao_req_id}</option>`).join('');stage5Req.innerText=reqMap.map(r=>`${r.zentao_req_id} 用例[${(r.case_ids||[]).join(',')}] 历史Bug[${(r.history_bug_ids||[]).join(',')}]`).join(' | ');stage5Rows=data.bug_pool;renderS5()}
+function renderS5(){s5Table.innerHTML=stage5Rows.map(b=>`<tr><td>${b.bug_id}</td><td><div class='prefix-input'><span>b#</span><input id='nb_${b.id}' value='${(b.newly_found_bug_id||'').replace('b#','')}' ${b.test_done?'disabled':''} oninput='digitsOnly(this)'></div></td><td><label><input id='done_${b.id}' type='checkbox' ${b.test_done?'checked':''} onchange='toggleS5Lock(${b.id})'>测试完毕</label><button onclick='saveS5(${b.id})'>保存</button></td></tr>`).join('')}
+function toggleS5Lock(id){document.getElementById('nb_'+id).disabled=document.getElementById('done_'+id).checked}
+async function saveS5(id){const done=document.getElementById('done_'+id).checked;const n=withPrefix('b#',document.getElementById('nb_'+id).value);await api(`/stage5/bugs/${id}/result`,{method:'PUT',headers:H,body:JSON.stringify({minor_version_id:Number(s5MinorSelect.value),test_done:done,newly_found_bug_id:n})});showMessage('整体测试项已保存');loadStage5()}
+async function addIssue(){const bug=withPrefix('b#',newBugNum.value);await api('/stage5/issues',{method:'POST',headers:H,body:JSON.stringify({major_version_id:Number(s5MajorSelect.value),requirement_id:newReqSelect.value?Number(newReqSelect.value):null,source_type:newSourceType.value,source_ref:newSourceRef.value||null,bug_id:bug,minor_version_id:Number(s5MinorSelect.value)})});showMessage('问题已新增并推送');newBugNum.value='';loadStage5()}
+async function pushStage5(){if(!confirmPush()) return;const res=await (await api(`/stage5/push-status?major_version_id=${Number(s5MajorSelect.value)}&minor_version_id=${Number(s5MinorSelect.value)}`,{method:'POST'})).json();showMessage(`整体状态已推送，剩余未闭环:${res.remaining}`)}
+
+async function loadDataOverview(){const data=await (await api('/admin/data-overview')).json();dataVersions.innerHTML=data.versions.map(v=>`<div class='row'><span>${v.version_no}(${v.version_type})</span><button onclick='editVersion(${v.id},"${v.version_no}","${v.version_type}",${v.parent_id||'null'})'>编辑</button><button class='secondary' onclick='removeVersion(${v.id})'>删除</button></div>`).join('');dataReqs.innerHTML=data.requirements.map(r=>`<div class='row'><span>${r.zentao_req_id} ${r.title}</span><button onclick='editReq(${r.id},"${r.zentao_req_id}","${r.title}",${r.major_version_id})'>编辑</button><button class='secondary' onclick='removeReq(${r.id})'>删除</button></div>`).join('');dataBugs.innerHTML=data.bugs.map(b=>`<div class='row'><span>${b.bug_id}</span><button onclick='editBug(${b.id},"${b.bug_id}")'>编辑</button><button class='secondary' onclick='removeBug(${b.id})'>删除</button></div>`).join('')}
+async function removeVersion(id){if(!confirm('⚠️ 高危操作：删除版本将级联删除所有下挂需求/用例/Bug，确定继续吗？'))return;await api('/versions/'+id,{method:'DELETE'});showMessage('版本已删除');loadVersions();loadDataOverview()}
+async function removeReq(id){if(!confirm('确定删除该需求及其用例/执行记录吗？'))return;await api('/requirements/'+id,{method:'DELETE'});showMessage('需求已删除');loadDataOverview()}
+async function removeBug(id){if(!confirm('确定删除该Bug吗？'))return;await api('/bugs/'+id,{method:'DELETE'});showMessage('Bug已删除');loadDataOverview()}
+async function editVersion(id,no,type,parent){const newNo=prompt('版本号',no);if(!newNo)return;await api('/versions/'+id,{method:'PUT',headers:H,body:JSON.stringify({version_no:newNo,version_type:type,parent_id:parent})});showMessage('版本已更新');loadVersions();loadDataOverview()}
+async function editReq(id,z,title,major){const zNum=prompt('需求号数字部分',z.replace('r#',''));if(!zNum)return;const t=prompt('需求标题',title);if(!t)return;await api('/requirements/'+id,{method:'PUT',headers:H,body:JSON.stringify({zentao_req_id:withPrefix('r#',zNum),title:t,major_version_id:major})});showMessage('需求已更新');loadDataOverview()}
+async function editBug(id,b){const num=prompt('Bug数字部分',b.replace('b#',''));if(!num)return;await api('/bugs/'+id+'?new_bug_id='+encodeURIComponent(withPrefix('b#',num)),{method:'PUT'});showMessage('Bug已更新');loadDataOverview()}
+
+window.addEventListener('error',e=>showMessage(e.message||'未知错误','error'))
+init().catch(err=>showMessage(err.message,'error'));
+</script>
+</body>
+</html>
