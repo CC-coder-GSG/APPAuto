@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>APPAuto v0.3.0</title>
+  <title>OmniQA 测试管理系统</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -11,7 +11,10 @@
 <div class="toast-wrap" id="toastWrap"></div>
 <div class="container">
   <div class="card row" style="justify-content:space-between">
-    <h1>测试协作系统 v0.3.0</h1>
+    <div style="display: flex; align-items: center;">
+      <img src="/static/omniqa-logo.png" alt="OmniQA" style="height: 36px; margin-right: 12px; border-radius: 4px;">
+      <h1 style="margin: 0; color: #1e293b; letter-spacing: 1px;">OmniQA</h1>
+    </div>
     <div><span id="me" class="badge"></span> <button class="secondary" onclick="logout()">退出</button></div>
   </div>
 
@@ -137,6 +140,7 @@ const token=localStorage.getItem('token'); if(!token) location.href='/login';
 const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
 let currentUser=null, users=[], versions=[], assignReqs=[], stage5Rows=[];
 let trendChart=null, sourcePieChart=null, radarChart=null, teamCompareChart=null, versionBugChart=null;
+let reportLoaded=false;
 
 function showMessage(msg,type='success'){const w=document.getElementById('toastWrap');const d=document.createElement('div');d.className=`toast ${type}`;d.innerText=msg;w.appendChild(d);setTimeout(()=>{d.classList.add('hide');setTimeout(()=>d.remove(),220)},3000)}
 function digitsOnly(el){el.value=(el.value||'').replace(/\D/g,'')}
@@ -145,7 +149,34 @@ function versionTypeZh(v){return v==='major'?'大版本':'子版本'}
 function sourceTypeZh(v){const m={manual:'自由问题',case:'用例来源',requirement:'需求来源',legacy_bug:'历史Bug来源'};return m[v]||v}
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
-function showTab(name){['assign','mine','retest','stage5','report','data'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));document.getElementById('tab-'+name).classList.remove('hidden')}
+function showTab(name){
+  ['assign','mine','retest','stage5','report','data'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
+  document.getElementById('tab-'+name).classList.remove('hidden');
+  if(name==='report'){loadReportOnDemand()}
+}
+function isAllUsersReport(){return currentUser && currentUser.role==='admin' && reportUserSelect && reportUserSelect.value==='0'}
+function adjustReportChartVisibility(){
+  const radarEl=document.getElementById('radarChart');
+  const teamEl=document.getElementById('teamCompareChart');
+  const allUsersMode=isAllUsersReport();
+  if(radarEl) radarEl.style.display=allUsersMode?'none':'';
+  if(teamEl) teamEl.style.display=allUsersMode?'':'none';
+  if(radarChart) radarChart.resize();
+  if(teamCompareChart) teamCompareChart.resize();
+}
+async function loadReportOnDemand(){
+  if(!reportLoaded){await queryReport();return}
+  adjustReportChartVisibility();
+}
+function bindReportEvents(){
+  const onFilterChange=()=>{if(!document.getElementById('tab-report').classList.contains('hidden')) queryReport()};
+  reportStartDate.addEventListener('change',onFilterChange);
+  reportEndDate.addEventListener('change',onFilterChange);
+  reportUserSelect.addEventListener('change',onFilterChange);
+  window.addEventListener('resize',()=>{
+    [trendChart,sourcePieChart,radarChart,teamCompareChart,versionBugChart].forEach(c=>c&&c.resize())
+  });
+}
 
 async function api(url,opt={}){opt.headers={...(opt.headers||{}),Authorization:'Bearer '+token};const r=await fetch(url,opt);if(r.status===401){logout();throw new Error('401')}if(!r.ok){let t='操作失败';try{const j=await r.json();t=j.detail||t}catch{};throw new Error(t)}return r}
 
@@ -155,6 +186,7 @@ async function init(){
   const today = new Date().toISOString().slice(0,10);
   document.getElementById('reportStartDate').value=today;
   document.getElementById('reportEndDate').value=today;
+  bindReportEvents();
 
   await loadVersions();
   if(currentUser.role==='admin'){
@@ -172,7 +204,7 @@ async function init(){
 }
 
 async function loadUsers(){users=await (await api('/users')).json();fillReportUsers()}
-function fillReportUsers(){const s=document.getElementById('reportUserSelect');if(!s) return; const allOpt=currentUser&&currentUser.role==='admin'?'<option value="0">全员</option>':''; s.innerHTML=allOpt+users.map(u=>`<option value="${u.id}">${u.username}${u.is_team_member===false?'(编外)':''}</option>`).join('')}
+function fillReportUsers(){const s=document.getElementById('reportUserSelect');if(!s) return; const allOpt=currentUser&&currentUser.role==='admin'?'<option value="0">全员</option>':''; s.innerHTML=allOpt+users.map(u=>`<option value="${u.id}">${u.username}${u.is_team_member===false?'(编外)':''}</option>`).join('');adjustReportChartVisibility()}
 
 async function loadVersions(){versions=await (await api('/versions')).json();fillVersionSelects();fillCreateVersionParent();toggleCreateVersionParent()}
 function fillVersionSelects(){
@@ -325,6 +357,7 @@ async function queryReport(){
     let url=`/reports/summary?start_date=${start_date}&end_date=${end_date}`;
     if(currentUser.role==='admin' && reportUserSelect.value){url += `&user_id=${reportUserSelect.value}`}
     const data=await (await api(url)).json();
+    reportLoaded=true;
     mReq.innerText=data.overview.executed_requirements || 0;
     mCase.innerText=data.overview.created_cases || 0;
     mBug.innerText=data.overview.created_bugs || 0;
@@ -401,6 +434,7 @@ async function queryReport(){
       yAxis:{type:'value'},
       series:[{name:'Bug数',type:'bar',data:vb.map(i=>i.bug_count)}]
     });
+    adjustReportChartVisibility();
 
     showMessage('报表查询成功','success');
   }catch(err){showMessage(err.message||'查询报表失败','error')}
