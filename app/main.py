@@ -634,13 +634,45 @@ def create_execution_bug(payload: ExecutionBugPayload, current_user: Annotated[U
 @app.post("/requirements/assign-and-publish")
 async def assign_and_publish(payload: AssignPublishPayload, _: Annotated[User, Depends(require_admin)], db: Annotated[Session, Depends(get_db)]):
     req_map = {r.id: r for r in db.query(Requirement).filter(Requirement.major_version_id == payload.major_version_id).all()}
+    # 获取所有用户映射，用于在企微消息中精准@对应人员
+    users_map = {u.id: u.username for u in db.query(User).all()}
+
+    change_msgs = []
+
     for item in payload.assignments:
         req = req_map.get(item.requirement_id)
         if req:
-            req.owner_id = item.owner_id
-            req.status = RequirementStatus.ASSIGNED if item.owner_id else RequirementStatus.PENDING
+            old_owner_id = req.owner_id
+            new_owner_id = item.owner_id
+
+            # 如果负责人发生实质性改变
+            if old_owner_id != new_owner_id:
+                req.owner_id = new_owner_id
+
+                # 核心逻辑：只要发生人员流转，强制打回初始未完成状态，倒逼新负责人重新确认
+                req.case_completed = False
+                req.test_completed = False
+
+                if new_owner_id:
+                    req.status = RequirementStatus.ASSIGNED
+                    old_name = users_map.get(old_owner_id, "未分配")
+                    new_name = users_map.get(new_owner_id, "未知")
+
+                    # 只有“之前有人处理过”且“现在分配给了另一个人”时，才发送精准移交通知
+                    if old_owner_id:
+                        change_msgs.append(f"> **{req.zentao_req_id}** ({req.title}) 已从 @{old_name} 移交给了 @{new_name}")
+                else:
+                    req.status = RequirementStatus.PENDING
+
     db.commit()
-    await _send_wechat_markdown("需求分配已更新")
+
+    # 根据是否有人员换防，发送不同的企微播报
+    if change_msgs:
+        md = "### 🔄 需求负责人变更通知\n" + "\n".join(change_msgs) + "\n\n*提示：移交的需求已自动重置【完成状态】，请新负责人重新校验并打勾。*"
+        await _send_wechat_markdown(md)
+    else:
+        await _send_wechat_markdown("✅ 需求分配状态已整体更新发布")
+
     return {"message": "Assignments updated"}
 
 
