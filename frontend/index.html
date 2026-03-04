@@ -7,6 +7,10 @@
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    .text-btn { background:none; border:none; color:#64748b; cursor:pointer; padding:0 4px; font-size:14px; font-weight:bold; }
+    .text-btn:hover { color:#dc2626; }
+  </style>
 </head>
 <body>
 <div class="toast-wrap" id="toastWrap"></div>
@@ -155,12 +159,14 @@
     </div>
 
     <p class="warn">危险操作：删除大版本会级联删除其下需求/用例/Bug。</p>
-    <div class="row"><button onclick="loadDataOverview()">刷新数据</button></div>
-    <div class="row" style="align-items:flex-start">
-      <div style="flex:1"><h3>版本</h3><div id="dataVersions"></div></div>
-      <div style="flex:1"><h3>需求</h3><div id="dataReqs"></div></div>
-      <div style="flex:1"><h3>Bug</h3><div id="dataBugs"></div></div>
+    <div class="row" style="justify-content: space-between; align-items: center; margin-top: 24px; margin-bottom: 12px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">
+      <h3 style="margin: 0;">🌳 质量资产大盘 (树形追溯)</h3>
+      <div>
+        <button class="secondary" onclick="exportTreePdf()" style="margin-right: 8px;">导出树状图 (PDF)</button>
+        <button onclick="loadDataOverview()">刷新大盘</button>
+      </div>
     </div>
+    <div id="dataTreeArea"></div>
   </section>
 </div>
 
@@ -588,12 +594,125 @@ function exportReportPdf(){
   html2pdf().from(document.getElementById('reportContent')).save('测试效能度量报表.pdf');
 }
 
+function exportTreePdf() {
+  const treeArea = document.getElementById('dataTreeArea');
+  if (!treeArea || treeArea.innerText.includes('暂无数据')) {
+    showMessage('当前没有可导出的数据！', 'error');
+    return;
+  }
+
+  showMessage('正在展开数据并生成 PDF，请稍候...', 'success');
+
+  // 1. 魔法操作：在导出前，找到大盘里所有被隐藏的抽屉（包含 major_body 和 req_body）并强制展开
+  const hiddenElements = treeArea.querySelectorAll('.hidden');
+  hiddenElements.forEach(el => el.classList.remove('hidden'));
+
+  // 2. 配置 PDF 生成参数
+  const opt = {
+    margin:       0.3,
+    filename:     '质量资产树状追溯大盘.pdf',
+    image:        { type: 'jpeg', quality: 0.98 },
+    html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+    jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+  };
+
+  // 3. 执行导出
+  html2pdf().set(opt).from(treeArea).save().then(() => {
+    showMessage('PDF 导出成功！', 'success');
+    // 4. 导出完毕后，重新加载一次大盘，让卡片恢复默认的折叠清爽状态
+    loadDataOverview();
+  }).catch(err => {
+    showMessage('导出失败，请重试', 'error');
+    loadDataOverview(); // 出错也恢复状态
+  });
+}
+
 async function loadDataOverview(){
   const data=await (await api('/admin/data-overview')).json();
+  
+  // 1. 用户部分保持原样
   dataUsers.innerHTML=(data.users||[]).map(u=>`<div class='row'><span>${u.username}（${u.role==='admin'?'管理员':'普通用户'}）</span><span class='badge' style='background:${u.is_team_member?'#dcfce7':'#fee2e2'};color:${u.is_team_member?'#166534':'#991b1b'}'>${u.is_team_member?'组员':'编外'}</span><button onclick='toggleRole(${u.id},"${u.role}")'>设为${u.role==='admin'?'普通用户':'管理员'}</button><button class='secondary' onclick='toggleTeamMember(${u.id}, ${u.is_team_member ? false : true})'>${u.is_team_member?'设为编外人员':'设为组员'}</button><button class='danger' onclick='removeUser(${u.id},"${u.username}")'>删除</button></div>`).join('');
-  dataVersions.innerHTML=(data.versions||[]).map(v=>`<div class='row'><span>${v.version_no}(${versionTypeZh(v.version_type)})</span><button onclick='editVersion(${v.id},"${v.version_no}","${v.version_type}",${v.parent_id||'null'})'>编辑</button><button class='secondary' onclick='removeVersion(${v.id})'>删除</button></div>`).join('');
-  dataReqs.innerHTML=(data.requirements||[]).map(r=>`<div class='row'><span>${r.zentao_req_id} ${r.title}</span><button onclick='editReq(${r.id},"${r.zentao_req_id}","${r.title}",${r.major_version_id})'>编辑</button><button class='secondary' onclick='removeReq(${r.id})'>删除</button></div>`).join('');
-  dataBugs.innerHTML=(data.bugs||[]).map(b=>`<div class='row'><span>${b.bug_id}(${sourceTypeZh(b.source_type)})</span><button onclick='editBug(${b.id},"${b.bug_id}")'>编辑</button><button class='secondary' onclick='removeBug(${b.id})'>删除</button></div>`).join('');
+
+  // 2. 组装树形追溯视图
+  const majors = (data.versions||[]).filter(v=>v.version_type==='major');
+  const minors = (data.versions||[]).filter(v=>v.version_type==='minor');
+  const minorMap = {}; 
+  minors.forEach(m => minorMap[m.id] = m.version_no);
+
+  let treeHtml = '';
+  majors.forEach(major => {
+    const majorMinors = minors.filter(m => m.parent_id === major.id);
+    const reqs = (data.requirements||[]).filter(r => r.major_version_id === major.id);
+
+    // 渲染小版本标签
+    let minorHtml = majorMinors.map(m => `<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-right:8px;padding-right:2px;">🏷️ ${m.version_no} <button class="text-btn" title="编辑" onclick="editVersion(${m.id},'${m.version_no}','minor',${major.id})">✎</button><button class="text-btn" title="删除" onclick="removeVersion(${m.id})">×</button></span>`).join('');
+    if(!minorHtml) minorHtml = '<span class="muted" style="font-size:13px;">暂无发包记录</span>';
+
+    // 渲染需求列表
+    let reqHtml = reqs.map(req => {
+        const reqBugs = (data.bugs||[]).filter(b => b.requirement_id === req.id);
+        const freeBugs = reqBugs.filter(b => b.source_type === 'manual');
+        const caseBugs = reqBugs.filter(b => b.source_type === 'case');
+
+        // 区块A：用例及关联Bug
+        let casesListHtml = (req.case_ids||[]).map(cId => {
+            const relatedBugs = caseBugs.filter(b => b.source_ref === cId);
+            let bHtml = relatedBugs.map(b => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 关联 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.minor_version_id]||'未知'}]</span> <button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button></div>`).join('');
+            if(!bHtml) bHtml = `<div style="margin-left:24px; color:#10b981; font-size:13px; margin-top:4px;">↳ ✓ 完美通过，无关联Bug</div>`;
+            return `<div style="margin-top:12px;">🧪 <b>用例 [${cId}]</b> ${bHtml}</div>`;
+        }).join('');
+
+        // 区块B：自由Bug
+        let freeBugsHtml = freeBugs.map(b => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 自由 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.minor_version_id]||'未知'}]</span> <button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button></div>`).join('');
+
+        return `
+        <div style="border:1px solid #e2e8f0; border-radius:6px; margin-bottom:12px; background:#fff;">
+          <div style="padding:10px 12px; cursor:pointer; background:#f8fafc; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;" onclick="document.getElementById('req_body_${req.id}').classList.toggle('hidden')">
+            <span style="font-size:14px;">📄 <b>${req.zentao_req_id}</b> ${req.title}</span>
+            <span>
+              <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); editReq(${req.id},'${req.zentao_req_id}','${req.title}',${major.id})">编辑</button>
+              <button class="danger" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); removeReq(${req.id})">删除</button>
+            </span>
+          </div>
+          <div id="req_body_${req.id}" class="hidden" style="padding:12px; background:#fff;">
+            <div style="margin-bottom:16px;">
+              <div style="font-weight:bold; color:#334155; border-bottom:1px solid #f1f5f9; padding-bottom:4px;">[区块 A：测试用例与关联 Bug]</div>
+              ${casesListHtml||'<div class="muted" style="margin-left:24px; margin-top:8px;">暂无用例</div>'}
+            </div>
+            <div>
+              <div style="font-weight:bold; color:#334155; border-bottom:1px solid #f1f5f9; padding-bottom:4px;">[区块 B：自由 Bug 池]</div>
+              ${freeBugsHtml||'<div class="muted" style="margin-left:24px; margin-top:8px;">暂无自由Bug</div>'}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+
+    if(!reqHtml) reqHtml = '<div class="muted" style="font-size:13px;">暂无下辖需求</div>';
+
+    // 拼装大版本卡片
+    treeHtml += `
+    <div style="border:2px solid #cbd5e1; border-radius:8px; margin-bottom:16px; background:#fff; overflow:hidden;">
+      <div style="padding:12px 16px; background:#f1f5f9; border-bottom:1px solid #cbd5e1; cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="document.getElementById('major_body_${major.id}').classList.toggle('hidden')">
+        <span style="font-size:16px; font-weight:bold; color:#0f172a;">📦 大版本：${major.version_no}</span>
+        <span>
+          <button class="secondary" onclick="event.stopPropagation(); editVersion(${major.id},'${major.version_no}','major',null)">编辑版本</button>
+          <button class="danger" onclick="event.stopPropagation(); removeVersion(${major.id})">删除整体</button>
+        </span>
+      </div>
+      <div id="major_body_${major.id}" class="hidden" style="padding:16px; background:#f8fafc;">
+        <div style="margin-bottom:20px; padding-bottom:12px; border-bottom:1px dashed #cbd5e1;">
+          <div style="font-weight:bold; margin-bottom:8px; color:#334155;">【版本发包履历】</div>
+          <div>${minorHtml}</div>
+        </div>
+        <div>
+          <div style="font-weight:bold; margin-bottom:12px; color:#334155;">【下辖需求清单】</div>
+          ${reqHtml}
+        </div>
+      </div>
+    </div>`;
+  });
+
+  document.getElementById('dataTreeArea').innerHTML = treeHtml || '<div class="muted" style="padding: 20px; text-align: center;">系统中暂无数据，请先创建大版本</div>';
 }
 
 async function toggleRole(userId, currentRole){
