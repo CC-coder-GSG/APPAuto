@@ -774,8 +774,53 @@ async def push_test_progress(minor_version_id: int, major_version_id: int, curre
 
 @app.get("/retest/workbench")
 def get_retest_workbench(major_version_id: int, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
-    rows = db.query(Requirement).options(joinedload(Requirement.owner), joinedload(Requirement.test_cases), joinedload(Requirement.retester)).filter(Requirement.major_version_id == major_version_id, Requirement.test_completed.is_(True), Requirement.owner_id.isnot(None), Requirement.owner_id != current_user.id).order_by(Requirement.id.asc()).all()
-    return [{"id": r.id, "zentao_req_id": r.zentao_req_id, "title": r.title, "owner": r.owner.username if r.owner else None, "case_ids": [c.zentao_case_id for c in r.test_cases], "retest_completed": r.retest_completed, "retested_by": r.retester.username if r.retester else None} for r in rows]
+    reqs = db.query(Requirement).options(
+        joinedload(Requirement.owner),
+        joinedload(Requirement.test_cases),
+        joinedload(Requirement.retester)
+    ).filter(
+        Requirement.major_version_id == major_version_id,
+        Requirement.test_completed.is_(True),
+        Requirement.owner_id.isnot(None),
+        Requirement.owner_id != current_user.id
+    ).order_by(Requirement.id.asc()).all()
+    
+    # 获取所有小版本映射，用于在前端直观展示 Bug 所在的发包号
+    minors = {v.id: v.version_no for v in db.query(Version).filter(Version.version_type == VersionType.MINOR).all()}
+
+    req_ids = [r.id for r in reqs]
+    case_ids = [c.id for r in reqs for c in r.test_cases]
+    
+    # 一次性查出该批需求下的所有 Bug
+    case_bug_rows = db.query(BugTracking).filter(BugTracking.requirement_id.in_(req_ids), BugTracking.source_type == BugSourceType.CASE, BugTracking.source_ref.in_([str(x) for x in case_ids] if case_ids else ["-1"])).all() if req_ids else []
+    free_bug_rows = db.query(BugTracking).filter(BugTracking.requirement_id.in_(req_ids), BugTracking.source_type == BugSourceType.MANUAL).all() if req_ids else []
+
+    # 按用例 ID 归类关联 Bug
+    case_bug_map: dict[str, list[dict]] = {}
+    for b in case_bug_rows:
+        case_bug_map.setdefault(b.source_ref or "", []).append({"id": b.id, "bug_id": b.bug_id, "minor_version_no": minors.get(b.latest_minor_version_id, "未知")})
+
+    # 按需求 ID 归类自由 Bug
+    free_bug_map: dict[int, list[dict]] = {}
+    for b in free_bug_rows:
+        free_bug_map.setdefault(b.requirement_id or -1, []).append({"id": b.id, "bug_id": b.bug_id, "minor_version_no": minors.get(b.latest_minor_version_id, "未知")})
+
+    return [
+        {
+            "id": r.id,
+            "zentao_req_id": r.zentao_req_id,
+            "title": r.title,
+            "owner": r.owner.username if r.owner else None,
+            "retest_completed": r.retest_completed,
+            "retested_by": r.retester.username if r.retester else None,
+            "test_cases": [
+                {"id": c.id, "zentao_case_id": c.zentao_case_id, "bugs": case_bug_map.get(str(c.id), [])}
+                for c in r.test_cases
+            ],
+            "free_bugs": free_bug_map.get(r.id, []),
+        }
+        for r in reqs
+    ]
 
 
 @app.put("/requirements/{requirement_id}/retest")
