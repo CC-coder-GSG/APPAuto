@@ -106,6 +106,16 @@ class RequirementCreate(BaseModel):
     major_version_id: int = Field(gt=0)
 
 
+class ReqBatchItem(BaseModel):
+    zentao_req_id: str
+    title: str
+
+
+class RequirementBatchCreate(BaseModel):
+    major_version_id: int
+    items: list[ReqBatchItem]
+
+
 class AssignItem(BaseModel):
     requirement_id: int
     owner_id: Optional[int] = None
@@ -478,6 +488,34 @@ def create_requirement(payload: RequirementCreate, _: Annotated[User, Depends(ge
     db.commit()
     db.refresh(requirement)
     return {"id": requirement.id, "zentao_req_id": requirement.zentao_req_id, "title": requirement.title, "status": requirement.status}
+
+
+@app.post("/requirements/batch", status_code=201)
+def batch_create_requirements(payload: RequirementBatchCreate, _: Annotated[User, Depends(require_admin)], db: Annotated[Session, Depends(get_db)]):
+    version = db.query(Version).filter(Version.id == payload.major_version_id, Version.version_type == VersionType.MAJOR).first()
+    if not version:
+        raise HTTPException(status_code=400, detail="关联的大版本不存在")
+
+    existing_reqs = {r[0] for r in db.query(Requirement.zentao_req_id).all()}
+
+    new_reqs = []
+    for item in payload.items:
+        if not R_PATTERN.match(item.zentao_req_id) or item.zentao_req_id in existing_reqs:
+            continue
+        new_reqs.append(
+            Requirement(
+                zentao_req_id=item.zentao_req_id,
+                title=item.title,
+                major_version_id=payload.major_version_id,
+            )
+        )
+        existing_reqs.add(item.zentao_req_id)
+
+    if new_reqs:
+        db.bulk_save_objects(new_reqs)
+        db.commit()
+
+    return {"message": "导入成功", "count": len(new_reqs)}
 
 
 @app.get("/requirements")

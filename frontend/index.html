@@ -35,16 +35,6 @@
 
   <section id="tab-mine" class="card">
     <h2>我的工作台</h2>
-    <div class="card">
-      <h3>✨ 快速新增需求</h3>
-      <div class="row">
-        <input id="createReqTitle" placeholder="需求标题">
-        <div class="prefix-input"><span>r#</span><input id="createReqNo" inputmode="numeric" placeholder="请输入数字" oninput="digitsOnly(this)"></div>
-        <select id="createReqMajorSelect"></select>
-        <button id="createReqBtn" onclick="createReq()">创建并加入我的任务</button>
-      </div>
-    </div>
-
     <div class="card" style="background: #f8fafc; border: 1px solid #e2e8f0; margin-bottom: 16px;">
       <div class="row" style="margin-bottom: 12px;">
         <span style="font-weight: bold; color: #334155; margin-right: 8px;">🎯 需求视图:</span>
@@ -115,6 +105,29 @@
 
   <section id="tab-data" class="hidden card">
     <h2>数据管理台（仅管理员）</h2>
+    <div class="card">
+      <h3>新增与导入需求</h3>
+      <div class="row">
+        <input id="createReqTitle" placeholder="需求标题">
+        <div class="prefix-input"><span>r#</span><input id="createReqNo" inputmode="numeric" placeholder="请输入数字" oninput="digitsOnly(this)"></div>
+        <select id="createReqMajorSelect"></select>
+        <button id="createReqBtn" onclick="createReq()">单条创建</button>
+        <button class="secondary" onclick="document.getElementById('importReqFile').click()">批量导入(CSV)</button>
+        <input type="file" id="importReqFile" accept=".csv" class="hidden" onchange="handleReqFileSelect(event)">
+      </div>
+      
+      <div id="importPreviewArea" class="hidden" style="margin-top: 16px; padding: 16px; background: #f8fafc; border: 1px dashed #94a3b8; border-radius: 8px;">
+        <div style="font-weight: bold; margin-bottom: 12px; color: #334155;">📊 导入预览 (共解析到 <span id="previewCount" style="color: #2563eb; font-size: 18px;">0</span> 条有效数据)</div>
+        <div style="max-height: 200px; overflow-y: auto; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; padding: 10px; font-size: 13px; margin-bottom: 12px;" id="previewList"></div>
+        <div class="row">
+          <label>导入到大版本：</label>
+          <select id="importMajorSelect"></select>
+          <button onclick="confirmImport()">确认并导入</button>
+          <button class="secondary" onclick="cancelImport()" style="background: #94a3b8;">取消</button>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <h3>新增版本</h3>
       <div class="row">
@@ -232,11 +245,13 @@ function fillSelect(id,list){const el=document.getElementById(id); if(!el) retur
 function updateCreateReqControls(){
   const majorSel=document.getElementById('createReqMajorSelect');
   const createBtn=document.getElementById('createReqBtn');
+  const importMajorSel=document.getElementById('importMajorSelect');
   if(!majorSel || !createBtn) return;
   const hasMajor=(majorSel.options||[]).length>0;
   majorSel.disabled=!hasMajor;
   createBtn.disabled=!hasMajor;
   createBtn.title=hasMajor?'':'请先去【数据管理台】创建一个大版本！';
+  if(importMajorSel) importMajorSel.innerHTML=majorSel.innerHTML;
 }
 
 function fillCreateVersionParent(){
@@ -292,8 +307,94 @@ async function createReq(){
     await api('/requirements',{method:'POST',headers:H,body:JSON.stringify({zentao_req_id:reqNo,title,major_version_id})});
     createReqTitle.value='';createReqNo.value='';
     showMessage('需求已创建成功，请联系管理员分配人员或刷新列表', 'success');
-    await loadMyWorkbench();
+    await loadDataOverview();
   }catch(err){showMessage(err.message||'创建需求失败','error')}
+}
+
+let pendingImportReqs = [];
+
+function handleReqFileSelect(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  // Excel导出的CSV通常是GBK编码，指定 GBK 可避免中文乱码
+  reader.onload = function(evt) {
+    parseReqCSV(evt.target.result);
+    e.target.value = '';
+  };
+  reader.readAsText(file, 'GBK');
+}
+
+function parseReqCSV(csvText) {
+  const lines = csvText.split(/\r?\n/);
+  pendingImportReqs = [];
+  let isDataStarted = false;
+  let idIndex = -1, titleIndex = -1;
+
+  for (let line of lines) {
+    line = line.trim();
+    if (!line) continue;
+
+    // 简易 CSV 解析（支持忽略被双引号包裹的逗号）
+    const cols = [];
+    let inQuote = false, curVal = '';
+    for (let char of line) {
+      if (char === '"') inQuote = !inQuote;
+      else if (char === ',' && !inQuote) { cols.push(curVal); curVal = ''; }
+      else curVal += char;
+    }
+    cols.push(curVal);
+    const cleanCols = cols.map(c => c.replace(/^"|"$/g, '').trim());
+
+    if (!isDataStarted) {
+      // 动态寻找真正的表头行
+      idIndex = cleanCols.indexOf('编号');
+      titleIndex = cleanCols.indexOf('需求名称');
+      if (idIndex !== -1 && titleIndex !== -1) isDataStarted = true;
+      continue;
+    }
+
+    // 提取数据
+    if (idIndex !== -1 && titleIndex !== -1 && cleanCols[idIndex] && cleanCols[titleIndex]) {
+      const reqNo = cleanCols[idIndex].replace(/\D/g, '');
+      if (reqNo) pendingImportReqs.push({ zentao_req_id: 'r#' + reqNo, title: cleanCols[titleIndex] });
+    }
+  }
+
+  if (pendingImportReqs.length === 0) {
+    showMessage('未解析到数据，请检查文件是否包含"编号"和"需求名称"列！', 'error');
+    return;
+  }
+
+  // 渲染预览区
+  document.getElementById('importPreviewArea').classList.remove('hidden');
+  document.getElementById('previewCount').innerText = pendingImportReqs.length;
+  document.getElementById('previewList').innerHTML = pendingImportReqs.map(r => `<div style="padding: 4px 0; border-bottom: 1px solid #f1f5f9;"><span class="badge" style="margin-right:8px">${r.zentao_req_id}</span> ${r.title}</div>`).join('');
+  document.getElementById('importMajorSelect').innerHTML = document.getElementById('createReqMajorSelect').innerHTML;
+}
+
+function cancelImport() {
+  pendingImportReqs = [];
+  document.getElementById('importPreviewArea').classList.add('hidden');
+}
+
+async function confirmImport() {
+  const majorId = Number(document.getElementById('importMajorSelect').value);
+  if (!majorId) { showMessage('请选择要导入的大版本！', 'error'); return; }
+  
+  try {
+    const res = await api('/requirements/batch', {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({ major_version_id: majorId, items: pendingImportReqs })
+    });
+    const data = await res.json();
+    showMessage(`成功导入 ${data.count} 条新需求（已自动忽略系统中存在的重复项）！`, 'success');
+    cancelImport();
+    await loadDataOverview();
+  } catch (err) {
+    showMessage(err.message || '导入失败', 'error');
+  }
 }
 
 async function loadAssignBoard(){const majorId=Number(assignMajorSelect.value);assignReqs=await (await api('/requirements?major_version_id='+majorId)).json();assignTable.innerHTML=assignReqs.map(r=>`<tr><td>${r.zentao_req_id} ${r.title}</td><td><select id='o_${r.id}'><option value=''>未分配</option>${users.map(u=>`<option value='${u.id}' ${u.id===r.owner_id?'selected':''}>${u.username}</option>`).join('')}</select></td></tr>`).join('')}
