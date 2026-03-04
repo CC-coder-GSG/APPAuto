@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"/><title>APPAuto 登录</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><div class="container login"><div class="card"><h2>登录</h2><div class="row"><input id="u" placeholder="用户名" style="width:100%"></div><div class="row"><input id="p" type="password" placeholder="密码" style="width:100%"></div><div class="row"><button onclick="login()" style="width:100%">登录</button></div><div id="msg" class="muted"></div></div></div>
+<script>
+async function login(){
+ const fd=new URLSearchParams();fd.set('username',u.value);fd.set('password',p.value);
+ const r=await fetch('/auth/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:fd});
+ if(!r.ok){msg.innerText='登录失败';return}
+ const data=await r.json();localStorage.setItem('token',data.access_token);location.href='/dashboard';
+}
+</script></body></html>

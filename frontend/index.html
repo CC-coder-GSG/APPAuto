@@ -1,0 +1,444 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>APPAuto v0.3.0</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+<body>
+<div class="toast-wrap" id="toastWrap"></div>
+<div class="container">
+  <div class="card row" style="justify-content:space-between">
+    <h1>测试协作系统 v0.3.0</h1>
+    <div><span id="me" class="badge"></span> <button class="secondary" onclick="logout()">退出</button></div>
+  </div>
+
+  <div class="card row" id="tabs">
+    <button id="tabAssignBtn" onclick="showTab('assign')">任务分配台</button>
+    <button id="tabMineBtn" onclick="showTab('mine')">我的工作台</button>
+    <button onclick="showTab('retest')">复测工作台</button>
+    <button onclick="showTab('stage5')">整体测试</button>
+    <button onclick="showTab('report')">报表中心</button>
+    <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
+  </div>
+
+  <section id="tab-assign" class="hidden card">
+    <h2>任务分配台（仅管理员）</h2>
+    <div class="row"><label>大版本</label><select id="assignMajorSelect"></select><button onclick="loadAssignBoard()">加载</button><button onclick="publishAssign()">一键发布/更新分配</button></div>
+    <table><thead><tr><th>需求</th><th>负责人</th></tr></thead><tbody id="assignTable"></tbody></table>
+  </section>
+
+  <section id="tab-mine" class="card">
+    <h2>我的工作台</h2>
+    <div class="card">
+      <h3>✨ 快速新增需求</h3>
+      <div class="row">
+        <input id="createReqTitle" placeholder="需求标题">
+        <div class="prefix-input"><span>r#</span><input id="createReqNo" inputmode="numeric" placeholder="请输入数字" oninput="digitsOnly(this)"></div>
+        <select id="createReqMajorSelect"></select>
+        <button onclick="createReq()">创建并加入我的任务</button>
+      </div>
+    </div>
+
+    <div class="row"><label>大版本</label><select id="mineMajorSelect"></select><label>子版本</label><select id="mineMinorSelect"></select><button onclick="loadMyWorkbench()">加载我的需求</button><button onclick="pushCase()">推送用例进度</button><button onclick="pushTest()">推送测试进度</button></div>
+    <div id="mineCards"></div>
+  </section>
+
+  <section id="tab-retest" class="hidden card">
+    <h2>复测工作台</h2>
+    <div class="row"><label>大版本</label><select id="retestMajorSelect"></select><button onclick="loadRetest()">加载</button><button onclick="pushRetest()">📢 推送复测结果</button></div>
+    <table><thead><tr><th>需求</th><th>原负责人</th><th>复测</th></tr></thead><tbody id="retestTable"></tbody></table>
+  </section>
+
+  <section id="tab-stage5" class="hidden card">
+    <h2>整体测试阶段</h2>
+    <div class="row"><label>大版本</label><select id="s5MajorSelect"></select><label>子版本</label><select id="s5MinorSelect"></select><button onclick="loadStage5()">加载全景</button><button onclick="pushStage5()">推送整体测试状态</button></div>
+    <div id="stage5Req" class="muted"></div>
+    <table><thead><tr><th>Bug池</th><th>新Bug</th><th>测试完毕</th></tr></thead><tbody id="s5Table"></tbody></table>
+    <h3>➕ 新增问题</h3>
+    <div class="row">
+      <div class="prefix-input"><span>b#</span><input id="newBugNum" inputmode="numeric" oninput="digitsOnly(this)"></div>
+      <select id="newSourceType"><option value="manual">自由问题</option><option value="requirement">需求来源</option><option value="case">用例来源</option><option value="legacy_bug">历史Bug来源</option></select>
+      <input id="newSourceRef" placeholder="来源编号(可空)">
+      <select id="newReqSelect"><option value="">关联需求(可空)</option></select>
+      <button onclick="addIssue()">新增问题</button>
+    </div>
+  </section>
+
+  <section id="tab-report" class="hidden card">
+    <h2>报表中心</h2>
+    <div class="row">
+      <label>开始日期</label><input type="date" id="reportStartDate">
+      <label>结束日期</label><input type="date" id="reportEndDate">
+      <span id="reportUserWrap" class="row hidden"><label>人员</label><select id="reportUserSelect"></select></span>
+      <button onclick="queryReport()">查询报表</button>
+      <button class="secondary" onclick="exportReportPdf()">导出 PDF</button>
+    </div>
+
+    <div id="reportContent" class="card">
+      <div class="metrics-grid">
+        <div class="metric-card"><div class="metric-title">执行/测试过需求总数</div><div class="metric-value" id="mReq">0</div></div>
+        <div class="metric-card"><div class="metric-title">创建用例总数</div><div class="metric-value" id="mCase">0</div></div>
+        <div class="metric-card"><div class="metric-title">创建Bug总数</div><div class="metric-value" id="mBug">0</div></div>
+        <div class="metric-card"><div class="metric-title">复测需求数</div><div class="metric-value" id="mRetest">0</div></div>
+        <div class="metric-card"><div class="metric-title">关闭Bug数</div><div class="metric-value" id="mClosed">0</div></div>
+      </div>
+      <div class="chart-grid">
+        <div id="trendChart" class="chart-box"></div>
+        <div id="sourcePieChart" class="chart-box"></div>
+        <div id="radarChart" class="chart-box"></div>
+        <div id="teamCompareChart" class="chart-box"></div>
+        <div id="versionBugChart" class="chart-box"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-data" class="hidden card">
+    <h2>数据管理台（仅管理员）</h2>
+    <div class="card">
+      <h3>新增版本</h3>
+      <div class="row">
+        <input id="createVersionNo" placeholder="版本号 (如 4030 / 40300097)">
+        <select id="createVersionType" onchange="toggleCreateVersionParent()"><option value="major">大版本</option><option value="minor">子版本</option></select>
+        <select id="createVersionParent" disabled><option value="">父大版本（minor必选）</option></select>
+        <button onclick="createVersion()">创建版本</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>新增用户</h3>
+      <div class="row">
+        <input id="createUsername" placeholder="用户名">
+        <input id="createPassword" type="password" placeholder="密码">
+        <select id="createUserRole"><option value="user">普通用户</option><option value="admin">管理员</option></select>
+        <button onclick="createUser()">创建用户</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>用户管理</h3>
+      <div id="dataUsers"></div>
+    </div>
+
+    <p class="warn">危险操作：删除大版本会级联删除其下需求/用例/Bug。</p>
+    <div class="row"><button onclick="loadDataOverview()">刷新数据</button></div>
+    <div class="row" style="align-items:flex-start">
+      <div style="flex:1"><h3>版本</h3><div id="dataVersions"></div></div>
+      <div style="flex:1"><h3>需求</h3><div id="dataReqs"></div></div>
+      <div style="flex:1"><h3>Bug</h3><div id="dataBugs"></div></div>
+    </div>
+  </section>
+</div>
+
+<script>
+const token=localStorage.getItem('token'); if(!token) location.href='/login';
+const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+let currentUser=null, users=[], versions=[], assignReqs=[], stage5Rows=[];
+let trendChart=null, sourcePieChart=null, radarChart=null, teamCompareChart=null, versionBugChart=null;
+
+function showMessage(msg,type='success'){const w=document.getElementById('toastWrap');const d=document.createElement('div');d.className=`toast ${type}`;d.innerText=msg;w.appendChild(d);setTimeout(()=>{d.classList.add('hide');setTimeout(()=>d.remove(),220)},3000)}
+function digitsOnly(el){el.value=(el.value||'').replace(/\D/g,'')}
+function withPrefix(prefix,num){if(!num) return null; return `${prefix}${String(num).replace(/\D/g,'')}`}
+function versionTypeZh(v){return v==='major'?'大版本':'子版本'}
+function sourceTypeZh(v){const m={manual:'自由问题',case:'用例来源',requirement:'需求来源',legacy_bug:'历史Bug来源'};return m[v]||v}
+function logout(){localStorage.removeItem('token');location.href='/login'}
+function confirmPush(){return confirm('确定要向企微群发送吗？')}
+function showTab(name){['assign','mine','retest','stage5','report','data'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));document.getElementById('tab-'+name).classList.remove('hidden')}
+
+async function api(url,opt={}){opt.headers={...(opt.headers||{}),Authorization:'Bearer '+token};const r=await fetch(url,opt);if(r.status===401){logout();throw new Error('401')}if(!r.ok){let t='操作失败';try{const j=await r.json();t=j.detail||t}catch{};throw new Error(t)}return r}
+
+async function init(){
+  currentUser=await (await api('/auth/me')).json();
+  document.getElementById('me').innerText=`${currentUser.username}(${currentUser.role})`;
+  const today = new Date().toISOString().slice(0,10);
+  document.getElementById('reportStartDate').value=today;
+  document.getElementById('reportEndDate').value=today;
+
+  await loadVersions();
+  if(currentUser.role==='admin'){
+    await loadUsers();
+    document.getElementById('tabAssignBtn').classList.remove('hidden');
+    document.getElementById('tabDataBtn').classList.remove('hidden');
+    document.getElementById('reportUserWrap').classList.remove('hidden');
+    fillReportUsers();
+    showTab('assign');
+  }else{
+    document.getElementById('tabAssignBtn').classList.add('hidden');
+    document.getElementById('tabDataBtn').classList.add('hidden');
+    showTab('mine');
+  }
+}
+
+async function loadUsers(){users=await (await api('/users')).json();fillReportUsers()}
+function fillReportUsers(){const s=document.getElementById('reportUserSelect');if(!s) return; const allOpt=currentUser&&currentUser.role==='admin'?'<option value="0">全员</option>':''; s.innerHTML=allOpt+users.map(u=>`<option value="${u.id}">${u.username}</option>`).join('')}
+
+async function loadVersions(){versions=await (await api('/versions')).json();fillVersionSelects();fillCreateVersionParent();toggleCreateVersionParent()}
+function fillVersionSelects(){
+  const majors=versions.filter(v=>v.version_type==='major');
+  const minors=versions.filter(v=>v.version_type==='minor');
+  ['assignMajorSelect','mineMajorSelect','retestMajorSelect','s5MajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
+  ['mineMinorSelect','s5MinorSelect'].forEach(id=>fillSelect(id,minors));
+}
+function fillSelect(id,list){const el=document.getElementById(id); if(!el) return; el.innerHTML=list.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('')}
+
+function fillCreateVersionParent(){
+  const parentSel=document.getElementById('createVersionParent'); if(!parentSel) return;
+  const majors=versions.filter(v=>v.version_type==='major');
+  parentSel.innerHTML='<option value="">父大版本（minor必选）</option>'+majors.map(v=>`<option value="${v.id}">${v.version_no}</option>`).join('');
+}
+function toggleCreateVersionParent(){
+  const type=document.getElementById('createVersionType')?.value;
+  const parent=document.getElementById('createVersionParent');
+  if(!parent) return; parent.disabled = type!=='minor'; if(type!=='minor') parent.value='';
+}
+
+async function createVersion(){
+  try{
+    const version_no=(createVersionNo.value||'').trim();
+    const version_type=createVersionType.value;
+    const parentRaw=createVersionParent.value;
+    const parent_id=version_type==='minor'?Number(parentRaw):null;
+    if(!version_no){showMessage('请填写版本号','error');return}
+    if(version_type==='minor' && !parentRaw){showMessage('minor 版本必须选择父大版本','error');return}
+    await api('/versions',{method:'POST',headers:H,body:JSON.stringify({version_no,version_type,parent_id})});
+    createVersionNo.value='';createVersionType.value='major';toggleCreateVersionParent();
+    await loadVersions(); await loadDataOverview();
+    showMessage('创建版本成功','success');
+  }catch(err){showMessage(err.message||'创建版本失败','error')}
+}
+
+async function createUser(){
+  try{
+    const username=(createUsername.value||'').trim();
+    const password=(createPassword.value||'').trim();
+    const role=createUserRole.value;
+    if(!username||!password){showMessage('请填写用户名和密码','error');return}
+    await api('/users',{method:'POST',headers:H,body:JSON.stringify({username,password,role})});
+    createUsername.value='';createPassword.value='';createUserRole.value='user';
+    await loadUsers(); await loadDataOverview();
+    showMessage('创建用户成功','success');
+  }catch(err){showMessage(err.message||'创建用户失败','error')}
+}
+
+async function createReq(){
+  try{
+    const title=(createReqTitle.value||'').trim();
+    const reqNo=withPrefix('r#',createReqNo.value);
+    const major_version_id=Number(createReqMajorSelect.value);
+    if(!title){showMessage('请填写需求标题','error');return}
+    if(!reqNo){showMessage('请填写需求编号数字部分','error');return}
+    await api('/requirements',{method:'POST',headers:H,body:JSON.stringify({zentao_req_id:reqNo,title,major_version_id})});
+    createReqTitle.value='';createReqNo.value='';
+    showMessage('需求已创建成功，请联系管理员分配人员或刷新列表', 'success');
+    await loadMyWorkbench();
+  }catch(err){showMessage(err.message||'创建需求失败','error')}
+}
+
+async function loadAssignBoard(){const majorId=Number(assignMajorSelect.value);assignReqs=await (await api('/requirements?major_version_id='+majorId)).json();assignTable.innerHTML=assignReqs.map(r=>`<tr><td>${r.zentao_req_id} ${r.title}</td><td><select id='o_${r.id}'><option value=''>未分配</option>${users.map(u=>`<option value='${u.id}' ${u.id===r.owner_id?'selected':''}>${u.username}</option>`).join('')}</select></td></tr>`).join('')}
+async function publishAssign(){if(!confirmPush()) return;const majorId=Number(assignMajorSelect.value);const assignments=assignReqs.map(r=>({requirement_id:r.id,owner_id:Number(document.getElementById('o_'+r.id).value)||null}));await api('/requirements/assign-and-publish',{method:'POST',headers:H,body:JSON.stringify({major_version_id:majorId,assignments})});showMessage('分配发布成功')}
+
+async function loadMyWorkbench(){
+  const majorId=Number(mineMajorSelect.value);
+  const data=await (await api('/requirements/my-workbench?major_version_id='+majorId)).json();
+  mineCards.innerHTML=data.map(req=>{
+    const caseHtml=(req.test_cases||[]).map(c=>`<div class="case-item"><div class="row"><b>${c.zentao_case_id}</b><button onclick="promptCaseBug(${req.id},${c.id})">添加关联Bug</button><button class="danger" onclick="deleteCase(${c.id})">删除用例</button></div><div class="case-bugs">${(c.bugs||[]).map(b=>`<span class="bug-chip">${b.bug_id}</span>`).join('')||'<span class="muted">暂无关联Bug</span>'}</div></div>`).join('');
+    const freeBugHtml=(req.free_bugs||[]).map(b=>`<span class="bug-chip">${b.bug_id}</span>`).join('')||'<span class="muted">暂无自由Bug</span>';
+    return `<div class="mine-req-card"><div class="mine-req-head">${req.zentao_req_id} ${req.title}</div><div class="row" style="margin-bottom:8px"><label><input type="checkbox" ${req.case_completed?'checked':''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked)">✅用例完成</label><label><input type="checkbox" ${req.test_completed?'checked':''} onchange="setReqStatus(${req.id}, 'test_completed', this.checked)">✅测试完成</label></div><div>${caseHtml}</div><div class="free-bug-box"><div><b>自由Bug</b></div><div>${freeBugHtml}</div></div><div class="row" style="margin-top:8px"><div class="prefix-input"><span>u#</span><input id="new_case_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增用例编号"></div><button onclick="addCase(${req.id})">逐个添加用例</button><div class="prefix-input"><span>b#</span><input id="new_free_bug_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增自由Bug"></div><button onclick="addFreeBug(${req.id})">添加自由Bug</button></div></div>`;
+  }).join('');
+}
+
+
+async function setReqStatus(reqId, key, checked){
+  try{
+    if(!checked){
+      const ok=confirm(key==='case_completed'?'确认取消【用例完成】状态吗？':'确认取消【测试完成】状态吗？');
+      if(!ok){loadMyWorkbench();return}
+    }
+    const payload={}; payload[key]=checked;
+    await api(`/requirements/${reqId}/status`,{method:'PATCH',headers:H,body:JSON.stringify(payload)});
+    showMessage('需求状态已更新','success');
+  }catch(err){
+    showMessage(err.message||'状态更新失败','error');
+  }finally{
+    loadMyWorkbench();
+  }
+}
+
+async function addCase(reqId){
+  try{
+    const n=document.getElementById(`new_case_${reqId}`).value;
+    const caseId=withPrefix('u#',n);
+    if(!caseId){showMessage('请输入用例编号数字','error');return}
+    await api(`/requirements/${reqId}/cases`,{method:'POST',headers:H,body:JSON.stringify({zentao_case_id:caseId})});
+    showMessage('用例新增成功','success');
+    loadMyWorkbench();
+  }catch(err){showMessage(err.message||'新增用例失败','error')}
+}
+
+async function deleteCase(caseId){
+  if(!confirm('确定删除该用例吗？')) return;
+  try{await api(`/test-cases/${caseId}`,{method:'DELETE'});showMessage('用例已删除','success');loadMyWorkbench()}catch(err){showMessage(err.message||'删除用例失败','error')}
+}
+
+async function promptCaseBug(reqId, caseId){
+  const n=prompt('请输入关联Bug数字部分：');
+  if(!n) return;
+  const bug=withPrefix('b#',n);
+  try{
+    await api('/bugs/execution',{method:'POST',headers:H,body:JSON.stringify({bug_id:bug,minor_version_id:Number(mineMinorSelect.value),requirement_id:reqId,source_type:'case',source_ref:String(caseId)})});
+    showMessage('关联Bug新增成功','success');
+    loadMyWorkbench();
+  }catch(err){showMessage(err.message||'新增Bug失败','error')}
+}
+
+async function addFreeBug(reqId){
+  const n=document.getElementById(`new_free_bug_${reqId}`).value;
+  const bug=withPrefix('b#',n);
+  if(!bug){showMessage('请输入自由Bug数字','error');return}
+  try{
+    await api('/bugs/execution',{method:'POST',headers:H,body:JSON.stringify({bug_id:bug,minor_version_id:Number(mineMinorSelect.value),requirement_id:reqId,source_type:'manual'})});
+    showMessage('自由Bug新增成功','success');
+    loadMyWorkbench();
+  }catch(err){showMessage(err.message||'新增自由Bug失败','error')}
+}
+
+async function pushCase(){if(!confirmPush()) return; await api('/push/case-progress',{method:'POST',headers:H,body:JSON.stringify({major_version_id:Number(mineMajorSelect.value)})});showMessage('用例进度已推送')}
+async function pushTest(){if(!confirmPush()) return; await api(`/push/test-progress?minor_version_id=${Number(mineMinorSelect.value)}&major_version_id=${Number(mineMajorSelect.value)}`,{method:'POST'});showMessage('测试进度已推送')}
+
+async function loadRetest(){const data=await (await api('/retest/workbench?major_version_id='+Number(retestMajorSelect.value))).json();retestTable.innerHTML=data.map(x=>`<tr><td>${x.zentao_req_id} ${x.title}</td><td>${x.owner||''}</td><td><label><input type='checkbox' ${x.retest_completed?'checked':''} onchange='setRetest(${x.id},this.checked)'>✅复测完成</label></td></tr>`).join('')}
+async function setRetest(id,v){await api(`/requirements/${id}/retest`,{method:'PUT',headers:H,body:JSON.stringify({retest_completed:v})});showMessage('复测状态已更新')}
+async function pushRetest(){if(!confirmPush()) return; await api(`/push/retest-result?major_version_id=${Number(retestMajorSelect.value)}`,{method:'POST'});showMessage('复测结果已推送')}
+
+async function loadStage5(){const majorId=Number(s5MajorSelect.value);const data=await (await api('/stage5/overview?major_version_id='+majorId)).json();newReqSelect.innerHTML='<option value="">关联需求(可空)</option>'+data.requirements.map(r=>`<option value='${r.id}'>${r.zentao_req_id}</option>`).join('');stage5Req.innerText=data.requirements.map(r=>`${r.zentao_req_id} 用例[${(r.case_ids||[]).join(',')}] 历史Bug[${(r.history_bug_ids||[]).join(',')}]`).join(' | ');stage5Rows=data.bug_pool;renderS5()}
+function renderS5(){s5Table.innerHTML=stage5Rows.map(b=>`<tr><td>${b.bug_id} (${sourceTypeZh(b.source_type)})</td><td><div class='prefix-input'><span>b#</span><input id='nb_${b.id}' value='${(b.newly_found_bug_id||'').replace('b#','')}' ${b.test_done?'disabled':''} oninput='digitsOnly(this)'></div></td><td><label><input id='done_${b.id}' type='checkbox' ${b.test_done?'checked':''} onchange='toggleS5Lock(${b.id})'>测试完毕</label><button onclick='saveS5(${b.id})'>保存</button></td></tr>`).join('')}
+function toggleS5Lock(id){document.getElementById('nb_'+id).disabled=document.getElementById('done_'+id).checked}
+async function saveS5(id){const done=document.getElementById('done_'+id).checked;const n=withPrefix('b#',document.getElementById('nb_'+id).value);await api(`/stage5/bugs/${id}/result`,{method:'PUT',headers:H,body:JSON.stringify({minor_version_id:Number(s5MinorSelect.value),test_done:done,newly_found_bug_id:n})});showMessage('整体测试项已保存');loadStage5()}
+async function addIssue(){const bug=withPrefix('b#',newBugNum.value);await api('/stage5/issues',{method:'POST',headers:H,body:JSON.stringify({major_version_id:Number(s5MajorSelect.value),requirement_id:newReqSelect.value?Number(newReqSelect.value):null,source_type:newSourceType.value,source_ref:newSourceRef.value||null,bug_id:bug,minor_version_id:Number(s5MinorSelect.value)})});showMessage('问题已新增并推送');newBugNum.value='';loadStage5()}
+async function pushStage5(){if(!confirmPush()) return;const res=await (await api(`/stage5/push-status?major_version_id=${Number(s5MajorSelect.value)}&minor_version_id=${Number(s5MinorSelect.value)}`,{method:'POST'})).json();showMessage(`整体状态已推送，剩余未闭环:${res.remaining}`)}
+
+async function queryReport(){
+  try{
+    const start_date=reportStartDate.value;
+    const end_date=reportEndDate.value;
+    let url=`/reports/summary?start_date=${start_date}&end_date=${end_date}`;
+    if(currentUser.role==='admin' && reportUserSelect.value){url += `&user_id=${reportUserSelect.value}`}
+    const data=await (await api(url)).json();
+    mReq.innerText=data.overview.executed_requirements || 0;
+    mCase.innerText=data.overview.created_cases || 0;
+    mBug.innerText=data.overview.created_bugs || 0;
+    mRetest.innerText=data.overview.retested_reqs || 0;
+    mClosed.innerText=data.overview.closed_bugs || 0;
+
+    const x=data.trend.map(i=>i.date);
+    const yReq=data.trend.map(i=>i.executed_requirements);
+    const yCase=data.trend.map(i=>i.created_cases);
+    const yBug=data.trend.map(i=>i.created_bugs);
+    const yRetest=data.trend.map(i=>i.retested_reqs||0);
+    const yClosed=data.trend.map(i=>i.closed_bugs||0);
+
+    if(!trendChart){trendChart=echarts.init(document.getElementById('trendChart'))}
+    trendChart.setOption({
+      title:{text:'趋势折线图'},
+      tooltip:{trigger:'axis'},
+      legend:{data:['执行需求','创建用例','创建Bug','复测需求','关闭Bug']},
+      xAxis:{type:'category',data:x},
+      yAxis:{type:'value'},
+      series:[
+        {name:'执行需求',type:'line',data:yReq,smooth:true},
+        {name:'创建用例',type:'line',data:yCase,smooth:true},
+        {name:'创建Bug',type:'line',data:yBug,smooth:true},
+        {name:'复测需求',type:'line',data:yRetest,smooth:true},
+        {name:'关闭Bug',type:'line',data:yClosed,smooth:true},
+      ]
+    });
+
+    if(!sourcePieChart){sourcePieChart=echarts.init(document.getElementById('sourcePieChart'))}
+    sourcePieChart.setOption({
+      title:{text:'Bug来源分布',left:'center'},
+      tooltip:{trigger:'item'},
+      series:[{type:'pie',radius:'60%',data:(data.bug_source_dist||[]).map(i=>({name:sourceTypeZh(i.source_type),value:i.count}))}]
+    });
+
+    if(!radarChart){radarChart=echarts.init(document.getElementById('radarChart'))}
+    radarChart.setOption({
+      title:{text:'个人能力雷达图'},
+      tooltip:{},
+      radar:{indicator:[
+        {name:'执行需求',max:Math.max(10, Number(mReq.innerText)||0)},
+        {name:'创建用例',max:Math.max(10, Number(mCase.innerText)||0)},
+        {name:'创建Bug',max:Math.max(10, Number(mBug.innerText)||0)},
+        {name:'复测需求',max:Math.max(10, Number(mRetest.innerText)||0)},
+        {name:'关闭Bug',max:Math.max(10, Number(mClosed.innerText)||0)},
+      ]},
+      series:[{type:'radar',data:[{value:[Number(mReq.innerText)||0,Number(mCase.innerText)||0,Number(mBug.innerText)||0,Number(mRetest.innerText)||0,Number(mClosed.innerText)||0],name:'指标'}]}]
+    });
+
+    if(!teamCompareChart){teamCompareChart=echarts.init(document.getElementById('teamCompareChart'))}
+    const team=(data.team_comparison||[])
+    teamCompareChart.setOption({
+      title:{text:'团队对比（全员模式）'},
+      tooltip:{trigger:'axis'},
+      legend:{data:['执行需求','创建用例','创建Bug','复测需求','关闭Bug']},
+      xAxis:{type:'category',data:team.map(i=>i.username)},
+      yAxis:{type:'value'},
+      series:[
+        {name:'执行需求',type:'bar',data:team.map(i=>i.executed_requirements||0)},
+        {name:'创建用例',type:'bar',data:team.map(i=>i.created_cases||0)},
+        {name:'创建Bug',type:'bar',data:team.map(i=>i.created_bugs||0)},
+        {name:'复测需求',type:'bar',data:team.map(i=>i.retested_reqs||0)},
+        {name:'关闭Bug',type:'bar',data:team.map(i=>i.closed_bugs||0)},
+      ]
+    });
+
+    const vb=await (await api('/reports/version-bugs')).json();
+    if(!versionBugChart){versionBugChart=echarts.init(document.getElementById('versionBugChart'))}
+    versionBugChart.setOption({
+      title:{text:'版本Bug分布'},
+      tooltip:{trigger:'axis'},
+      xAxis:{type:'category',data:vb.map(i=>i.version_name)},
+      yAxis:{type:'value'},
+      series:[{name:'Bug数',type:'bar',data:vb.map(i=>i.bug_count)}]
+    });
+
+    showMessage('报表查询成功','success');
+  }catch(err){showMessage(err.message||'查询报表失败','error')}
+}
+
+
+function exportReportPdf(){
+  html2pdf().from(document.getElementById('reportContent')).save('测试效能度量报表.pdf');
+}
+
+async function loadDataOverview(){
+  const data=await (await api('/admin/data-overview')).json();
+  dataUsers.innerHTML=(data.users||[]).map(u=>`<div class='row'><span>${u.username}（${u.role==='admin'?'管理员':'普通用户'}）</span><button onclick='toggleRole(${u.id},"${u.role}")'>设为${u.role==='admin'?'普通用户':'管理员'}</button><button class='danger' onclick='removeUser(${u.id},"${u.username}")'>删除</button></div>`).join('');
+  dataVersions.innerHTML=(data.versions||[]).map(v=>`<div class='row'><span>${v.version_no}(${versionTypeZh(v.version_type)})</span><button onclick='editVersion(${v.id},"${v.version_no}","${v.version_type}",${v.parent_id||'null'})'>编辑</button><button class='secondary' onclick='removeVersion(${v.id})'>删除</button></div>`).join('');
+  dataReqs.innerHTML=(data.requirements||[]).map(r=>`<div class='row'><span>${r.zentao_req_id} ${r.title}</span><button onclick='editReq(${r.id},"${r.zentao_req_id}","${r.title}",${r.major_version_id})'>编辑</button><button class='secondary' onclick='removeReq(${r.id})'>删除</button></div>`).join('');
+  dataBugs.innerHTML=(data.bugs||[]).map(b=>`<div class='row'><span>${b.bug_id}(${sourceTypeZh(b.source_type)})</span><button onclick='editBug(${b.id},"${b.bug_id}")'>编辑</button><button class='secondary' onclick='removeBug(${b.id})'>删除</button></div>`).join('');
+}
+
+async function toggleRole(userId, currentRole){
+  const nextRole=currentRole==='admin'?'user':'admin';
+  if(!confirm(`确定将该用户设为${nextRole==='admin'?'管理员':'普通用户'}吗？`)) return;
+  try{await api(`/users/${userId}/role`,{method:'PUT',headers:H,body:JSON.stringify({role:nextRole})});showMessage('角色切换成功','success');loadDataOverview();loadUsers();}catch(err){showMessage(err.message||'角色切换失败','error')}
+}
+
+async function removeUser(userId, username){
+  if(!confirm(`⚠️ 确认删除用户【${username}】吗？此操作不可恢复。`)) return;
+  try{await api(`/users/${userId}`,{method:'DELETE'});showMessage('用户删除成功','success');loadDataOverview();loadUsers();}catch(err){showMessage(err.message||'删除用户失败','error')}
+}
+
+async function removeVersion(id){if(!confirm('⚠️ 高危操作：删除版本将级联删除所有下挂需求/用例/Bug，确定继续吗？'))return;await api('/versions/'+id,{method:'DELETE'});showMessage('版本已删除');loadVersions();loadDataOverview()}
+async function removeReq(id){if(!confirm('确定删除该需求及其用例/执行记录吗？'))return;await api('/requirements/'+id,{method:'DELETE'});showMessage('需求已删除');loadDataOverview()}
+async function removeBug(id){if(!confirm('确定删除该Bug吗？'))return;await api('/bugs/'+id,{method:'DELETE'});showMessage('Bug已删除');loadDataOverview()}
+async function editVersion(id,no,type,parent){const newNo=prompt('版本号',no);if(!newNo)return;await api('/versions/'+id,{method:'PUT',headers:H,body:JSON.stringify({version_no:newNo,version_type:type,parent_id:parent})});showMessage('版本已更新');loadVersions();loadDataOverview()}
+async function editReq(id,z,title,major){const zNum=prompt('需求号数字部分',z.replace('r#',''));if(!zNum)return;const t=prompt('需求标题',title);if(!t)return;await api('/requirements/'+id,{method:'PUT',headers:H,body:JSON.stringify({zentao_req_id:withPrefix('r#',zNum),title:t,major_version_id:major})});showMessage('需求已更新');loadDataOverview()}
+async function editBug(id,b){const num=prompt('Bug数字部分',b.replace('b#',''));if(!num)return;await api('/bugs/'+id+'?new_bug_id='+encodeURIComponent(withPrefix('b#',num)),{method:'PUT'});showMessage('Bug已更新');loadDataOverview()}
+
+window.addEventListener('error',e=>showMessage(e.message||'未知错误','error'))
+init().catch(err=>showMessage(err.message,'error'));
+</script>
+</body>
+</html>
