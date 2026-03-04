@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.database import SessionLocal, get_db
 from app.init_db import init_db
 from app.models import (
+    BugStage5Record,
     BugSourceType,
     BugTracking,
     Requirement,
@@ -563,6 +564,8 @@ def add_case_to_requirement(req_id: int, payload: AddCasePayload, current_user: 
     req = db.query(Requirement).filter(Requirement.id == req_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    if req.case_completed:
+        raise HTTPException(status_code=400, detail="用例已封板（已勾选完成），无法新增！请先取消勾选。")
     if not U_PATTERN.match(payload.zentao_case_id):
         raise HTTPException(status_code=400, detail="zentao_case_id must be like u#xxxx")
     case = TestCase(requirement_id=req_id, zentao_case_id=payload.zentao_case_id, creator_id=current_user.id)
@@ -600,6 +603,11 @@ def delete_case(case_id: int, _: Annotated[User, Depends(get_current_user)], db:
     c = db.query(TestCase).filter(TestCase.id == case_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Case not found")
+        
+    req = db.query(Requirement).filter(Requirement.id == c.requirement_id).first()
+    if req and req.case_completed:
+        raise HTTPException(status_code=400, detail="用例已封板（已勾选完成），无法删除！请先取消勾选。")
+        
     db.delete(c)
     db.commit()
     return {"message": "Case deleted"}
@@ -611,10 +619,14 @@ def create_execution_bug(payload: ExecutionBugPayload, current_user: Annotated[U
         raise HTTPException(status_code=400, detail="bug_id must be like b#xxxx")
     if payload.source_type not in [BugSourceType.CASE, BugSourceType.MANUAL]:
         raise HTTPException(status_code=400, detail="source_type only supports case/manual")
+    if db.query(BugTracking).filter(BugTracking.bug_id == payload.bug_id).first():
+        raise HTTPException(status_code=400, detail=f"添加失败：Bug 编号 {payload.bug_id} 已经存在！")
 
     req = db.query(Requirement).filter(Requirement.id == payload.requirement_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    if req.test_completed:
+        raise HTTPException(status_code=400, detail="测试已封板（已勾选完成），无法继续添加 Bug！请先取消勾选。")
 
     bug = BugTracking(
         major_version_id=req.major_version_id,
@@ -790,14 +802,28 @@ async def push_retest_result(major_version_id: int, current_user: Annotated[User
 
 
 @app.get("/stage5/overview")
-def stage5_overview(major_version_id: int, _: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
+def stage5_overview(major_version_id: int, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
     reqs = db.query(Requirement).options(joinedload(Requirement.test_cases), joinedload(Requirement.test_executions)).filter(Requirement.major_version_id == major_version_id).all()
-    bugs = db.query(BugTracking).filter(BugTracking.major_version_id == major_version_id).all()
-    return {
-        "major_version_id": major_version_id,
-        "requirements": [{"id": r.id, "zentao_req_id": r.zentao_req_id, "title": r.title, "case_ids": [c.zentao_case_id for c in r.test_cases], "history_bug_ids": [e.bug_id for e in r.test_executions if e.bug_id]} for r in reqs],
-        "bug_pool": [{"id": b.id, "bug_id": b.bug_id, "source_type": b.source_type.value, "source_ref": b.source_ref, "requirement_id": b.requirement_id, "latest_minor_version_id": b.latest_minor_version_id, "test_done": b.test_done, "newly_found_bug_id": b.newly_found_bug_id, "closed": b.closed} for b in bugs],
-    }
+    bugs = db.query(BugTracking).options(joinedload(BugTracking.stage5_records).joinedload(BugStage5Record.user), joinedload(BugTracking.stage5_records).joinedload(BugStage5Record.minor_version)).filter(BugTracking.major_version_id == major_version_id).all()
+    
+    bug_pool = []
+    for b in bugs:
+        other_records = []
+        for r in b.stage5_records:
+            if r.user_id != current_user.id:
+                other_records.append({
+                    "username": r.user.username,
+                    "minor_version_no": r.minor_version.version_no if r.minor_version else "未知",
+                    "test_done": r.test_done,
+                    "newly_found_bug_id": r.newly_found_bug_id
+                })
+        bug_pool.append({
+            "id": b.id, "bug_id": b.bug_id, "source_type": b.source_type.value, "source_ref": b.source_ref,
+            "requirement_id": b.requirement_id, "latest_minor_version_id": b.latest_minor_version_id,
+            "test_done": b.test_done, "newly_found_bug_id": b.newly_found_bug_id, "closed": b.closed,
+            "other_records": other_records
+        })
+    return {"major_version_id": major_version_id, "requirements": [{"id": r.id, "zentao_req_id": r.zentao_req_id, "title": r.title, "case_ids": [c.zentao_case_id for c in r.test_cases], "history_bug_ids": [e.bug_id for e in r.test_executions if e.bug_id]} for r in reqs], "bug_pool": bug_pool}
 
 
 @app.put("/stage5/bugs/{bug_track_id}/result")
@@ -805,11 +831,24 @@ async def submit_stage5_result(bug_track_id: int, payload: Stage5ResultPayload, 
     bug = db.query(BugTracking).filter(BugTracking.id == bug_track_id).first()
     if not bug:
         raise HTTPException(status_code=404, detail="Bug tracking item not found")
+
+    # 1. 保持全局灵活覆盖
     bug.latest_minor_version_id = payload.minor_version_id
     bug.test_done = payload.test_done
     bug.newly_found_bug_id = payload.newly_found_bug_id
     bug.closed = payload.test_done and (not payload.newly_found_bug_id)
     bug.closed_by_id = current_user.id if bug.closed else None
+
+    # 2. 保存个人独立闭环业绩 (UPSERT)
+    record = db.query(BugStage5Record).filter(BugStage5Record.bug_tracking_id == bug_track_id, BugStage5Record.user_id == current_user.id).first()
+    if not record:
+        record = BugStage5Record(bug_tracking_id=bug_track_id, user_id=current_user.id)
+        db.add(record)
+    record.minor_version_id = payload.minor_version_id
+    record.test_done = payload.test_done
+    record.newly_found_bug_id = payload.newly_found_bug_id
+    record.updated_at = datetime.utcnow()
+
     db.commit()
     return {"message": "Stage5 result updated"}
 
@@ -818,6 +857,8 @@ async def submit_stage5_result(bug_track_id: int, payload: Stage5ResultPayload, 
 async def add_stage5_issue(payload: Stage5IssueCreatePayload, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
     if not B_PATTERN.match(payload.bug_id):
         raise HTTPException(status_code=400, detail="bug_id must be like b#xxxx")
+    if db.query(BugTracking).filter(BugTracking.bug_id == payload.bug_id).first():
+        raise HTTPException(status_code=400, detail=f"添加失败：Bug 编号 {payload.bug_id} 已经存在！")
     item = BugTracking(
         major_version_id=payload.major_version_id,
         requirement_id=payload.requirement_id,
@@ -892,8 +933,14 @@ def reports_summary(
             or 0
         )
         closed_bugs = (
-            db.query(func.count(BugTracking.id))
-            .filter(BugTracking.closed_by_id == uid, BugTracking.updated_at >= sdt, BugTracking.updated_at <= edt, BugTracking.closed.is_(True))
+            db.query(func.count(BugStage5Record.id))
+            .filter(
+                BugStage5Record.user_id == uid,
+                BugStage5Record.updated_at >= sdt,
+                BugStage5Record.updated_at <= edt,
+                BugStage5Record.test_done.is_(True),
+                BugStage5Record.newly_found_bug_id.is_(None),
+            )
             .scalar()
             or 0
         )
@@ -932,8 +979,14 @@ def reports_summary(
                 or 0
             ),
             "closed_bugs": (
-                db.query(func.count(BugTracking.id))
-                .filter(BugTracking.closed.is_(True), BugTracking.updated_at >= sdt, BugTracking.updated_at <= edt, BugTracking.closed_by_id.in_(team_ids))
+                db.query(func.count(BugStage5Record.id))
+                .filter(
+                    BugStage5Record.updated_at >= sdt,
+                    BugStage5Record.updated_at <= edt,
+                    BugStage5Record.user_id.in_(team_ids),
+                    BugStage5Record.test_done.is_(True),
+                    BugStage5Record.newly_found_bug_id.is_(None),
+                )
                 .scalar()
                 or 0
             ),
@@ -973,8 +1026,14 @@ def reports_summary(
                 or 0
             )
             day_closed = (
-                db.query(func.count(BugTracking.id))
-                .filter(BugTracking.closed.is_(True), BugTracking.updated_at >= day_s, BugTracking.updated_at <= day_e, BugTracking.closed_by_id.in_(team_ids))
+                db.query(func.count(BugStage5Record.id))
+                .filter(
+                    BugStage5Record.updated_at >= day_s,
+                    BugStage5Record.updated_at <= day_e,
+                    BugStage5Record.user_id.in_(team_ids),
+                    BugStage5Record.test_done.is_(True),
+                    BugStage5Record.newly_found_bug_id.is_(None),
+                )
                 .scalar()
                 or 0
             )
@@ -1004,8 +1063,14 @@ def reports_summary(
                 or 0
             )
             day_closed = (
-                db.query(func.count(BugTracking.id))
-                .filter(BugTracking.closed_by_id == target_user_id, BugTracking.closed.is_(True), BugTracking.updated_at >= day_s, BugTracking.updated_at <= day_e)
+                db.query(func.count(BugStage5Record.id))
+                .filter(
+                    BugStage5Record.user_id == target_user_id,
+                    BugStage5Record.updated_at >= day_s,
+                    BugStage5Record.updated_at <= day_e,
+                    BugStage5Record.test_done.is_(True),
+                    BugStage5Record.newly_found_bug_id.is_(None),
+                )
                 .scalar()
                 or 0
             )
@@ -1078,9 +1143,15 @@ def admin_data_overview(_: Annotated[User, Depends(require_admin)], db: Session 
 
 
 @app.put("/bugs/{bug_id}")
-def update_bug(bug_id: int, new_bug_id: str, _: Annotated[User, Depends(require_admin)], db: Session = Depends(get_db)):
+def update_bug(bug_id: int, new_bug_id: str, _: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
     if not B_PATTERN.match(new_bug_id):
         raise HTTPException(status_code=400, detail="Invalid bug format")
+        
+    # 查重：新编号是否已被其他Bug占用
+    existing = db.query(BugTracking).filter(BugTracking.bug_id == new_bug_id).first()
+    if existing and existing.id != bug_id:
+        raise HTTPException(status_code=400, detail=f"修改失败：Bug 编号 {new_bug_id} 已存在！")
+        
     bug = db.query(BugTracking).filter(BugTracking.id == bug_id).first()
     if not bug:
         raise HTTPException(status_code=404, detail="Bug not found")
@@ -1090,7 +1161,7 @@ def update_bug(bug_id: int, new_bug_id: str, _: Annotated[User, Depends(require_
 
 
 @app.delete("/bugs/{bug_id}")
-def delete_bug(bug_id: int, _: Annotated[User, Depends(require_admin)], db: Session = Depends(get_db)):
+def delete_bug(bug_id: int, _: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
     bug = db.query(BugTracking).filter(BugTracking.id == bug_id).first()
     if not bug:
         raise HTTPException(status_code=404, detail="Bug not found")

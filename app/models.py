@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Optional
 
 from passlib.context import CryptContext
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -171,3 +171,18 @@ class BugTracking(Base):
 
     requirement: Mapped[Optional[Requirement]] = relationship("Requirement", back_populates="bug_tracks")
     major_version: Mapped[Version] = relationship("Version", back_populates="bugs", foreign_keys=[major_version_id])
+    stage5_records = relationship("BugStage5Record", backref="bug", cascade="all, delete-orphan")
+
+
+class BugStage5Record(Base):
+    __tablename__ = "bug_stage5_records"
+    id = Column(Integer, primary_key=True, index=True)
+    bug_tracking_id = Column(Integer, ForeignKey("bug_tracking.id"))
+    user_id = Column(Integer, ForeignKey("users.id"))
+    minor_version_id = Column(Integer, ForeignKey("versions.id"))
+    test_done = Column(Boolean, default=False)
+    newly_found_bug_id = Column(String, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User")
+    minor_version = relationship("Version")

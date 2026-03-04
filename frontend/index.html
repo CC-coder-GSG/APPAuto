@@ -66,10 +66,34 @@
   </section>
 
   <section id="tab-stage5" class="hidden card">
-    <h2>整体测试阶段</h2>
-    <div class="row"><label>大版本</label><select id="s5MajorSelect"></select><label>子版本</label><select id="s5MinorSelect"></select><button onclick="loadStage5()">加载全景</button><button onclick="pushStage5()">推送整体测试状态</button></div>
-    <div id="stage5Req" class="muted"></div>
-    <table><thead><tr><th>Bug池</th><th>新Bug</th><th>测试完毕</th></tr></thead><tbody id="s5Table"></tbody></table>
+    <h2>整体测试阶段 (发版前回归)</h2>
+    
+    <div class="card" style="background: #f8fafc; border: 1px solid #e2e8f0; margin-bottom: 16px;">
+      <div class="row" style="margin-bottom: 12px;">
+        <span style="font-weight: bold; color: #334155; margin-right: 8px;">🎯 提取Bug池:</span>
+        <label>大版本</label><select id="s5MajorSelect"></select>
+        <button onclick="loadStage5()">加载全景大盘</button>
+      </div>
+      <div class="row" style="border-top: 1px dashed #cbd5e1; padding-top: 12px;">
+        <span style="font-weight: bold; color: #334155; margin-right: 8px;">🚀 回归发包环境:</span>
+        <label>当前验证子版本</label><select id="s5MinorSelect"></select>
+        <button class="secondary" onclick="pushStage5()">📢 推送整体进度到企微</button>
+      </div>
+    </div>
+
+    <div id="stage5Panorama" class="hidden" style="margin-bottom: 20px;">
+      <div class="metrics-grid" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="metric-card" style="background: #fff;"><div class="metric-title">Bug 总池 (个)</div><div class="metric-value" id="s5TotalBugs" style="color: #475569;">0</div></div>
+        <div class="metric-card" style="background: #f0fdf4; border-color: #bbf7d0;"><div class="metric-title">已彻底闭环 (个)</div><div class="metric-value" id="s5ClosedBugs" style="color: #16a34a;">0</div></div>
+        <div class="metric-card" style="background: #fef2f2; border-color: #fecaca;"><div class="metric-title">剩余待验证 (个)</div><div class="metric-value" id="s5PendingBugs" style="color: #dc2626;">0</div></div>
+        <div class="metric-card" style="background: #f0f9ff; border-color: #bae6fd;"><div class="metric-title">发版就绪度</div><div class="metric-value" id="s5ReadyRate" style="color: #0284c7;">0%</div></div>
+      </div>
+    </div>
+
+    <table id="s5TableContainer" class="hidden">
+      <thead><tr><th>Bug 编号 (来源)</th><th>引出的新Bug(如有)</th><th>验证操作</th></tr></thead>
+      <tbody id="s5Table"></tbody>
+    </table>
     <h3>➕ 新增问题</h3>
     <div class="row">
       <div class="prefix-input"><span>b#</span><input id="newBugNum" inputmode="numeric" oninput="digitsOnly(this)"></div>
@@ -423,10 +447,42 @@ async function publishAssign(){if(!confirmPush()) return;const majorId=Number(as
 async function loadMyWorkbench(){
   const majorId=Number(mineMajorSelect.value);
   const data=await (await api('/requirements/my-workbench?major_version_id='+majorId)).json();
+  
   mineCards.innerHTML=data.map(req=>{
-    const caseHtml=(req.test_cases||[]).map(c=>`<div class="case-item"><div class="row"><b>${c.zentao_case_id}</b><button onclick="promptCaseBug(${req.id},${c.id})">添加关联Bug</button><button class="danger" onclick="deleteCase(${c.id})">删除用例</button></div><div class="case-bugs">${(c.bugs||[]).map(b=>`<span class="bug-chip">${b.bug_id}</span>`).join('')||'<span class="muted">暂无关联Bug</span>'}</div></div>`).join('');
+    // 根据完成状态计算按钮和输入框的 disabled 属性
+    const caseDisabled = req.case_completed ? 'disabled' : '';
+    const testDisabled = req.test_completed ? 'disabled' : '';
+    const casePrefixColor = req.case_completed ? 'color:#94a3b8;' : '';
+    const testPrefixColor = req.test_completed ? 'color:#94a3b8;' : '';
+
+    const caseHtml=(req.test_cases||[]).map(c=>`
+      <div class="case-item">
+        <div class="row">
+          <b>${c.zentao_case_id}</b>
+          <button ${testDisabled} onclick="promptCaseBug(${req.id},${c.id})">添加关联Bug</button>
+          <button class="danger" ${caseDisabled} onclick="deleteCase(${c.id})">删除用例</button>
+        </div>
+        <div class="case-bugs">${(c.bugs||[]).map(b=>`<span class="bug-chip">${b.bug_id}</span>`).join('')||'<span class="muted">暂无关联Bug</span>'}</div>
+      </div>`).join('');
+      
     const freeBugHtml=(req.free_bugs||[]).map(b=>`<span class="bug-chip">${b.bug_id}</span>`).join('')||'<span class="muted">暂无自由Bug</span>';
-    return `<div class="mine-req-card"><div class="mine-req-head">${req.zentao_req_id} ${req.title}</div><div class="row" style="margin-bottom:8px"><label><input type="checkbox" ${req.case_completed?'checked':''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked)">✅用例完成</label><label><input type="checkbox" ${req.test_completed?'checked':''} onchange="setReqStatus(${req.id}, 'test_completed', this.checked)">✅测试完成</label></div><div>${caseHtml}</div><div class="free-bug-box"><div><b>自由Bug</b></div><div>${freeBugHtml}</div></div><div class="row" style="margin-top:8px"><div class="prefix-input"><span>u#</span><input id="new_case_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增用例编号"></div><button onclick="addCase(${req.id})">逐个添加用例</button><div class="prefix-input"><span>b#</span><input id="new_free_bug_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增自由Bug"></div><button onclick="addFreeBug(${req.id})">添加自由Bug</button></div></div>`;
+    
+    return `
+      <div class="mine-req-card">
+        <div class="mine-req-head">${req.zentao_req_id} ${req.title}</div>
+        <div class="row" style="margin-bottom:8px">
+          <label><input type="checkbox" ${req.case_completed?'checked':''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked)">✅用例完成</label>
+          <label><input type="checkbox" ${req.test_completed?'checked':''} onchange="setReqStatus(${req.id}, 'test_completed', this.checked)">✅测试完成</label>
+        </div>
+        <div>${caseHtml}</div>
+        <div class="free-bug-box"><div><b>自由Bug</b></div><div>${freeBugHtml}</div></div>
+        <div class="row" style="margin-top:8px">
+          <div class="prefix-input"><span style="${casePrefixColor}">u#</span><input id="new_case_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增用例编号" ${caseDisabled}></div>
+          <button ${caseDisabled} onclick="addCase(${req.id})">逐个添加用例</button>
+          <div class="prefix-input"><span style="${testPrefixColor}">b#</span><input id="new_free_bug_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增自由Bug" ${testDisabled}></div>
+          <button ${testDisabled} onclick="addFreeBug(${req.id})">添加自由Bug</button>
+        </div>
+      </div>`;
   }).join('');
 }
 
@@ -492,8 +548,94 @@ async function loadRetest(){const data=await (await api('/retest/workbench?major
 async function setRetest(id,v){await api(`/requirements/${id}/retest`,{method:'PUT',headers:H,body:JSON.stringify({retest_completed:v})});showMessage('复测状态已更新')}
 async function pushRetest(){if(!confirmPush()) return; await api(`/push/retest-result?major_version_id=${Number(retestMajorSelect.value)}`,{method:'POST'});showMessage('复测结果已推送')}
 
-async function loadStage5(){const majorId=Number(s5MajorSelect.value);const data=await (await api('/stage5/overview?major_version_id='+majorId)).json();newReqSelect.innerHTML='<option value="">关联需求(可空)</option>'+data.requirements.map(r=>`<option value='${r.id}'>${r.zentao_req_id}</option>`).join('');stage5Req.innerText=data.requirements.map(r=>`${r.zentao_req_id} 用例[${(r.case_ids||[]).join(',')}] 历史Bug[${(r.history_bug_ids||[]).join(',')}]`).join(' | ');stage5Rows=data.bug_pool;renderS5()}
-function renderS5(){s5Table.innerHTML=stage5Rows.map(b=>`<tr><td>${b.bug_id} (${sourceTypeZh(b.source_type)})</td><td><div class='prefix-input'><span>b#</span><input id='nb_${b.id}' value='${(b.newly_found_bug_id||'').replace('b#','')}' ${b.test_done?'disabled':''} oninput='digitsOnly(this)'></div></td><td><label><input id='done_${b.id}' type='checkbox' ${b.test_done?'checked':''} onchange='toggleS5Lock(${b.id})'>测试完毕</label><button onclick='saveS5(${b.id})'>保存</button></td></tr>`).join('')}
+async function loadStage5(){
+  const majorId=Number(s5MajorSelect.value);
+  if(!majorId){showMessage('请选择大版本','error');return;}
+  
+  const data=await (await api('/stage5/overview?major_version_id='+majorId)).json();
+  
+  // 更新下方的关联需求下拉框
+  newReqSelect.innerHTML='<option value=\"\">关联需求(可空)</option>'+data.requirements.map(r=>`<option value='${r.id}'>${r.zentao_req_id}</option>`).join('');
+  
+  stage5Rows=data.bug_pool || [];
+  
+  // 计算全景统计数据
+  const total = stage5Rows.length;
+  const closed = stage5Rows.filter(b => b.closed).length;
+  const pending = total - closed;
+  const rate = total === 0 ? 100 : Math.round((closed / total) * 100);
+
+  // 渲染全景数据看板
+  document.getElementById('stage5Panorama').classList.remove('hidden');
+  document.getElementById('s5TableContainer').classList.remove('hidden');
+  
+  document.getElementById('s5TotalBugs').innerText = total;
+  document.getElementById('s5ClosedBugs').innerText = closed;
+  document.getElementById('s5PendingBugs').innerText = pending;
+  document.getElementById('s5ReadyRate').innerText = rate + '%';
+
+  renderS5();
+  showMessage('全景大盘加载成功', 'success');
+}
+
+function renderS5(){
+  s5Table.innerHTML=stage5Rows.map(b=>{
+    const rowStyle = b.closed ? "background: #f8fafc; color: #94a3b8; text-decoration: line-through;" : "";
+    const inputStyle = b.closed ? "text-decoration: none;" : "";
+    
+    // 动态拼接其他同事的操作记录
+    let othersHtml = '';
+    if(b.other_records && b.other_records.length > 0) {
+      othersHtml = `<div style="margin-top: 6px; font-size: 12px; text-decoration: none;">` + 
+        b.other_records.map(r => {
+          const status = (r.test_done && !r.newly_found_bug_id) ? '<span style="color:#16a34a; font-weight:bold;">✅已验证闭环</span>' : '<span style="color:#dc2626;">❌未闭环(引出新Bug)</span>';
+          return `<span class="badge" style="background:#f1f5f9; color:#475569; margin-right:4px; padding: 2px 6px;">🙋‍♂️ ${r.username}: ${status} (版本: 🏷️${r.minor_version_no})</span>`;
+        }).join('') + `</div>`;
+    }
+
+    return `<tr style="${rowStyle}">
+      <td>
+        <b>${b.bug_id}</b> <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span>
+        <a href="javascript:void(0)" onclick="editS5Bug(${b.id}, '${b.bug_id}')" style="margin-left:8px; font-size:12px; color:#3b82f6; text-decoration:none;">编辑</a>
+        <a href="javascript:void(0)" onclick="removeS5Bug(${b.id})" style="margin-left:4px; font-size:12px; color:#ef4444; text-decoration:none;">删除</a>
+        ${othersHtml}
+      </td>
+      <td>
+        <div class='prefix-input' style="${inputStyle}">
+          <span>b#</span>
+          <input id='nb_${b.id}' value='${(b.newly_found_bug_id||'').replace('b#','')}' ${b.test_done?'disabled':''} oninput='digitsOnly(this)'>
+        </div>
+      </td>
+      <td style="text-decoration: none;">
+        <label style="color: #0f172a;"><input id='done_${b.id}' type='checkbox' ${b.test_done?'checked':''} onchange='toggleS5Lock(${b.id})'> 测试完毕</label>
+        <button ${b.closed ? 'class="secondary"' : ''} onclick='saveS5(${b.id})'>保存记录</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function editS5Bug(id, oldBugId){
+  const num = prompt('请输入正确的 Bug 数字部分：', oldBugId.replace('b#', ''));
+  if(!num) return;
+  try {
+    await api('/bugs/'+id+'?new_bug_id='+encodeURIComponent(withPrefix('b#',num)), {method:'PUT'});
+    showMessage('Bug 编号已纠正', 'success');
+    loadStage5(); // 刷新当前大盘
+  } catch(err) {
+    showMessage(err.message || '更新失败', 'error');
+  }
+}
+
+async function removeS5Bug(id){
+  if(!confirm('确定要在该大版本下移除这个 Bug 吗？')) return;
+  try {
+    await api('/bugs/'+id, {method:'DELETE'});
+    showMessage('Bug 已彻底移除', 'success');
+    loadStage5(); // 刷新当前大盘
+  } catch(err) {
+    showMessage(err.message || '删除失败', 'error');
+  }
+}
 function toggleS5Lock(id){document.getElementById('nb_'+id).disabled=document.getElementById('done_'+id).checked}
 async function saveS5(id){const done=document.getElementById('done_'+id).checked;const n=withPrefix('b#',document.getElementById('nb_'+id).value);await api(`/stage5/bugs/${id}/result`,{method:'PUT',headers:H,body:JSON.stringify({minor_version_id:Number(s5MinorSelect.value),test_done:done,newly_found_bug_id:n})});showMessage('整体测试项已保存');loadStage5()}
 async function addIssue(){const bug=withPrefix('b#',newBugNum.value);await api('/stage5/issues',{method:'POST',headers:H,body:JSON.stringify({major_version_id:Number(s5MajorSelect.value),requirement_id:newReqSelect.value?Number(newReqSelect.value):null,source_type:newSourceType.value,source_ref:newSourceRef.value||null,bug_id:bug,minor_version_id:Number(s5MinorSelect.value)})});showMessage('问题已新增并推送');newBugNum.value='';loadStage5()}
