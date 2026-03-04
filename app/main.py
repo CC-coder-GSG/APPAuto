@@ -103,7 +103,7 @@ class VersionCreate(BaseModel):
 class RequirementCreate(BaseModel):
     zentao_req_id: str
     title: str
-    major_version_id: int
+    major_version_id: int = Field(gt=0)
 
 
 class AssignItem(BaseModel):
@@ -187,6 +187,14 @@ def _parse_multiple_ids(raw_ids: list[str], pattern: re.Pattern[str], label: str
             raise HTTPException(status_code=400, detail=f"Invalid {label} format: {i}")
         clean.append(i)
     return list(dict.fromkeys(clean))
+
+
+def _ensure_major_version_exists(db: Session, major_version_id: int) -> None:
+    version = db.query(Version).filter(Version.id == major_version_id).first()
+    if not version:
+        raise HTTPException(status_code=400, detail="major_version_id does not exist")
+    if version.version_type != VersionType.MAJOR:
+        raise HTTPException(status_code=400, detail="major_version_id must reference a major version")
 
 
 async def _send_wechat_markdown(markdown: str) -> None:
@@ -462,6 +470,7 @@ def delete_version(version_id: int, _: Annotated[User, Depends(require_admin)], 
 def create_requirement(payload: RequirementCreate, _: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
     if not R_PATTERN.match(payload.zentao_req_id):
         raise HTTPException(status_code=400, detail="zentao_req_id must be like r#xxxx")
+    _ensure_major_version_exists(db, payload.major_version_id)
     if db.query(Requirement).filter(Requirement.zentao_req_id == payload.zentao_req_id).first():
         raise HTTPException(status_code=400, detail="zentao_req_id exists")
     requirement = Requirement(zentao_req_id=payload.zentao_req_id, title=payload.title, major_version_id=payload.major_version_id)
@@ -530,6 +539,7 @@ def update_requirement(requirement_id: int, payload: RequirementCreate, _: Annot
     req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Requirement not found")
+    _ensure_major_version_exists(db, payload.major_version_id)
     req.zentao_req_id = payload.zentao_req_id
     req.title = payload.title
     req.major_version_id = payload.major_version_id

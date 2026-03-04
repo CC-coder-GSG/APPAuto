@@ -41,11 +41,26 @@
         <input id="createReqTitle" placeholder="需求标题">
         <div class="prefix-input"><span>r#</span><input id="createReqNo" inputmode="numeric" placeholder="请输入数字" oninput="digitsOnly(this)"></div>
         <select id="createReqMajorSelect"></select>
-        <button onclick="createReq()">创建并加入我的任务</button>
+        <button id="createReqBtn" onclick="createReq()">创建并加入我的任务</button>
       </div>
     </div>
 
-    <div class="row"><label>大版本</label><select id="mineMajorSelect"></select><label>子版本</label><select id="mineMinorSelect"></select><button onclick="loadMyWorkbench()">加载我的需求</button><button onclick="pushCase()">推送用例进度</button><button onclick="pushTest()">推送测试进度</button></div>
+    <div class="card" style="background: #f8fafc; border: 1px solid #e2e8f0; margin-bottom: 16px;">
+      <div class="row" style="margin-bottom: 12px;">
+        <span style="font-weight: bold; color: #334155; margin-right: 8px;">🎯 需求视图:</span>
+        <label>大版本</label>
+        <select id="mineMajorSelect"></select>
+        <button onclick="loadMyWorkbench()">加载我的需求</button>
+      </div>
+      
+      <div class="row" style="border-top: 1px dashed #cbd5e1; padding-top: 12px;">
+        <span style="font-weight: bold; color: #334155; margin-right: 8px;">🚀 测试上下文:</span>
+        <label>当前执行子版本 (发包)</label>
+        <select id="mineMinorSelect"></select>
+        <button class="secondary" onclick="pushCase()">推送用例进度</button>
+        <button class="secondary" onclick="pushTest()">推送测试进度</button>
+      </div>
+    </div>
     <div id="mineCards"></div>
   </section>
 
@@ -206,7 +221,7 @@ async function init(){
 async function loadUsers(){users=await (await api('/users')).json();fillReportUsers()}
 function fillReportUsers(){const s=document.getElementById('reportUserSelect');if(!s) return; const allOpt=currentUser&&currentUser.role==='admin'?'<option value="0">全员</option>':''; s.innerHTML=allOpt+users.map(u=>`<option value="${u.id}">${u.username}${u.is_team_member===false?'(编外)':''}</option>`).join('');adjustReportChartVisibility()}
 
-async function loadVersions(){versions=await (await api('/versions')).json();fillVersionSelects();fillCreateVersionParent();toggleCreateVersionParent()}
+async function loadVersions(){versions=await (await api('/versions')).json();fillVersionSelects();fillCreateVersionParent();toggleCreateVersionParent();updateCreateReqControls()}
 function fillVersionSelects(){
   const majors=versions.filter(v=>v.version_type==='major');
   const minors=versions.filter(v=>v.version_type==='minor');
@@ -214,6 +229,15 @@ function fillVersionSelects(){
   ['mineMinorSelect','s5MinorSelect'].forEach(id=>fillSelect(id,minors));
 }
 function fillSelect(id,list){const el=document.getElementById(id); if(!el) return; el.innerHTML=list.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('')}
+function updateCreateReqControls(){
+  const majorSel=document.getElementById('createReqMajorSelect');
+  const createBtn=document.getElementById('createReqBtn');
+  if(!majorSel || !createBtn) return;
+  const hasMajor=(majorSel.options||[]).length>0;
+  majorSel.disabled=!hasMajor;
+  createBtn.disabled=!hasMajor;
+  createBtn.title=hasMajor?'':'请先去【数据管理台】创建一个大版本！';
+}
 
 function fillCreateVersionParent(){
   const parentSel=document.getElementById('createVersionParent'); if(!parentSel) return;
@@ -259,6 +283,10 @@ async function createReq(){
     const title=(createReqTitle.value||'').trim();
     const reqNo=withPrefix('r#',createReqNo.value);
     const major_version_id=Number(createReqMajorSelect.value);
+    if(!major_version_id){
+      showMessage('请先去【数据管理台】创建一个大版本！', 'error');
+      return;
+    }
     if(!title){showMessage('请填写需求标题','error');return}
     if(!reqNo){showMessage('请填写需求编号数字部分','error');return}
     await api('/requirements',{method:'POST',headers:H,body:JSON.stringify({zentao_req_id:reqNo,title,major_version_id})});
