@@ -1,1 +1,4 @@
 .venv/
+app_auto.db
+__pycache__/
+*.pyc
