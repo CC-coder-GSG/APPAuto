@@ -577,11 +577,23 @@ async function queryReport(){
     const vb=await (await api('/reports/version-bugs')).json();
     if(!versionBugChart){versionBugChart=echarts.init(document.getElementById('versionBugChart'))}
     versionBugChart.setOption({
-      title:{text:'版本Bug分布'},
+      title:{text:'各发包(小版本) Bug 检出分布', textStyle: { fontSize: 15, color: '#334155' }},
       tooltip:{trigger:'axis'},
-      xAxis:{type:'category',data:vb.map(i=>i.version_name)},
-      yAxis:{type:'value'},
-      series:[{name:'Bug数',type:'bar',data:vb.map(i=>i.bug_count)}]
+      grid: { bottom: '15%' }, // 留出空间显示两行文字
+      xAxis:{
+        type:'category',
+        data:vb.map(i=>i.version_name),
+        axisLabel: { interval: 0, fontSize: 11, color: '#64748b' } // 强制显示所有文字并允许换行
+      },
+      yAxis:{type:'value', minInterval: 1},
+      series:[{
+        name:'检出 Bug 数',
+        type:'bar',
+        barMaxWidth: 40,
+        itemStyle: { color: '#3b82f6', borderRadius: [4, 4, 0, 0] },
+        data:vb.map(i=>i.bug_count),
+        label: { show: true, position: 'top', color: '#1e293b', fontWeight: 'bold' } // 在柱子顶部显示具体数字
+      }]
     });
     adjustReportChartVisibility();
 

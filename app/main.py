@@ -1047,21 +1047,21 @@ def reports_summary(
 
 @app.get("/reports/version-bugs")
 def reports_version_bugs(_: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
-    major_rows = (
-        db.query(Version.version_no, func.count(BugTracking.id))
-        .join(BugTracking, BugTracking.major_version_id == Version.id)
-        .group_by(Version.version_no)
-        .all()
-    )
-    minor_rows = (
-        db.query(Version.version_no, func.count(BugTracking.id))
-        .join(BugTracking, BugTracking.latest_minor_version_id == Version.id)
-        .filter(BugTracking.latest_minor_version_id.isnot(None))
-        .group_by(Version.version_no)
-        .all()
-    )
-
-    return [{"version_name": n, "bug_count": c} for n, c in major_rows] + [{"version_name": n, "bug_count": c} for n, c in minor_rows]
+    # 获取所有小版本
+    minor_versions = db.query(Version).filter(Version.version_type == VersionType.MINOR).all()
+    
+    result = []
+    for mv in minor_versions:
+        # 统计挂在这个小版本上的 Bug 数量
+        bug_count = db.query(BugTracking).filter(BugTracking.latest_minor_version_id == mv.id).count()
+        if bug_count > 0:
+            parent = db.query(Version).filter(Version.id == mv.parent_id).first()
+            parent_name = parent.version_no if parent else "未知大版本"
+            # 拼接展示名称，如：V4030(换行)V4030.1
+            display_name = f"{parent_name}\n{mv.version_no}"
+            result.append({"version_name": display_name, "bug_count": bug_count})
+            
+    return result
 
 
 @app.get("/admin/data-overview")
