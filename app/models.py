@@ -162,6 +162,7 @@ class BugTracking(Base):
     latest_minor_version_id: Mapped[Optional[int]] = mapped_column(ForeignKey("versions.id"), nullable=True)
     test_done: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     newly_found_bug_id: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    resolution: Mapped[str] = mapped_column(String, default="fixed", nullable=False)  # 可选值: fixed(修复通过), false_alarm(误报), rejected(拒绝修复)
     closed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -182,6 +183,7 @@ class BugStage5Record(Base):
     minor_version_id = Column(Integer, ForeignKey("versions.id"))
     test_done = Column(Boolean, default=False)
     newly_found_bug_id = Column(String, nullable=True)
+    resolution = Column(String, default="fixed")  # 可选值: fixed(修复通过), false_alarm(误报), rejected(拒绝修复)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = relationship("User")

@@ -158,6 +158,7 @@ class Stage5ResultPayload(BaseModel):
     minor_version_id: int
     test_done: bool
     newly_found_bug_id: Optional[str] = None
+    resolution: str = "fixed"
 
 
 class Stage5IssueCreatePayload(BaseModel):
@@ -598,6 +599,23 @@ def delete_requirement(requirement_id: int, _: Annotated[User, Depends(require_a
     return {"message": "Requirement deleted"}
 
 
+@app.put("/test-cases/{case_id}")
+def update_case(case_id: int, payload: AddCasePayload, _: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
+    if not U_PATTERN.match(payload.zentao_case_id):
+        raise HTTPException(status_code=400, detail="zentao_case_id must be like u#xxxx")
+    c = db.query(TestCase).filter(TestCase.id == case_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Case not found")
+        
+    req = db.query(Requirement).filter(Requirement.id == c.requirement_id).first()
+    if req and req.case_completed:
+        raise HTTPException(status_code=400, detail="用例已封板（已勾选完成），无法修改！请先取消勾选。")
+        
+    c.zentao_case_id = payload.zentao_case_id
+    db.commit()
+    return {"message": "Case updated"}
+
+
 @app.delete("/test-cases/{case_id}")
 def delete_case(case_id: int, _: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
     c = db.query(TestCase).filter(TestCase.id == case_id).first()
@@ -850,7 +868,7 @@ async def push_retest_result(major_version_id: int, current_user: Annotated[User
 def stage5_overview(major_version_id: int, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
     reqs = db.query(Requirement).options(joinedload(Requirement.test_cases), joinedload(Requirement.test_executions)).filter(Requirement.major_version_id == major_version_id).all()
     bugs = db.query(BugTracking).options(joinedload(BugTracking.stage5_records).joinedload(BugStage5Record.user), joinedload(BugTracking.stage5_records).joinedload(BugStage5Record.minor_version)).filter(BugTracking.major_version_id == major_version_id).all()
-    
+
     bug_pool = []
     for b in bugs:
         other_records = []
@@ -860,16 +878,26 @@ def stage5_overview(major_version_id: int, current_user: Annotated[User, Depends
                     "username": r.user.username,
                     "minor_version_no": r.minor_version.version_no if r.minor_version else "未知",
                     "test_done": r.test_done,
-                    "newly_found_bug_id": r.newly_found_bug_id
+                    "newly_found_bug_id": r.newly_found_bug_id,
+                    "resolution": r.resolution,
                 })
         bug_pool.append({
             "id": b.id, "bug_id": b.bug_id, "source_type": b.source_type.value, "source_ref": b.source_ref,
             "requirement_id": b.requirement_id, "latest_minor_version_id": b.latest_minor_version_id,
-            "test_done": b.test_done, "newly_found_bug_id": b.newly_found_bug_id, "closed": b.closed,
-            "other_records": other_records
+            "test_done": b.test_done, "newly_found_bug_id": b.newly_found_bug_id, "closed": b.closed, "resolution": b.resolution,
+            "other_records": other_records,
         })
-    return {"major_version_id": major_version_id, "requirements": [{"id": r.id, "zentao_req_id": r.zentao_req_id, "title": r.title, "case_ids": [c.zentao_case_id for c in r.test_cases], "history_bug_ids": [e.bug_id for e in r.test_executions if e.bug_id]} for r in reqs], "bug_pool": bug_pool}
-
+    return {
+        "major_version_id": major_version_id,
+        "requirements": [{
+            "id": r.id,
+            "zentao_req_id": r.zentao_req_id,
+            "title": r.title,
+            "case_ids": [c.zentao_case_id for c in r.test_cases],
+            "history_bug_ids": [e.bug_id for e in r.test_executions if e.bug_id],
+        } for r in reqs],
+        "bug_pool": bug_pool,
+    }
 
 @app.put("/stage5/bugs/{bug_track_id}/result")
 async def submit_stage5_result(bug_track_id: int, payload: Stage5ResultPayload, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
@@ -877,14 +905,25 @@ async def submit_stage5_result(bug_track_id: int, payload: Stage5ResultPayload, 
     if not bug:
         raise HTTPException(status_code=404, detail="Bug tracking item not found")
 
-    # 1. 保持全局灵活覆盖
+    old_resolution = bug.resolution
+
+    # 1. Keep global latest status updatable
     bug.latest_minor_version_id = payload.minor_version_id
     bug.test_done = payload.test_done
     bug.newly_found_bug_id = payload.newly_found_bug_id
+    bug.resolution = payload.resolution
     bug.closed = payload.test_done and (not payload.newly_found_bug_id)
     bug.closed_by_id = current_user.id if bug.closed else None
 
-    # 2. 保存个人独立闭环业绩 (UPSERT)
+    # Broadcast only on meaningful resolution transitions of closed bugs
+    if bug.closed and old_resolution != payload.resolution:
+        res_zh_map = {"fixed": "✅修复通过", "false_alarm": "⚠️误报", "rejected": "⛔拒绝修复"}
+        if payload.resolution in ["false_alarm", "rejected"] or old_resolution in ["false_alarm", "rejected"]:
+            await _send_wechat_markdown(
+                f"📢 **Bug 状态流转通知**\n> 缺陷 **{bug.bug_id}** 的处理状态被 @{current_user.username} 更新为：**{res_zh_map.get(payload.resolution, payload.resolution)}** (位于发包: 🏷️{payload.minor_version_id})"
+            )
+
+    # 2. Save personal stage5 performance (UPSERT)
     record = db.query(BugStage5Record).filter(BugStage5Record.bug_tracking_id == bug_track_id, BugStage5Record.user_id == current_user.id).first()
     if not record:
         record = BugStage5Record(bug_tracking_id=bug_track_id, user_id=current_user.id)
@@ -892,11 +931,11 @@ async def submit_stage5_result(bug_track_id: int, payload: Stage5ResultPayload, 
     record.minor_version_id = payload.minor_version_id
     record.test_done = payload.test_done
     record.newly_found_bug_id = payload.newly_found_bug_id
+    record.resolution = payload.resolution
     record.updated_at = datetime.utcnow()
 
     db.commit()
     return {"message": "Stage5 result updated"}
-
 
 @app.post("/stage5/issues")
 async def add_stage5_issue(payload: Stage5IssueCreatePayload, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
@@ -978,7 +1017,7 @@ def reports_summary(
             or 0
         )
         closed_bugs = (
-            db.query(func.count(BugStage5Record.id))
+            db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
             .filter(
                 BugStage5Record.user_id == uid,
                 BugStage5Record.updated_at >= sdt,
@@ -1024,7 +1063,7 @@ def reports_summary(
                 or 0
             ),
             "closed_bugs": (
-                db.query(func.count(BugStage5Record.id))
+                db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
                 .filter(
                     BugStage5Record.updated_at >= sdt,
                     BugStage5Record.updated_at <= edt,
@@ -1071,7 +1110,7 @@ def reports_summary(
                 or 0
             )
             day_closed = (
-                db.query(func.count(BugStage5Record.id))
+                db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
                 .filter(
                     BugStage5Record.updated_at >= day_s,
                     BugStage5Record.updated_at <= day_e,
@@ -1108,7 +1147,7 @@ def reports_summary(
                 or 0
             )
             day_closed = (
-                db.query(func.count(BugStage5Record.id))
+                db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
                 .filter(
                     BugStage5Record.user_id == target_user_id,
                     BugStage5Record.updated_at >= day_s,
