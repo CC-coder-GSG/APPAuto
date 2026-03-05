@@ -36,6 +36,7 @@ class BugSourceType(str, Enum):
     CASE = "case"
     LEGACY_BUG = "legacy_bug"
     MANUAL = "manual"
+    RETEST = "retest"
 
 
 class User(Base):
@@ -79,7 +80,7 @@ class Version(Base):
 
     parent: Mapped[Optional[Version]] = relationship("Version", remote_side=[id], back_populates="children")
     children: Mapped[list[Version]] = relationship("Version", back_populates="parent", cascade="all, delete-orphan")
-    requirements: Mapped[list[Requirement]] = relationship("Requirement", back_populates="major_version", cascade="all, delete-orphan")
+    requirements: Mapped[list[Requirement]] = relationship("Requirement", back_populates="major_version", cascade="all, delete-orphan", foreign_keys="Requirement.major_version_id")
     executions: Mapped[list[TestExecution]] = relationship("TestExecution", back_populates="minor_version", cascade="all, delete-orphan")
     bugs: Mapped[list[BugTracking]] = relationship(
         "BugTracking",
@@ -104,13 +105,16 @@ class Requirement(Base):
     retest_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     retested_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     retested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    retest_minor_version_id: Mapped[Optional[int]] = mapped_column(ForeignKey("versions.id"), nullable=True)
+    retest_passed: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)  # True为通过，False为打回
 
     status: Mapped[RequirementStatus] = mapped_column(SAEnum(RequirementStatus), default=RequirementStatus.PENDING, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
-    major_version: Mapped[Version] = relationship("Version", back_populates="requirements")
+    major_version: Mapped[Version] = relationship("Version", back_populates="requirements", foreign_keys=[major_version_id])
+    retest_minor_version: Mapped[Optional[Version]] = relationship("Version", foreign_keys=[retest_minor_version_id])
     owner: Mapped[Optional[User]] = relationship("User", back_populates="assigned_requirements", foreign_keys=[owner_id])
     retester: Mapped[Optional[User]] = relationship("User", back_populates="retested_requirements", foreign_keys=[retested_by_id])
     test_cases: Mapped[list[TestCase]] = relationship("TestCase", back_populates="requirement", cascade="all, delete-orphan")
@@ -166,12 +170,15 @@ class BugTracking(Base):
     closed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    dispatched_to_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     closed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    is_retest_failed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     requirement: Mapped[Optional[Requirement]] = relationship("Requirement", back_populates="bug_tracks")
     major_version: Mapped[Version] = relationship("Version", back_populates="bugs", foreign_keys=[major_version_id])
+    dispatched_to: Mapped[Optional[User]] = relationship("User", foreign_keys=[dispatched_to_id])
     stage5_records = relationship("BugStage5Record", backref="bug", cascade="all, delete-orphan")
 
 

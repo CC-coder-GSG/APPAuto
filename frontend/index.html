@@ -30,6 +30,7 @@
     <button onclick="showTab('stage5')">整体测试</button>
     <button onclick="showTab('report')">报表中心</button>
     <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
+    <button id="tabDispatchBtn" class="hidden" onclick="showTab('dispatch')">BUG特派</button>
   </div>
 
   <section id="tab-assign" class="hidden card">
@@ -64,6 +65,8 @@
     <div class="row" style="margin-bottom: 16px;">
       <label>大版本</label><select id="retestMajorSelect"></select>
       <button onclick="loadRetest()">加载待复测需求</button>
+      <label style="margin-left:16px; border-left:1px solid #cbd5e1; padding-left:16px;">当前复测发包(小版本)</label>
+      <select id="retestMinorSelect"></select>
       <button class="secondary" onclick="pushRetest()">📢 推送复测结果</button>
     </div>
     <div id="retestCardsArea"></div>
@@ -132,6 +135,23 @@
         <div id="radarChart" class="chart-box"></div>
         <div id="teamCompareChart" class="chart-box"></div>
         <div id="versionBugChart" class="chart-box"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-dispatch" class="hidden card">
+    <h2>BUG特派中心 (专项验证分发)</h2>
+    <div class="row">
+      <div class="prefix-input"><span>b#</span><input id="dispatchBugNo" inputmode="numeric" oninput="digitsOnly(this)" placeholder="输入 Bug 数字编号"></div>
+      <button onclick="searchDispatchBug()">检索缺陷</button>
+    </div>
+
+    <div id="dispatchBugInfo" class="hidden card" style="margin-top: 16px; background: #f8fafc; border: 1px solid #cbd5e1;">
+      <div style="font-size: 16px; font-weight: bold; margin-bottom: 12px; color: #0f172a;" id="dispatchBugTitle"></div>
+      <div class="row" style="border-top: 1px dashed #94a3b8; padding-top: 12px;">
+        <label>特派给：</label>
+        <select id="dispatchUserSelect"></select>
+        <button onclick="confirmDispatchBug()">确认特派</button>
       </div>
     </div>
   </section>
@@ -213,7 +233,7 @@ function sourceTypeZh(v){const m={manual:'自由问题',case:'用例来源',requ
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
 function showTab(name){
-  ['assign','mine','retest','stage5','report','data'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
+  ['assign','mine','retest','stage5','report','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
   document.getElementById('tab-'+name).classList.remove('hidden');
   if(name==='report'){loadReportOnDemand()}
 }
@@ -256,6 +276,7 @@ async function init(){
     await loadUsers();
     document.getElementById('tabAssignBtn').classList.remove('hidden');
     document.getElementById('tabDataBtn').classList.remove('hidden');
+    document.getElementById('tabDispatchBtn').classList.remove('hidden');
     document.getElementById('reportUserWrap').classList.remove('hidden');
     fillReportUsers();
     showTab('assign');
@@ -266,7 +287,7 @@ async function init(){
   }
 }
 
-async function loadUsers(){users=await (await api('/users')).json();fillReportUsers()}
+async function loadUsers(){users=await (await api('/users')).json();fillReportUsers();if(document.getElementById('dispatchUserSelect')) document.getElementById('dispatchUserSelect').innerHTML = users.map(u=>'<option value=\"'+u.id+'\">'+u.username+'</option>').join('')}
 function fillReportUsers(){const s=document.getElementById('reportUserSelect');if(!s) return; const allOpt=currentUser&&currentUser.role==='admin'?'<option value="0">全员</option>':''; s.innerHTML=allOpt+users.map(u=>`<option value="${u.id}">${u.username}${u.is_team_member===false?'(编外)':''}</option>`).join('');adjustReportChartVisibility()}
 
 async function loadVersions(){versions=await (await api('/versions')).json();fillVersionSelects();fillCreateVersionParent();toggleCreateVersionParent();updateCreateReqControls()}
@@ -274,7 +295,7 @@ function fillVersionSelects(){
   const majors=versions.filter(v=>v.version_type==='major');
   const minors=versions.filter(v=>v.version_type==='minor');
   ['assignMajorSelect','mineMajorSelect','retestMajorSelect','s5MajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
-  ['mineMinorSelect','s5MinorSelect'].forEach(id=>fillSelect(id,minors));
+  ['mineMinorSelect','s5MinorSelect','retestMinorSelect'].forEach(id=>fillSelect(id,minors));
 }
 function fillSelect(id,list){const el=document.getElementById(id); if(!el) return; el.innerHTML=list.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('')}
 function updateCreateReqControls(){
@@ -451,8 +472,35 @@ async function publishAssign(){if(!confirmPush()) return;const majorId=Number(as
 async function loadMyWorkbench(){
   const majorId=Number(mineMajorSelect.value);
   const data=await (await api('/requirements/my-workbench?major_version_id='+majorId)).json();
+  const ddata = await (await api('/bugs/dispatched-to-me?major_version_id='+majorId)).json();
+  let dhtml = '';
+  if(ddata.length > 0){
+    dhtml = `<div class="card" style="border:2px solid #3b82f6; background:#eff6ff; margin-bottom:24px;">
+      <h3 style="color:#1d4ed8; margin-top:0; border-bottom:1px dashed #93c5fd; padding-bottom:8px;">🪂 管理员特派给我的专项 Bug</h3>
+      <table style="background:#fff; border-radius:6px; overflow:hidden;">
+        <thead><tr><th>Bug 编号 / 归属需求</th><th>引出的新Bug</th><th>专项处理操作</th></tr></thead>
+        <tbody>
+          ${ddata.map(b=>`
+            <tr style="${b.test_done?'background:#f8fafc; color:#94a3b8; text-decoration:line-through;':''}">
+              <td><b>${b.bug_id}</b> <span style="font-size:12px;color:#64748b;">(${b.req_title})</span></td>
+              <td><div class='prefix-input' style="${b.test_done?'text-decoration:none;':''}"><span style="color:#94a3b8">b#</span><input id='dnb_${b.id}' value='${(b.newly_found_bug_id||'').replace('b#','')}' ${b.test_done?'disabled':''} oninput='digitsOnly(this)'></div></td>
+              <td style="text-decoration:none;">
+                <select id='dres_${b.id}' style="margin-right:8px; padding:2px; font-size:13px;" ${b.test_done?'disabled':''}>
+                  <option value="fixed" ${b.resolution==='fixed'?'selected':''}>🚀修复通过</option>
+                  <option value="false_alarm" ${b.resolution==='false_alarm'?'selected':''}>⚠️误报</option>
+                  <option value="rejected" ${b.resolution==='rejected'?'selected':''}>⛔拒绝修复</option>
+                </select>
+                <label style="color:#0f172a;"><input id='ddone_${b.id}' type='checkbox' ${b.test_done?'checked':''} onchange="document.getElementById('dnb_'+${b.id}).disabled=this.checked"> 确认闭环</label>
+                <button class="${b.test_done?'secondary':''}" onclick="saveDispatchedBug(${b.id})" style="margin-left:8px;">保存记录</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  }
   
-  mineCards.innerHTML=data.map(req=>{
+  mineCards.innerHTML = dhtml + data.map(req=>{
     const caseDisabled = req.case_completed ? 'disabled' : '';
     const testDisabled = req.test_completed ? 'disabled' : '';
     const casePrefixColor = req.case_completed ? 'color:#94a3b8;' : '';
@@ -460,8 +508,9 @@ async function loadMyWorkbench(){
 
     // 辅助函数：生成带有操作按钮的 Bug 标签
     const renderBugChip = (b) => {
+        const dBadge = b.dispatched_to_name ? `<span style="color:#ea580c; background:#ffedd5; padding:1px 4px; border-radius:4px; font-size:11px; margin-left:6px;">🪂已特派给:${b.dispatched_to_name}</span>` : '';
         return `<span class="badge" style="background:#f1f5f9; border:1px solid #cbd5e1; padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
-            ${b.bug_id}
+            ${b.bug_id} ${dBadge}
             <a href="javascript:void(0)" title="编辑" onclick="${req.test_completed ? 'return false;' : `editWorkbenchBug(${b.id}, '${b.bug_id}')`}" style="color:${req.test_completed?'#94a3b8':'#3b82f6'}; margin-left:4px; text-decoration:none;">✎</a>
             <a href="javascript:void(0)" title="删除" onclick="${req.test_completed ? 'return false;' : `removeWorkbenchBug(${b.id})`}" style="color:${req.test_completed?'#94a3b8':'#ef4444'}; margin-left:2px; text-decoration:none;">×</a>
         </span>`;
@@ -588,7 +637,7 @@ async function loadRetest(){
   const majorId = Number(retestMajorSelect.value);
   if(!majorId){showMessage('请选择大版本','error');return;}
   const data = await (await api('/retest/workbench?major_version_id='+majorId)).json();
-  
+
   const container = document.getElementById('retestCardsArea');
   if(!data || data.length === 0) {
     container.innerHTML = '<div class="muted" style="padding: 20px; text-align: center; background: #f8fafc; border-radius: 8px;">🎉 当前大版本下没有需要您复测的需求（仅显示其他同事已完成测试的需求）</div>';
@@ -596,32 +645,47 @@ async function loadRetest(){
   }
 
   container.innerHTML = data.map(req => {
-    // 组装原测试用例及关联 Bug HTML
     const caseHtml = (req.test_cases||[]).map(c => {
-      const bugs = (c.bugs||[]).map(b => `<span class="badge" style="background:#fef2f2; color:#dc2626; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(发包: 🏷️${b.minor_version_no})</span></span>`).join('');
+      const bugs = (c.bugs||[]).map(b => {
+        return `<div style="margin-top:4px;">
+          <span class="badge" style="background:#fef2f2; color:#dc2626; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(发包: 🏷️${b.minor_version_no})</span></span>
+          <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed?'checked':''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
+        </div>`;
+      }).join('');
       return `<div style="margin-bottom: 10px; padding-left: 12px; border-left: 3px solid #cbd5e1;">
         <div style="font-weight: bold; color: #475569;">🧪 用例 [${c.zentao_case_id}]</div>
         <div style="margin-top: 4px;">${bugs || '<span class="muted" style="font-size:12px;">✓ 完美通过，无关联Bug</span>'}</div>
       </div>`;
     }).join('');
-    
-    // 组装自由 Bug HTML
-    const freeBugHtml = (req.free_bugs||[]).map(b => `<span class="badge" style="background:#fff7ed; color:#ea580c; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(发包: 🏷️${b.minor_version_no})</span></span>`).join('');
-    
+
+    const freeBugHtml = (req.free_bugs||[]).map(b => `<div style="margin-bottom:6px;">
+      <span class="badge" style="background:#fff7ed; color:#ea580c; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(发包: 🏷️${b.minor_version_no})</span></span>
+      <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed?'checked':''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
+    </div>`).join('');
+
+    const retestBugHtml = (req.retest_bugs||[]).map(b => `<div style="margin-bottom:6px;">
+      <span class="badge" style="background:#fee2e2; color:#b91c1c; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(复测新增)</span></span>
+      <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed?'checked':''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
+    </div>`).join('');
+
+    const statusTag = req.retest_completed
+      ? (req.retest_passed ? '<span class="badge" style="background:#dcfce7;color:#166534;">✅已通过</span>' : '<span class="badge" style="background:#fee2e2;color:#b91c1c;">❌已打回</span>')
+      : '<span class="badge">未提交复测结论</span>';
+
     return `
       <div class="card" style="border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed #cbd5e1; padding-bottom: 12px; margin-bottom: 12px;">
           <div>
             <span style="font-size: 16px; font-weight: bold; color: #0f172a;">📄 ${req.zentao_req_id} ${req.title}</span>
             <span class="badge" style="margin-left: 12px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;">👤 原测试人: ${req.owner||'未知'}</span>
+            <span style="margin-left:8px;">${statusTag}</span>
           </div>
           <div>
-            <label style="font-size: 15px; font-weight: bold; color: #16a34a; cursor: pointer; padding: 6px 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px;">
-              <input type='checkbox' style="transform: scale(1.2); margin-right: 8px;" ${req.retest_completed?'checked':''} onchange='setRetest(${req.id},this.checked)'>✅ 交叉复测通过
-            </label>
+            <button style="background:#16a34a;" onclick='setRetest(${req.id}, true)'>✅通过</button>
+            <button class="danger" onclick='setRetest(${req.id}, false)'>❌打回</button>
           </div>
         </div>
-        
+
         <div class="row" style="align-items: flex-start; margin: 0;">
           <div style="flex: 1; padding-right: 16px; border-right: 1px dashed #e2e8f0;">
             <div style="font-weight: bold; margin-bottom: 12px; color: #334155; font-size: 13px;">【原测试用例 & 关联Bug】</div>
@@ -632,10 +696,46 @@ async function loadRetest(){
             <div>${freeBugHtml || '<div class="muted">暂无自由Bug</div>'}</div>
           </div>
         </div>
+        <div style="margin-top:12px; border-top:1px dashed #e2e8f0; padding-top:12px;">
+          <div style="font-weight:bold; color:#b91c1c; margin-bottom:8px;">【复测新增漏测 Bug】</div>
+          <div>${retestBugHtml || '<div class="muted">暂无复测新增Bug</div>'}</div>
+          <div class="row" style="margin-top:8px;">
+            <div class="prefix-input"><span>b#</span><input id="rb_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增漏测Bug编号"></div>
+            <button onclick="addRetestBug(${req.id})">➕新增漏测Bug</button>
+          </div>
+        </div>
       </div>`;
   }).join('');
 }
-async function setRetest(id,v){await api(`/requirements/${id}/retest`,{method:'PUT',headers:H,body:JSON.stringify({retest_completed:v})});showMessage('复测状态已更新')}
+
+async function setRetest(id, passed){
+  const minorId = Number(retestMinorSelect.value);
+  if(!minorId){showMessage('请选择当前复测发包(小版本)','error');return;}
+  await api(`/requirements/${id}/retest`,{
+    method:'PUT',
+    headers:H,
+    body:JSON.stringify({retest_completed:true,retest_passed:passed,retest_minor_version_id:minorId})
+  });
+  showMessage(passed?'复测结果已标记为通过':'已打回给原测试人','success');
+  loadRetest();
+}
+
+async function toggleBugFail(id, checked){
+  await api(`/bugs/${id}/retest-fail`,{method:'PATCH',headers:H,body:JSON.stringify({is_retest_failed:checked})});
+  showMessage(checked?'已标记未修好':'已取消未修好标记','success');
+}
+
+async function addRetestBug(reqId){
+  const num=(document.getElementById('rb_'+reqId).value||'').trim();
+  const bug=withPrefix('b#',num);
+  const minorId=Number(retestMinorSelect.value);
+  if(!bug){showMessage('请输入漏测Bug编号数字部分','error');return;}
+  if(!minorId){showMessage('请选择当前复测发包(小版本)','error');return;}
+  await api('/bugs/execution',{method:'POST',headers:H,body:JSON.stringify({bug_id:bug,minor_version_id:minorId,requirement_id:reqId,source_type:'retest'})});
+  showMessage('复测漏测Bug已新增','success');
+  loadRetest();
+}
+
 async function pushRetest(){if(!confirmPush()) return; await api(`/push/retest-result?major_version_id=${Number(retestMajorSelect.value)}`,{method:'POST'});showMessage('复测结果已推送')}
 
 async function loadStage5(){
@@ -683,10 +783,11 @@ function renderS5(){
           return `<span class="badge" style="background:#f1f5f9; color:#475569; margin-right:4px; padding: 2px 6px;">🙋‍♂️ ${r.username}: ${status} (发包: 🏷️${r.minor_version_no})</span>`;
         }).join('') + `</div>`;
     }
+    const failBadge = b.is_retest_failed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; margin-left:4px;">🚨复测打回</span>' : '';
 
     return `<tr style="${rowStyle}">
       <td>
-        <b>${b.bug_id}</b> <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span>
+        <b>${b.bug_id}</b> ${failBadge} <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span>
         <a href="javascript:void(0)" onclick="editS5Bug(${b.id}, '${b.bug_id}')" style="margin-left:8px; font-size:12px; color:#3b82f6; text-decoration:none;">编辑</a>
         <a href="javascript:void(0)" onclick="removeS5Bug(${b.id})" style="margin-left:4px; font-size:12px; color:#ef4444; text-decoration:none;">删除</a>
         ${othersHtml}
@@ -1047,7 +1148,45 @@ async function editBug(id,b){
   loadDataOverview();
 }
 
-window.addEventListener('error',e=>showMessage(e.message||'鏈煡閿欒','error'))
+let currentDispatchBugId = null;
+
+async function searchDispatchBug() {
+  const bugId = withPrefix('b#', document.getElementById('dispatchBugNo').value);
+  if (!bugId) return;
+  try {
+    const res = await (await api('/bugs/search?bug_id=' + encodeURIComponent(bugId))).json();
+    currentDispatchBugId = res.id;
+    document.getElementById('dispatchBugTitle').innerHTML = `🎯 找到缺陷：<b>${res.bug_id}</b> <span style="font-size:14px; color:#475569;">(归属：${res.req_title})</span>`;
+    if(res.dispatched_to_id) document.getElementById('dispatchUserSelect').value = String(res.dispatched_to_id);
+    document.getElementById('dispatchBugInfo').classList.remove('hidden');
+  } catch (err) {
+    showMessage(err.message, 'error');
+    document.getElementById('dispatchBugInfo').classList.add('hidden');
+  }
+}
+
+async function confirmDispatchBug() {
+  if (!currentDispatchBugId) return;
+  const uid = document.getElementById('dispatchUserSelect').value;
+  try {
+    await api('/bugs/' + currentDispatchBugId + '/dispatch', { method: 'POST', headers: H, body: JSON.stringify({ user_id: Number(uid) }) });
+    showMessage('特派成功！企微已通知', 'success');
+  } catch (err) { showMessage(err.message, 'error'); }
+}
+
+async function saveDispatchedBug(id) {
+  const done = document.getElementById('ddone_' + id).checked;
+  const n = withPrefix('b#', document.getElementById('dnb_' + id).value);
+  const res = document.getElementById('dres_' + id).value;
+  await api(`/stage5/bugs/${id}/result`, {
+    method: 'PUT', headers: H,
+    body: JSON.stringify({ minor_version_id: Number(mineMinorSelect.value), test_done: done, newly_found_bug_id: n, resolution: res })
+  });
+  showMessage('特派专项验证已保存并同步至总盘');
+  loadMyWorkbench();
+}
+
+window.addEventListener('error',e=>showMessage(e.message||'未知错误','error'))
 init().catch(err=>showMessage(err.message,'error'));
 </script>
 </body>

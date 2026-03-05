@@ -147,6 +147,8 @@ class ProgressPushPayload(BaseModel):
 
 class RetestPayload(BaseModel):
     retest_completed: bool
+    retest_passed: Optional[bool] = None
+    retest_minor_version_id: Optional[int] = None
 
 
 class ReqStatusUpdate(BaseModel):
@@ -180,6 +182,14 @@ class ExecutionBugPayload(BaseModel):
     requirement_id: int
     source_type: BugSourceType
     source_ref: Optional[str] = None
+
+
+class DispatchPayload(BaseModel):
+    user_id: int
+
+
+class BugRetestFailPayload(BaseModel):
+    is_retest_failed: bool
 
 
 def _create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -532,16 +542,16 @@ def my_workbench(major_version_id: int = Query(...), current_user: Annotated[Use
 
     req_ids = [r.id for r in reqs]
     case_ids = [c.id for r in reqs for c in r.test_cases]
-    case_bug_rows = db.query(BugTracking).filter(BugTracking.requirement_id.in_(req_ids), BugTracking.source_type == BugSourceType.CASE, BugTracking.source_ref.in_([str(x) for x in case_ids] if case_ids else ["-1"])).all() if req_ids else []
-    free_bug_rows = db.query(BugTracking).filter(BugTracking.requirement_id.in_(req_ids), BugTracking.source_type == BugSourceType.MANUAL).all() if req_ids else []
+    case_bug_rows = db.query(BugTracking).options(joinedload(BugTracking.dispatched_to)).filter(BugTracking.requirement_id.in_(req_ids), BugTracking.source_type == BugSourceType.CASE, BugTracking.source_ref.in_([str(x) for x in case_ids] if case_ids else ["-1"])).all() if req_ids else []
+    free_bug_rows = db.query(BugTracking).options(joinedload(BugTracking.dispatched_to)).filter(BugTracking.requirement_id.in_(req_ids), BugTracking.source_type == BugSourceType.MANUAL).all() if req_ids else []
 
     case_bug_map: dict[str, list[dict]] = {}
     for b in case_bug_rows:
-        case_bug_map.setdefault(b.source_ref or "", []).append({"id": b.id, "bug_id": b.bug_id, "minor_version_id": b.latest_minor_version_id})
+        case_bug_map.setdefault(b.source_ref or "", []).append({"id": b.id, "bug_id": b.bug_id, "minor_version_id": b.latest_minor_version_id, "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else None})
 
     free_bug_map: dict[int, list[dict]] = {}
     for b in free_bug_rows:
-        free_bug_map.setdefault(b.requirement_id or -1, []).append({"id": b.id, "bug_id": b.bug_id, "minor_version_id": b.latest_minor_version_id})
+        free_bug_map.setdefault(b.requirement_id or -1, []).append({"id": b.id, "bug_id": b.bug_id, "minor_version_id": b.latest_minor_version_id, "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else None})
 
     return [
         {
@@ -635,8 +645,8 @@ def delete_case(case_id: int, _: Annotated[User, Depends(get_current_user)], db:
 def create_execution_bug(payload: ExecutionBugPayload, current_user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
     if not B_PATTERN.match(payload.bug_id):
         raise HTTPException(status_code=400, detail="bug_id must be like b#xxxx")
-    if payload.source_type not in [BugSourceType.CASE, BugSourceType.MANUAL]:
-        raise HTTPException(status_code=400, detail="source_type only supports case/manual")
+    if payload.source_type not in [BugSourceType.CASE, BugSourceType.MANUAL, BugSourceType.RETEST]:
+        raise HTTPException(status_code=400, detail="source_type only supports case/manual/retest")
     if db.query(BugTracking).filter(BugTracking.bug_id == payload.bug_id).first():
         raise HTTPException(status_code=400, detail=f"添加失败：Bug 编号 {payload.bug_id} 已经存在！")
 
@@ -802,26 +812,51 @@ def get_retest_workbench(major_version_id: int, current_user: Annotated[User, De
         Requirement.owner_id.isnot(None),
         Requirement.owner_id != current_user.id
     ).order_by(Requirement.id.asc()).all()
-    
-    # 获取所有小版本映射，用于在前端直观展示 Bug 所在的发包号
-    minors = {v.id: v.version_no for v in db.query(Version).filter(Version.version_type == VersionType.MINOR).all()}
 
+    minors = {v.id: v.version_no for v in db.query(Version).filter(Version.version_type == VersionType.MINOR).all()}
     req_ids = [r.id for r in reqs]
     case_ids = [c.id for r in reqs for c in r.test_cases]
-    
-    # 一次性查出该批需求下的所有 Bug
-    case_bug_rows = db.query(BugTracking).filter(BugTracking.requirement_id.in_(req_ids), BugTracking.source_type == BugSourceType.CASE, BugTracking.source_ref.in_([str(x) for x in case_ids] if case_ids else ["-1"])).all() if req_ids else []
-    free_bug_rows = db.query(BugTracking).filter(BugTracking.requirement_id.in_(req_ids), BugTracking.source_type == BugSourceType.MANUAL).all() if req_ids else []
 
-    # 按用例 ID 归类关联 Bug
+    case_bug_rows = db.query(BugTracking).filter(
+        BugTracking.requirement_id.in_(req_ids),
+        BugTracking.source_type == BugSourceType.CASE,
+        BugTracking.source_ref.in_([str(x) for x in case_ids] if case_ids else ["-1"]),
+    ).all() if req_ids else []
+    free_bug_rows = db.query(BugTracking).filter(
+        BugTracking.requirement_id.in_(req_ids),
+        BugTracking.source_type == BugSourceType.MANUAL,
+    ).all() if req_ids else []
+    retest_bug_rows = db.query(BugTracking).filter(
+        BugTracking.requirement_id.in_(req_ids),
+        BugTracking.source_type == BugSourceType.RETEST,
+    ).all() if req_ids else []
+
     case_bug_map: dict[str, list[dict]] = {}
     for b in case_bug_rows:
-        case_bug_map.setdefault(b.source_ref or "", []).append({"id": b.id, "bug_id": b.bug_id, "minor_version_no": minors.get(b.latest_minor_version_id, "未知")})
+        case_bug_map.setdefault(b.source_ref or "", []).append({
+            "id": b.id,
+            "bug_id": b.bug_id,
+            "minor_version_no": minors.get(b.latest_minor_version_id, "??"),
+            "is_retest_failed": b.is_retest_failed,
+        })
 
-    # 按需求 ID 归类自由 Bug
     free_bug_map: dict[int, list[dict]] = {}
     for b in free_bug_rows:
-        free_bug_map.setdefault(b.requirement_id or -1, []).append({"id": b.id, "bug_id": b.bug_id, "minor_version_no": minors.get(b.latest_minor_version_id, "未知")})
+        free_bug_map.setdefault(b.requirement_id or -1, []).append({
+            "id": b.id,
+            "bug_id": b.bug_id,
+            "minor_version_no": minors.get(b.latest_minor_version_id, "??"),
+            "is_retest_failed": b.is_retest_failed,
+        })
+
+    retest_bug_map: dict[int, list[dict]] = {}
+    for b in retest_bug_rows:
+        retest_bug_map.setdefault(b.requirement_id or -1, []).append({
+            "id": b.id,
+            "bug_id": b.bug_id,
+            "minor_version_no": minors.get(b.latest_minor_version_id, "??"),
+            "is_retest_failed": b.is_retest_failed,
+        })
 
     return [
         {
@@ -830,16 +865,18 @@ def get_retest_workbench(major_version_id: int, current_user: Annotated[User, De
             "title": r.title,
             "owner": r.owner.username if r.owner else None,
             "retest_completed": r.retest_completed,
+            "retest_passed": r.retest_passed,
+            "retest_minor_version_id": r.retest_minor_version_id,
             "retested_by": r.retester.username if r.retester else None,
             "test_cases": [
                 {"id": c.id, "zentao_case_id": c.zentao_case_id, "bugs": case_bug_map.get(str(c.id), [])}
                 for c in r.test_cases
             ],
             "free_bugs": free_bug_map.get(r.id, []),
+            "retest_bugs": retest_bug_map.get(r.id, []),
         }
         for r in reqs
     ]
-
 
 @app.put("/requirements/{requirement_id}/retest")
 def submit_retest(requirement_id: int, payload: RetestPayload, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
@@ -848,21 +885,32 @@ def submit_retest(requirement_id: int, payload: RetestPayload, current_user: Ann
         raise HTTPException(status_code=404, detail="Requirement not found")
     if req.owner_id == current_user.id:
         raise HTTPException(status_code=403, detail="Self-tested requirement cannot be cross-retested by self")
+
     req.retest_completed = payload.retest_completed
+    req.retest_passed = payload.retest_passed if payload.retest_completed else None
+    req.retest_minor_version_id = payload.retest_minor_version_id if payload.retest_completed else None
     req.retested_by_id = current_user.id if payload.retest_completed else None
     req.retested_at = datetime.utcnow() if payload.retest_completed else None
     db.commit()
     return {"message": "Retest status updated"}
 
-
 @app.post("/push/retest-result")
 async def push_retest_result(major_version_id: int, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
-    rows = db.query(Requirement).filter(Requirement.major_version_id == major_version_id, Requirement.retest_completed.is_(True), Requirement.retested_by_id == current_user.id).all()
+    rows = db.query(Requirement).options(joinedload(Requirement.owner), joinedload(Requirement.retest_minor_version)).filter(Requirement.major_version_id == major_version_id, Requirement.retest_completed.is_(True), Requirement.retested_by_id == current_user.id).all()
     if not rows:
         raise HTTPException(status_code=400, detail="No retested requirements by current user")
-    await _send_wechat_markdown("\n".join([f"✅ [{r.zentao_req_id}] 需求已由 [{current_user.username}] 复测通过，顺利闭环！" for r in rows]))
-    return {"message": "Retest results pushed", "count": len(rows)}
 
+    msg_lines = [f"### 📢 复测结果专项通报 (复测人: @{current_user.username})"]
+    for r in rows:
+        owner_name = r.owner.username if r.owner else "未知"
+        minor_ver = r.retest_minor_version.version_no if r.retest_minor_version else "未知"
+        if r.retest_passed:
+            msg_lines.append(f"> ✅ **[通过]** {r.zentao_req_id} (原测试: @{owner_name} | 验证发包: {minor_ver})")
+        else:
+            msg_lines.append(f"> ❌ **[打回]** <font color=\"warning\">{r.zentao_req_id}</font> (原测试: @{owner_name} | 验证发包: {minor_ver}) - *存在漏测或未修复问题！*")
+
+    await _send_wechat_markdown("\n".join(msg_lines))
+    return {"message": "Retest results pushed", "count": len(rows)}
 
 @app.get("/stage5/overview")
 def stage5_overview(major_version_id: int, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
@@ -884,7 +932,7 @@ def stage5_overview(major_version_id: int, current_user: Annotated[User, Depends
         bug_pool.append({
             "id": b.id, "bug_id": b.bug_id, "source_type": b.source_type.value, "source_ref": b.source_ref,
             "requirement_id": b.requirement_id, "latest_minor_version_id": b.latest_minor_version_id,
-            "test_done": b.test_done, "newly_found_bug_id": b.newly_found_bug_id, "closed": b.closed, "resolution": b.resolution,
+            "test_done": b.test_done, "newly_found_bug_id": b.newly_found_bug_id, "closed": b.closed, "resolution": b.resolution, "is_retest_failed": b.is_retest_failed,
             "other_records": other_records,
         })
     return {
@@ -1252,6 +1300,62 @@ def delete_bug(bug_id: int, _: Annotated[User, Depends(get_current_user)], db: S
     db.delete(bug)
     db.commit()
     return {"message": "Bug deleted"}
+
+
+@app.patch("/bugs/{bug_id}/retest-fail")
+def toggle_bug_retest_fail(bug_id: int, payload: BugRetestFailPayload, _: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
+    bug = db.query(BugTracking).filter(BugTracking.id == bug_id).first()
+    if not bug:
+        raise HTTPException(status_code=404, detail="Bug not found")
+    bug.is_retest_failed = payload.is_retest_failed
+    db.commit()
+    return {"message": "Bug retest status updated"}
+
+
+@app.get("/bugs/search")
+def search_bug(bug_id: str, _: Annotated[User, Depends(require_admin)], db: Session = Depends(get_db)):
+    b = db.query(BugTracking).options(joinedload(BugTracking.requirement)).filter(BugTracking.bug_id == bug_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="未找到该 Bug 编号")
+    return {
+        "id": b.id,
+        "bug_id": b.bug_id,
+        "req_title": b.requirement.title if b.requirement else "无关联需求 / 自由Bug",
+        "dispatched_to_id": b.dispatched_to_id,
+    }
+
+
+@app.post("/bugs/{bug_id}/dispatch")
+async def dispatch_bug(bug_id: int, payload: DispatchPayload, _: Annotated[User, Depends(require_admin)], db: Annotated[Session, Depends(get_db)]):
+    b = db.query(BugTracking).filter(BugTracking.id == bug_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Bug not found")
+    b.dispatched_to_id = payload.user_id
+    db.commit()
+    u = db.query(User).filter(User.id == payload.user_id).first()
+    if u:
+        await _send_wechat_markdown(f"📢 **Bug 特派专项通知**\n> 缺陷 **{b.bug_id}** 已被管理员特派给 @{u.username} 进行专项验证！请前往【我的工作台】顶部处理。")
+    return {"message": "特派成功"}
+
+
+@app.get("/bugs/dispatched-to-me")
+def dispatched_to_me(major_version_id: int, current_user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
+    bugs = db.query(BugTracking).options(joinedload(BugTracking.requirement)).filter(BugTracking.major_version_id == major_version_id, BugTracking.dispatched_to_id == current_user.id).all()
+    records = db.query(BugStage5Record).filter(BugStage5Record.user_id == current_user.id).all()
+    rmap = {r.bug_tracking_id: r for r in records}
+    res = []
+    for b in bugs:
+        r = rmap.get(b.id)
+        res.append({
+            "id": b.id,
+            "bug_id": b.bug_id,
+            "source_type": b.source_type.value,
+            "req_title": b.requirement.title if b.requirement else "无关联需求 / 自由Bug",
+            "test_done": r.test_done if r else False,
+            "resolution": r.resolution if r else "fixed",
+            "newly_found_bug_id": r.newly_found_bug_id if r else "",
+        })
+    return res
 
 
 @app.get("/export")
