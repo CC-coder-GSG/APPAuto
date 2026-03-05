@@ -16,13 +16,30 @@
 <div class="toast-wrap" id="toastWrap"></div>
 <div class="container">
   <div class="card row" style="justify-content:space-between">
-    <div style="display: flex; align-items: center;">
-      <img src="/static/omniqa-logo.png" alt="OmniQA" style="height: 36px; margin-right: 12px; border-radius: 4px;">
-      <h1 style="margin: 0; color: #1e293b; letter-spacing: 1px;">OmniQA</h1>
+    <div style="display: flex; align-items: center; gap: 14px; padding: 4px 0;">
+      <img src="/static/omniqa-logo.png" alt="OmniQA Logo" style="height: 46px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));">
+
+      <div style="display: flex; flex-direction: column; justify-content: center;">
+        <h1 style="margin: 0; font-size: 26px; font-weight: 800; color: var(--primary, #2563eb); letter-spacing: 1px; line-height: 1.1; font-family: 'Arial Black', Impact, sans-serif;">
+          QA
+        </h1>
+        <span style="font-size: 13px; color: #64748b; font-weight: 600; letter-spacing: 1.5px; margin-top: 2px;">
+          测试管理系统
+        </span>
+      </div>
     </div>
-    <div><span id="me" class="badge"></span>
-      <button class="secondary" style="margin-right: 8px;" onclick="changeMyPassword()">修改密码</button>
-      <button class="secondary" onclick="logout()">退出</button>
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <div style="display: flex; align-items: center; gap: 8px; background: #f8fafc; padding: 6px 16px 6px 6px; border-radius: 999px; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+        <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--primary, #2563eb); color: white; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: inset 0 -2px 4px rgba(0,0,0,0.2);">
+          👨‍💻
+        </div>
+        <span id="me" style="font-weight: 700; color: #1e293b; font-size: 14px; letter-spacing: 0.5px;"></span>
+      </div>
+
+      <div style="display: flex; gap: 8px;">
+        <button style="background: transparent; color: #475569; border: 1px solid #cbd5e1; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.borderColor='#2563eb'; this.style.color='#2563eb'; this.style.background='#eff6ff'" onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#475569'; this.style.background='transparent'" onclick="changeMyPassword()">🔐 修改密码</button>
+        <button style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.background='#fee2e2'; this.style.borderColor='#f87171'" onmouseout="this.style.background='#fef2f2'; this.style.borderColor='#fecaca'" onclick="logout()">🚪 退出系统</button>
+      </div>
     </div>
   </div>
 
@@ -177,6 +194,19 @@
         <div id="teamCompareChart" class="chart-box"></div>
         <div id="versionBugChart" class="chart-box"></div>
       </div>
+      <div style="margin-top: 30px; border-top: 2px dashed #cbd5e1; padding-top: 20px; width: 100%;">
+        <h3 style="color: #334155; margin-bottom: 20px; text-align: center;">🚀 项目高阶质量与效能度量</h3>
+
+        <div class="row" style="flex-wrap: wrap; margin-bottom: 20px;">
+          <div class="card" style="flex:1; min-width:45%;"><div id="topReqChart" style="height:350px;"></div></div>
+          <div class="card" style="flex:1; min-width:45%;"><div id="leakageChart" style="height:350px;"></div></div>
+        </div>
+
+        <div class="row" style="flex-wrap: wrap;">
+          <div class="card" style="flex:1; min-width:45%;"><div id="funnelChart" style="height:350px;"></div></div>
+          <div class="card" style="flex:1; min-width:45%;"><div id="execChart" style="height:350px;"></div></div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -279,7 +309,8 @@
 const token=localStorage.getItem('token'); if(!token) location.href='/login';
 const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
 let currentUser=null, users=[], versions=[], assignReqs=[], stage5Rows=[];
-let trendChart=null, sourcePieChart=null, radarChart=null, teamCompareChart=null, versionBugChart=null;
+let trendChart, sourcePieChart, radarChart, teamCompareChart, versionBugChart;
+let topReqChart, leakageChart, funnelChart, execChart;
 let reportLoaded=false;
 
 function showMessage(msg,type='success'){const w=document.getElementById('toastWrap');const d=document.createElement('div');d.className=`toast ${type}`;d.innerText=msg;w.appendChild(d);setTimeout(()=>{d.classList.add('hide');setTimeout(()=>d.remove(),220)},3000)}
@@ -324,7 +355,7 @@ function bindReportEvents(){
   reportEndDate.addEventListener('change',onFilterChange);
   reportUserSelect.addEventListener('change',onFilterChange);
   window.addEventListener('resize',()=>{
-    [trendChart,sourcePieChart,radarChart,teamCompareChart,versionBugChart].forEach(c=>c&&c.resize())
+    [trendChart,sourcePieChart,radarChart,teamCompareChart,versionBugChart,topReqChart,leakageChart,funnelChart,execChart].forEach(c=>c&&c.resize())
   });
 }
 
@@ -1128,7 +1159,8 @@ async function queryReport(){
     trendChart.setOption({
       title:{text:'趋势折线图'},
       tooltip:{trigger:'axis'},
-      legend:{data:['执行需求','创建用例','创建Bug','复测需求','关闭Bug']},
+      grid: { top: 60, bottom: 40, left: 50, right: 30 },
+      legend:{data:['执行需求','创建用例','创建Bug','复测需求','关闭Bug'], top: 30},
       xAxis:{type:'category',data:x},
       yAxis:{type:'value'},
       series:[
@@ -1144,14 +1176,15 @@ async function queryReport(){
     sourcePieChart.setOption({
       title:{text:'Bug来源分布',left:'center'},
       tooltip:{trigger:'item'},
-      series:[{type:'pie',radius:'60%',data:(data.bug_source_dist||[]).map(i=>({name:sourceTypeZh(i.source_type),value:i.count}))}]
+      legend: { top: 'bottom' },
+      series:[{type:'pie',radius:'50%',center: ['50%', '55%'], data:(data.bug_source_dist||[]).map(i=>({name:sourceTypeZh(i.source_type),value:i.count}))}]
     });
 
     if(!radarChart){radarChart=echarts.init(document.getElementById('radarChart'))}
     radarChart.setOption({
       title:{text:'个人能力雷达图'},
       tooltip:{},
-      radar:{indicator:[
+      radar:{radius: '60%',center: ['50%', '55%'],indicator:[
         {name:'执行需求',max:Math.max(10, Number(mReq.innerText)||0)},
         {name:'创建用例',max:Math.max(10, Number(mCase.innerText)||0)},
         {name:'创建Bug',max:Math.max(10, Number(mBug.innerText)||0)},
@@ -1166,7 +1199,8 @@ async function queryReport(){
     teamCompareChart.setOption({
       title:{text:'团队对比（全员模式）'},
       tooltip:{trigger:'axis'},
-      legend:{data:['执行需求','创建用例','创建Bug','复测需求','关闭Bug']},
+      grid: { top: 60, bottom: 40, left: 50, right: 30 },
+      legend:{data:['执行需求','创建用例','创建Bug','复测需求','关闭Bug'], top: 30},
       xAxis:{type:'category',data:team.map(i=>i.username)},
       yAxis:{type:'value'},
       series:[
@@ -1183,7 +1217,7 @@ async function queryReport(){
     versionBugChart.setOption({
       title:{text:'各发包(小版本) Bug 检出分布', textStyle: { fontSize: 15, color: '#334155' }},
       tooltip:{trigger:'axis'},
-      grid: { bottom: '15%' },
+      grid: { top: 60, bottom: '15%' },
       xAxis:{
         type:'category',
         data:vb.map(i=>i.version_name),
@@ -1198,6 +1232,74 @@ async function queryReport(){
         data:vb.map(i=>i.bug_count),
         label: { show: true, position: 'top', color: '#1e293b', fontWeight: 'bold' }
       }]
+    });
+
+    // === 请求高阶数据 ===
+    const advRes = await api(`/reports/advanced?start_date=${start_date}&end_date=${end_date}`);
+    const advData = await advRes.json();
+
+    // 1. 需求质量刺客排行榜 (横向柱状图)
+    if(!topReqChart) topReqChart = echarts.init(document.getElementById('topReqChart'));
+    topReqChart.setOption({
+        title: {text: '需求质量“刺客”排行榜 (Top 7)', textStyle: {fontSize: 15}},
+        tooltip: {trigger: 'axis', axisPointer: {type: 'shadow'}},
+        grid: {left: 100, right: 40, bottom: 20},
+        xAxis: {type: 'value'},
+        yAxis: {type: 'category', data: advData.top_reqs.map(r => r.req_id).reverse(), axisLabel: {interval: 0, formatter: (val) => val.substring(0,8)}},
+        series: [{
+            name: 'Bug数量', type: 'bar',
+            data: advData.top_reqs.map(r => r.count).reverse(),
+            label: {show: true, position: 'right'},
+            itemStyle: {color: '#ef4444', borderRadius: [0, 4, 4, 0]}
+        }]
+    });
+
+    // 2. 交叉复测漏测率 (空心饼图)
+    if(!leakageChart) leakageChart = echarts.init(document.getElementById('leakageChart'));
+    leakageChart.setOption({
+        title: {text: '交叉复测漏测率', left: 'center', textStyle: {fontSize: 15}},
+        tooltip: {trigger: 'item', formatter: '{b}: {c}个 ({d}%)'},
+        legend: {top: 'bottom'},
+        series: [{
+            type: 'pie', radius: ['40%', '65%'], center: ['50%', '50%'],
+            data: [
+                {name: '原测发现 (正常)', value: advData.leakage.normal, itemStyle: {color: '#3b82f6'}},
+                {name: '复测新增 (漏测)', value: advData.leakage.retest, itemStyle: {color: '#f97316'}}
+            ]
+        }]
+    });
+
+    // 3. 缺陷闭环转化漏斗
+    if(!funnelChart) funnelChart = echarts.init(document.getElementById('funnelChart'));
+    funnelChart.setOption({
+        title: {text: '缺陷闭环转化漏斗', left: 'center', textStyle: {fontSize: 15}},
+        tooltip: {trigger: 'item', formatter: '{b}: {c}'},
+        series: [{
+            type: 'funnel', left: '10%', top: 50, bottom: 50, width: '80%',
+            min: 0, max: Math.max(advData.funnel.total, 1),
+            minSize: '10%', maxSize: '100%',
+            sort: 'descending', gap: 2,
+            label: {show: true, position: 'inside', formatter: '{b}: {c}'},
+            itemStyle: {borderColor: '#fff', borderWidth: 1},
+            data: [
+                {name: '发现Bug总数', value: advData.funnel.total, itemStyle: {color: '#ef4444'}},
+                {name: '开发处理完毕', value: advData.funnel.fixed, itemStyle: {color: '#eab308'}},
+                {name: '验证彻底闭环', value: advData.funnel.closed, itemStyle: {color: '#22c55e'}}
+            ]
+        }]
+    });
+
+    // 4. 用例执行结果分布
+    if(!execChart) execChart = echarts.init(document.getElementById('execChart'));
+    const execMap = {'passed': '✅通过', 'failed': '❌失败', 'blocked': '⛔阻塞', 'untested': '⏳未测'};
+    execChart.setOption({
+        title: {text: '用例执行结果分布', left: 'center', textStyle: {fontSize: 15}},
+        tooltip: {trigger: 'item', formatter: '{b}: {c}个 ({d}%)'},
+        legend: {top: 'bottom'},
+        series: [{
+            type: 'pie', radius: '60%', center: ['50%', '50%'],
+            data: advData.executions.map(e => ({name: execMap[e.status] || e.status, value: e.count}))
+        }]
     });
     adjustReportChartVisibility();
 

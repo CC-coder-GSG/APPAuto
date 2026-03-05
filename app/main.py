@@ -1357,6 +1357,42 @@ def reports_summary(
     return result
 
 
+@app.get("/reports/advanced")
+def reports_advanced(start_date: date, end_date: date, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    sdt = datetime.combine(start_date, datetime.min.time())
+    edt = datetime.combine(end_date, datetime.max.time())
+
+    # 1. 需求质量刺客排行榜 (Top 7)
+    req_bugs = db.query(Requirement.zentao_req_id, Requirement.title, func.count(BugTracking.id).label("bug_count")) \
+        .join(BugTracking, BugTracking.requirement_id == Requirement.id) \
+        .filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt) \
+        .group_by(Requirement.id) \
+        .order_by(func.count(BugTracking.id).desc()).limit(7).all()
+    top_reqs = [{"req_id": r[0], "title": r[1], "count": r[2]} for r in req_bugs]
+
+    # 2. 漏测率对比
+    retest_bugs = db.query(func.count(BugTracking.id)).filter(BugTracking.source_type == BugSourceType.RETEST, BugTracking.created_at >= sdt, BugTracking.created_at <= edt).scalar() or 0
+    normal_bugs = db.query(func.count(BugTracking.id)).filter(BugTracking.source_type.in_([BugSourceType.CASE, BugSourceType.MANUAL]), BugTracking.created_at >= sdt, BugTracking.created_at <= edt).scalar() or 0
+
+    # 3. 闭环漏斗
+    total_bugs = db.query(func.count(BugTracking.id)).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt).scalar() or 0
+    fixed_bugs = db.query(func.count(BugTracking.id)).filter(BugTracking.resolution.in_(["fixed", "false_alarm", "rejected"]), BugTracking.created_at >= sdt, BugTracking.created_at <= edt).scalar() or 0
+    closed_bugs = db.query(func.count(BugTracking.id)).filter(BugTracking.closed.is_(True), BugTracking.created_at >= sdt, BugTracking.created_at <= edt).scalar() or 0
+
+    # 4. 用例执行分布
+    exec_results = db.query(TestExecution.result_status, func.count(TestExecution.id)) \
+        .filter(TestExecution.executed_at >= sdt, TestExecution.executed_at <= edt) \
+        .group_by(TestExecution.result_status).all()
+    executions = [{"status": r[0], "count": r[1]} for r in exec_results]
+
+    return {
+        "top_reqs": top_reqs,
+        "leakage": {"retest": retest_bugs, "normal": normal_bugs},
+        "funnel": {"total": total_bugs, "fixed": fixed_bugs, "closed": closed_bugs},
+        "executions": executions
+    }
+
+
 @app.get("/reports/version-bugs")
 def reports_version_bugs(_: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
     # 获取所有小版本
