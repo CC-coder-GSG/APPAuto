@@ -77,6 +77,11 @@
         <select id="mineMinorSelect" style="padding: 6px; border-radius: 4px; border: 1px solid #cbd5e1;"></select>
       </div>
 
+      <div style="display:flex; align-items:center; gap:8px; border-left:1px solid #cbd5e1; padding-left:12px;">
+        <button class="secondary" onclick="pushCase()">推送用例进度</button>
+        <button class="secondary" onclick="pushTest()">推送测试进度</button>
+      </div>
+
       <div class="prefix-input" style="flex:1; min-width: 200px; background: #fff;">
         <span>🔍</span>
         <input id="mineSearchInput" oninput="renderMineCards()" placeholder="搜索需求编号或名称..." style="width:100%; border:none; outline:none; background:transparent;">
