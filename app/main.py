@@ -852,16 +852,94 @@ def upsert_test_execution(requirement_id: int, payload: TestExecutionPayload, cu
 
 
 @app.post("/push/case-progress")
-async def push_case_progress(payload: ProgressPushPayload, _: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
-    await _send_wechat_markdown(f"阶段二进度推送：大版本{payload.major_version_id}")
+async def push_case_progress(payload: ProgressPushPayload, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
+    major = db.query(Version).filter(Version.id == payload.major_version_id).first()
+    major_name = major.version_no if major else f"ID:{payload.major_version_id}"
+
+    created_cases = (
+        db.query(func.count(TestCase.id))
+        .join(Requirement, TestCase.requirement_id == Requirement.id)
+        .filter(
+            Requirement.major_version_id == payload.major_version_id,
+            TestCase.creator_id == current_user.id,
+        )
+        .scalar()
+        or 0
+    )
+    req_case_pending = (
+        db.query(func.count(Requirement.id))
+        .filter(
+            Requirement.major_version_id == payload.major_version_id,
+            Requirement.owner_id == current_user.id,
+            Requirement.case_completed.is_(False),
+        )
+        .scalar()
+        or 0
+    )
+    req_case_done = (
+        db.query(func.count(Requirement.id))
+        .filter(
+            Requirement.major_version_id == payload.major_version_id,
+            Requirement.owner_id == current_user.id,
+            Requirement.case_completed.is_(True),
+        )
+        .scalar()
+        or 0
+    )
+
+    md = "\n".join(
+        [
+            "### 需求测试进度",
+            f"> 大版本：{major_name}",
+            f"> 提交人：@{current_user.username}",
+            f"> 当前人员填写用例：{created_cases} 个",
+            f"> 需求用例未完成：{req_case_pending} 个",
+            f"> 需求用例已完成：{req_case_done} 个",
+        ]
+    )
+    await _send_wechat_markdown(md)
     return {"message": "Case progress pushed"}
 
 
 @app.post("/push/test-progress")
 async def push_test_progress(minor_version_id: int, major_version_id: int, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
-    other_members = db.query(User).filter(User.id != current_user.id).all()
-    mentions = " ".join([f"@{u.username}" for u in other_members])
-    await _send_wechat_markdown(f"阶段三进度推送：包{minor_version_id}。以上需求已测试完毕，请其他人前往系统进行交叉复测！{mentions}")
+    major = db.query(Version).filter(Version.id == major_version_id).first()
+    minor = db.query(Version).filter(Version.id == minor_version_id).first()
+    major_name = major.version_no if major else f"ID:{major_version_id}"
+    minor_name = minor.version_no if minor else f"ID:{minor_version_id}"
+
+    req_test_done = (
+        db.query(func.count(Requirement.id))
+        .filter(
+            Requirement.major_version_id == major_version_id,
+            Requirement.owner_id == current_user.id,
+            Requirement.test_completed.is_(True),
+        )
+        .scalar()
+        or 0
+    )
+    req_test_pending = (
+        db.query(func.count(Requirement.id))
+        .filter(
+            Requirement.major_version_id == major_version_id,
+            Requirement.owner_id == current_user.id,
+            Requirement.test_completed.is_(False),
+        )
+        .scalar()
+        or 0
+    )
+
+    md = "\n".join(
+        [
+            "### 需求测试进度",
+            f"> 大版本：{major_name} | 当前发包：{minor_name}",
+            f"> 提交人：@{current_user.username}",
+            f"> 当前人员已完成测试需求：{req_test_done} 个",
+            f"> 需求测试未完成：{req_test_pending} 个",
+            f"> 需求测试已完成：{req_test_done} 个",
+        ]
+    )
+    await _send_wechat_markdown(md)
     return {"message": "Test progress pushed"}
 
 
