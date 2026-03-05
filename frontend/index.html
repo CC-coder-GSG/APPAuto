@@ -20,7 +20,10 @@
       <img src="/static/omniqa-logo.png" alt="OmniQA" style="height: 36px; margin-right: 12px; border-radius: 4px;">
       <h1 style="margin: 0; color: #1e293b; letter-spacing: 1px;">OmniQA</h1>
     </div>
-    <div><span id="me" class="badge"></span> <button class="secondary" onclick="logout()">退出</button></div>
+    <div><span id="me" class="badge"></span>
+      <button class="secondary" style="margin-right: 8px;" onclick="changeMyPassword()">修改密码</button>
+      <button class="secondary" onclick="logout()">退出</button>
+    </div>
   </div>
 
   <div class="card row" id="tabs">
@@ -196,7 +199,12 @@
     <div class="card" style="margin-top: 24px; border-top: 2px solid #e2e8f0;">
       <div class="row" style="justify-content: space-between; align-items: center;">
         <h3 style="margin: 0; color: #334155;">📊 特派分发状态追踪大盘</h3>
-        <button onclick="loadDispatchedAll()">刷新列表</button>
+        <div class="row">
+          <label style="cursor: pointer; color: #475569; margin-right: 12px; font-weight: bold;">
+            <input type="checkbox" id="hideClosedDispatch" onchange="loadDispatchedAll()" checked> 隐藏已闭环
+          </label>
+          <button onclick="loadDispatchedAll()">刷新列表</button>
+        </div>
       </div>
       <table style="margin-top: 16px;">
         <thead><tr><th>Bug 编号</th><th>特派负责人</th><th>当前处理状态</th></tr></thead>
@@ -613,24 +621,6 @@ function renderMineCards() {
              (req.title && req.title.toLowerCase().includes(searchKw));
   });
 
-  const renderBugChip = (b) => {
-      const dBadge = b.dispatched_to_name ? `<span style="color:#ea580c; background:#ffedd5; padding:1px 4px; border-radius:4px; font-size:11px; margin-left:6px;">🪂已特派给:${b.dispatched_to_name}</span>` : '';
-
-      // 我们通过判断 b.fixed_minor_version_id 是否存在，来决定展示“发现”还是“已解决”
-      let verText = '';
-      if (b.fixed_minor_version_id) {
-          verText = `<span style="color:#16a34a; font-size:11px; margin-left:4px;">(✅解决于: 🏷️${b.fixed_minor_version_id})</span>`;
-      } else {
-          verText = `<span style="color:#94a3b8; font-size:11px; margin-left:4px;">(发现于: 🏷️${b.found_minor_version_id || '未知'})</span>`;
-      }
-
-      return `<span class="badge" style="background:#f1f5f9; border:1px solid #cbd5e1; padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
-          ${b.bug_id} ${verText} ${dBadge}
-          <a href="javascript:void(0)" title="编辑" onclick="editWorkbenchBug(${b.id}, '${b.bug_id}')" style="color:#3b82f6; margin-left:4px; text-decoration:none;">✎</a>
-          <a href="javascript:void(0)" title="删除" onclick="removeWorkbenchBug(${b.id})" style="color:#ef4444; margin-left:2px; text-decoration:none;">×</a>
-      </span>`;
-  };
-
   const reqsHtml = filteredData.map(req => {
     const caseDisabled = req.case_completed ? 'disabled' : '';
     const testDisabled = req.test_completed ? 'disabled' : '';
@@ -640,6 +630,23 @@ function renderMineCards() {
     const isFullyCompleted = req.test_completed && req.case_completed;
     const mode = document.getElementById('mineDisplayMode').value;
     const vTag = (mode === 'all_pending' && req.major_version_name) ? `<span class="badge" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; margin-right:8px; padding:2px 6px;">🏷️${req.major_version_name}</span>` : '';
+    const renderBugChip = (b) => {
+        const dBadge = b.dispatched_to_name ? `<span style="color:#ea580c; background:#ffedd5; padding:1px 4px; border-radius:4px; font-size:11px; margin-left:6px;">🪂已特派给:${b.dispatched_to_name}</span>` : '';
+
+        // 读取名称字段(_no)而不是ID(_id)
+        let verText = '';
+        if (b.fixed_minor_version_no) {
+            verText = `<span style="color:#16a34a; font-size:11px; margin-left:4px;">(✅解决于: 🏷️${b.fixed_minor_version_no})</span>`;
+        } else {
+            verText = `<span style="color:#94a3b8; font-size:11px; margin-left:4px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span>`;
+        }
+
+        return `<span class="badge" style="background:#f1f5f9; border:1px solid #cbd5e1; padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
+            ${b.bug_id} ${verText} ${dBadge}
+            <a href="javascript:void(0)" title="编辑" onclick="${req.test_completed ? 'return false;' : `editWorkbenchBug(${b.id}, '${b.bug_id}')`}" style="color:${req.test_completed?'#94a3b8':'#3b82f6'}; margin-left:4px; text-decoration:none;">✎</a>
+            <a href="javascript:void(0)" title="删除" onclick="${req.test_completed ? 'return false;' : `removeWorkbenchBug(${b.id})`}" style="color:${req.test_completed?'#94a3b8':'#ef4444'}; margin-left:2px; text-decoration:none;">×</a>
+        </span>`;
+    };
 
     const caseHtml=(req.test_cases||[]).map(c=>`
       <div class="case-item">
@@ -784,10 +791,13 @@ async function loadRetest(){
   }
 
   container.innerHTML = data.map(req => {
+    let evidenceCount = 0; // 实时统计证据数量
+
     const caseHtml = (req.test_cases||[]).map(c => {
       const bugs = (c.bugs||[]).map(b => {
+        if(b.is_retest_failed) evidenceCount++;
         return `<div style="margin-top:4px;">
-          <span class="badge" style="background:#fef2f2; color:#dc2626; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no})</span></span>
+          <span class="badge" style="background:#fef2f2; color:#dc2626; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>
           <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed?'checked':''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
         </div>`;
       }).join('');
@@ -797,70 +807,95 @@ async function loadRetest(){
       </div>`;
     }).join('');
 
-    const freeBugHtml = (req.free_bugs||[]).map(b => `<div style="margin-bottom:6px;">
-      <span class="badge" style="background:#fff7ed; color:#ea580c; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no})</span></span>
+    const freeBugHtml = (req.free_bugs||[]).map(b => {
+      if(b.is_retest_failed) evidenceCount++;
+      return `<div style="margin-bottom:6px;">
+      <span class="badge" style="background:#fff7ed; color:#ea580c; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>
       <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed?'checked':''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
-    </div>`).join('');
+    </div>`}).join('');
 
-    const retestBugHtml = (req.retest_bugs||[]).map(b => `<div style="margin-bottom:6px;">
+    const retestBugHtml = (req.retest_bugs||[]).map(b => {
+      evidenceCount++; // 只要有复测新增Bug，就是死证据
+      return `<div style="margin-bottom:6px;">
       <span class="badge" style="background:#fee2e2; color:#b91c1c; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(复测新增)</span></span>
-    </div>`).join('');
+    </div>`}).join('');
 
-    const statusTag = req.retest_completed
+    const hasEvidence = evidenceCount > 0;
+    const isCompleted = req.retest_completed;
+    const statusTag = isCompleted
       ? (req.retest_passed ? '<span class="badge" style="background:#dcfce7;color:#166534;">✅已通过</span>' : '<span class="badge" style="background:#fee2e2;color:#b91c1c;">❌已打回</span>')
       : '<span class="badge">未提交复测结论</span>';
 
+    // 采用 details 标签实现丝滑的自动折叠
     return `
-      <div class="card" style="border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed #cbd5e1; padding-bottom: 12px; margin-bottom: 12px;">
+      <details class="card" ${isCompleted ? '' : 'open'} style="border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px; background: ${isCompleted ? '#f8fafc' : '#fff'}; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: all 0.3s;">
+        <summary style="outline:none; cursor:pointer; list-style:none; display: flex; justify-content: space-between; align-items: center; border-bottom: ${isCompleted ? 'none' : '1px dashed #cbd5e1'}; padding-bottom: ${isCompleted ? '0' : '12px'}; margin-bottom: ${isCompleted ? '0' : '12px'};">
           <div>
-            <span style="font-size: 16px; font-weight: bold; color: #0f172a;">📄 ${req.zentao_req_id} ${req.title}</span>
+            <span style="font-size: 16px; font-weight: bold; color: ${isCompleted ? '#94a3b8; text-decoration:line-through;' : '#0f172a'};">📄 ${req.zentao_req_id} ${req.title}</span>
             <span class="badge" style="margin-left: 12px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;">👤 原测试人: ${req.owner||'未知'}</span>
             <span style="margin-left:8px;">${statusTag}</span>
           </div>
-          <div>
-            <button style="background:#16a34a;" onclick='setRetest(${req.id}, true)'>✅通过</button>
-            <button class="danger" onclick='setRetest(${req.id}, false)'>❌打回</button>
+          <div onclick="event.stopPropagation()"> <button style="background:#16a34a;" onclick='setRetest(${req.id}, true, ${hasEvidence})'>✅通过</button>
+            <button class="danger" onclick='setRetest(${req.id}, false, ${hasEvidence})'>❌打回</button>
           </div>
-        </div>
+        </summary>
 
-        <div class="row" style="align-items: flex-start; margin: 0;">
-          <div style="flex: 1; padding-right: 16px; border-right: 1px dashed #e2e8f0;">
-            <div style="font-weight: bold; margin-bottom: 12px; color: #334155; font-size: 13px;">【原测试用例 & 关联Bug】</div>
-            ${caseHtml || '<div class="muted">原测试人员未建立用例</div>'}
+        <div style="margin-top: 12px;">
+          <div class="row" style="align-items: flex-start; margin: 0;">
+            <div style="flex: 1; padding-right: 16px; border-right: 1px dashed #e2e8f0;">
+              <div style="font-weight: bold; margin-bottom: 12px; color: #334155; font-size: 13px;">【原测试用例 & 关联Bug】</div>
+              ${caseHtml || '<div class="muted">原测试人员未建立用例</div>'}
+            </div>
+            <div style="flex: 1; padding-left: 16px;">
+              <div style="font-weight: bold; margin-bottom: 12px; color: #334155; font-size: 13px;">【原测试发现的自由Bug】</div>
+              <div>${freeBugHtml || '<div class="muted">暂无自由Bug</div>'}</div>
+            </div>
           </div>
-          <div style="flex: 1; padding-left: 16px;">
-            <div style="font-weight: bold; margin-bottom: 12px; color: #334155; font-size: 13px;">【原测试发现的自由Bug】</div>
-            <div>${freeBugHtml || '<div class="muted">暂无自由Bug</div>'}</div>
+          <div style="margin-top:12px; border-top:1px dashed #e2e8f0; padding-top:12px;">
+            <div style="font-weight:bold; color:#b91c1c; margin-bottom:8px;">【复测新增漏测 Bug】</div>
+            <div>${retestBugHtml || '<div class="muted">暂无复测新增Bug</div>'}</div>
+            <div class="row" style="margin-top:8px;">
+              <div class="prefix-input"><span>b#</span><input id="rb_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增漏测Bug编号"></div>
+              <button onclick="addRetestBug(${req.id})">➕新增漏测Bug</button>
+            </div>
           </div>
         </div>
-        <div style="margin-top:12px; border-top:1px dashed #e2e8f0; padding-top:12px;">
-          <div style="font-weight:bold; color:#b91c1c; margin-bottom:8px;">【复测新增漏测 Bug】</div>
-          <div>${retestBugHtml || '<div class="muted">暂无复测新增Bug</div>'}</div>
-          <div class="row" style="margin-top:8px;">
-            <div class="prefix-input"><span>b#</span><input id="rb_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增漏测Bug编号"></div>
-            <button onclick="addRetestBug(${req.id})">➕新增漏测Bug</button>
-          </div>
-        </div>
-      </div>`;
+      </details>`;
   }).join('');
 }
 
-async function setRetest(id, passed){
+async function setRetest(id, passed, hasEvidence){
+  // 1. 前端强逻辑拦截
+  if (passed && hasEvidence) {
+    showMessage('逻辑冲突：该需求存在未修好的Bug或新增漏测Bug，绝对无法标记为【通过】！', 'error');
+    return;
+  }
+  if (!passed && !hasEvidence) {
+    showMessage('空口无凭：请至少勾选一个未修好的旧Bug，或新增一个漏测Bug作为打回证据！', 'error');
+    return;
+  }
+
   const minorId = Number(retestMinorSelect.value);
   if(!minorId){showMessage('请选择当前复测发包(小版本)','error');return;}
-  await api(`/requirements/${id}/retest`,{
-    method:'PUT',
-    headers:H,
-    body:JSON.stringify({retest_completed:true,retest_passed:passed,retest_minor_version_id:minorId})
-  });
-  showMessage(passed?'复测结果已标记为通过':'已打回给原测试人','success');
-  loadRetest();
+  
+  // 2. 增加 try-catch 捕获可能的后端异常
+  try {
+    await api(`/requirements/${id}/retest`,{
+      method:'PUT',
+      headers:H,
+      body:JSON.stringify({retest_completed:true,retest_passed:passed,retest_minor_version_id:minorId})
+    });
+    showMessage(passed ? '🎉 复测结果已标记为通过' : '🚨 已打回给原测试人', 'success');
+    loadRetest();
+  } catch (err) {
+    showMessage(err.message || '操作失败', 'error');
+  }
 }
 
 async function toggleBugFail(id, checked){
   await api(`/bugs/${id}/retest-fail`,{method:'PATCH',headers:H,body:JSON.stringify({is_retest_failed:checked})});
   showMessage(checked?'已标记未修好':'已取消未修好标记','success');
+  loadRetest(); // 新增：实时刷新大盘以重新计算证据链
 }
 
 async function addRetestBug(reqId){
@@ -1206,7 +1241,7 @@ function exportTreePdf() {
 async function loadDataOverview(){
   const data = await (await api('/admin/data-overview')).json();
 
-  dataUsers.innerHTML = (data.users || []).map(u => `<div class='row'><span>${u.username}（${u.role==='admin'?'管理员':'普通用户'}）</span><span class='badge' style='background:${u.is_team_member?'#dcfce7':'#fee2e2'};color:${u.is_team_member?'#166534':'#991b1b'}'>${u.is_team_member?'组员':'编外'}</span><button onclick='toggleRole(${u.id},"${u.role}")'>设为${u.role==='admin'?'普通用户':'管理员'}</button><button class='secondary' onclick='toggleTeamMember(${u.id}, ${u.is_team_member ? false : true})'>${u.is_team_member?'设为编外人员':'设为组员'}</button><button class='danger' onclick='removeUser(${u.id},"${u.username}")'>删除</button></div>`).join('');
+  dataUsers.innerHTML = (data.users || []).map(u => `<div class='row'><span>${u.username}（${u.role==='admin'?'管理员':'普通用户'}）</span><span class='badge' style='background:${u.is_team_member?'#dcfce7':'#fee2e2'};color:${u.is_team_member?'#166534':'#991b1b'}'>${u.is_team_member?'组员':'编外'}</span><button onclick='toggleRole(${u.id},"${u.role}")'>设为${u.role==='admin'?'普通用户':'管理员'}</button><button class='secondary' onclick='toggleTeamMember(${u.id}, ${u.is_team_member ? false : true})'>${u.is_team_member?'设为编外人员':'设为组员'}</button><button class='secondary' onclick='resetUserPassword(${u.id}, "${u.username}")'>重置密码</button><button class='danger' onclick='removeUser(${u.id},"${u.username}")'>删除</button></div>`).join('');
 
   const majors = (data.versions || []).filter(v => v.version_type === 'major');
   const minors = (data.versions || []).filter(v => v.version_type === 'minor');
@@ -1438,8 +1473,19 @@ async function removeDerivedBug(id, bugToRemove) {
 async function loadDispatchedAll() {
   try {
     const data = await (await api('/bugs/dispatched-all')).json();
+    const hideClosed = document.getElementById('hideClosedDispatch').checked;
+    
+    // 根据开关状态过滤数据
+    const filteredData = hideClosed ? data.filter(b => !b.closed) : data;
+    
     const resZh = {"fixed":"🚀修复通过", "false_alarm":"⚠️误报", "rejected":"⛔拒绝修复"};
-    document.getElementById('dispatchAllTable').innerHTML = data.map(b => {
+    
+    if (filteredData.length === 0) {
+        document.getElementById('dispatchAllTable').innerHTML = '<tr><td colspan="3" style="text-align:center; padding: 20px; color:#94a3b8;">🎉 太棒了，当前没有待处理的特派 Bug！</td></tr>';
+        return;
+    }
+
+    document.getElementById('dispatchAllTable').innerHTML = filteredData.map(b => {
       const statusHtml = b.closed ? `<span style="color:#16a34a;font-weight:bold;">✅已闭环 (${resZh[b.resolution]||'修复'})</span>` : `<span style="color:#dc2626;">⏳处理中</span>`;
       return `<tr>
           <td><b>${b.bug_id}</b></td>
@@ -1447,7 +1493,30 @@ async function loadDispatchedAll() {
           <td>${statusHtml}</td>
       </tr>`;
     }).join('');
-  } catch(e) {}
+  } catch(e) {
+    console.error("加载特派列表失败", e);
+  }
+}
+
+async function changeMyPassword() {
+  const oldP = prompt("请输入【原密码】:");
+  if(!oldP) return;
+  const newP = prompt("请输入【新密码】 (长度大于等于3位):");
+  if(!newP) return;
+  try {
+    await api('/auth/password', {method: 'PUT', headers: H, body: JSON.stringify({old_password: oldP, new_password: newP})});
+    showMessage('密码修改成功，3秒后跳转到登录页', 'success');
+    setTimeout(logout, 3000);
+  } catch(e) { showMessage(e.message, 'error'); }
+}
+
+async function resetUserPassword(id, username) {
+  const newP = prompt(`请输入用户【${username}】的【新密码】:`);
+  if(!newP) return;
+  try {
+    await api(`/users/${id}/password`, {method: 'PUT', headers: H, body: JSON.stringify({new_password: newP})});
+    showMessage(`密码已重置！用户 ${username} 已被强制下线。`, 'success');
+  } catch(e) { showMessage(e.message, 'error'); }
 }
 
 window.addEventListener('error',e=>showMessage(e.message||'未知错误','error'))

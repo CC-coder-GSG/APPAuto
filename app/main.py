@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+import uuid
 from csv import DictWriter
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -89,6 +90,15 @@ class UserCreate(BaseModel):
 
 class UserRoleUpdate(BaseModel):
     role: UserRole
+
+
+class PasswordChangeSelf(BaseModel):
+    old_password: str
+    new_password: str = Field(min_length=3, max_length=128)
+
+
+class PasswordResetAdmin(BaseModel):
+    new_password: str = Field(min_length=3, max_length=128)
 
 
 class TeamStatusUpdate(BaseModel):
@@ -246,13 +256,15 @@ def get_current_user(
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str | None = payload.get("sub")
+        session_token = payload.get("session")
         if username is None:
             raise credential_exception
     except JWTError as exc:
         raise credential_exception from exc
 
     user = db.query(User).filter(User.username == username).first()
-    if not user:
+    # 核心拦截逻辑：如果用户不存在，或者 token 里的 session 已经被新的登录冲刷掉了，则拒绝访问
+    if not user or session_token != user.session_token:
         raise credential_exception
     return user
 
@@ -357,8 +369,11 @@ def login(
     if not user:
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
+    user.session_token = str(uuid.uuid4())
+    db.commit()
+
     access_token = _create_access_token(
-        data={"sub": user.username, "role": user.role.value},
+        data={"sub": user.username, "role": user.role.value, "session": user.session_token},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
     return Token(access_token=access_token)
@@ -441,6 +456,31 @@ def update_user_team_status(
     user.is_team_member = payload.is_team_member
     db.commit()
     return {"message": "Team member status updated"}
+
+
+@app.put("/auth/password")
+def change_my_password(payload: PasswordChangeSelf, current_user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
+    if not current_user.verify_password(payload.old_password):
+        raise HTTPException(status_code=400, detail="原密码输入错误")
+    if payload.old_password == payload.new_password:
+        raise HTTPException(status_code=400, detail="新密码不能与原密码相同")
+
+    current_user.password_hash = User.hash_password(payload.new_password)
+    current_user.session_token = None  # 清空会话，强制自己重新登录
+    db.commit()
+    return {"message": "密码修改成功，请重新登录"}
+
+
+@app.put("/users/{user_id}/password")
+def reset_user_password(user_id: int, payload: PasswordResetAdmin, _: Annotated[User, Depends(require_admin)], db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.password_hash = User.hash_password(payload.new_password)
+    user.session_token = None  # 清空会话，强制该用户下线
+    db.commit()
+    return {"message": f"用户 {user.username} 的密码已重置，且已被强制下线"}
 
 
 @app.post("/versions", status_code=201)
@@ -553,6 +593,8 @@ def my_workbench(current_user: Annotated[User, Depends(get_current_user)], db: S
 
     req_ids = [r.id for r in reqs]
     case_ids = [c.id for r in reqs for c in r.test_cases]
+    # 获取小版本映射字典
+    minors = {v.id: v.version_no for v in db.query(Version).filter(Version.version_type == VersionType.MINOR).all()}
 
     # 获取 bugs
     case_bug_rows = db.query(BugTracking).options(joinedload(BugTracking.dispatched_to)).filter(
@@ -566,14 +608,18 @@ def my_workbench(current_user: Annotated[User, Depends(get_current_user)], db: S
     case_bug_map: dict[str, list[dict]] = {}
     for b in case_bug_rows:
         case_bug_map.setdefault(b.source_ref or "", []).append({
-            "id": b.id, "bug_id": b.bug_id, "found_minor_version_id": b.found_minor_version_id, "fixed_minor_version_id": b.fixed_minor_version_id,
+            "id": b.id, "bug_id": b.bug_id,
+            "found_minor_version_no": minors.get(b.found_minor_version_id, "未知") if b.found_minor_version_id else "未知",
+            "fixed_minor_version_no": minors.get(b.fixed_minor_version_id, "未知") if b.fixed_minor_version_id else None,
             "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else None
         })
 
     free_bug_map: dict[int, list[dict]] = {}
     for b in free_bug_rows:
         free_bug_map.setdefault(b.requirement_id or -1, []).append({
-            "id": b.id, "bug_id": b.bug_id, "found_minor_version_id": b.found_minor_version_id, "fixed_minor_version_id": b.fixed_minor_version_id,
+            "id": b.id, "bug_id": b.bug_id,
+            "found_minor_version_no": minors.get(b.found_minor_version_id, "未知") if b.found_minor_version_id else "未知",
+            "fixed_minor_version_no": minors.get(b.fixed_minor_version_id, "未知") if b.fixed_minor_version_id else None,
             "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else None
         })
 

@@ -47,6 +47,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(SAEnum(UserRole), default=UserRole.USER, nullable=False)
     is_team_member: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    session_token: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     assigned_requirements: Mapped[list[Requirement]] = relationship(
