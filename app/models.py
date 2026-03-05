@@ -163,7 +163,8 @@ class BugTracking(Base):
     source_ref: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     bug_id: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
-    latest_minor_version_id: Mapped[Optional[int]] = mapped_column(ForeignKey("versions.id"), nullable=True)
+    found_minor_version_id: Mapped[Optional[int]] = mapped_column(ForeignKey("versions.id"), nullable=True)
+    fixed_minor_version_id: Mapped[Optional[int]] = mapped_column(ForeignKey("versions.id"), nullable=True)
     test_done: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     newly_found_bug_id: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     resolution: Mapped[str] = mapped_column(String, default="fixed", nullable=False)  # 可选值: fixed(修复通过), false_alarm(误报), rejected(拒绝修复)
