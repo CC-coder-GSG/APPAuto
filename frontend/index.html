@@ -1307,8 +1307,43 @@ async function queryReport(){
   }catch(err){showMessage(err.message||'查询报表失败','error')}
 }
 
-function exportReportPdf(){
-  html2pdf().from(document.getElementById('reportContent')).save('测试效能度量报表.pdf');
+function exportReportPdf() {
+  const element = document.getElementById('reportContent');
+  if (!element) return;
+
+  // 【物理级终极绝杀】：找出所有宽或高为 0 的 canvas，暂时从 DOM 树中“拔”下来，存放在内存里
+  const badCanvases = Array.from(element.querySelectorAll('canvas')).filter(c => c.width === 0 || c.height === 0);
+  const restoredList = badCanvases.map(canvas => {
+    const placeholder = document.createComment('hidden-canvas-placeholder');
+    canvas.parentNode.insertBefore(placeholder, canvas);
+    canvas.parentNode.removeChild(canvas);
+    return { canvas, placeholder };
+  });
+
+  showMessage('正在生成高清晰度报表 PDF，耗时约几秒钟，请稍候...', 'success');
+
+  const opt = {
+    margin: 0.3,
+    filename: '测试效能度量大盘.pdf',
+    image: { type: 'jpeg', quality: 0.98 },
+    html2canvas: { scale: 2, useCORS: true, backgroundColor: '#f8fafc' },
+    jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
+  };
+
+  html2pdf().set(opt).from(element).save().then(() => {
+    showMessage('🎉 报表 PDF 导出成功！', 'success');
+  }).catch((err) => {
+    console.error('PDF导出失败:', err);
+    showMessage('导出失败，请打开 F12 查看报错', 'error');
+  }).finally(() => {
+    // 导出操作结束后（无论成功失败），神不知鬼不觉地把 canvas “种”回原处，不影响页面继续使用
+    restoredList.forEach(item => {
+      if(item.placeholder && item.placeholder.parentNode) {
+        item.placeholder.parentNode.insertBefore(item.canvas, item.placeholder);
+        item.placeholder.parentNode.removeChild(item.placeholder);
+      }
+    });
+  });
 }
 
 function exportTreePdf() {
