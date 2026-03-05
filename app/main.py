@@ -537,33 +537,52 @@ def list_requirements(major_version_id: int = Query(...), db: Session = Depends(
 
 
 @app.get("/requirements/my-workbench")
-def my_workbench(major_version_id: int = Query(...), current_user: Annotated[User, Depends(get_current_user)] = None, db: Session = Depends(get_db)):
-    reqs = db.query(Requirement).options(joinedload(Requirement.test_cases)).filter(Requirement.major_version_id == major_version_id, Requirement.owner_id == current_user.id).order_by(Requirement.id.asc()).all()
+def my_workbench(current_user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db), major_version_id: Optional[int] = None, mode: str = "version"):
+    query = db.query(Requirement).options(
+        joinedload(Requirement.major_version),
+        joinedload(Requirement.test_cases)
+    ).filter(Requirement.owner_id == current_user.id)
+
+    # 支持按单个版本查看，或查看所有未完成测试的跨版本需求
+    if mode == "version" and major_version_id:
+        query = query.filter(Requirement.major_version_id == major_version_id)
+    elif mode == "all_pending":
+        query = query.filter(Requirement.test_completed == False)
+
+    reqs = query.order_by(Requirement.id.desc()).all()
 
     req_ids = [r.id for r in reqs]
     case_ids = [c.id for r in reqs for c in r.test_cases]
-    case_bug_rows = db.query(BugTracking).options(joinedload(BugTracking.dispatched_to)).filter(BugTracking.requirement_id.in_(req_ids), BugTracking.source_type == BugSourceType.CASE, BugTracking.source_ref.in_([str(x) for x in case_ids] if case_ids else ["-1"])).all() if req_ids else []
-    free_bug_rows = db.query(BugTracking).options(joinedload(BugTracking.dispatched_to)).filter(BugTracking.requirement_id.in_(req_ids), BugTracking.source_type == BugSourceType.MANUAL).all() if req_ids else []
+
+    # 获取 bugs
+    case_bug_rows = db.query(BugTracking).options(joinedload(BugTracking.dispatched_to)).filter(
+        BugTracking.requirement_id.in_(req_ids), BugTracking.source_type == BugSourceType.CASE, BugTracking.source_ref.in_([str(x) for x in case_ids] if case_ids else ["-1"])
+    ).all() if req_ids else []
+
+    free_bug_rows = db.query(BugTracking).options(joinedload(BugTracking.dispatched_to)).filter(
+        BugTracking.requirement_id.in_(req_ids), BugTracking.source_type == BugSourceType.MANUAL
+    ).all() if req_ids else []
 
     case_bug_map: dict[str, list[dict]] = {}
     for b in case_bug_rows:
-        case_bug_map.setdefault(b.source_ref or "", []).append({"id": b.id, "bug_id": b.bug_id, "minor_version_id": b.latest_minor_version_id, "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else None})
+        case_bug_map.setdefault(b.source_ref or "", []).append({
+            "id": b.id, "bug_id": b.bug_id, "minor_version_id": b.latest_minor_version_id,
+            "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else None
+        })
 
     free_bug_map: dict[int, list[dict]] = {}
     for b in free_bug_rows:
-        free_bug_map.setdefault(b.requirement_id or -1, []).append({"id": b.id, "bug_id": b.bug_id, "minor_version_id": b.latest_minor_version_id, "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else None})
+        free_bug_map.setdefault(b.requirement_id or -1, []).append({
+            "id": b.id, "bug_id": b.bug_id, "minor_version_id": b.latest_minor_version_id,
+            "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else None
+        })
 
     return [
         {
-            "id": r.id,
-            "zentao_req_id": r.zentao_req_id,
-            "title": r.title,
-            "case_completed": r.case_completed,
-            "test_completed": r.test_completed,
-            "test_cases": [
-                {"id": c.id, "zentao_case_id": c.zentao_case_id, "bugs": case_bug_map.get(str(c.id), [])}
-                for c in r.test_cases
-            ],
+            "id": r.id, "zentao_req_id": r.zentao_req_id, "title": r.title,
+            "case_completed": r.case_completed, "test_completed": r.test_completed,
+            "major_version_name": r.major_version.version_no if r.major_version else "",
+            "test_cases": [{"id": c.id, "zentao_case_id": c.zentao_case_id, "bugs": case_bug_map.get(str(c.id), [])} for c in r.test_cases],
             "free_bugs": free_bug_map.get(r.id, []),
         }
         for r in reqs
@@ -924,21 +943,27 @@ def stage5_overview(major_version_id: int, current_user: Annotated[User, Depends
     bug_pool = []
     for b in bugs:
         other_records = []
+        my_record = None
         for r in b.stage5_records:
             if r.user_id != current_user.id:
                 other_records.append({
                     "username": r.user.username,
                     "minor_version_no": r.minor_version.version_no if r.minor_version else "未知",
                     "test_done": r.test_done,
-                    "newly_found_bug_id": r.newly_found_bug_id,
-                    "resolution": r.resolution,
+                    "resolution": r.resolution
                 })
+            else:
+                my_record = r
+
         bug_pool.append({
             "id": b.id, "bug_id": b.bug_id, "source_type": b.source_type.value, "source_ref": b.source_ref,
             "requirement_id": b.requirement_id, "latest_minor_version_id": b.latest_minor_version_id,
-            "test_done": b.test_done, "newly_found_bug_id": b.newly_found_bug_id, "closed": b.closed, "resolution": b.resolution, "is_retest_failed": b.is_retest_failed,
-            "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else None,
+            "closed": b.closed,  # 保留全局闭环状态用于全景进度条统计
+            "my_test_done": my_record.test_done if my_record else False,
+            "my_resolution": my_record.resolution if my_record else "fixed",
             "other_records": other_records,
+            "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else None,
+            "is_retest_failed": getattr(b, 'is_retest_failed', False)
         })
     return {
         "major_version_id": major_version_id,
@@ -952,6 +977,21 @@ def stage5_overview(major_version_id: int, current_user: Annotated[User, Depends
         "bug_pool": bug_pool,
     }
 
+
+@app.get("/stage5/search-options")
+def get_stage5_search_options(major_version_id: int, _: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
+    # 抓取当前版本下的可选项用于前端模糊搜索
+    reqs = db.query(Requirement).filter(Requirement.major_version_id == major_version_id).all()
+    cases = db.query(TestCase).join(Requirement).filter(Requirement.major_version_id == major_version_id).all()
+    legacy_bugs = db.query(BugTracking).filter(BugTracking.major_version_id == major_version_id).all()
+
+    return {
+        "reqs": [{"id": r.id, "label": f"{r.zentao_req_id} {r.title}"} for r in reqs],
+        "cases": [{"id": c.id, "req_id": c.requirement_id, "label": c.zentao_case_id} for c in cases],
+        "bugs": [{"id": b.id, "req_id": b.requirement_id, "label": b.bug_id} for b in legacy_bugs],
+    }
+
+
 @app.put("/stage5/bugs/{bug_track_id}/result")
 async def submit_stage5_result(bug_track_id: int, payload: Stage5ResultPayload, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
     bug = db.query(BugTracking).filter(BugTracking.id == bug_track_id).first()
@@ -960,42 +1000,8 @@ async def submit_stage5_result(bug_track_id: int, payload: Stage5ResultPayload, 
 
     old_resolution = bug.resolution
 
-    # 兼容逗号分割的多 Bug 字符串，自动逐个查重并创建，同时特派给当前提交人
-    if payload.newly_found_bug_id:
-        from app.models import BugSourceType
-        new_bugs = [b.strip() for b in payload.newly_found_bug_id.split(",") if b.strip()]
-        for nb in new_bugs:
-            existing_new = db.query(BugTracking).filter(BugTracking.bug_id == nb).first()
-            if not existing_new:
-                new_bug = BugTracking(
-                    major_version_id=bug.major_version_id,
-                    requirement_id=bug.requirement_id,
-                    source_type=BugSourceType.LEGACY_BUG,
-                    source_ref=bug.bug_id,
-                    bug_id=nb,
-                    latest_minor_version_id=payload.minor_version_id,
-                    created_by_id=current_user.id,
-                    dispatched_to_id=current_user.id,
-                )
-                db.add(new_bug)
-
-    # 1. Keep global latest status updatable
-    bug.latest_minor_version_id = payload.minor_version_id
-    bug.test_done = payload.test_done
-    bug.newly_found_bug_id = payload.newly_found_bug_id
-    bug.resolution = payload.resolution
-    bug.closed = payload.test_done and (not payload.newly_found_bug_id)
-    bug.closed_by_id = current_user.id if bug.closed else None
-
-    # Broadcast only on meaningful resolution transitions of closed bugs
-    if bug.closed and old_resolution != payload.resolution:
-        res_zh_map = {"fixed": "✅修复通过", "false_alarm": "⚠️误报", "rejected": "⛔拒绝修复"}
-        if payload.resolution in ["false_alarm", "rejected"] or old_resolution in ["false_alarm", "rejected"]:
-            await _send_wechat_markdown(
-                f"📢 **Bug 状态流转通知**\n> 缺陷 **{bug.bug_id}** 的处理状态被 @{current_user.username} 更新为：**{res_zh_map.get(payload.resolution, payload.resolution)}** (位于发包: 🏷️{payload.minor_version_id})"
-            )
-
-    # 2. Save personal stage5 performance (UPSERT)
+    # 1. 保存个人独立闭环业绩 (UPSERT)
+    from app.models import BugStage5Record
     record = db.query(BugStage5Record).filter(BugStage5Record.bug_tracking_id == bug_track_id, BugStage5Record.user_id == current_user.id).first()
     if not record:
         record = BugStage5Record(bug_tracking_id=bug_track_id, user_id=current_user.id)
@@ -1005,6 +1011,34 @@ async def submit_stage5_result(bug_track_id: int, payload: Stage5ResultPayload, 
     record.newly_found_bug_id = payload.newly_found_bug_id
     record.resolution = payload.resolution
     record.updated_at = datetime.utcnow()
+    db.commit()  # 先提交个人记录
+
+    # 2. 重新计算全局状态：只要有一个人确认了闭环，全局即视为闭环（用于统计进度条）
+    all_records = db.query(BugStage5Record).filter(BugStage5Record.bug_tracking_id == bug_track_id).all()
+    any_closed = any(r.test_done for r in all_records)
+
+    bug.latest_minor_version_id = payload.minor_version_id
+    bug.resolution = payload.resolution
+    bug.closed = any_closed
+    bug.closed_by_id = current_user.id if any_closed else None
+
+    # 企微消息广播逻辑
+    if payload.test_done and old_resolution != payload.resolution:
+        res_zh_map = {"fixed": "✅修复通过", "false_alarm": "⚠️误报", "rejected": "⛔拒绝修复"}
+        if payload.resolution in ["false_alarm", "rejected"] or old_resolution in ["false_alarm", "rejected"]:
+            await _send_wechat_markdown(f"📢 **Bug 状态流转通知**\n> 缺陷 **{bug.bug_id}** 的处理状态被 @{current_user.username} 更新为：**{res_zh_map.get(payload.resolution, payload.resolution)}** (位于发包: 🏷️{payload.minor_version_id})")
+
+    # 3. 兼容逗号分割的多 Bug 字符串自动连带创建 (特派区逻辑)
+    if payload.newly_found_bug_id:
+        from app.models import BugSourceType
+        new_bugs = [b.strip() for b in payload.newly_found_bug_id.split(",") if b.strip()]
+        for nb in new_bugs:
+            if not db.query(BugTracking).filter(BugTracking.bug_id == nb).first():
+                db.add(BugTracking(
+                    major_version_id=bug.major_version_id, requirement_id=bug.requirement_id,
+                    source_type=BugSourceType.LEGACY_BUG, source_ref=bug.bug_id, bug_id=nb,
+                    latest_minor_version_id=payload.minor_version_id, created_by_id=current_user.id, dispatched_to_id=current_user.id
+                ))
 
     db.commit()
     return {"message": "Stage5 result updated"}

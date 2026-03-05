@@ -39,24 +39,33 @@
     <table><thead><tr><th>需求</th><th>负责人</th></tr></thead><tbody id="assignTable"></tbody></table>
   </section>
 
-  <section id="tab-mine" class="card">
+  <section id="tab-mine" class="hidden card">
     <h2>我的工作台</h2>
-    <div class="card" style="background: #f8fafc; border: 1px solid #e2e8f0; margin-bottom: 16px;">
-      <div class="row" style="margin-bottom: 12px;">
-        <span style="font-weight: bold; color: #334155; margin-right: 8px;">🎯 需求视图:</span>
-        <label>大版本</label>
-        <select id="mineMajorSelect"></select>
-        <button onclick="loadMyWorkbench()">加载我的需求</button>
+    <div class="row" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px; align-items: center; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+      <select id="mineDisplayMode" onchange="toggleMineMode()" style="padding: 6px; border-radius: 4px; border: 1px solid #cbd5e1; outline: none; font-weight: bold; color: #334155;">
+        <option value="version">📌 按大版本查看</option>
+        <option value="all_pending">🔥 查看所有待测试需求</option>
+      </select>
+
+      <div id="mineVersionWrap" style="display:flex; align-items:center;">
+        <label style="margin-right:8px; font-weight:bold; color:#475569;">大版本</label>
+        <select id="mineMajorSelect" onchange="loadMyWorkbench()" style="padding: 6px; border-radius: 4px; border: 1px solid #cbd5e1;"></select>
       </div>
 
-      <div class="row" style="border-top: 1px dashed #cbd5e1; padding-top: 12px;">
-        <span style="font-weight: bold; color: #334155; margin-right: 8px;">🚀 测试上下文:</span>
-        <label>当前执行子版本 (发包)</label>
-        <select id="mineMinorSelect"></select>
-        <button class="secondary" onclick="pushCase()">推送用例进度</button>
-        <button class="secondary" onclick="pushTest()">推送测试进度</button>
+      <div style="display:flex; align-items:center;">
+        <label style="margin-right:8px; font-weight:bold; color:#475569;">当前复测发包(小版本)</label>
+        <select id="mineMinorSelect" style="padding: 6px; border-radius: 4px; border: 1px solid #cbd5e1;"></select>
       </div>
+
+      <div class="prefix-input" style="flex:1; min-width: 200px; background: #fff;">
+        <span>🔍</span>
+        <input id="mineSearchInput" oninput="renderMineCards()" placeholder="搜索需求编号或名称..." style="width:100%; border:none; outline:none; background:transparent;">
+      </div>
+      <button onclick="loadMyWorkbench()">刷新工作台</button>
     </div>
+
+    <div id="mineSummaryText" style="margin-bottom: 16px; font-weight: bold; color: #ea580c; background: #ffedd5; padding: 10px 16px; border-radius: 6px; display: none; border-left: 4px solid #f97316;"></div>
+
     <div id="mineCards"></div>
   </section>
 
@@ -102,12 +111,41 @@
       <tbody id="s5Table"></tbody>
     </table>
     <h3>➕ 新增问题</h3>
-    <div class="row">
-      <div class="prefix-input"><span>b#</span><input id="newBugNum" inputmode="numeric" oninput="digitsOnly(this)"></div>
-      <select id="newSourceType"><option value="manual">自由问题</option><option value="requirement">需求来源</option><option value="case">用例来源</option><option value="legacy_bug">历史Bug来源</option></select>
-      <input id="newSourceRef" placeholder="来源编号(可空)">
-      <select id="newReqSelect"><option value="">关联需求(可空)</option></select>
-      <button onclick="addIssue()">新增问题</button>
+    <div class="row" style="margin-top: 16px; align-items: flex-end; background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px dashed #cbd5e1;">
+      <div>
+        <label style="font-weight:bold; color:#334155;">来源类型</label>
+        <select id="s5BugSource" onchange="toggleS5BugInputs()" style="padding: 6px;">
+          <option value="manual">自由问题 (不关联需求)</option>
+          <option value="requirement">需求关联</option>
+          <option value="case">测试用例关联</option>
+          <option value="legacy_bug">历史Bug关联</option>
+        </select>
+      </div>
+
+      <div id="s5WrapReq" class="hidden" style="margin-left: 12px;">
+        <label style="font-weight:bold; color:#334155;">关联需求 <span style="color:#ef4444">*必选</span></label>
+        <input list="s5ReqList" id="s5ReqInput" placeholder="键盘输入名称或编号搜索..." style="width: 260px; padding: 6px;">
+        <datalist id="s5ReqList"></datalist>
+      </div>
+
+      <div id="s5WrapCase" class="hidden" style="margin-left: 12px;">
+        <label style="font-weight:bold; color:#334155;">关联用例 <span style="color:#ef4444">*必选</span></label>
+        <input list="s5CaseList" id="s5CaseInput" placeholder="键盘输入编号搜索..." style="width: 220px; padding: 6px;">
+        <datalist id="s5CaseList"></datalist>
+      </div>
+
+      <div id="s5WrapLegacy" class="hidden" style="margin-left: 12px;">
+        <label style="font-weight:bold; color:#334155;">关联历史Bug <span style="color:#ef4444">*必选</span></label>
+        <input list="s5LegacyList" id="s5LegacyInput" placeholder="键盘输入编号搜索..." style="width: 220px; padding: 6px;">
+        <datalist id="s5LegacyList"></datalist>
+      </div>
+
+      <div style="margin-left: 12px;">
+        <label style="font-weight:bold; color:#334155;">新Bug编号</label>
+        <div class="prefix-input"><span style="color:#94a3b8">b#</span><input id="s5BugId" inputmode="numeric" oninput="digitsOnly(this)" placeholder="输入数字" style="padding: 6px; width: 100px;"></div>
+      </div>
+
+      <button onclick="submitS5Bug()" style="margin-left: 12px; height: 34px;">➕ 提交新问题</button>
     </div>
   </section>
 
@@ -765,9 +803,8 @@ async function loadStage5(){
   if(!majorId){showMessage('请选择大版本','error');return;}
   
   const data=await (await api('/stage5/overview?major_version_id='+majorId)).json();
-  
-  // 更新下方的关联需求下拉框
-  newReqSelect.innerHTML='<option value=\"\">关联需求(可空)</option>'+data.requirements.map(r=>`<option value='${r.id}'>${r.zentao_req_id}</option>`).join('');
+  await loadS5OptionsData(majorId);
+  toggleS5BugInputs();
   
   stage5Rows=data.bug_pool || [];
   
@@ -792,36 +829,39 @@ async function loadStage5(){
 
 function renderS5(){
   s5Table.innerHTML=stage5Rows.map(b=>{
-    const rowStyle = b.closed ? "background: #f8fafc; color: #94a3b8; text-decoration: line-through;" : "";
+    // 判断当前登录用户是否已经亲自确认闭环
+    const isMyClosed = b.my_test_done;
+    const rowStyle = isMyClosed ? "background: #f8fafc; color: #94a3b8; text-decoration: line-through;" : "";
 
     // 动态拼接其他同事的操作记录
     let othersHtml = '';
     const resZh = {"fixed":"修复通过", "false_alarm":"误报", "rejected":"拒绝修复"};
     if(b.other_records && b.other_records.length > 0) {
-      othersHtml = `<div style="margin-top: 6px; font-size: 12px; text-decoration: none;">` +
+      othersHtml = `<div style="margin-top: 6px; font-size: 12px; text-decoration: none;">` + 
         b.other_records.map(r => {
-          const status = (r.test_done && !r.newly_found_bug_id) ? `<span style="color:#16a34a; font-weight:bold;">✅闭环(${resZh[r.resolution]||'修复'})</span>` : '<span style="color:#dc2626;">❌未闭环</span>';
+          const status = r.test_done ? `<span style="color:#16a34a; font-weight:bold;">✅闭环(${resZh[r.resolution]||'修复'})</span>` : '<span style="color:#dc2626;">⏳未闭环</span>';
           return `<span class="badge" style="background:#f1f5f9; color:#475569; margin-right:4px; padding: 2px 6px;">🙋‍♂️ ${r.username}: ${status} (发包: 🏷️${r.minor_version_no})</span>`;
         }).join('') + `</div>`;
     }
+
     const failBadge = b.is_retest_failed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; margin-left:4px;">🚨复测打回</span>' : '';
     const dispatchBadge = b.dispatched_to_name ? `<span class="badge" style="background:#ffedd5; color:#ea580c; border:1px solid #fdba74; margin-left:4px;">🪂特派:${b.dispatched_to_name}</span>` : '';
 
     return `<tr style="${rowStyle}">
       <td>
-        <b>${b.bug_id}</b> ${failBadge} ${dispatchBadge} <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span>
+        <b>${b.bug_id}</b> <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span> ${failBadge} ${dispatchBadge}
         <a href="javascript:void(0)" onclick="editS5Bug(${b.id}, '${b.bug_id}')" style="margin-left:8px; font-size:12px; color:#3b82f6; text-decoration:none;">编辑</a>
         <a href="javascript:void(0)" onclick="removeS5Bug(${b.id})" style="margin-left:4px; font-size:12px; color:#ef4444; text-decoration:none;">删除</a>
         ${othersHtml}
       </td>
       <td style="text-decoration: none;">
-        <select id='res_${b.id}' style="margin-right: 8px; padding: 2px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 4px; color: #475569;">
-          <option value="fixed" ${b.resolution==='fixed'?'selected':''}>🚀修复通过</option>
-          <option value="false_alarm" ${b.resolution==='false_alarm'?'selected':''}>⚠️误报</option>
-          <option value="rejected" ${b.resolution==='rejected'?'selected':''}>⛔拒绝修复</option>
+        <select id='res_${b.id}' style="margin-right: 8px; padding: 2px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 4px; color: #475569;" ${isMyClosed?'disabled':''}>
+          <option value="fixed" ${b.my_resolution==='fixed'?'selected':''}>🚀修复通过</option>
+          <option value="false_alarm" ${b.my_resolution==='false_alarm'?'selected':''}>⚠️误报</option>
+          <option value="rejected" ${b.my_resolution==='rejected'?'selected':''}>⛔拒绝修复</option>
         </select>
-        <label style="color: #0f172a;"><input id='done_${b.id}' type='checkbox' ${b.test_done?'checked':''}> 确认闭环</label>
-        <button ${b.closed ? 'class="secondary"' : ''} onclick='saveS5(${b.id})' style="margin-left:8px;">保存记录</button>
+        <label style="color: #0f172a; font-weight: bold;"><input id='done_${b.id}' type='checkbox' ${isMyClosed?'checked':''} onchange="this.nextSibling.disabled=this.checked"> 我的闭环确认</label>
+        <button class="${isMyClosed ? 'secondary' : ''}" onclick='saveS5(${b.id})' style="margin-left:8px;">保存记录</button>
       </td>
     </tr>`;
   }).join('');
@@ -857,8 +897,82 @@ async function saveS5(id){
     showMessage('整体测试项已保存');
     loadStage5();
 }
-async function addIssue(){const bug=withPrefix('b#',newBugNum.value);await api('/stage5/issues',{method:'POST',headers:H,body:JSON.stringify({major_version_id:Number(s5MajorSelect.value),requirement_id:newReqSelect.value?Number(newReqSelect.value):null,source_type:newSourceType.value,source_ref:newSourceRef.value||null,bug_id:bug,minor_version_id:Number(s5MinorSelect.value)})});showMessage('问题已新增并推送');newBugNum.value='';loadStage5()}
 async function pushStage5(){if(!confirmPush()) return;const res=await (await api(`/stage5/push-status?major_version_id=${Number(s5MajorSelect.value)}&minor_version_id=${Number(s5MinorSelect.value)}`,{method:'POST'})).json();showMessage(`整体状态已推送，剩余未闭环 ${res.remaining}`)}
+
+let globalS5Options = { reqs: [], cases: [], bugs: [] };
+
+function toggleS5BugInputs() {
+  const type = document.getElementById('s5BugSource').value;
+  document.getElementById('s5WrapReq').classList.toggle('hidden', type !== 'requirement');
+  document.getElementById('s5WrapCase').classList.toggle('hidden', type !== 'case');
+  document.getElementById('s5WrapLegacy').classList.toggle('hidden', type !== 'legacy_bug');
+
+  // 每次切换来源类型时，清空输入框防止串台
+  document.getElementById('s5ReqInput').value = '';
+  document.getElementById('s5CaseInput').value = '';
+  document.getElementById('s5LegacyInput').value = '';
+}
+
+async function loadS5OptionsData(majorId) {
+  try {
+    globalS5Options = await (await api('/stage5/search-options?major_version_id=' + majorId)).json();
+    document.getElementById('s5ReqList').innerHTML = globalS5Options.reqs.map(r => `<option value="${r.label}">`).join('');
+    document.getElementById('s5CaseList').innerHTML = globalS5Options.cases.map(c => `<option value="${c.label}">`).join('');
+    document.getElementById('s5LegacyList').innerHTML = globalS5Options.bugs.map(b => `<option value="${b.label}">`).join('');
+  } catch(e) {
+    console.error('搜索数据加载失败');
+  }
+}
+
+// 覆盖原有的提交函数，加入强校验与自动寻址逻辑
+async function submitS5Bug() {
+  const type = document.getElementById('s5BugSource').value;
+  const bugInput = document.getElementById('s5BugId').value;
+  if (!bugInput) { showMessage('请输入新Bug编号', 'error'); return; }
+  const bugId = withPrefix('b#', bugInput);
+
+  let reqId = null;
+  let sourceRef = null;
+
+  if (type === 'requirement') {
+    const val = document.getElementById('s5ReqInput').value;
+    const target = globalS5Options.reqs.find(r => r.label === val);
+    if(!target) { showMessage('必须从下拉列表中准确选择一个需求！', 'error'); return; }
+    reqId = target.id;
+  } else if (type === 'case') {
+    const val = document.getElementById('s5CaseInput').value;
+    const target = globalS5Options.cases.find(c => c.label === val);
+    if(!target) { showMessage('必须从下拉列表中准确选择一个用例！', 'error'); return; }
+    reqId = target.req_id;
+    sourceRef = target.label;
+  } else if (type === 'legacy_bug') {
+    const val = document.getElementById('s5LegacyInput').value;
+    const target = globalS5Options.bugs.find(b => b.label === val);
+    if(!target) { showMessage('必须从下拉列表中准确选择一个历史Bug！', 'error'); return; }
+    reqId = target.req_id;
+    sourceRef = target.label;
+  }
+
+  try {
+    await api('/stage5/issues', {
+      method: 'POST',
+      headers: H,
+      body: JSON.stringify({
+        major_version_id: Number(s5MajorSelect.value),
+        requirement_id: reqId,
+        source_type: type,
+        source_ref: sourceRef,
+        bug_id: bugId,
+        minor_version_id: Number(s5MinorSelect.value),
+      }),
+    });
+    showMessage('新问题已成功添加到大盘！', 'success');
+    document.getElementById('s5BugId').value = '';
+    loadStage5();
+  } catch(err) {
+    showMessage(err.message || '添加失败', 'error');
+  }
+}
 
 async function queryReport(){
   try{
