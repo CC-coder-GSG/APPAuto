@@ -98,7 +98,7 @@
     </div>
 
     <table id="s5TableContainer" class="hidden">
-      <thead><tr><th>Bug 编号 (来源)</th><th>引出的新Bug(如有)</th><th>验证操作</th></tr></thead>
+      <thead><tr><th>Bug 编号 (来源)</th><th>验证操作</th></tr></thead>
       <tbody id="s5Table"></tbody>
     </table>
     <h3>➕ 新增问题</h3>
@@ -153,6 +153,17 @@
         <select id="dispatchUserSelect"></select>
         <button onclick="confirmDispatchBug()">确认特派</button>
       </div>
+    </div>
+
+    <div class="card" style="margin-top: 24px; border-top: 2px solid #e2e8f0;">
+      <div class="row" style="justify-content: space-between; align-items: center;">
+        <h3 style="margin: 0; color: #334155;">📊 特派分发状态追踪大盘</h3>
+        <button onclick="loadDispatchedAll()">刷新列表</button>
+      </div>
+      <table style="margin-top: 16px;">
+        <thead><tr><th>Bug 编号</th><th>特派负责人</th><th>当前处理状态</th></tr></thead>
+        <tbody id="dispatchAllTable"></tbody>
+      </table>
     </div>
   </section>
 
@@ -235,6 +246,7 @@ function confirmPush(){return confirm('确定要向企微群发送吗？')}
 function showTab(name){
   ['assign','mine','retest','stage5','report','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
   document.getElementById('tab-'+name).classList.remove('hidden');
+  if(name === 'dispatch') { loadDispatchedAll(); }
   if(name==='report'){loadReportOnDemand()}
 }
 function isAllUsersReport(){return currentUser && currentUser.role==='admin' && reportUserSelect && reportUserSelect.value==='0'}
@@ -483,14 +495,24 @@ async function loadMyWorkbench(){
           ${ddata.map(b=>`
             <tr style="${b.test_done?'background:#f8fafc; color:#94a3b8; text-decoration:line-through;':''}">
               <td><b>${b.bug_id}</b> <span style="font-size:12px;color:#64748b;">(${b.req_title})</span></td>
-              <td><div class='prefix-input' style="${b.test_done?'text-decoration:none;':''}"><span style="color:#94a3b8">b#</span><input id='dnb_${b.id}' value='${(b.newly_found_bug_id||'').replace('b#','')}' ${b.test_done?'disabled':''} oninput='digitsOnly(this)'></div></td>
+              <td>
+                <input type="hidden" id="dnb_hidden_${b.id}" value="${b.newly_found_bug_id||''}">
+                <div style="margin-bottom:6px;">
+                  ${(b.newly_found_bug_id ? b.newly_found_bug_id.split(',') : []).map(dbug => `
+                    <span class="badge" style="background:#fef2f2; color:#b91c1c; border:1px solid #fca5a5; margin-right:4px; margin-bottom:4px; display:inline-block;">
+                      ${dbug} <a href="javascript:void(0)" onclick="${b.test_done?'return false;':`removeDerivedBug(${b.id}, '${dbug}')`}" style="color:#7f1d1d; text-decoration:none; margin-left:4px; font-weight:bold;">×</a>
+                    </span>
+                  `).join('') || '<span class="muted" style="font-size:12px;">暂无引出Bug</span>'}
+                </div>
+                <button class="secondary" style="padding:2px 8px; font-size:12px;" ${b.test_done?'disabled':''} onclick="addDerivedBug(${b.id})">➕ 添加引出Bug</button>
+              </td>
               <td style="text-decoration:none;">
                 <select id='dres_${b.id}' style="margin-right:8px; padding:2px; font-size:13px;" ${b.test_done?'disabled':''}>
                   <option value="fixed" ${b.resolution==='fixed'?'selected':''}>🚀修复通过</option>
                   <option value="false_alarm" ${b.resolution==='false_alarm'?'selected':''}>⚠️误报</option>
                   <option value="rejected" ${b.resolution==='rejected'?'selected':''}>⛔拒绝修复</option>
                 </select>
-                <label style="color:#0f172a;"><input id='ddone_${b.id}' type='checkbox' ${b.test_done?'checked':''} onchange="document.getElementById('dnb_'+${b.id}).disabled=this.checked"> 确认闭环</label>
+                <label style="color:#0f172a;"><input id='ddone_${b.id}' type='checkbox' ${b.test_done?'checked':''}> 确认闭环</label>
                 <button class="${b.test_done?'secondary':''}" onclick="saveDispatchedBug(${b.id})" style="margin-left:8px;">保存记录</button>
               </td>
             </tr>
@@ -771,7 +793,6 @@ async function loadStage5(){
 function renderS5(){
   s5Table.innerHTML=stage5Rows.map(b=>{
     const rowStyle = b.closed ? "background: #f8fafc; color: #94a3b8; text-decoration: line-through;" : "";
-    const inputStyle = b.closed ? "text-decoration: none;" : "";
 
     // 动态拼接其他同事的操作记录
     let othersHtml = '';
@@ -784,19 +805,14 @@ function renderS5(){
         }).join('') + `</div>`;
     }
     const failBadge = b.is_retest_failed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; margin-left:4px;">🚨复测打回</span>' : '';
+    const dispatchBadge = b.dispatched_to_name ? `<span class="badge" style="background:#ffedd5; color:#ea580c; border:1px solid #fdba74; margin-left:4px;">🪂特派:${b.dispatched_to_name}</span>` : '';
 
     return `<tr style="${rowStyle}">
       <td>
-        <b>${b.bug_id}</b> ${failBadge} <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span>
+        <b>${b.bug_id}</b> ${failBadge} ${dispatchBadge} <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span>
         <a href="javascript:void(0)" onclick="editS5Bug(${b.id}, '${b.bug_id}')" style="margin-left:8px; font-size:12px; color:#3b82f6; text-decoration:none;">编辑</a>
         <a href="javascript:void(0)" onclick="removeS5Bug(${b.id})" style="margin-left:4px; font-size:12px; color:#ef4444; text-decoration:none;">删除</a>
         ${othersHtml}
-      </td>
-      <td>
-        <div class='prefix-input' style="${inputStyle}">
-          <span>b#</span>
-          <input id='nb_${b.id}' value='${(b.newly_found_bug_id||'').replace('b#','')}' ${b.test_done?'disabled':''} oninput='digitsOnly(this)'>
-        </div>
       </td>
       <td style="text-decoration: none;">
         <select id='res_${b.id}' style="margin-right: 8px; padding: 2px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 4px; color: #475569;">
@@ -804,7 +820,7 @@ function renderS5(){
           <option value="false_alarm" ${b.resolution==='false_alarm'?'selected':''}>⚠️误报</option>
           <option value="rejected" ${b.resolution==='rejected'?'selected':''}>⛔拒绝修复</option>
         </select>
-        <label style="color: #0f172a;"><input id='done_${b.id}' type='checkbox' ${b.test_done?'checked':''} onchange='toggleS5Lock(${b.id})'> 确认闭环</label>
+        <label style="color: #0f172a;"><input id='done_${b.id}' type='checkbox' ${b.test_done?'checked':''}> 确认闭环</label>
         <button ${b.closed ? 'class="secondary"' : ''} onclick='saveS5(${b.id})' style="margin-left:8px;">保存记录</button>
       </td>
     </tr>`;
@@ -833,12 +849,11 @@ async function removeS5Bug(id){
     showMessage(err.message || '删除失败', 'error');
   }
 }
-function toggleS5Lock(id){document.getElementById('nb_'+id).disabled=document.getElementById('done_'+id).checked}
+function toggleS5Lock(id){const el=document.getElementById('nb_'+id);if(el){el.disabled=document.getElementById('done_'+id).checked}}
 async function saveS5(id){
     const done=document.getElementById('done_'+id).checked;
-    const n=withPrefix('b#',document.getElementById('nb_'+id).value);
     const res=document.getElementById('res_'+id).value;
-    await api(`/stage5/bugs/${id}/result`,{method:'PUT',headers:H,body:JSON.stringify({minor_version_id:Number(s5MinorSelect.value),test_done:done,newly_found_bug_id:n, resolution:res})});
+    await api(`/stage5/bugs/${id}/result`,{method:'PUT',headers:H,body:JSON.stringify({minor_version_id:Number(s5MinorSelect.value),test_done:done,newly_found_bug_id:null, resolution:res})});
     showMessage('整体测试项已保存');
     loadStage5();
 }
@@ -1176,7 +1191,7 @@ async function confirmDispatchBug() {
 
 async function saveDispatchedBug(id) {
   const done = document.getElementById('ddone_' + id).checked;
-  const n = withPrefix('b#', document.getElementById('dnb_' + id).value);
+  const n = document.getElementById('dnb_hidden_' + id).value || null;
   const res = document.getElementById('dres_' + id).value;
   await api(`/stage5/bugs/${id}/result`, {
     method: 'PUT', headers: H,
@@ -1184,6 +1199,47 @@ async function saveDispatchedBug(id) {
   });
   showMessage('特派专项验证已保存并同步至总盘');
   loadMyWorkbench();
+}
+
+async function addDerivedBug(id) {
+  const n = prompt("请输入引出的新Bug数字编号：");
+  if(!n) return;
+  const newBug = withPrefix('b#', n);
+  const hiddenEl = document.getElementById('dnb_hidden_' + id);
+  let arr = hiddenEl.value ? hiddenEl.value.split(',') : [];
+
+  if (arr.includes(newBug)) {
+    showMessage('该 Bug 编号已经添加过了！', 'error');
+    return;
+  }
+
+  arr.push(newBug);
+  hiddenEl.value = arr.join(',');
+  await saveDispatchedBug(id);
+}
+
+async function removeDerivedBug(id, bugToRemove) {
+  if(!confirm(`确定要移除引出的 Bug [${bugToRemove}] 吗？`)) return;
+  const hiddenEl = document.getElementById('dnb_hidden_' + id);
+  let arr = hiddenEl.value ? hiddenEl.value.split(',') : [];
+  arr = arr.filter(x => x !== bugToRemove);
+  hiddenEl.value = arr.join(',');
+  await saveDispatchedBug(id);
+}
+
+async function loadDispatchedAll() {
+  try {
+    const data = await (await api('/bugs/dispatched-all')).json();
+    const resZh = {"fixed":"🚀修复通过", "false_alarm":"⚠️误报", "rejected":"⛔拒绝修复"};
+    document.getElementById('dispatchAllTable').innerHTML = data.map(b => {
+      const statusHtml = b.closed ? `<span style="color:#16a34a;font-weight:bold;">✅已闭环 (${resZh[b.resolution]||'修复'})</span>` : `<span style="color:#dc2626;">⏳处理中</span>`;
+      return `<tr>
+          <td><b>${b.bug_id}</b></td>
+          <td><span class="badge" style="background:#ffedd5;color:#ea580c; border:1px solid #fdba74;">🪂 ${b.dispatched_to_name}</span></td>
+          <td>${statusHtml}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {}
 }
 
 window.addEventListener('error',e=>showMessage(e.message||'未知错误','error'))

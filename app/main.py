@@ -915,7 +915,11 @@ async def push_retest_result(major_version_id: int, current_user: Annotated[User
 @app.get("/stage5/overview")
 def stage5_overview(major_version_id: int, current_user: Annotated[User, Depends(get_current_user)], db: Annotated[Session, Depends(get_db)]):
     reqs = db.query(Requirement).options(joinedload(Requirement.test_cases), joinedload(Requirement.test_executions)).filter(Requirement.major_version_id == major_version_id).all()
-    bugs = db.query(BugTracking).options(joinedload(BugTracking.stage5_records).joinedload(BugStage5Record.user), joinedload(BugTracking.stage5_records).joinedload(BugStage5Record.minor_version)).filter(BugTracking.major_version_id == major_version_id).all()
+    bugs = db.query(BugTracking).options(
+        joinedload(BugTracking.stage5_records).joinedload(BugStage5Record.user),
+        joinedload(BugTracking.stage5_records).joinedload(BugStage5Record.minor_version),
+        joinedload(BugTracking.dispatched_to),
+    ).filter(BugTracking.major_version_id == major_version_id).all()
 
     bug_pool = []
     for b in bugs:
@@ -933,6 +937,7 @@ def stage5_overview(major_version_id: int, current_user: Annotated[User, Depends
             "id": b.id, "bug_id": b.bug_id, "source_type": b.source_type.value, "source_ref": b.source_ref,
             "requirement_id": b.requirement_id, "latest_minor_version_id": b.latest_minor_version_id,
             "test_done": b.test_done, "newly_found_bug_id": b.newly_found_bug_id, "closed": b.closed, "resolution": b.resolution, "is_retest_failed": b.is_retest_failed,
+            "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else None,
             "other_records": other_records,
         })
     return {
@@ -954,6 +959,25 @@ async def submit_stage5_result(bug_track_id: int, payload: Stage5ResultPayload, 
         raise HTTPException(status_code=404, detail="Bug tracking item not found")
 
     old_resolution = bug.resolution
+
+    # 兼容逗号分割的多 Bug 字符串，自动逐个查重并创建，同时特派给当前提交人
+    if payload.newly_found_bug_id:
+        from app.models import BugSourceType
+        new_bugs = [b.strip() for b in payload.newly_found_bug_id.split(",") if b.strip()]
+        for nb in new_bugs:
+            existing_new = db.query(BugTracking).filter(BugTracking.bug_id == nb).first()
+            if not existing_new:
+                new_bug = BugTracking(
+                    major_version_id=bug.major_version_id,
+                    requirement_id=bug.requirement_id,
+                    source_type=BugSourceType.LEGACY_BUG,
+                    source_ref=bug.bug_id,
+                    bug_id=nb,
+                    latest_minor_version_id=payload.minor_version_id,
+                    created_by_id=current_user.id,
+                    dispatched_to_id=current_user.id,
+                )
+                db.add(new_bug)
 
     # 1. Keep global latest status updatable
     bug.latest_minor_version_id = payload.minor_version_id
@@ -1356,6 +1380,18 @@ def dispatched_to_me(major_version_id: int, current_user: Annotated[User, Depend
             "newly_found_bug_id": r.newly_found_bug_id if r else "",
         })
     return res
+
+
+@app.get("/bugs/dispatched-all")
+def get_all_dispatched_bugs(_: Annotated[User, Depends(require_admin)], db: Session = Depends(get_db)):
+    bugs = db.query(BugTracking).options(joinedload(BugTracking.dispatched_to)).filter(BugTracking.dispatched_to_id.isnot(None)).order_by(BugTracking.id.desc()).all()
+    return [{
+        "id": b.id,
+        "bug_id": b.bug_id,
+        "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else "未知",
+        "closed": b.closed,
+        "resolution": b.resolution
+    } for b in bugs]
 
 
 @app.get("/export")
