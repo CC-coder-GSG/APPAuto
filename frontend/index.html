@@ -294,6 +294,24 @@
     </div>
 
     <div class="card">
+      <h3>视图控制</h3>
+      <div class="row" style="justify-content: space-between; align-items: center;">
+        <div class="row" style="gap: 16px;">
+          <label style="font-weight: 600; color: #334155;">
+            <input id="toggleDataUsers" type="checkbox" checked onchange="setDataView('users', this.checked)"> 显示用户信息
+          </label>
+          <label style="font-weight: 600; color: #334155;">
+            <input id="toggleDataVersions" type="checkbox" checked onchange="setDataView('versions', this.checked)"> 显示版本信息
+          </label>
+        </div>
+        <div class="row" style="gap: 8px;">
+          <button class="secondary" onclick="setDataViewBatch(true)">全部显示</button>
+          <button class="secondary" onclick="setDataViewBatch(false)">全部隐藏</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="dataUsersCard" class="card">
       <h3>用户管理</h3>
       <div id="dataUsers"></div>
     </div>
@@ -317,6 +335,8 @@ let currentUser=null, users=[], versions=[], assignReqs=[], stage5Rows=[];
 let trendChart, sourcePieChart, radarChart, teamCompareChart, versionBugChart;
 let topReqChart, leakageChart, funnelChart, execChart;
 let reportLoaded=false;
+let dataOverviewCache = null;
+let dataViewState = { showUsers: true, showVersions: true };
 
 function showMessage(msg,type='success'){const w=document.getElementById('toastWrap');const d=document.createElement('div');d.className=`toast ${type}`;d.innerText=msg;w.appendChild(d);setTimeout(()=>{d.classList.add('hide');setTimeout(()=>d.remove(),220)},3000)}
 function digitsOnly(el){el.value=(el.value||'').replace(/\D/g,'')}
@@ -1381,9 +1401,55 @@ function exportTreePdf() {
 }
 
 async function loadDataOverview(){
-  const data = await (await api('/admin/data-overview')).json();
+  dataOverviewCache = await (await api('/admin/data-overview')).json();
+  renderDataOverview();
+}
 
-  dataUsers.innerHTML = (data.users || []).map(u => `<div class='row'><span>${u.username}（${u.role==='admin'?'管理员':'普通用户'}）</span><span class='badge' style='background:${u.is_team_member?'#dcfce7':'#fee2e2'};color:${u.is_team_member?'#166534':'#991b1b'}'>${u.is_team_member?'组员':'编外'}</span><button onclick='toggleRole(${u.id},"${u.role}")'>设为${u.role==='admin'?'普通用户':'管理员'}</button><button class='secondary' onclick='toggleTeamMember(${u.id}, ${u.is_team_member ? false : true})'>${u.is_team_member?'设为编外人员':'设为组员'}</button><button class='secondary' onclick='resetUserPassword(${u.id}, "${u.username}")'>重置密码</button><button class='danger' onclick='removeUser(${u.id},"${u.username}")'>删除</button></div>`).join('');
+function setDataView(key, checked){
+  if(key === 'users') dataViewState.showUsers = checked;
+  if(key === 'versions') dataViewState.showVersions = checked;
+  renderDataOverview();
+}
+
+function setDataViewBatch(showAll){
+  dataViewState.showUsers = showAll;
+  dataViewState.showVersions = showAll;
+  const usersToggle = document.getElementById('toggleDataUsers');
+  const versionsToggle = document.getElementById('toggleDataVersions');
+  if(usersToggle) usersToggle.checked = showAll;
+  if(versionsToggle) versionsToggle.checked = showAll;
+  renderDataOverview();
+}
+
+function renderDataOverview(){
+  const data = dataOverviewCache || { users: [], versions: [], requirements: [], bugs: [] };
+  const usersCard = document.getElementById('dataUsersCard');
+  if(usersCard) usersCard.classList.toggle('hidden', !dataViewState.showUsers);
+
+  if(dataViewState.showUsers){
+    dataUsers.innerHTML = (data.users || []).length === 0
+      ? '<div class="muted" style="padding: 12px 8px;">暂无用户数据</div>'
+      : (data.users || []).map(u => {
+          const safeUsername = String(u.username || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+          return `<div class="card" style="margin-bottom:12px; padding:14px 16px; border:1px solid #e2e8f0; box-shadow:none;">
+            <div style="display:grid; grid-template-columns:minmax(220px, 1fr) auto; gap:12px; align-items:center;">
+              <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+                <span style="font-weight:700; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${u.username}</span>
+                <span class="badge" style="background:${u.role==='admin'?'#dbeafe':'#f1f5f9'}; color:${u.role==='admin'?'#1d4ed8':'#475569'}">${u.role==='admin'?'管理员':'普通用户'}</span>
+                <span class="badge" style="background:${u.is_team_member?'#dcfce7':'#fee2e2'}; color:${u.is_team_member?'#166534':'#991b1b'}">${u.is_team_member?'组员':'编外'}</span>
+              </div>
+              <div class="row" style="justify-content:flex-end; gap:8px; margin:0; flex-wrap:wrap;">
+                <button onclick="toggleRole(${u.id},'${u.role}')">设为${u.role==='admin'?'普通用户':'管理员'}</button>
+                <button class="secondary" onclick="toggleTeamMember(${u.id}, ${u.is_team_member ? false : true})">${u.is_team_member?'设为编外人员':'设为组员'}</button>
+                <button class="secondary" onclick="resetUserPassword(${u.id}, '${safeUsername}')">重置密码</button>
+                <button class="danger" onclick="removeUser(${u.id}, '${safeUsername}')">删除</button>
+              </div>
+            </div>
+          </div>`;
+        }).join('');
+  } else {
+    dataUsers.innerHTML = '';
+  }
 
   const majors = (data.versions || []).filter(v => v.version_type === 'major');
   const minors = (data.versions || []).filter(v => v.version_type === 'minor');
@@ -1446,10 +1512,10 @@ async function loadDataOverview(){
         </span>
       </div>
       <div id="major_body_${major.id}" class="hidden" style="padding:16px; background:#f8fafc;">
-        <div style="margin-bottom:20px; padding-bottom:12px; border-bottom:1px dashed #cbd5e1;">
+        ${dataViewState.showVersions ? `<div style="margin-bottom:20px; padding-bottom:12px; border-bottom:1px dashed #cbd5e1;">
           <div style="font-weight:bold; margin-bottom:8px; color:#334155;">【版本发包履历】</div>
           <div>${minorHtml}</div>
-        </div>
+        </div>` : '<div class="muted" style="margin-bottom:20px; padding-bottom:12px; border-bottom:1px dashed #cbd5e1;">版本信息已隐藏（可在上方视图控制中开启）</div>'}
         <div>
           <div style="font-weight:bold; margin-bottom:12px; color:#334155;">【下辖需求清单】</div>
           ${reqHtml}
