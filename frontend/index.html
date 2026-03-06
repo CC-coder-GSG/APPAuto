@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8"/>
   <title>OmniQA 测试管理系统</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/css/main.css">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script type="module" src="/static/js/app.js"></script>
   <style>
     .text-btn { background:none; border:none; color:#64748b; cursor:pointer; padding:0 4px; font-size:14px; font-weight:bold; }
     .text-btn:hover { color:#dc2626; }
@@ -389,6 +390,7 @@ async function api(url,opt={}){opt.headers={...(opt.headers||{}),Authorization:'
 
 async function init(){
   currentUser=await (await api('/auth/me')).json();
+  window.OmniQAState && (window.OmniQAState.currentUser = currentUser);
   document.getElementById('me').innerText=`${currentUser.username}(${currentUser.role})`;
   const today = new Date().toISOString().slice(0,10);
   document.getElementById('reportStartDate').value=today;
@@ -414,7 +416,7 @@ async function init(){
 async function loadUsers(){users=await (await api('/users')).json();fillReportUsers();if(document.getElementById('dispatchUserSelect')) document.getElementById('dispatchUserSelect').innerHTML = users.map(u=>'<option value=\"'+u.id+'\">'+u.username+'</option>').join('')}
 function fillReportUsers(){const s=document.getElementById('reportUserSelect');if(!s) return; const allOpt=currentUser&&currentUser.role==='admin'?'<option value="0">全员</option>':''; s.innerHTML=allOpt+users.map(u=>`<option value="${u.id}">${u.username}${u.is_team_member===false?'(编外)':''}</option>`).join('');adjustReportChartVisibility()}
 
-async function loadVersions(){versions=await (await api('/versions')).json();fillVersionSelects();fillCreateVersionParent();toggleCreateVersionParent();updateCreateReqControls()}
+async function loadVersions(){versions=await (await api('/versions')).json();window.OmniQAState && (window.OmniQAState.versions = versions);fillVersionSelects();fillCreateVersionParent();toggleCreateVersionParent();updateCreateReqControls()}
 function fillVersionSelects(){
   const majors=versions.filter(v=>v.version_type==='major');
   const minors=versions.filter(v=>v.version_type==='minor');
@@ -446,930 +448,148 @@ function toggleCreateVersionParent(){
 }
 
 async function createVersion(){
-  try{
-    const version_no=(createVersionNo.value||'').trim();
-    const version_type=createVersionType.value;
-    const parentRaw=createVersionParent.value;
-    const parent_id=version_type==='minor'?Number(parentRaw):null;
-    if(!version_no){showMessage('请填写版本号','error');return}
-    if(version_type==='minor' && !parentRaw){showMessage('minor 版本必须选择父大版本','error');return}
-    await api('/versions',{method:'POST',headers:H,body:JSON.stringify({version_no,version_type,parent_id})});
-    createVersionNo.value='';createVersionType.value='major';toggleCreateVersionParent();
-    await loadVersions(); await loadDataOverview();
-    showMessage('创建版本成功','success');
-  }catch(err){showMessage(err.message||'创建版本失败','error')}
+  return window.OmniQADataTab.createVersion();
 }
 
 async function createUser(){
-  try{
-    const username=(createUsername.value||'').trim();
-    const password=(createPassword.value||'').trim();
-    const role=createUserRole.value;
-    if(!username||!password){showMessage('请填写用户名和密码','error');return}
-    await api('/users',{method:'POST',headers:H,body:JSON.stringify({username,password,role})});
-    createUsername.value='';createPassword.value='';createUserRole.value='user';
-    await loadUsers(); await loadDataOverview();
-    showMessage('创建用户成功','success');
-  }catch(err){showMessage(err.message||'创建用户失败','error')}
+  return window.OmniQADataTab.createUser();
 }
 
 async function createReq(){
-  try{
-    const title=(createReqTitle.value||'').trim();
-    const reqNo=withPrefix('r#',createReqNo.value);
-    const major_version_id=Number(createReqMajorSelect.value);
-    if(!major_version_id){
-      showMessage('请先去【数据管理台】创建一个大版本！', 'error');
-      return;
-    }
-    if(!title){showMessage('请填写需求标题','error');return}
-    if(!reqNo){showMessage('请填写需求编号数字部分','error');return}
-    await api('/requirements',{method:'POST',headers:H,body:JSON.stringify({zentao_req_id:reqNo,title,major_version_id})});
-    createReqTitle.value='';createReqNo.value='';
-    showMessage('需求已创建成功，请联系管理员分配人员或刷新列表', 'success');
-    await loadDataOverview();
-  }catch(err){showMessage(err.message||'创建需求失败','error')}
+  return window.OmniQADataTab.createReq();
 }
 
-/* ================= XLSX / CSV 解析核心逻辑 ================= */
-let pendingImportReqs = [];
-
 function handleReqFileSelect(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = function(evt) {
-    try {
-      // 1. 获取文件的二进制数据
-      const data = new Uint8Array(evt.target.result);
-      // 2. 借助 SheetJS 解析 Excel
-      const workbook = XLSX.read(data, {type: 'array'});
-      const firstSheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[firstSheetName];
-      // 3. 转为二维数组，避免换行符和逗号导致的解析问题
-      const jsonArr = XLSX.utils.sheet_to_json(worksheet, {header: 1});
-      
-      parseExcelArray(jsonArr);
-    } catch(err) {
-      showMessage('Excel 解析失败，请检查文件格式是否正确', 'error');
-    }
-    e.target.value = ''; // 清空 input，允许重复选择同一文件
-  };
-  
-  // 必须用 readAsArrayBuffer 才能读取真实 .xlsx 二进制文件
-  reader.readAsArrayBuffer(file); 
+  return window.OmniQADataTab.handleReqFileSelect(e);
 }
 
 function parseExcelArray(rows) {
-  pendingImportReqs = [];
-  let isDataStarted = false;
-  let idIndex = -1, titleIndex = -1;
-
-  for (let row of rows) {
-    // 忽略空行
-    if (!row || row.length === 0) continue;
-
-    if (!isDataStarted) {
-      // 自动向下查找包含“编号”和“需求名称”的真实表头（跳过顶部说明）
-      idIndex = row.indexOf('编号');
-      titleIndex = row.indexOf('需求名称');
-      if (idIndex !== -1 && titleIndex !== -1) {
-          isDataStarted = true;
-      }
-      continue;
-    }
-
-    // 找到表头后提取下方数据
-    if (idIndex !== -1 && titleIndex !== -1) {
-      const rawId = String(row[idIndex] || '').trim();
-      const rawTitle = String(row[titleIndex] || '').trim();
-      
-      // 提取纯数字作为需求号
-      const reqNo = rawId.replace(/\D/g, '');
-      if (reqNo && rawTitle) {
-        pendingImportReqs.push({ zentao_req_id: 'r#' + reqNo, title: rawTitle });
-      }
-    }
-  }
-
-  if (pendingImportReqs.length === 0) {
-    showMessage('未解析到数据，请确保表格中包含\"编号\"和\"需求名称\"列头！', 'error');
-    return;
-  }
-
-  // 渲染预览区
-  document.getElementById('importPreviewArea').classList.remove('hidden');
-  document.getElementById('previewCount').innerText = pendingImportReqs.length;
-  document.getElementById('previewList').innerHTML = pendingImportReqs.map(r => `<div style="padding: 4px 0; border-bottom: 1px solid #f1f5f9;"><span class="badge" style="margin-right:8px">${r.zentao_req_id}</span> ${r.title}</div>`).join('');
-  document.getElementById('importMajorSelect').innerHTML = document.getElementById('createReqMajorSelect').innerHTML;
+  return window.OmniQADataTab.parseExcelArray(rows);
 }
 
 function cancelImport() {
-  pendingImportReqs = [];
-  document.getElementById('importPreviewArea').classList.add('hidden');
+  return window.OmniQADataTab.cancelImport();
 }
 
 async function confirmImport() {
-  const majorId = Number(document.getElementById('importMajorSelect').value);
-  if (!majorId) { showMessage('请选择要导入的大版本！', 'error'); return; }
-  
-  try {
-    const res = await api('/requirements/batch', {
-      method: 'POST',
-      headers: H,
-      body: JSON.stringify({ major_version_id: majorId, items: pendingImportReqs })
-    });
-    const data = await res.json();
-    showMessage(`成功导入 ${data.count} 条新需求（已自动忽略系统中存在的重复项）！`, 'success');
-    cancelImport();
-    await loadDataOverview();
-  } catch (err) {
-    showMessage(err.message || '导入失败', 'error');
-  }
+  return window.OmniQADataTab.confirmImport();
 }
-/* ======================================================== */
 
-async function loadAssignBoard(){const majorId=Number(assignMajorSelect.value);assignReqs=await (await api('/requirements?major_version_id='+majorId)).json();assignTable.innerHTML=assignReqs.map(r=>`<tr><td>${r.zentao_req_id} ${r.title}</td><td><select id='o_${r.id}'><option value=''>未分配</option>${users.map(u=>`<option value='${u.id}' ${u.id===r.owner_id?'selected':''}>${u.username}</option>`).join('')}</select></td></tr>`).join('')}
-async function publishAssign(){if(!confirmPush()) return;const majorId=Number(assignMajorSelect.value);const assignments=assignReqs.map(r=>({requirement_id:r.id,owner_id:Number(document.getElementById('o_'+r.id).value)||null}));await api('/requirements/assign-and-publish',{method:'POST',headers:H,body:JSON.stringify({major_version_id:majorId,assignments})});showMessage('分配发布成功')}
+async function loadAssignBoard(){
+  return window.OmniQAAssignTab.loadAssignBoard();
+}
 
-// 全局变量和模式切换函数必须放在最外层
-let currentMineData = [];
-let currentDispatchHtml = '';
+async function publishAssign(){
+  return window.OmniQAAssignTab.publishAssign();
+}
 
+// ????????mine tab ????? frontend/js/tabs/mine.js
 function toggleMineMode() {
-  const mode = document.getElementById('mineDisplayMode').value;
-  document.getElementById('mineVersionWrap').style.display = (mode === 'version') ? 'flex' : 'none';
-  loadMyWorkbench();
+  return window.OmniQAMineTab.toggleMineMode();
 }
 
 async function loadMyWorkbench() {
-  const mode = document.getElementById('mineDisplayMode').value || 'version';
-  const majorId = Number(mineMajorSelect.value);
-
-  let url = '/requirements/my-workbench?mode=' + mode;
-  if (mode === 'version' && majorId) url += '&major_version_id=' + majorId;
-
-  // 1. 获取特派 Bug 区 (仅在按大版本查看时显示)
-  currentDispatchHtml = '';
-  if (mode === 'version' && majorId) {
-      const ddata = await (await api('/bugs/dispatched-to-me?major_version_id='+majorId)).json();
-      if(ddata.length > 0){
-        currentDispatchHtml = `<div class="card" style="border:2px solid #3b82f6; background:#eff6ff; margin-bottom:24px;">
-          <h3 style="color:#1d4ed8; margin-top:0; border-bottom:1px dashed #93c5fd; padding-bottom:8px;">🪂 管理员特派给我的专项 Bug</h3>
-          <table style="background:#fff; border-radius:6px; overflow:hidden;">
-            <thead><tr><th>Bug 编号 / 归属需求</th><th>引出的新Bug</th><th>专项处理操作</th></tr></thead>
-            <tbody>
-              ${ddata.map(b=>`
-                <tr style="${b.test_done?'background:#f8fafc; color:#94a3b8; text-decoration:line-through;':''}">
-                  <td><b>${b.bug_id}</b> <span style="font-size:12px;color:#64748b;">(${b.req_title})</span></td>
-                  <td>
-                    <input type="hidden" id="dnb_hidden_${b.id}" value="${b.newly_found_bug_id||''}">
-                    <div style="margin-bottom:6px;">
-                      ${(b.newly_found_bug_id ? b.newly_found_bug_id.split(',') : []).map(dbug => `
-                        <span class="badge" style="background:#fef2f2; color:#b91c1c; border:1px solid #fca5a5; margin-right:4px; margin-bottom:4px; display:inline-block;">
-                          ${dbug} <a href="javascript:void(0)" onclick="${b.test_done?'return false;':`removeDerivedBug(${b.id}, '${dbug}')`}" style="color:#7f1d1d; text-decoration:none; margin-left:4px; font-weight:bold;">×</a>
-                        </span>
-                      `).join('') || '<span class="muted" style="font-size:12px;">暂无引出Bug</span>'}
-                    </div>
-                    <button class="secondary" style="padding:2px 8px; font-size:12px;" ${b.test_done?'disabled':''} onclick="addDerivedBug(${b.id})">➕ 添加引出Bug</button>
-                  </td>
-                  <td style="text-decoration:none;">
-                    <select id='dres_${b.id}' style="margin-right:8px; padding:2px; font-size:13px;" ${b.test_done?'disabled':''}>
-                      <option value="fixed" ${b.resolution==='fixed'?'selected':''}>🚀修复通过</option>
-                      <option value="false_alarm" ${b.resolution==='false_alarm'?'selected':''}>⚠️误报</option>
-                      <option value="rejected" ${b.resolution==='rejected'?'selected':''}>⛔拒绝修复</option>
-                    </select>
-                    <label style="color:#0f172a;"><input id='ddone_${b.id}' type='checkbox' ${b.test_done?'checked':''} onchange="document.getElementById('dnb_hidden_'+${b.id}).disabled=this.checked"> 确认闭环</label>
-                    <button class="${b.test_done?'secondary':''}" onclick="saveDispatchedBug(${b.id})" style="margin-left:8px;">保存记录</button>
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>`;
-      }
-  }
-
-  // 2. 获取需求数据，更新顶部统计并触发渲染
-  currentMineData = await (await api(url)).json();
-
-  const summaryEl = document.getElementById('mineSummaryText');
-  const pendingCount = currentMineData.filter(r => !r.test_completed || !r.case_completed).length;
-
-  if (mode === 'version') {
-      const vName = mineMajorSelect.options[mineMajorSelect.selectedIndex]?.text || '当前大版本';
-      summaryEl.innerHTML = `📢 <b>${vName}</b> 剩余 <b style="color:#dc2626; font-size:18px;">${pendingCount}</b> 个需求未完成测试！`;
-  } else {
-      summaryEl.innerHTML = `📢 跨版本汇总：您共有 <b style="color:#dc2626; font-size:18px;">${pendingCount}</b> 个待办测试需求！`;
-  }
-  summaryEl.style.display = 'block';
-
-  renderMineCards();
+  return window.OmniQAMineTab.loadMyWorkbench();
 }
 
-// 独立的渲染与过滤函数
 function renderMineCards() {
-  const searchKw = document.getElementById('mineSearchInput').value.trim().toLowerCase();
-
-  const filteredData = currentMineData.filter(req => {
-      if (!searchKw) return true;
-      return (req.zentao_req_id && req.zentao_req_id.toLowerCase().includes(searchKw)) ||
-             (req.title && req.title.toLowerCase().includes(searchKw));
-  });
-
-  const reqsHtml = filteredData.map(req => {
-    const caseDisabled = req.case_completed ? 'disabled' : '';
-    const testDisabled = req.test_completed ? 'disabled' : '';
-    const casePrefixColor = req.case_completed ? 'color:#94a3b8;' : '';
-    const testPrefixColor = req.test_completed ? 'color:#94a3b8;' : '';
-
-    const isFullyCompleted = req.test_completed && req.case_completed;
-    const mode = document.getElementById('mineDisplayMode').value;
-    const vTag = (mode === 'all_pending' && req.major_version_name) ? `<span class="badge" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; margin-right:8px; padding:2px 6px;">🏷️${req.major_version_name}</span>` : '';
-    const renderBugChip = (b) => {
-        const dBadge = b.dispatched_to_name ? `<span style="color:#ea580c; background:#ffedd5; padding:1px 4px; border-radius:4px; font-size:11px; margin-left:6px;">🪂已特派给:${b.dispatched_to_name}</span>` : '';
-
-        // 读取名称字段(_no)而不是ID(_id)
-        let verText = '';
-        if (b.fixed_minor_version_no) {
-            verText = `<span style="color:#16a34a; font-size:11px; margin-left:4px;">(✅解决于: 🏷️${b.fixed_minor_version_no})</span>`;
-        } else {
-            verText = `<span style="color:#94a3b8; font-size:11px; margin-left:4px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span>`;
-        }
-
-        return `<span class="badge" style="background:#f1f5f9; border:1px solid #cbd5e1; padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
-            ${b.bug_id} ${verText} ${dBadge}
-            <a href="javascript:void(0)" title="编辑" onclick="${req.test_completed ? 'return false;' : `editWorkbenchBug(${b.id}, '${b.bug_id}')`}" style="color:${req.test_completed?'#94a3b8':'#3b82f6'}; margin-left:4px; text-decoration:none;">✎</a>
-            <a href="javascript:void(0)" title="删除" onclick="${req.test_completed ? 'return false;' : `removeWorkbenchBug(${b.id})`}" style="color:${req.test_completed?'#94a3b8':'#ef4444'}; margin-left:2px; text-decoration:none;">×</a>
-        </span>`;
-    };
-
-    const caseHtml=(req.test_cases||[]).map(c=>`
-      <div class="case-item">
-        <div class="row">
-          <b>${c.zentao_case_id}</b>
-          <button class="secondary" style="padding:2px 8px; font-size:12px; margin-left:8px;" ${caseDisabled} onclick="editWorkbenchCase(${c.id}, '${c.zentao_case_id}')">编辑编号</button>
-          <button ${testDisabled} onclick="promptCaseBug(${req.id},${c.id})">添加关联Bug</button>
-          <button class="danger" ${caseDisabled} onclick="deleteCase(${c.id})">删除用例</button>
-        </div>
-        <div class="case-bugs" style="margin-top:6px;">${(c.bugs||[]).map(b=>renderBugChip(b)).join('')||'<span class="muted">暂无关联Bug</span>'}</div>
-      </div>`).join('');
-
-    const freeBugHtml=(req.free_bugs||[]).map(b=>renderBugChip(b)).join('')||'<span class="muted">暂无自由Bug</span>';
-
-    return `
-      <details class="mine-req-card" ${isFullyCompleted ? '' : 'open'} style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; transition: all 0.3s;">
-        <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
-          <div>${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${req.zentao_req_id} ${req.title}</span></div>
-          ${isFullyCompleted ? '<span style="color:#16a34a; font-size:14px; background:#f0fdf4; padding:4px 8px; border-radius:4px; border:1px solid #bbf7d0;">✅ 测试已完成</span>' : '<span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开卡片)</span>'}
-        </summary>
-
-        <div style="margin-top: 12px;">
-          <div class="row" style="margin-bottom:8px">
-            <label><input type="checkbox" ${req.case_completed?'checked':''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked).then(()=>loadMyWorkbench())">✅用例完成</label>
-            <label><input type="checkbox" ${req.test_completed?'checked':''} onchange="setReqStatus(${req.id}, 'test_completed', this.checked).then(()=>loadMyWorkbench())">✅测试完成</label>
-          </div>
-          <div>${caseHtml}</div>
-          <div class="free-bug-box"><div><b>自由Bug</b></div><div style="margin-top:6px;">${freeBugHtml}</div></div>
-          <div class="row" style="margin-top:8px">
-            <div class="prefix-input"><span style="${casePrefixColor}">u#</span><input id="new_case_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增用例编号" ${caseDisabled}></div>
-            <button ${caseDisabled} onclick="addCase(${req.id})">逐个添加用例</button>
-            <div class="prefix-input"><span style="${testPrefixColor}">b#</span><input id="new_free_bug_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增自由Bug" ${testDisabled}></div>
-            <button ${testDisabled} onclick="addFreeBug(${req.id})">添加自由Bug</button>
-          </div>
-        </div>
-      </details>`;
-  }).join('');
-
-  document.getElementById('mineCards').innerHTML = currentDispatchHtml + reqsHtml;
+  return window.OmniQAMineTab.renderMineCards();
 }
 
 async function editWorkbenchCase(id, oldCaseId) {
-  const num = prompt('请输入正确的用例数字部分：', oldCaseId.replace('u#', ''));
-  if(!num) return;
-  try {
-    await api('/test-cases/'+id, {method:'PUT', headers:H, body:JSON.stringify({zentao_case_id: withPrefix('u#', num)})});
-    showMessage('用例编号已修改', 'success');
-    loadMyWorkbench();
-  } catch(err) { showMessage(err.message || '修改失败', 'error'); }
+  return window.OmniQAMineTab.editWorkbenchCase(id, oldCaseId);
 }
 
 async function editWorkbenchBug(id, oldBugId){
-  const num = prompt('请输入正确的 Bug 数字部分：', oldBugId.replace('b#', ''));
-  if(!num) return;
-  try {
-    await api('/bugs/'+id+'?new_bug_id='+encodeURIComponent(withPrefix('b#',num)), {method:'PUT'});
-    showMessage('Bug 编号已纠正', 'success');
-    loadMyWorkbench();
-  } catch(err) { showMessage(err.message || '修改失败', 'error'); }
+  return window.OmniQAMineTab.editWorkbenchBug(id, oldBugId);
 }
 
 async function removeWorkbenchBug(id){
-  if(!confirm('确定要在工作台中彻底删除这个 Bug 吗？')) return;
-  try {
-    await api('/bugs/'+id, {method:'DELETE'});
-    showMessage('Bug 已彻底删除', 'success');
-    loadMyWorkbench();
-  } catch(err) { showMessage(err.message || '删除失败', 'error'); }
+  return window.OmniQAMineTab.removeWorkbenchBug(id);
 }
 async function setReqStatus(reqId, key, checked){
-  try{
-    if(!checked){
-      const ok=confirm(key==='case_completed'?'确认取消【用例完成】状态吗？':'确认取消【测试完成】状态吗？');
-      if(!ok){loadMyWorkbench();return}
-    }
-    const payload={}; payload[key]=checked;
-    await api(`/requirements/${reqId}/status`,{method:'PATCH',headers:H,body:JSON.stringify(payload)});
-    showMessage('需求状态已更新','success');
-  }catch(err){
-    showMessage(err.message||'状态更新失败','error');
-  }finally{
-    loadMyWorkbench();
-  }
+  return window.OmniQAMineTab.setReqStatus(reqId, key, checked);
 }
 
 async function addCase(reqId){
-  try{
-    const n=document.getElementById(`new_case_${reqId}`).value;
-    const caseId=withPrefix('u#',n);
-    if(!caseId){showMessage('请输入用例编号数字部分','error');return}
-    await api(`/requirements/${reqId}/cases`,{method:'POST',headers:H,body:JSON.stringify({zentao_case_id:caseId})});
-    showMessage('用例新增成功','success');
-    loadMyWorkbench();
-  }catch(err){showMessage(err.message||'新增用例失败','error')}
+  return window.OmniQAMineTab.addCase(reqId);
 }
 
 async function deleteCase(caseId){
-  if(!confirm('确定删除该用例吗？')) return;
-  try{await api(`/test-cases/${caseId}`,{method:'DELETE'});showMessage('用例已删除','success');loadMyWorkbench()}catch(err){showMessage(err.message||'删除用例失败','error')}
+  return window.OmniQAMineTab.deleteCase(caseId);
 }
 
 async function promptCaseBug(reqId, caseId){
-  const minorId = Number(mineMinorSelect.value);
-  if(!minorId){showMessage('拦截：请先在页面顶部选择【当前复测发包(小版本)】环境！','error');return;}
-  
-  const n=prompt('请输入关联 Bug 的数字部分：');
-  if(!n) return;
-  const bug=withPrefix('b#',n);
-  try{
-    await api('/bugs/execution',{method:'POST',headers:H,body:JSON.stringify({bug_id:bug,minor_version_id:minorId,requirement_id:reqId,source_type:'case',source_ref:String(caseId)})});
-    showMessage('关联Bug新增成功','success');
-    loadMyWorkbench();
-  }catch(err){showMessage(err.message||'新增Bug失败','error')}
+  return window.OmniQAMineTab.promptCaseBug(reqId, caseId);
 }
 
 async function addFreeBug(reqId){
-  const minorId = Number(mineMinorSelect.value);
-  if(!minorId){showMessage('拦截：请先在页面顶部选择【当前复测发包(小版本)】环境！','error');return;}
-  
-  const n=document.getElementById(`new_free_bug_${reqId}`).value;
-  const bug=withPrefix('b#',n);
-  if(!bug){showMessage('请输入自由Bug数字','error');return}
-  try{
-    await api('/bugs/execution',{method:'POST',headers:H,body:JSON.stringify({bug_id:bug,minor_version_id:minorId,requirement_id:reqId,source_type:'manual'})});
-    showMessage('自由Bug新增成功','success');
-    loadMyWorkbench();
-  }catch(err){showMessage(err.message||'新增自由Bug失败','error')}
+  return window.OmniQAMineTab.addFreeBug(reqId);
 }
 
-async function pushCase(){if(!confirmPush()) return; await api('/push/case-progress',{method:'POST',headers:H,body:JSON.stringify({major_version_id:Number(mineMajorSelect.value)})});showMessage('用例进度已推送')}
-async function pushTest(){if(!confirmPush()) return; await api(`/push/test-progress?minor_version_id=${Number(mineMinorSelect.value)}&major_version_id=${Number(mineMajorSelect.value)}`,{method:'POST'});showMessage('测试进度已推送')}
+async function pushCase(){return window.OmniQAMineTab.pushCase()}
+async function pushTest(){return window.OmniQAMineTab.pushTest()}
 
 async function loadRetest(){
-  const majorId = Number(retestMajorSelect.value);
-  if(!majorId){showMessage('请选择大版本','error');return;}
-  const data = await (await api('/retest/workbench?major_version_id='+majorId)).json();
+  return window.OmniQARetestTab.loadRetest();
+}
 
-  const container = document.getElementById('retestCardsArea');
-  if(!data || data.length === 0) {
-    container.innerHTML = '<div class="muted" style="padding: 20px; text-align: center; background: #f8fafc; border-radius: 8px;">🎉 当前大版本下没有需要您复测的需求（仅显示其他同事已完成测试的需求）</div>';
-    return;
-  }
-
-  container.innerHTML = data.map(req => {
-    let evidenceCount = 0; // 实时统计证据数量
-
-    const caseHtml = (req.test_cases||[]).map(c => {
-      const bugs = (c.bugs||[]).map(b => {
-        if(b.is_retest_failed) evidenceCount++;
-        return `<div style="margin-top:4px;">
-          <span class="badge" style="background:#fef2f2; color:#dc2626; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>
-          <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed?'checked':''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
-        </div>`;
-      }).join('');
-      return `<div style="margin-bottom: 10px; padding-left: 12px; border-left: 3px solid #cbd5e1;">
-        <div style="font-weight: bold; color: #475569;">🧪 用例 [${c.zentao_case_id}]</div>
-        <div style="margin-top: 4px;">${bugs || '<span class="muted" style="font-size:12px;">✓ 完美通过，无关联Bug</span>'}</div>
-      </div>`;
-    }).join('');
-
-    const freeBugHtml = (req.free_bugs||[]).map(b => {
-      if(b.is_retest_failed) evidenceCount++;
-      return `<div style="margin-bottom:6px;">
-      <span class="badge" style="background:#fff7ed; color:#ea580c; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>
-      <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed?'checked':''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
-    </div>`}).join('');
-
-    const retestBugHtml = (req.retest_bugs||[]).map(b => {
-      evidenceCount++; // 只要有复测新增Bug，就是死证据
-      return `<div style="margin-bottom:6px;">
-      <span class="badge" style="background:#fee2e2; color:#b91c1c; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(复测新增)</span></span>
-    </div>`}).join('');
-
-    const hasEvidence = evidenceCount > 0;
-    const isCompleted = req.retest_completed;
-    const statusTag = isCompleted
-      ? (req.retest_passed ? '<span class="badge" style="background:#dcfce7;color:#166534;">✅已通过</span>' : '<span class="badge" style="background:#fee2e2;color:#b91c1c;">❌已打回</span>')
-      : '<span class="badge">未提交复测结论</span>';
-
-    // 采用 details 标签实现丝滑的自动折叠
-    return `
-      <details class="card" ${isCompleted ? '' : 'open'} style="border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px; background: ${isCompleted ? '#f8fafc' : '#fff'}; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: all 0.3s;">
-        <summary style="outline:none; cursor:pointer; list-style:none; display: flex; justify-content: space-between; align-items: center; border-bottom: ${isCompleted ? 'none' : '1px dashed #cbd5e1'}; padding-bottom: ${isCompleted ? '0' : '12px'}; margin-bottom: ${isCompleted ? '0' : '12px'};">
-          <div>
-            <span style="font-size: 16px; font-weight: bold; color: ${isCompleted ? '#94a3b8; text-decoration:line-through;' : '#0f172a'};">📄 ${req.zentao_req_id} ${req.title}</span>
-            <span class="badge" style="margin-left: 12px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;">👤 原测试人: ${req.owner||'未知'}</span>
-            <span style="margin-left:8px;">${statusTag}</span>
-          </div>
-          <div onclick="event.stopPropagation()"> <button style="background:#16a34a;" onclick='setRetest(${req.id}, true, ${hasEvidence})'>✅通过</button>
-            <button class="danger" onclick='setRetest(${req.id}, false, ${hasEvidence})'>❌打回</button>
-          </div>
-        </summary>
-
-        <div style="margin-top: 12px;">
-          <div class="row" style="align-items: flex-start; margin: 0;">
-            <div style="flex: 1; padding-right: 16px; border-right: 1px dashed #e2e8f0;">
-              <div style="font-weight: bold; margin-bottom: 12px; color: #334155; font-size: 13px;">【原测试用例 & 关联Bug】</div>
-              ${caseHtml || '<div class="muted">原测试人员未建立用例</div>'}
-            </div>
-            <div style="flex: 1; padding-left: 16px;">
-              <div style="font-weight: bold; margin-bottom: 12px; color: #334155; font-size: 13px;">【原测试发现的自由Bug】</div>
-              <div>${freeBugHtml || '<div class="muted">暂无自由Bug</div>'}</div>
-            </div>
-          </div>
-          <div style="margin-top:12px; border-top:1px dashed #e2e8f0; padding-top:12px;">
-            <div style="font-weight:bold; color:#b91c1c; margin-bottom:8px;">【复测新增漏测 Bug】</div>
-            <div>${retestBugHtml || '<div class="muted">暂无复测新增Bug</div>'}</div>
-            <div class="row" style="margin-top:8px;">
-              <div class="prefix-input"><span>b#</span><input id="rb_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增漏测Bug编号"></div>
-              <button onclick="addRetestBug(${req.id})">➕新增漏测Bug</button>
-            </div>
-          </div>
-        </div>
-      </details>`;
-  }).join('');
+function renderRetestCards() {
+  return window.OmniQARetestTab.loadRetest();
 }
 
 async function setRetest(id, passed, hasEvidence){
-  // 1. 前端强逻辑拦截
-  if (passed && hasEvidence) {
-    showMessage('逻辑冲突：该需求存在未修好的Bug或新增漏测Bug，绝对无法标记为【通过】！', 'error');
-    return;
-  }
-  if (!passed && !hasEvidence) {
-    showMessage('空口无凭：请至少勾选一个未修好的旧Bug，或新增一个漏测Bug作为打回证据！', 'error');
-    return;
-  }
-
-  const minorId = Number(retestMinorSelect.value);
-  if(!minorId){showMessage('请选择当前复测发包(小版本)','error');return;}
-  
-  // 2. 增加 try-catch 捕获可能的后端异常
-  try {
-    await api(`/requirements/${id}/retest`,{
-      method:'PUT',
-      headers:H,
-      body:JSON.stringify({retest_completed:true,retest_passed:passed,retest_minor_version_id:minorId})
-    });
-    showMessage(passed ? '🎉 复测结果已标记为通过' : '🚨 已打回给原测试人', 'success');
-    loadRetest();
-  } catch (err) {
-    showMessage(err.message || '操作失败', 'error');
-  }
+  return window.OmniQARetestTab.setRetest(id, passed, hasEvidence);
 }
 
 async function toggleBugFail(id, checked){
-  await api(`/bugs/${id}/retest-fail`,{method:'PATCH',headers:H,body:JSON.stringify({is_retest_failed:checked})});
-  showMessage(checked?'已标记未修好':'已取消未修好标记','success');
-  loadRetest(); // 新增：实时刷新大盘以重新计算证据链
+  return window.OmniQARetestTab.toggleBugFail(id, checked);
 }
 
 async function addRetestBug(reqId){
-  try {
-    const num=(document.getElementById('rb_'+reqId).value||'').trim();
-    const bug=withPrefix('b#',num);
-    const minorId=Number(retestMinorSelect.value);
-    
-    if(!bug){showMessage('请输入漏测Bug编号数字部分','error');return;}
-    if(!minorId){showMessage('请选择当前复测发包(小版本)','error');return;}
-    
-    await api('/bugs/execution',{
-      method:'POST',
-      headers:H,
-      body:JSON.stringify({
-        bug_id:bug,
-        minor_version_id:minorId,
-        requirement_id:reqId,
-        source_type:'retest'
-      })
-    });
-    
-    showMessage('复测漏测Bug已新增','success');
-    loadRetest();
-  } catch(err) {
-    showMessage(err.message || '新增漏测Bug失败', 'error');
-  }
+  return window.OmniQARetestTab.addRetestBug(reqId);
 }
 
-async function pushRetest(){if(!confirmPush()) return; await api(`/push/retest-result?major_version_id=${Number(retestMajorSelect.value)}`,{method:'POST'});showMessage('复测结果已推送')}
+async function pushRetest(){
+  return window.OmniQARetestTab.pushRetest();
+}
 
 async function loadStage5(){
-  const majorId=Number(s5MajorSelect.value);
-  if(!majorId){showMessage('请选择大版本','error');return;}
-  
-  const data=await (await api('/stage5/overview?major_version_id='+majorId)).json();
-  await loadS5OptionsData(majorId);
-  toggleS5BugInputs();
-  
-  stage5Rows=data.bug_pool || [];
-  
-  // 计算全景统计数据
-  const total = stage5Rows.length;
-  const closed = stage5Rows.filter(b => b.closed).length;
-  const pending = total - closed;
-  const rate = total === 0 ? 100 : Math.round((closed / total) * 100);
-
-  // 渲染全景数据看板
-  document.getElementById('stage5Panorama').classList.remove('hidden');
-  document.getElementById('s5TableContainer').classList.remove('hidden');
-  
-  document.getElementById('s5TotalBugs').innerText = total;
-  document.getElementById('s5ClosedBugs').innerText = closed;
-  document.getElementById('s5PendingBugs').innerText = pending;
-  document.getElementById('s5ReadyRate').innerText = rate + '%';
-
-  renderS5();
-  showMessage('全景大盘加载成功', 'success');
+  return window.OmniQAStage5Tab.loadStage5();
 }
 
 function renderS5(){
-  s5Table.innerHTML=stage5Rows.map(b=>{
-    // 判断当前登录用户是否已经亲自确认闭环
-    const isMyClosed = b.my_test_done;
-    const rowStyle = isMyClosed ? "background: #f8fafc; color: #94a3b8; text-decoration: line-through;" : "";
-
-    // 动态拼接其他同事的操作记录
-    let othersHtml = '';
-    const resZh = {"fixed":"修复通过", "false_alarm":"误报", "rejected":"拒绝修复"};
-    if(b.other_records && b.other_records.length > 0) {
-      othersHtml = `<div style="margin-top: 6px; font-size: 12px; text-decoration: none;">` + 
-        b.other_records.map(r => {
-          const status = r.test_done ? `<span style="color:#16a34a; font-weight:bold;">✅闭环(${resZh[r.resolution]||'修复'})</span>` : '<span style="color:#dc2626;">⏳未闭环</span>';
-          return `<span class="badge" style="background:#f1f5f9; color:#475569; margin-right:4px; padding: 2px 6px;">🙋‍♂️ ${r.username}: ${status} (发包: 🏷️${r.minor_version_no})</span>`;
-        }).join('') + `</div>`;
-    }
-
-    const failBadge = b.is_retest_failed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; margin-left:4px;">🚨复测打回</span>' : '';
-    const dispatchBadge = b.dispatched_to_name ? `<span class="badge" style="background:#ffedd5; color:#ea580c; border:1px solid #fdba74; margin-left:4px;">🪂特派:${b.dispatched_to_name}</span>` : '';
-
-    return `<tr style="${rowStyle}">
-      <td>
-        <b>${b.bug_id}</b> <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span> ${failBadge} ${dispatchBadge}
-        <a href="javascript:void(0)" onclick="editS5Bug(${b.id}, '${b.bug_id}')" style="margin-left:8px; font-size:12px; color:#3b82f6; text-decoration:none;">编辑</a>
-        <a href="javascript:void(0)" onclick="removeS5Bug(${b.id})" style="margin-left:4px; font-size:12px; color:#ef4444; text-decoration:none;">删除</a>
-        ${othersHtml}
-      </td>
-      <td style="text-decoration: none;">
-        <select id='res_${b.id}' style="margin-right: 8px; padding: 2px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 4px; color: #475569;" ${isMyClosed?'disabled':''}>
-          <option value="fixed" ${b.my_resolution==='fixed'?'selected':''}>🚀修复通过</option>
-          <option value="false_alarm" ${b.my_resolution==='false_alarm'?'selected':''}>⚠️误报</option>
-          <option value="rejected" ${b.my_resolution==='rejected'?'selected':''}>⛔拒绝修复</option>
-        </select>
-        <label style="color: #0f172a; font-weight: bold;"><input id='done_${b.id}' type='checkbox' ${isMyClosed?'checked':''} onchange="this.nextSibling.disabled=this.checked"> 我的闭环确认</label>
-        <button class="${isMyClosed ? 'secondary' : ''}" onclick='saveS5(${b.id})' style="margin-left:8px;">保存记录</button>
-      </td>
-    </tr>`;
-  }).join('');
+  return window.OmniQAStage5Tab.renderS5();
 }
 
-async function editS5Bug(id, oldBugId){
-  const num = prompt('请输入正确的 Bug 数字部分：', oldBugId.replace('b#', ''));
-  if(!num) return;
-  try {
-    await api('/bugs/'+id+'?new_bug_id='+encodeURIComponent(withPrefix('b#',num)), {method:'PUT'});
-    showMessage('Bug 编号已纠正', 'success');
-    loadStage5(); // 刷新当前大盘
-  } catch(err) {
-    showMessage(err.message || '更新失败', 'error');
-  }
-}
-
-async function removeS5Bug(id){
-  if(!confirm('确定要在该大版本下移除这个 Bug 吗？')) return;
-  try {
-    await api('/bugs/'+id, {method:'DELETE'});
-    showMessage('Bug 已彻底移除', 'success');
-    loadStage5(); // 刷新当前大盘
-  } catch(err) {
-    showMessage(err.message || '删除失败', 'error');
-  }
-}
 function toggleS5Lock(id){const el=document.getElementById('nb_'+id);if(el){el.disabled=document.getElementById('done_'+id).checked}}
 async function saveS5(id){
-    const done=document.getElementById('done_'+id).checked;
-    const res=document.getElementById('res_'+id).value;
-    await api(`/stage5/bugs/${id}/result`,{method:'PUT',headers:H,body:JSON.stringify({minor_version_id:Number(s5MinorSelect.value),test_done:done,newly_found_bug_id:null, resolution:res})});
-    showMessage('整体测试项已保存');
-    loadStage5();
+  return window.OmniQAStage5Tab.saveS5(id);
 }
-async function pushStage5(){if(!confirmPush()) return;const res=await (await api(`/stage5/push-status?major_version_id=${Number(s5MajorSelect.value)}&minor_version_id=${Number(s5MinorSelect.value)}`,{method:'POST'})).json();showMessage(`整体状态已推送，剩余未闭环 ${res.remaining}`)}
-
-let globalS5Options = { reqs: [], cases: [], bugs: [] };
+async function pushStage5(){
+  return window.OmniQAStage5Tab.pushStage5();
+}
 
 function toggleS5BugInputs() {
-  const type = document.getElementById('s5BugSource').value;
-  document.getElementById('s5WrapReq').classList.toggle('hidden', type !== 'requirement');
-  document.getElementById('s5WrapCase').classList.toggle('hidden', type !== 'case');
-  document.getElementById('s5WrapLegacy').classList.toggle('hidden', type !== 'legacy_bug');
-
-  // 每次切换来源类型时，清空输入框防止串台
-  document.getElementById('s5ReqInput').value = '';
-  document.getElementById('s5CaseInput').value = '';
-  document.getElementById('s5LegacyInput').value = '';
+  return window.OmniQAStage5Tab.toggleS5BugInputs();
 }
 
 async function loadS5OptionsData(majorId) {
-  try {
-    globalS5Options = await (await api('/stage5/search-options?major_version_id=' + majorId)).json();
-    document.getElementById('s5ReqList').innerHTML = globalS5Options.reqs.map(r => `<option value="${r.label}">`).join('');
-    document.getElementById('s5CaseList').innerHTML = globalS5Options.cases.map(c => `<option value="${c.label}">`).join('');
-    document.getElementById('s5LegacyList').innerHTML = globalS5Options.bugs.map(b => `<option value="${b.label}">`).join('');
-  } catch(e) {
-    console.error('搜索数据加载失败');
-  }
+  return window.OmniQAStage5Tab.loadS5OptionsData(majorId);
 }
 
-// 覆盖原有的提交函数，加入强校验与自动寻址逻辑
 async function submitS5Bug() {
-  const type = document.getElementById('s5BugSource').value;
-  const bugInput = document.getElementById('s5BugId').value;
-  if (!bugInput) { showMessage('请输入新Bug编号', 'error'); return; }
-  const bugId = withPrefix('b#', bugInput);
-
-  let reqId = null;
-  let sourceRef = null;
-
-  if (type === 'requirement') {
-    const val = document.getElementById('s5ReqInput').value;
-    const target = globalS5Options.reqs.find(r => r.label === val);
-    if(!target) { showMessage('必须从下拉列表中准确选择一个需求！', 'error'); return; }
-    reqId = target.id;
-  } else if (type === 'case') {
-    const val = document.getElementById('s5CaseInput').value;
-    const target = globalS5Options.cases.find(c => c.label === val);
-    if(!target) { showMessage('必须从下拉列表中准确选择一个用例！', 'error'); return; }
-    reqId = target.req_id;
-    sourceRef = target.label;
-  } else if (type === 'legacy_bug') {
-    const val = document.getElementById('s5LegacyInput').value;
-    const target = globalS5Options.bugs.find(b => b.label === val);
-    if(!target) { showMessage('必须从下拉列表中准确选择一个历史Bug！', 'error'); return; }
-    reqId = target.req_id;
-    sourceRef = target.label;
-  }
-
-  try {
-    await api('/stage5/issues', {
-      method: 'POST',
-      headers: H,
-      body: JSON.stringify({
-        major_version_id: Number(s5MajorSelect.value),
-        requirement_id: reqId,
-        source_type: type,
-        source_ref: sourceRef,
-        bug_id: bugId,
-        minor_version_id: Number(s5MinorSelect.value),
-      }),
-    });
-    showMessage('新问题已成功添加到大盘！', 'success');
-    document.getElementById('s5BugId').value = '';
-    loadStage5();
-  } catch(err) {
-    showMessage(err.message || '添加失败', 'error');
-  }
+  return window.OmniQAStage5Tab.submitS5Bug();
 }
 
 async function queryReport(){
   try{
-    const start_date=reportStartDate.value;
-    const end_date=reportEndDate.value;
-    let url=`/reports/summary?start_date=${start_date}&end_date=${end_date}`;
-    if(currentUser.role==='admin' && reportUserSelect.value){url += `&user_id=${reportUserSelect.value}`}
-    const data=await (await api(url)).json();
-    reportLoaded=true;
-    mReq.innerText=data.overview.executed_requirements || 0;
-    mCase.innerText=data.overview.created_cases || 0;
-    mBug.innerText=data.overview.created_bugs || 0;
-    mRetest.innerText=data.overview.retested_reqs || 0;
-    mClosed.innerText=data.overview.closed_bugs || 0;
-
-    const x=data.trend.map(i=>i.date);
-    const yReq=data.trend.map(i=>i.executed_requirements);
-    const yCase=data.trend.map(i=>i.created_cases);
-    const yBug=data.trend.map(i=>i.created_bugs);
-    const yRetest=data.trend.map(i=>i.retested_reqs||0);
-    const yClosed=data.trend.map(i=>i.closed_bugs||0);
-
-    if(!trendChart){trendChart=echarts.init(document.getElementById('trendChart'))}
-    trendChart.setOption({
-      title:{text:'趋势折线图'},
-      tooltip:{trigger:'axis'},
-      grid: { top: 60, bottom: 40, left: 50, right: 30 },
-      legend:{data:['执行需求','创建用例','创建Bug','复测需求','关闭Bug'], top: 30},
-      xAxis:{type:'category',data:x},
-      yAxis:{type:'value'},
-      series:[
-        {name:'执行需求',type:'line',data:yReq,smooth:true},
-        {name:'创建用例',type:'line',data:yCase,smooth:true},
-        {name:'创建Bug',type:'line',data:yBug,smooth:true},
-        {name:'复测需求',type:'line',data:yRetest,smooth:true},
-        {name:'关闭Bug',type:'line',data:yClosed,smooth:true},
-      ]
-    });
-
-    if(!sourcePieChart){sourcePieChart=echarts.init(document.getElementById('sourcePieChart'))}
-    sourcePieChart.setOption({
-      title:{text:'Bug来源分布',left:'center'},
-      tooltip:{trigger:'item'},
-      legend: { top: 'bottom' },
-      series:[{type:'pie',radius:'50%',center: ['50%', '55%'], data:(data.bug_source_dist||[]).map(i=>({name:sourceTypeZh(i.source_type),value:i.count}))}]
-    });
-
-    if(!radarChart){radarChart=echarts.init(document.getElementById('radarChart'))}
-    radarChart.setOption({
-      title:{text:'个人能力雷达图'},
-      tooltip:{},
-      radar:{radius: '60%',center: ['50%', '55%'],indicator:[
-        {name:'执行需求',max:Math.max(10, Number(mReq.innerText)||0)},
-        {name:'创建用例',max:Math.max(10, Number(mCase.innerText)||0)},
-        {name:'创建Bug',max:Math.max(10, Number(mBug.innerText)||0)},
-        {name:'复测需求',max:Math.max(10, Number(mRetest.innerText)||0)},
-        {name:'关闭Bug',max:Math.max(10, Number(mClosed.innerText)||0)},
-      ]},
-      series:[{type:'radar',data:[{value:[Number(mReq.innerText)||0,Number(mCase.innerText)||0,Number(mBug.innerText)||0,Number(mRetest.innerText)||0,Number(mClosed.innerText)||0],name:'指标'}]}]
-    });
-
-    if(!teamCompareChart){teamCompareChart=echarts.init(document.getElementById('teamCompareChart'))}
-    const team=(data.team_comparison||[])
-    teamCompareChart.setOption({
-      title:{text:'团队对比（全员模式）'},
-      tooltip:{trigger:'axis'},
-      grid: { top: 60, bottom: 40, left: 50, right: 30 },
-      legend:{data:['执行需求','创建用例','创建Bug','复测需求','关闭Bug'], top: 30},
-      xAxis:{type:'category',data:team.map(i=>i.username)},
-      yAxis:{type:'value'},
-      series:[
-        {name:'执行需求',type:'bar',data:team.map(i=>i.executed_requirements||0)},
-        {name:'创建用例',type:'bar',data:team.map(i=>i.created_cases||0)},
-        {name:'创建Bug',type:'bar',data:team.map(i=>i.created_bugs||0)},
-        {name:'复测需求',type:'bar',data:team.map(i=>i.retested_reqs||0)},
-        {name:'关闭Bug',type:'bar',data:team.map(i=>i.closed_bugs||0)},
-      ]
-    });
-
-    const vb=await (await api('/reports/version-bugs')).json();
-    if(!versionBugChart){versionBugChart=echarts.init(document.getElementById('versionBugChart'))}
-    versionBugChart.setOption({
-      title:{text:'各发包(小版本) Bug 检出分布', textStyle: { fontSize: 15, color: '#334155' }},
-      tooltip:{trigger:'axis'},
-      grid: { top: 60, bottom: '15%' },
-      xAxis:{
-        type:'category',
-        data:vb.map(i=>i.version_name),
-        axisLabel: { interval: 0, fontSize: 11, color: '#64748b' }
-      },
-      yAxis:{type:'value', minInterval: 1},
-      series:[{
-        name:'检出 Bug 数',
-        type:'bar',
-        barMaxWidth: 40,
-        itemStyle: { color: '#3b82f6', borderRadius: [4, 4, 0, 0] },
-        data:vb.map(i=>i.bug_count),
-        label: { show: true, position: 'top', color: '#1e293b', fontWeight: 'bold' }
-      }]
-    });
-
-    // === 请求高阶数据 ===
-    const advRes = await api(`/reports/advanced?start_date=${start_date}&end_date=${end_date}`);
-    const advData = await advRes.json();
-
-    // 1. 需求质量刺客排行榜 (横向柱状图)
-    if(!topReqChart) topReqChart = echarts.init(document.getElementById('topReqChart'));
-    topReqChart.setOption({
-        title: {text: '需求质量“刺客”排行榜 (Top 7)', textStyle: {fontSize: 15}},
-        tooltip: {trigger: 'axis', axisPointer: {type: 'shadow'}},
-        grid: {left: 100, right: 40, bottom: 20},
-        xAxis: {type: 'value'},
-        yAxis: {type: 'category', data: advData.top_reqs.map(r => r.req_id).reverse(), axisLabel: {interval: 0, formatter: (val) => val.substring(0,8)}},
-        series: [{
-            name: 'Bug数量', type: 'bar',
-            data: advData.top_reqs.map(r => r.count).reverse(),
-            label: {show: true, position: 'right'},
-            itemStyle: {color: '#ef4444', borderRadius: [0, 4, 4, 0]}
-        }]
-    });
-
-    // 2. 交叉复测漏测率 (空心饼图)
-    if(!leakageChart) leakageChart = echarts.init(document.getElementById('leakageChart'));
-    leakageChart.setOption({
-        title: {text: '交叉复测漏测率', left: 'center', textStyle: {fontSize: 15}},
-        tooltip: {trigger: 'item', formatter: '{b}: {c}个 ({d}%)'},
-        legend: {top: 'bottom'},
-        series: [{
-            type: 'pie', radius: ['40%', '65%'], center: ['50%', '50%'],
-            data: [
-                {name: '原测发现 (正常)', value: advData.leakage.normal, itemStyle: {color: '#3b82f6'}},
-                {name: '复测新增 (漏测)', value: advData.leakage.retest, itemStyle: {color: '#f97316'}}
-            ]
-        }]
-    });
-
-    // 3. 缺陷闭环转化漏斗
-    if(!funnelChart) funnelChart = echarts.init(document.getElementById('funnelChart'));
-    funnelChart.setOption({
-        title: {text: '缺陷闭环转化漏斗', left: 'center', textStyle: {fontSize: 15}},
-        tooltip: {trigger: 'item', formatter: '{b}: {c}'},
-        series: [{
-            type: 'funnel', left: '10%', top: 50, bottom: 50, width: '80%',
-            min: 0, max: Math.max(advData.funnel.total, 1),
-            minSize: '10%', maxSize: '100%',
-            sort: 'descending', gap: 2,
-            label: {show: true, position: 'inside', formatter: '{b}: {c}'},
-            itemStyle: {borderColor: '#fff', borderWidth: 1},
-            data: [
-                {name: '发现Bug总数', value: advData.funnel.total, itemStyle: {color: '#ef4444'}},
-                {name: '开发处理完毕', value: advData.funnel.fixed, itemStyle: {color: '#eab308'}},
-                {name: '验证彻底闭环', value: advData.funnel.closed, itemStyle: {color: '#22c55e'}}
-            ]
-        }]
-    });
-
-    // 4. 用例执行结果分布
-    if(!execChart) execChart = echarts.init(document.getElementById('execChart'));
-    const execMap = {'passed': '✅通过', 'failed': '❌失败', 'blocked': '⛔阻塞', 'untested': '⏳未测'};
-    execChart.setOption({
-        title: {text: '用例执行结果分布', left: 'center', textStyle: {fontSize: 15}},
-        tooltip: {trigger: 'item', formatter: '{b}: {c}个 ({d}%)'},
-        legend: {top: 'bottom'},
-        series: [{
-            type: 'pie', radius: '60%', center: ['50%', '50%'],
-            data: advData.executions.map(e => ({name: execMap[e.status] || e.status, value: e.count}))
-        }]
-    });
-    adjustReportChartVisibility();
-
-    showMessage('报表查询成功','success');
+    return await window.OmniQAReportTab.queryReport();
   }catch(err){showMessage(err.message||'查询报表失败','error')}
 }
 
 function exportReportPdf() {
-  const element = document.getElementById('reportContent');
-  if (!element) return;
-
-  // 【物理级终极绝杀】：找出所有宽或高为 0 的 canvas，暂时从 DOM 树中“拔”下来，存放在内存里
-  const badCanvases = Array.from(element.querySelectorAll('canvas')).filter(c => c.width === 0 || c.height === 0);
-  const restoredList = badCanvases.map(canvas => {
-    const placeholder = document.createComment('hidden-canvas-placeholder');
-    canvas.parentNode.insertBefore(placeholder, canvas);
-    canvas.parentNode.removeChild(canvas);
-    return { canvas, placeholder };
-  });
-
-  showMessage('正在生成高清晰度报表 PDF，耗时约几秒钟，请稍候...', 'success');
-
-  const opt = {
-    margin: 0.3,
-    filename: '测试效能度量大盘.pdf',
-    image: { type: 'jpeg', quality: 0.98 },
-    html2canvas: { scale: 2, useCORS: true, backgroundColor: '#f8fafc' },
-    jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-  };
-
-  html2pdf().set(opt).from(element).save().then(() => {
-    showMessage('🎉 报表 PDF 导出成功！', 'success');
-  }).catch((err) => {
-    console.error('PDF导出失败:', err);
-    showMessage('导出失败，请打开 F12 查看报错', 'error');
-  }).finally(() => {
-    // 导出操作结束后（无论成功失败），神不知鬼不觉地把 canvas “种”回原处，不影响页面继续使用
-    restoredList.forEach(item => {
-      if(item.placeholder && item.placeholder.parentNode) {
-        item.placeholder.parentNode.insertBefore(item.canvas, item.placeholder);
-        item.placeholder.parentNode.removeChild(item.placeholder);
-      }
-    });
-  });
+  return window.OmniQAReportTab.exportReportPdf();
 }
 
 function exportTreePdf() {
@@ -1402,260 +622,79 @@ function exportTreePdf() {
 }
 
 async function loadDataOverview(){
-  dataOverviewCache = await (await api('/admin/data-overview')).json();
-  renderDataOverview();
+  return window.OmniQADataTab.loadDataOverview();
 }
 
 async function setDataView(key, checked){
-  if(key === 'users') dataViewState.showUsers = checked;
-  if(key === 'versions') dataViewState.showVersions = checked;
-  if(!dataOverviewCache){
-    await loadDataOverview();
-    return;
-  }
-  renderDataOverview();
-  if(key === 'versions' && checked){
-    expandAllMajorBodies();
-  }
+  return window.OmniQADataTab.setDataView(key, checked);
 }
 
 async function setDataViewBatch(showAll){
-  dataViewState.showUsers = showAll;
-  dataViewState.showVersions = showAll;
-  const usersToggle = document.getElementById('toggleDataUsers');
-  const versionsToggle = document.getElementById('toggleDataVersions');
-  if(usersToggle) usersToggle.checked = showAll;
-  if(versionsToggle) versionsToggle.checked = showAll;
-  if(!dataOverviewCache){
-    await loadDataOverview();
-    if(showAll) expandAllMajorBodies();
-    return;
-  }
-  renderDataOverview();
-  if(showAll) expandAllMajorBodies();
+  return window.OmniQADataTab.setDataViewBatch(showAll);
 }
 
 function expandAllMajorBodies(){
-  document.querySelectorAll('[id^="major_body_"]').forEach(el=>el.classList.remove('hidden'));
+  return window.OmniQADataTab.expandAllMajorBodies();
 }
 
 function renderDataOverview(){
-  const data = dataOverviewCache || { users: [], versions: [], requirements: [], bugs: [] };
-  const usersCard = document.getElementById('dataUsersCard');
-  if(usersCard) usersCard.classList.toggle('hidden', !dataViewState.showUsers);
-
-  if(dataViewState.showUsers){
-    dataUsers.innerHTML = (data.users || []).length === 0
-      ? '<div class="muted" style="padding: 12px 8px;">暂无用户数据</div>'
-      : (data.users || []).map(u => {
-          const safeUsername = String(u.username || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-          return `<div class="card" style="margin-bottom:12px; padding:14px 16px; border:1px solid #e2e8f0; box-shadow:none;">
-            <div style="display:grid; grid-template-columns:minmax(220px, 1fr) auto; gap:12px; align-items:center;">
-              <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-                <span style="font-weight:700; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${u.username}</span>
-                <span class="badge" style="background:${u.role==='admin'?'#dbeafe':'#f1f5f9'}; color:${u.role==='admin'?'#1d4ed8':'#475569'}">${u.role==='admin'?'管理员':'普通用户'}</span>
-                <span class="badge" style="background:${u.is_team_member?'#dcfce7':'#fee2e2'}; color:${u.is_team_member?'#166534':'#991b1b'}">${u.is_team_member?'组员':'编外'}</span>
-              </div>
-              <div class="row" style="justify-content:flex-end; gap:8px; margin:0; flex-wrap:wrap;">
-                <button onclick="toggleRole(${u.id},'${u.role}')">设为${u.role==='admin'?'普通用户':'管理员'}</button>
-                <button class="secondary" onclick="toggleTeamMember(${u.id}, ${u.is_team_member ? false : true})">${u.is_team_member?'设为编外人员':'设为组员'}</button>
-                <button class="secondary" onclick="resetUserPassword(${u.id}, '${safeUsername}')">重置密码</button>
-                <button class="danger" onclick="removeUser(${u.id}, '${safeUsername}')">删除</button>
-              </div>
-            </div>
-          </div>`;
-        }).join('');
-  } else {
-    dataUsers.innerHTML = '';
-  }
-
-  const majors = (data.versions || []).filter(v => v.version_type === 'major');
-  const minors = (data.versions || []).filter(v => v.version_type === 'minor');
-  const minorMap = {};
-  minors.forEach(m => minorMap[m.id] = m.version_no);
-
-  let treeHtml = '';
-  majors.forEach(major => {
-    const majorMinors = minors.filter(m => m.parent_id === major.id);
-    const reqs = (data.requirements || []).filter(r => r.major_version_id === major.id);
-
-    let minorHtml = majorMinors.map(m => `<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-right:8px;padding-right:2px;">🏷️ ${m.version_no} <button class="text-btn" title="编辑" onclick="editVersion(${m.id},'${m.version_no}','minor',${major.id})">✎</button><button class="text-btn" title="删除" onclick="removeVersion(${m.id})">×</button></span>`).join('');
-    if(!minorHtml) minorHtml = '<span class="muted" style="font-size:13px;">暂无发包记录</span>';
-
-    let reqHtml = reqs.map(req => {
-      const reqBugs = (data.bugs || []).filter(b => b.requirement_id === req.id);
-      const freeBugs = reqBugs.filter(b => b.source_type === 'manual');
-      const caseBugs = reqBugs.filter(b => b.source_type === 'case');
-
-      let casesListHtml = (req.case_ids || []).map(cId => {
-        const relatedBugs = caseBugs.filter(b => b.source_ref === cId);
-        let bHtml = relatedBugs.map(b => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 关联 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id]||'未知'}]</span> <button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button></div>`).join('');
-        if(!bHtml) bHtml = `<div style="margin-left:24px; color:#10b981; font-size:13px; margin-top:4px;">↳ ✓ 完美通过，无关联Bug</div>`;
-        return `<div style="margin-top:12px;">🧪 <b>用例 [${cId}]</b> ${bHtml}</div>`;
-      }).join('');
-
-      let freeBugsHtml = freeBugs.map(b => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 自由 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id]||'未知'}]</span> <button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button></div>`).join('');
-
-      return `
-      <div style="border:1px solid #e2e8f0; border-radius:6px; margin-bottom:12px; background:#fff;">
-        <div style="padding:10px 12px; cursor:pointer; background:#f8fafc; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;" onclick="document.getElementById('req_body_${req.id}').classList.toggle('hidden')">
-          <span style="font-size:14px;">📄 <b>${req.zentao_req_id}</b> ${req.title}</span>
-          <span>
-            <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); editReq(${req.id},'${req.zentao_req_id}','${req.title}',${major.id})">编辑</button>
-            <button class="danger" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); removeReq(${req.id})">删除</button>
-          </span>
-        </div>
-        <div id="req_body_${req.id}" class="hidden" style="padding:12px; background:#fff;">
-          <div style="margin-bottom:16px;">
-            <div style="font-weight:bold; color:#334155; border-bottom:1px solid #f1f5f9; padding-bottom:4px;">[区块 A：测试用例与关联 Bug]</div>
-            ${casesListHtml||'<div class="muted" style="margin-left:24px; margin-top:8px;">暂无用例</div>'}
-          </div>
-          <div>
-            <div style="font-weight:bold; color:#334155; border-bottom:1px solid #f1f5f9; padding-bottom:4px;">[区块 B：自由 Bug 池]</div>
-            ${freeBugsHtml||'<div class="muted" style="margin-left:24px; margin-top:8px;">暂无自由Bug</div>'}
-          </div>
-        </div>
-      </div>`;
-    }).join('');
-
-    if(!reqHtml) reqHtml = '<div class="muted" style="font-size:13px;">暂无下辖需求</div>';
-
-    treeHtml += `
-    <div style="border:2px solid #cbd5e1; border-radius:8px; margin-bottom:16px; background:#fff; overflow:hidden;">
-      <div style="padding:12px 16px; background:#f1f5f9; border-bottom:1px solid #cbd5e1; cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="document.getElementById('major_body_${major.id}').classList.toggle('hidden')">
-        <span style="font-size:16px; font-weight:bold; color:#0f172a;">📦 大版本：${major.version_no}</span>
-        <span>
-          <button class="secondary" onclick="event.stopPropagation(); editVersion(${major.id},'${major.version_no}','major',null)">编辑版本</button>
-          <button class="danger" onclick="event.stopPropagation(); removeVersion(${major.id})">删除整体</button>
-        </span>
-      </div>
-      <div id="major_body_${major.id}" class="hidden" style="padding:16px; background:#f8fafc;">
-        ${dataViewState.showVersions ? `<div style="margin-bottom:20px; padding-bottom:12px; border-bottom:1px dashed #cbd5e1;">
-          <div style="font-weight:bold; margin-bottom:8px; color:#334155;">【版本发包履历】</div>
-          <div>${minorHtml}</div>
-        </div>` : '<div class="muted" style="margin-bottom:20px; padding-bottom:12px; border-bottom:1px dashed #cbd5e1;">版本信息已隐藏（可在上方视图控制中开启）</div>'}
-        <div>
-          <div style="font-weight:bold; margin-bottom:12px; color:#334155;">【下辖需求清单】</div>
-          ${reqHtml}
-        </div>
-      </div>
-    </div>`;
-  });
-
-  document.getElementById('dataTreeArea').innerHTML = treeHtml || '<div class="muted" style="padding: 20px; text-align: center;">系统中暂无数据，请先创建大版本</div>';
+  return window.OmniQADataTab.renderDataOverview();
 }
 
 async function toggleRole(userId, currentRole){
-  const nextRole = currentRole === 'admin' ? 'user' : 'admin';
-  if(!confirm(`确定将该用户设为${nextRole==='admin'?'管理员':'普通用户'}吗？`)) return;
-  try {
-    await api(`/users/${userId}/role`, {method:'PUT', headers:H, body:JSON.stringify({role:nextRole})});
-    showMessage('角色切换成功', 'success');
-    loadDataOverview();
-    loadUsers();
-  } catch(err) {
-    showMessage(err.message || '角色切换失败', 'error');
-  }
+  return window.OmniQADataTab.toggleRole(userId, currentRole);
 }
 
 async function toggleTeamMember(userId, targetStatus){
-  const text = targetStatus ? '组员' : '编外人员';
-  if(!confirm(`确定将该用户设为${text}吗？`)) return;
-  try {
-    await api(`/users/${userId}/team-status`, {method:'PUT', headers:H, body:JSON.stringify({is_team_member:targetStatus})});
-    showMessage(`已更新为${text}`, 'success');
-    loadDataOverview();
-    loadUsers();
-  } catch(err) {
-    showMessage(err.message || '组员状态更新失败', 'error');
-  }
+  return window.OmniQADataTab.toggleTeamMember(userId, targetStatus);
 }
 
 async function removeUser(userId, username){
-  if(!confirm(`确认删除用户【${username}】吗？此操作不可恢复。`)) return;
-  try {
-    await api(`/users/${userId}`, {method:'DELETE'});
-    showMessage('用户删除成功', 'success');
-    loadDataOverview();
-    loadUsers();
-  } catch(err) {
-    showMessage(err.message || '删除用户失败', 'error');
-  }
+  return window.OmniQADataTab.removeUser(userId, username);
 }
 
 async function removeVersion(id){
-  if(!confirm('⚠️ 高危操作：删除版本将级联删除所有下挂需求/用例/Bug，确定继续吗？')) return;
-  await api('/versions/'+id,{method:'DELETE'});
-  showMessage('版本已删除');
-  loadVersions();
-  loadDataOverview();
+  return window.OmniQADataTab.removeVersion(id);
 }
 
 async function removeReq(id){
-  if(!confirm('确定删除该需求及其用例/执行记录吗？')) return;
-  await api('/requirements/'+id,{method:'DELETE'});
-  showMessage('需求已删除');
-  loadDataOverview();
+  return window.OmniQADataTab.removeReq(id);
 }
 
 async function removeBug(id){
-  if(!confirm('确定删除该 Bug 吗？')) return;
-  await api('/bugs/'+id,{method:'DELETE'});
-  showMessage('Bug 已删除');
-  loadDataOverview();
+  return window.OmniQADataTab.removeBug(id);
 }
 
 async function editVersion(id,no,type,parent){
-  const newNo = prompt('版本号', no);
-  if(!newNo) return;
-  await api('/versions/'+id,{method:'PUT',headers:H,body:JSON.stringify({version_no:newNo,version_type:type,parent_id:parent})});
-  showMessage('版本已更新');
-  loadVersions();
-  loadDataOverview();
+  return window.OmniQADataTab.editVersion(id, no, type, parent);
 }
 
 async function editReq(id,z,title,major){
-  const zNum = prompt('需求号数字部分', z.replace('r#',''));
-  if(!zNum) return;
-  const t = prompt('需求标题', title);
-  if(!t) return;
-  await api('/requirements/'+id,{method:'PUT',headers:H,body:JSON.stringify({zentao_req_id:withPrefix('r#',zNum),title:t,major_version_id:major})});
-  showMessage('需求已更新');
-  loadDataOverview();
+  return window.OmniQADataTab.editReq(id, z, title, major);
 }
 
 async function editBug(id,b){
-  const num = prompt('Bug数字部分', b.replace('b#',''));
-  if(!num) return;
-  await api('/bugs/'+id+'?new_bug_id='+encodeURIComponent(withPrefix('b#',num)),{method:'PUT'});
-  showMessage('Bug已更新');
-  loadDataOverview();
+  return window.OmniQADataTab.editBug(id, b);
 }
 
-let currentDispatchBugId = null;
+async function saveDispatchedBug(id) {
+  return window.OmniQADispatchTab.saveDispatchedBug(id);
+}
+
+async function addDerivedBug(id) {
+  return window.OmniQADispatchTab.addDerivedBug(id);
+}
+
+async function removeDerivedBug(id, bugToRemove) {
+  return window.OmniQADispatchTab.removeDerivedBug(id, bugToRemove);
+}
 
 async function searchDispatchBug() {
-  const bugId = withPrefix('b#', document.getElementById('dispatchBugNo').value);
-  if (!bugId) return;
-  try {
-    const res = await (await api('/bugs/search?bug_id=' + encodeURIComponent(bugId))).json();
-    currentDispatchBugId = res.id;
-    document.getElementById('dispatchBugTitle').innerHTML = `🎯 找到缺陷：<b>${res.bug_id}</b> <span style="font-size:14px; color:#475569;">(归属：${res.req_title})</span>`;
-    if(res.dispatched_to_id) document.getElementById('dispatchUserSelect').value = String(res.dispatched_to_id);
-    document.getElementById('dispatchBugInfo').classList.remove('hidden');
-  } catch (err) {
-    showMessage(err.message, 'error');
-    document.getElementById('dispatchBugInfo').classList.add('hidden');
-  }
+  return window.OmniQADispatchTab.searchDispatchBug();
 }
 
 async function confirmDispatchBug() {
-  if (!currentDispatchBugId) return;
-  const uid = document.getElementById('dispatchUserSelect').value;
-  try {
-    await api('/bugs/' + currentDispatchBugId + '/dispatch', { method: 'POST', headers: H, body: JSON.stringify({ user_id: Number(uid) }) });
-    showMessage('特派成功！企微已通知', 'success');
-  } catch (err) { showMessage(err.message, 'error'); }
+  return window.OmniQADispatchTab.confirmDispatchBug();
 }
 
 async function saveDispatchedBug(id) {
@@ -1697,52 +736,15 @@ async function removeDerivedBug(id, bugToRemove) {
 }
 
 async function loadDispatchedAll() {
-  try {
-    const data = await (await api('/bugs/dispatched-all')).json();
-    const hideClosed = document.getElementById('hideClosedDispatch').checked;
-    
-    // 根据开关状态过滤数据
-    const filteredData = hideClosed ? data.filter(b => !b.closed) : data;
-    
-    const resZh = {"fixed":"🚀修复通过", "false_alarm":"⚠️误报", "rejected":"⛔拒绝修复"};
-    
-    if (filteredData.length === 0) {
-        document.getElementById('dispatchAllTable').innerHTML = '<tr><td colspan="3" style="text-align:center; padding: 20px; color:#94a3b8;">🎉 太棒了，当前没有待处理的特派 Bug！</td></tr>';
-        return;
-    }
-
-    document.getElementById('dispatchAllTable').innerHTML = filteredData.map(b => {
-      const statusHtml = b.closed ? `<span style="color:#16a34a;font-weight:bold;">✅已闭环 (${resZh[b.resolution]||'修复'})</span>` : `<span style="color:#dc2626;">⏳处理中</span>`;
-      return `<tr>
-          <td><b>${b.bug_id}</b></td>
-          <td><span class="badge" style="background:#ffedd5;color:#ea580c; border:1px solid #fdba74;">🪂 ${b.dispatched_to_name}</span></td>
-          <td>${statusHtml}</td>
-      </tr>`;
-    }).join('');
-  } catch(e) {
-    console.error("加载特派列表失败", e);
-  }
+  return window.OmniQADispatchTab.loadDispatchedAll();
 }
 
 async function changeMyPassword() {
-  const oldP = prompt("请输入【原密码】:");
-  if(!oldP) return;
-  const newP = prompt("请输入【新密码】 (长度大于等于3位):");
-  if(!newP) return;
-  try {
-    await api('/auth/password', {method: 'PUT', headers: H, body: JSON.stringify({old_password: oldP, new_password: newP})});
-    showMessage('密码修改成功，3秒后跳转到登录页', 'success');
-    setTimeout(logout, 3000);
-  } catch(e) { showMessage(e.message, 'error'); }
+  return window.OmniQAAuth.changeMyPassword();
 }
 
 async function resetUserPassword(id, username) {
-  const newP = prompt(`请输入用户【${username}】的【新密码】:`);
-  if(!newP) return;
-  try {
-    await api(`/users/${id}/password`, {method: 'PUT', headers: H, body: JSON.stringify({new_password: newP})});
-    showMessage(`密码已重置！用户 ${username} 已被强制下线。`, 'success');
-  } catch(e) { showMessage(e.message, 'error'); }
+  return window.OmniQAAuth.resetUserPassword(id, username);
 }
 
 window.addEventListener('error',e=>showMessage(e.message||'未知错误','error'))

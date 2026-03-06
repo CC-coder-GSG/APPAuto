@@ -1,0 +1,98 @@
+﻿import { api } from '../api.js';
+import { state } from '../state.js';
+import { withPrefix } from '../utils.js';
+
+export async function searchDispatchBug() {
+  const bugId = withPrefix('b#', document.getElementById('dispatchBugNo')?.value || '');
+  if (!bugId) return;
+  try {
+    const res = await (await api('/bugs/search?bug_id=' + encodeURIComponent(bugId))).json();
+    state.currentDispatchBugId = res.id;
+    document.getElementById('dispatchBugTitle').innerHTML = `找到缺陷：<b>${res.bug_id}</b> <span style="font-size:14px; color:#475569;">(归属：${res.req_title})</span>`;
+    if (res.dispatched_to_id) document.getElementById('dispatchUserSelect').value = String(res.dispatched_to_id);
+    document.getElementById('dispatchBugInfo').classList.remove('hidden');
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message, 'error');
+    document.getElementById('dispatchBugInfo').classList.add('hidden');
+  }
+}
+
+export async function confirmDispatchBug() {
+  if (!state.currentDispatchBugId) return;
+  const uid = document.getElementById('dispatchUserSelect')?.value;
+  try {
+    await api('/bugs/' + state.currentDispatchBugId + '/dispatch', {
+      method: 'POST',
+      headers: window.H,
+      body: JSON.stringify({ user_id: Number(uid) }),
+    });
+    window.showMessage && window.showMessage('特派成功，企微已通知', 'success');
+    await loadDispatchedAll();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message, 'error');
+  }
+}
+
+export async function loadDispatchedAll() {
+  try {
+    const data = await (await api('/bugs/dispatched-all')).json();
+    const hideClosed = document.getElementById('hideClosedDispatch')?.checked;
+    const filteredData = hideClosed ? data.filter((b) => !b.closed) : data;
+    const table = document.getElementById('dispatchAllTable');
+    if (!table) return;
+    const resZh = { fixed: '修复通过', false_alarm: '误报', rejected: '拒绝修复' };
+    if (filteredData.length === 0) {
+      table.innerHTML = '<tr><td colspan="3" style="text-align:center; padding: 20px; color:#94a3b8;">当前没有待处理的特派 Bug</td></tr>';
+      return;
+    }
+    table.innerHTML = filteredData.map((b) => {
+      const statusHtml = b.closed ? `<span style="color:#16a34a;font-weight:bold;">已闭环 (${resZh[b.resolution] || '修复'})</span>` : '<span style="color:#dc2626;">处理中</span>';
+      return `<tr>
+        <td><b>${b.bug_id}</b></td>
+        <td><span class="badge" style="background:#ffedd5;color:#ea580c; border:1px solid #fdba74;">特派给 ${b.dispatched_to_name}</span></td>
+        <td>${statusHtml}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    console.error('加载特派列表失败', e);
+  }
+}
+
+
+export async function saveDispatchedBug(id) {
+  const done = document.getElementById('ddone_' + id).checked;
+  const n = document.getElementById('dnb_hidden_' + id).value || null;
+  const res = document.getElementById('dres_' + id).value;
+  await api(`/stage5/bugs/${id}/result`, {
+    method: 'PUT', headers: window.H,
+    body: JSON.stringify({ minor_version_id: Number(document.getElementById('mineMinorSelect')?.value || 0), test_done: done, newly_found_bug_id: n, resolution: res }),
+  });
+  window.showMessage && window.showMessage('???????????????');
+  await window.OmniQAMineTab.loadMyWorkbench();
+}
+
+export async function addDerivedBug(id) {
+  const n = prompt('???????Bug?????');
+  if (!n) return;
+  const newBug = withPrefix('b#', n);
+  const hiddenEl = document.getElementById('dnb_hidden_' + id);
+  let arr = hiddenEl.value ? hiddenEl.value.split(',') : [];
+  if (arr.includes(newBug)) {
+    window.showMessage && window.showMessage('? Bug ?????????', 'error');
+    return;
+  }
+  arr.push(newBug);
+  hiddenEl.value = arr.join(',');
+  await saveDispatchedBug(id);
+}
+
+export async function removeDerivedBug(id, bugToRemove) {
+  if (!confirm(`???????? Bug [${bugToRemove}] ??`)) return;
+  const hiddenEl = document.getElementById('dnb_hidden_' + id);
+  let arr = hiddenEl.value ? hiddenEl.value.split(',') : [];
+  arr = arr.filter((x) => x !== bugToRemove);
+  hiddenEl.value = arr.join(',');
+  await saveDispatchedBug(id);
+}
+
+window.OmniQADispatchTab = { searchDispatchBug, confirmDispatchBug, loadDispatchedAll, saveDispatchedBug, addDerivedBug, removeDerivedBug };

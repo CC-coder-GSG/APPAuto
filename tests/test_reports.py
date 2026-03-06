@@ -1,0 +1,87 @@
+﻿from datetime import date, datetime
+
+from fastapi import HTTPException
+
+from app.models import BugSourceType, BugTracking, Requirement, TestCase, TestExecution, User, UserRole, Version, VersionType
+from app.services.report_service import ReportService
+
+
+def _create_user(db_session, username: str, role: UserRole = UserRole.USER, is_team_member: bool = True) -> User:
+    user = User(username=username, password_hash=User.hash_password("pass123"), role=role, is_team_member=is_team_member)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+def _create_major(db_session, version_no: str = "V7000") -> Version:
+    major = Version(version_no=version_no, version_type=VersionType.MAJOR)
+    db_session.add(major)
+    db_session.commit()
+    db_session.refresh(major)
+    return major
+
+
+def _create_minor(db_session, parent_id: int, version_no: str = "V7000.1") -> Version:
+    minor = Version(version_no=version_no, version_type=VersionType.MINOR, parent_id=parent_id)
+    db_session.add(minor)
+    db_session.commit()
+    db_session.refresh(minor)
+    return minor
+
+
+def test_summary_blocks_non_admin_viewing_other_user(db_session):
+    current_user = _create_user(db_session, "report_user")
+    other_user = _create_user(db_session, "report_other")
+    service = ReportService(db_session)
+
+    try:
+        service.summary(date(2026, 1, 1), date(2026, 1, 2), current_user, other_user.id)
+        assert False, "expected HTTPException"
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert "无权限查看其他人的报表" in exc.detail
+
+
+def test_summary_returns_expected_structure(db_session):
+    user = _create_user(db_session, "report_user2")
+    major = _create_major(db_session)
+    minor = _create_minor(db_session, major.id)
+    req = Requirement(zentao_req_id="r#7001", title="报表需求", major_version_id=major.id, owner_id=user.id)
+    db_session.add(req)
+    db_session.commit()
+    db_session.refresh(req)
+    db_session.add(TestCase(requirement_id=req.id, zentao_case_id="u#7001", creator_id=user.id, created_at=datetime(2026, 1, 1, 10, 0, 0)))
+    db_session.add(TestExecution(requirement_id=req.id, minor_version_id=minor.id, executed_by_id=user.id, executed_at=datetime(2026, 1, 1, 11, 0, 0), result_status="passed"))
+    db_session.add(BugTracking(major_version_id=major.id, requirement_id=req.id, source_type=BugSourceType.MANUAL, bug_id="b#7001", found_minor_version_id=minor.id, created_by_id=user.id, created_at=datetime(2026, 1, 1, 12, 0, 0)))
+    db_session.commit()
+
+    service = ReportService(db_session)
+    result = service.summary(date(2026, 1, 1), date(2026, 1, 1), user)
+
+    assert "overview" in result
+    assert "trend" in result
+    assert "bug_source_dist" in result
+    assert result["overview"]["created_cases"] == 1
+    assert result["overview"]["created_bugs"] == 1
+
+
+def test_advanced_and_version_bugs_return_expected_shapes(db_session):
+    user = _create_user(db_session, "report_user3", role=UserRole.ADMIN)
+    major = _create_major(db_session, "V7001")
+    minor = _create_minor(db_session, major.id, "V7001.1")
+    req = Requirement(zentao_req_id="r#7002", title="高级报表需求", major_version_id=major.id, owner_id=user.id)
+    db_session.add(req)
+    db_session.commit()
+    db_session.refresh(req)
+    db_session.add(BugTracking(major_version_id=major.id, requirement_id=req.id, source_type=BugSourceType.MANUAL, bug_id="b#7002", found_minor_version_id=minor.id, created_by_id=user.id, created_at=datetime(2026, 1, 2, 9, 0, 0), closed=True, resolution="fixed"))
+    db_session.add(TestExecution(requirement_id=req.id, minor_version_id=minor.id, executed_by_id=user.id, executed_at=datetime(2026, 1, 2, 10, 0, 0), result_status="passed"))
+    db_session.commit()
+
+    service = ReportService(db_session)
+    advanced = service.advanced(date(2026, 1, 2), date(2026, 1, 2))
+    version_bugs = service.version_bugs()
+
+    assert set(advanced.keys()) == {"top_reqs", "leakage", "funnel", "executions"}
+    assert isinstance(version_bugs, list)
+    assert version_bugs[0]["bug_count"] >= 1

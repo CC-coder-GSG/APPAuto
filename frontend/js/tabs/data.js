@@ -1,0 +1,402 @@
+﻿import { api } from '../api.js';
+import { state } from '../state.js';
+import { withPrefix } from '../utils.js';
+
+export async function createVersion() {
+  try {
+    const version_no = (window.createVersionNo?.value || '').trim();
+    const version_type = window.createVersionType?.value;
+    const parentRaw = window.createVersionParent?.value;
+    const parent_id = version_type === 'minor' ? Number(parentRaw) : null;
+    if (!version_no) {
+      window.showMessage && window.showMessage('请填写版本号', 'error');
+      return;
+    }
+    if (version_type === 'minor' && !parentRaw) {
+      window.showMessage && window.showMessage('minor 版本必须选择父大版本', 'error');
+      return;
+    }
+    await api('/versions', { method: 'POST', headers: window.H, body: JSON.stringify({ version_no, version_type, parent_id }) });
+    window.createVersionNo.value = '';
+    window.createVersionType.value = 'major';
+    window.toggleCreateVersionParent && window.toggleCreateVersionParent();
+    await window.loadVersions();
+    await loadDataOverview();
+    window.showMessage && window.showMessage('创建版本成功', 'success');
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '创建版本失败', 'error');
+  }
+}
+
+export async function createUser() {
+  try {
+    const username = (window.createUsername?.value || '').trim();
+    const password = (window.createPassword?.value || '').trim();
+    const role = window.createUserRole?.value;
+    if (!username || !password) {
+      window.showMessage && window.showMessage('请填写用户名和密码', 'error');
+      return;
+    }
+    await api('/users', { method: 'POST', headers: window.H, body: JSON.stringify({ username, password, role }) });
+    window.createUsername.value = '';
+    window.createPassword.value = '';
+    window.createUserRole.value = 'user';
+    await window.loadUsers();
+    await loadDataOverview();
+    window.showMessage && window.showMessage('创建用户成功', 'success');
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '创建用户失败', 'error');
+  }
+}
+
+export async function createReq() {
+  try {
+    const title = (window.createReqTitle?.value || '').trim();
+    const reqNo = withPrefix('r#', window.createReqNo?.value || '');
+    const major_version_id = Number(window.createReqMajorSelect?.value || 0);
+    if (!major_version_id) {
+      window.showMessage && window.showMessage('请先去【数据管理台】创建一个大版本！', 'error');
+      return;
+    }
+    if (!title) {
+      window.showMessage && window.showMessage('请填写需求标题', 'error');
+      return;
+    }
+    if (!reqNo) {
+      window.showMessage && window.showMessage('请填写需求编号数字部分', 'error');
+      return;
+    }
+    await api('/requirements', { method: 'POST', headers: window.H, body: JSON.stringify({ zentao_req_id: reqNo, title, major_version_id }) });
+    window.createReqTitle.value = '';
+    window.createReqNo.value = '';
+    window.showMessage && window.showMessage('需求已创建成功，请联系管理员分配人员或刷新列表', 'success');
+    await loadDataOverview();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '创建需求失败', 'error');
+  }
+}
+
+export function handleReqFileSelect(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(evt) {
+    try {
+      const data = new Uint8Array(evt.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonArr = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+      parseExcelArray(jsonArr);
+    } catch (err) {
+      window.showMessage && window.showMessage('Excel 解析失败，请检查文件格式是否正确', 'error');
+    }
+    e.target.value = '';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+export function parseExcelArray(rows) {
+  state.pendingImportReqs = [];
+  let isDataStarted = false;
+  let idIndex = -1;
+  let titleIndex = -1;
+  for (const row of rows) {
+    if (!row || row.length === 0) continue;
+    if (!isDataStarted) {
+      idIndex = row.indexOf('编号');
+      titleIndex = row.indexOf('需求名称');
+      if (idIndex !== -1 && titleIndex !== -1) isDataStarted = true;
+      continue;
+    }
+    if (idIndex !== -1 && titleIndex !== -1) {
+      const rawId = String(row[idIndex] || '').trim();
+      const rawTitle = String(row[titleIndex] || '').trim();
+      const reqNo = rawId.replace(/\D/g, '');
+      if (reqNo && rawTitle) {
+        state.pendingImportReqs.push({ zentao_req_id: 'r#' + reqNo, title: rawTitle });
+      }
+    }
+  }
+  if (state.pendingImportReqs.length === 0) {
+    window.showMessage && window.showMessage('未解析到数据，请确保表格中包含“编号”和“需求名称”列头！', 'error');
+    return;
+  }
+  document.getElementById('importPreviewArea').classList.remove('hidden');
+  document.getElementById('previewCount').innerText = state.pendingImportReqs.length;
+  document.getElementById('previewList').innerHTML = state.pendingImportReqs.map((r) => `<div style="padding: 4px 0; border-bottom: 1px solid #f1f5f9;"><span class="badge" style="margin-right:8px">${r.zentao_req_id}</span> ${r.title}</div>`).join('');
+  document.getElementById('importMajorSelect').innerHTML = document.getElementById('createReqMajorSelect').innerHTML;
+}
+
+export function cancelImport() {
+  state.pendingImportReqs = [];
+  document.getElementById('importPreviewArea').classList.add('hidden');
+}
+
+export async function confirmImport() {
+  const majorId = Number(document.getElementById('importMajorSelect')?.value || 0);
+  if (!majorId) {
+    window.showMessage && window.showMessage('请选择要导入的大版本！', 'error');
+    return;
+  }
+  try {
+    const res = await api('/requirements/batch', {
+      method: 'POST',
+      headers: window.H,
+      body: JSON.stringify({ major_version_id: majorId, items: state.pendingImportReqs }),
+    });
+    const data = await res.json();
+    window.showMessage && window.showMessage(`成功导入 ${data.count} 条新需求（已自动忽略系统中存在的重复项）！`, 'success');
+    cancelImport();
+    await loadDataOverview();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '导入失败', 'error');
+  }
+}
+
+export async function loadDataOverview() {
+  state.dataOverviewCache = await (await api('/admin/data-overview')).json();
+  window.dataOverviewCache = state.dataOverviewCache;
+  renderDataOverview();
+}
+
+export async function setDataView(key, checked) {
+  if (key === 'users') state.dataViewState.showUsers = checked;
+  if (key === 'versions') state.dataViewState.showVersions = checked;
+  window.dataViewState = state.dataViewState;
+  if (!state.dataOverviewCache) {
+    await loadDataOverview();
+    return;
+  }
+  renderDataOverview();
+  if (key === 'versions' && checked) expandAllMajorBodies();
+}
+
+export async function setDataViewBatch(showAll) {
+  state.dataViewState.showUsers = showAll;
+  state.dataViewState.showVersions = showAll;
+  window.dataViewState = state.dataViewState;
+  const usersToggle = document.getElementById('toggleDataUsers');
+  const versionsToggle = document.getElementById('toggleDataVersions');
+  if (usersToggle) usersToggle.checked = showAll;
+  if (versionsToggle) versionsToggle.checked = showAll;
+  if (!state.dataOverviewCache) {
+    await loadDataOverview();
+    if (showAll) expandAllMajorBodies();
+    return;
+  }
+  renderDataOverview();
+  if (showAll) expandAllMajorBodies();
+}
+
+export function expandAllMajorBodies() {
+  document.querySelectorAll('[id^="major_body_"]').forEach((el) => el.classList.remove('hidden'));
+}
+
+export function renderDataOverview() {
+  const data = state.dataOverviewCache || { users: [], versions: [], requirements: [], bugs: [] };
+  const usersCard = document.getElementById('dataUsersCard');
+  if (usersCard) usersCard.classList.toggle('hidden', !state.dataViewState.showUsers);
+  const dataUsers = document.getElementById('dataUsers');
+  if (state.dataViewState.showUsers && dataUsers) {
+    dataUsers.innerHTML = (data.users || []).length === 0
+      ? '<div class="muted" style="padding: 12px 8px;">暂无用户数据</div>'
+      : (data.users || []).map((u) => {
+        const safeUsername = String(u.username || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        return `<div class="card" style="margin-bottom:12px; padding:14px 16px; border:1px solid #e2e8f0; box-shadow:none;">
+          <div style="display:grid; grid-template-columns:minmax(220px, 1fr) auto; gap:12px; align-items:center;">
+            <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+              <span style="font-weight:700; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${u.username}</span>
+              <span class="badge" style="background:${u.role === 'admin' ? '#dbeafe' : '#f1f5f9'}; color:${u.role === 'admin' ? '#1d4ed8' : '#475569'}">${u.role === 'admin' ? '管理员' : '普通用户'}</span>
+              <span class="badge" style="background:${u.is_team_member ? '#dcfce7' : '#fee2e2'}; color:${u.is_team_member ? '#166534' : '#991b1b'}">${u.is_team_member ? '组员' : '编外'}</span>
+            </div>
+            <div class="row" style="justify-content:flex-end; gap:8px; margin:0; flex-wrap:wrap;">
+              <button onclick="toggleRole(${u.id},'${u.role}')">设为${u.role === 'admin' ? '普通用户' : '管理员'}</button>
+              <button class="secondary" onclick="toggleTeamMember(${u.id}, ${u.is_team_member ? false : true})">${u.is_team_member ? '设为编外人员' : '设为组员'}</button>
+              <button class="secondary" onclick="resetUserPassword(${u.id}, '${safeUsername}')">重置密码</button>
+              <button class="danger" onclick="removeUser(${u.id}, '${safeUsername}')">删除</button>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+  } else if (dataUsers) {
+    dataUsers.innerHTML = '';
+  }
+
+  const majors = (data.versions || []).filter((v) => v.version_type === 'major');
+  const minors = (data.versions || []).filter((v) => v.version_type === 'minor');
+  const minorMap = {};
+  minors.forEach((m) => { minorMap[m.id] = m.version_no; });
+  let treeHtml = '';
+  majors.forEach((major) => {
+    const majorMinors = minors.filter((m) => m.parent_id === major.id);
+    const reqs = (data.requirements || []).filter((r) => r.major_version_id === major.id);
+    let minorHtml = majorMinors.map((m) => `<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-right:8px;padding-right:2px;">版本 ${m.version_no} <button class="text-btn" title="编辑" onclick="editVersion(${m.id},'${m.version_no}','minor',${major.id})">编辑</button><button class="text-btn" title="删除" onclick="removeVersion(${m.id})">删除</button></span>`).join('');
+    if (!minorHtml) minorHtml = '<span class="muted" style="font-size:13px;">暂无发包记录</span>';
+    let reqHtml = reqs.map((req) => {
+      const reqBugs = (data.bugs || []).filter((b) => b.requirement_id === req.id);
+      const freeBugs = reqBugs.filter((b) => b.source_type === 'manual');
+      const caseBugs = reqBugs.filter((b) => b.source_type === 'case');
+      const casesListHtml = (req.case_ids || []).map((cId) => {
+        const relatedBugs = caseBugs.filter((b) => b.source_ref === cId);
+        let bHtml = relatedBugs.map((b) => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">关联 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">编辑</button><button class="text-btn" onclick="removeBug(${b.id})">删除</button></div>`).join('');
+        if (!bHtml) bHtml = '<div style="margin-left:24px; color:#10b981; font-size:13px; margin-top:4px;">通过，无关联 Bug</div>';
+        return `<div style="margin-top:12px;">用例 [${cId}] ${bHtml}</div>`;
+      }).join('');
+      const freeBugsHtml = freeBugs.map((b) => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">自由 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">编辑</button><button class="text-btn" onclick="removeBug(${b.id})">删除</button></div>`).join('');
+      return `
+      <div style="border:1px solid #e2e8f0; border-radius:6px; margin-bottom:12px; background:#fff;">
+        <div style="padding:10px 12px; cursor:pointer; background:#f8fafc; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;" onclick="document.getElementById('req_body_${req.id}').classList.toggle('hidden')">
+          <span style="font-size:14px;">需求 <b>${req.zentao_req_id}</b> ${req.title}</span>
+          <span>
+            <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); editReq(${req.id},'${req.zentao_req_id}','${req.title}',${major.id})">编辑</button>
+            <button class="danger" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); removeReq(${req.id})">删除</button>
+          </span>
+        </div>
+        <div id="req_body_${req.id}" class="hidden" style="padding:12px; background:#fff;">
+          <div style="margin-bottom:16px;">
+            <div style="font-weight:bold; color:#334155; border-bottom:1px solid #f1f5f9; padding-bottom:4px;">[区块 A：测试用例与关联 Bug]</div>
+            ${casesListHtml || '<div class="muted" style="margin-left:24px; margin-top:8px;">暂无用例</div>'}
+          </div>
+          <div>
+            <div style="font-weight:bold; color:#334155; border-bottom:1px solid #f1f5f9; padding-bottom:4px;">[区块 B：自由 Bug 池]</div>
+            ${freeBugsHtml || '<div class="muted" style="margin-left:24px; margin-top:8px;">暂无自由Bug</div>'}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    if (!reqHtml) reqHtml = '<div class="muted" style="font-size:13px;">暂无下辖需求</div>';
+    treeHtml += `
+    <div style="border:2px solid #cbd5e1; border-radius:8px; margin-bottom:16px; background:#fff; overflow:hidden;">
+      <div style="padding:12px 16px; background:#f1f5f9; border-bottom:1px solid #cbd5e1; cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="document.getElementById('major_body_${major.id}').classList.toggle('hidden')">
+        <span style="font-size:16px; font-weight:bold; color:#0f172a;">大版本：${major.version_no}</span>
+        <span>
+          <button class="secondary" onclick="event.stopPropagation(); editVersion(${major.id},'${major.version_no}','major',null)">编辑版本</button>
+          <button class="danger" onclick="event.stopPropagation(); removeVersion(${major.id})">删除整体</button>
+        </span>
+      </div>
+      <div id="major_body_${major.id}" class="hidden" style="padding:16px; background:#f8fafc;">
+        ${state.dataViewState.showVersions ? `<div style="margin-bottom:20px; padding-bottom:12px; border-bottom:1px dashed #cbd5e1;">
+          <div style="font-weight:bold; margin-bottom:8px; color:#334155;">【版本发包履历】</div>
+          <div>${minorHtml}</div>
+        </div>` : '<div class="muted" style="margin-bottom:20px; padding-bottom:12px; border-bottom:1px dashed #cbd5e1;">版本信息已隐藏（可在上方视图控制中开启）</div>'}
+        <div>
+          <div style="font-weight:bold; margin-bottom:12px; color:#334155;">【下辖需求清单】</div>
+          ${reqHtml}
+        </div>
+      </div>
+    </div>`;
+  });
+  document.getElementById('dataTreeArea').innerHTML = treeHtml || '<div class="muted" style="padding: 20px; text-align: center;">系统中暂无数据，请先创建大版本</div>';
+}
+
+
+export async function toggleRole(userId, currentRole) {
+  const nextRole = currentRole === 'admin' ? 'user' : 'admin';
+  if (!confirm(`????????${nextRole === 'admin' ? '???' : '????'}??`)) return;
+  try {
+    await api(`/users/${userId}/role`, { method: 'PUT', headers: window.H, body: JSON.stringify({ role: nextRole }) });
+    window.showMessage && window.showMessage('??????', 'success');
+    await loadDataOverview();
+    await window.loadUsers();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '??????', 'error');
+  }
+}
+
+export async function toggleTeamMember(userId, targetStatus) {
+  const text = targetStatus ? '??' : '????';
+  if (!confirm(`????????${text}??`)) return;
+  try {
+    await api(`/users/${userId}/team-status`, { method: 'PUT', headers: window.H, body: JSON.stringify({ is_team_member: targetStatus }) });
+    window.showMessage && window.showMessage(`????${text}`, 'success');
+    await loadDataOverview();
+    await window.loadUsers();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '????????', 'error');
+  }
+}
+
+export async function removeUser(userId, username) {
+  if (!confirm(`???????${username}???????????`)) return;
+  try {
+    await api(`/users/${userId}`, { method: 'DELETE' });
+    window.showMessage && window.showMessage('??????', 'success');
+    await loadDataOverview();
+    await window.loadUsers();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '??????', 'error');
+  }
+}
+
+export async function removeVersion(id) {
+  if (!confirm('???????????????????????? Bug???????')) return;
+  await api('/versions/' + id, { method: 'DELETE' });
+  window.showMessage && window.showMessage('?????');
+  await window.loadVersions();
+  await loadDataOverview();
+}
+
+export async function removeReq(id) {
+  if (!confirm('??????????????????')) return;
+  await api('/requirements/' + id, { method: 'DELETE' });
+  window.showMessage && window.showMessage('?????');
+  await loadDataOverview();
+}
+
+export async function removeBug(id) {
+  if (!confirm('????? Bug ??')) return;
+  await api('/bugs/' + id, { method: 'DELETE' });
+  window.showMessage && window.showMessage('Bug ???');
+  await loadDataOverview();
+}
+
+export async function editVersion(id, no, type, parent) {
+  const newNo = prompt('???', no);
+  if (!newNo) return;
+  await api('/versions/' + id, { method: 'PUT', headers: window.H, body: JSON.stringify({ version_no: newNo, version_type: type, parent_id: parent }) });
+  window.showMessage && window.showMessage('?????');
+  await window.loadVersions();
+  await loadDataOverview();
+}
+
+export async function editReq(id, z, title, major) {
+  const zNum = prompt('???????', z.replace('r#', ''));
+  if (!zNum) return;
+  const t = prompt('????', title);
+  if (!t) return;
+  await api('/requirements/' + id, { method: 'PUT', headers: window.H, body: JSON.stringify({ zentao_req_id: withPrefix('r#', zNum), title: t, major_version_id: major }) });
+  window.showMessage && window.showMessage('?????');
+  await loadDataOverview();
+}
+
+export async function editBug(id, b) {
+  const num = prompt('Bug????', b.replace('b#', ''));
+  if (!num) return;
+  await api('/bugs/' + id + '?new_bug_id=' + encodeURIComponent(withPrefix('b#', num)), { method: 'PUT' });
+  window.showMessage && window.showMessage('Bug???');
+  await loadDataOverview();
+}
+
+window.OmniQADataTab = {
+  createVersion,
+  createUser,
+  createReq,
+  handleReqFileSelect,
+  parseExcelArray,
+  cancelImport,
+  confirmImport,
+  loadDataOverview,
+  setDataView,
+  setDataViewBatch,
+  expandAllMajorBodies,
+  renderDataOverview,
+  toggleRole,
+  toggleTeamMember,
+  removeUser,
+  removeVersion,
+  removeReq,
+  removeBug,
+  editVersion,
+  editReq,
+  editBug,
+};

@@ -1,0 +1,136 @@
+﻿from app.models import BugSourceType, BugStage5Record, BugTracking, Requirement, RequirementStatus, User, UserRole, Version, VersionType
+from app.services.stage5_service import Stage5Service
+
+
+def _create_major(db_session, version_no: str = "V6000") -> Version:
+    major = Version(version_no=version_no, version_type=VersionType.MAJOR)
+    db_session.add(major)
+    db_session.commit()
+    db_session.refresh(major)
+    return major
+
+
+def _create_minor(db_session, parent_id: int, version_no: str = "V6000.1") -> Version:
+    minor = Version(version_no=version_no, version_type=VersionType.MINOR, parent_id=parent_id)
+    db_session.add(minor)
+    db_session.commit()
+    db_session.refresh(minor)
+    return minor
+
+
+def _create_user(db_session, username: str) -> User:
+    user = User(username=username, password_hash=User.hash_password("pass123"), role=UserRole.USER)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+def _create_requirement(db_session, major_id: int) -> Requirement:
+    req = Requirement(zentao_req_id="r#6001", title="Stage5需求", major_version_id=major_id, status=RequirementStatus.PENDING)
+    db_session.add(req)
+    db_session.commit()
+    db_session.refresh(req)
+    return req
+
+
+def test_submit_stage5_result_marks_bug_closed_when_any_record_done(db_session):
+    major = _create_major(db_session)
+    minor = _create_minor(db_session, major.id)
+    user = _create_user(db_session, "stage5_user")
+    req = _create_requirement(db_session, major.id)
+    bug = BugTracking(
+        major_version_id=major.id,
+        requirement_id=req.id,
+        source_type=BugSourceType.MANUAL,
+        bug_id="b#6001",
+        found_minor_version_id=minor.id,
+        created_by_id=user.id,
+        closed=False,
+    )
+    db_session.add(bug)
+    db_session.commit()
+    db_session.refresh(bug)
+
+    service = Stage5Service(db_session)
+    result = service.submit_result(
+        bug.id,
+        minor_version_id=minor.id,
+        test_done=True,
+        newly_found_bug_id=None,
+        resolution="fixed",
+        current_user=user,
+    )
+    db_session.refresh(bug)
+
+    assert result["message"] == "Stage5 result updated"
+    assert bug.closed is True
+    assert bug.fixed_minor_version_id == minor.id
+
+
+def test_submit_stage5_result_creates_derived_bug_and_dispatches_to_self(db_session):
+    major = _create_major(db_session, "V6001")
+    minor = _create_minor(db_session, major.id, "V6001.1")
+    user = _create_user(db_session, "stage5_user2")
+    req = _create_requirement(db_session, major.id)
+    bug = BugTracking(
+        major_version_id=major.id,
+        requirement_id=req.id,
+        source_type=BugSourceType.MANUAL,
+        bug_id="b#6002",
+        found_minor_version_id=minor.id,
+        created_by_id=user.id,
+    )
+    db_session.add(bug)
+    db_session.commit()
+    db_session.refresh(bug)
+
+    service = Stage5Service(db_session)
+    result = service.submit_result(
+        bug.id,
+        minor_version_id=minor.id,
+        test_done=False,
+        newly_found_bug_id="b#6003,b#6004",
+        resolution="fixed",
+        current_user=user,
+    )
+
+    derived = db_session.query(BugTracking).filter(BugTracking.source_ref == "b#6002").order_by(BugTracking.bug_id.asc()).all()
+    assert result["created_bug_ids"] == ["b#6003", "b#6004"]
+    assert [b.bug_id for b in derived] == ["b#6003", "b#6004"]
+    assert all(b.dispatched_to_id == user.id for b in derived)
+
+
+def test_stage5_overview_separates_my_record_and_other_records(db_session):
+    major = _create_major(db_session, "V6002")
+    minor = _create_minor(db_session, major.id, "V6002.1")
+    me = _create_user(db_session, "stage5_me")
+    other = _create_user(db_session, "stage5_other")
+    req = _create_requirement(db_session, major.id)
+    bug = BugTracking(
+        major_version_id=major.id,
+        requirement_id=req.id,
+        source_type=BugSourceType.MANUAL,
+        bug_id="b#6005",
+        found_minor_version_id=minor.id,
+        created_by_id=me.id,
+        dispatched_to_id=other.id,
+    )
+    db_session.add(bug)
+    db_session.commit()
+    db_session.refresh(bug)
+    db_session.add_all([
+        BugStage5Record(bug_tracking_id=bug.id, user_id=me.id, minor_version_id=minor.id, test_done=False, resolution="fixed"),
+        BugStage5Record(bug_tracking_id=bug.id, user_id=other.id, minor_version_id=minor.id, test_done=True, resolution="rejected"),
+    ])
+    db_session.commit()
+
+    service = Stage5Service(db_session)
+    data = service.overview(major.id, me)
+    row = data["bug_pool"][0]
+
+    assert row["my_test_done"] is False
+    assert row["dispatched_to_name"] == other.username
+    assert len(row["other_records"]) == 1
+    assert row["other_records"][0]["username"] == other.username
+    assert row["other_records"][0]["resolution"] == "rejected"

@@ -1,4 +1,14 @@
 .venv/
-app_auto.db
 __pycache__/
 *.pyc
+*.pyo
+*.db
+*.sqlite3
+.env
+.pytest_cache/
+.coverage
+htmlcov/
+node_modules/
+.vscode/
+.idea/
+frontend/.tmp_index_script.js

@@ -1,0 +1,39 @@
+from __future__ import annotations
+
+from typing import Generator
+
+from fastapi import Depends, HTTPException
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.db.session import SessionLocal
+from app.models import User
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
+
+
+def get_db() -> Generator[Session, None, None]:
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+    credential_exception = HTTPException(status_code=401, detail="Could not validate credentials")
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        username = payload.get("sub")
+        session_token = payload.get("session")
+        if username is None:
+            raise credential_exception
+    except JWTError as exc:
+        raise credential_exception from exc
+
+    user = db.query(User).filter(User.username == username).first()
+    if not user or user.session_token != session_token:
+        raise credential_exception
+    return user
