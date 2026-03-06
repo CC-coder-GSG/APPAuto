@@ -292,88 +292,88 @@ export function renderDataOverview() {
 
 export async function toggleRole(userId, currentRole) {
   const nextRole = currentRole === 'admin' ? 'user' : 'admin';
-  if (!confirm(`????????${nextRole === 'admin' ? '???' : '????'}??`)) return;
+  if (!confirm(`确定将该用户设为${nextRole === 'admin' ? '管理员' : '普通用户'}吗？`)) return;
   try {
     await api(`/users/${userId}/role`, { method: 'PUT', headers: window.H, body: JSON.stringify({ role: nextRole }) });
-    window.showMessage && window.showMessage('??????', 'success');
+    window.showMessage && window.showMessage('角色切换成功', 'success');
     await loadDataOverview();
     await window.loadUsers();
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '??????', 'error');
+    window.showMessage && window.showMessage(err.message || '角色切换失败', 'error');
   }
 }
 
 export async function toggleTeamMember(userId, targetStatus) {
-  const text = targetStatus ? '??' : '????';
-  if (!confirm(`????????${text}??`)) return;
+  const text = targetStatus ? '组员' : '编外人员';
+  if (!confirm(`确定将该用户设为${text}吗？`)) return;
   try {
     await api(`/users/${userId}/team-status`, { method: 'PUT', headers: window.H, body: JSON.stringify({ is_team_member: targetStatus }) });
-    window.showMessage && window.showMessage(`????${text}`, 'success');
+    window.showMessage && window.showMessage(`已更新为${text}`, 'success');
     await loadDataOverview();
     await window.loadUsers();
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '????????', 'error');
+    window.showMessage && window.showMessage(err.message || '组员状态更新失败', 'error');
   }
 }
 
 export async function removeUser(userId, username) {
-  if (!confirm(`???????${username}???????????`)) return;
+  if (!confirm(`确认删除用户【${username}】吗？此操作不可恢复。`)) return;
   try {
     await api(`/users/${userId}`, { method: 'DELETE' });
-    window.showMessage && window.showMessage('??????', 'success');
+    window.showMessage && window.showMessage('用户删除成功', 'success');
     await loadDataOverview();
     await window.loadUsers();
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '??????', 'error');
+    window.showMessage && window.showMessage(err.message || '删除用户失败', 'error');
   }
 }
 
 export async function removeVersion(id) {
-  if (!confirm('???????????????????????? Bug???????')) return;
+  if (!confirm('高危操作：删除版本将级联删除所有下挂需求、用例和 Bug，确定继续吗？')) return;
   await api('/versions/' + id, { method: 'DELETE' });
-  window.showMessage && window.showMessage('?????');
+  window.showMessage && window.showMessage('版本已删除');
   await window.loadVersions();
   await loadDataOverview();
 }
 
 export async function removeReq(id) {
-  if (!confirm('??????????????????')) return;
+  if (!confirm('确定删除该需求及其用例、执行记录吗？')) return;
   await api('/requirements/' + id, { method: 'DELETE' });
-  window.showMessage && window.showMessage('?????');
+  window.showMessage && window.showMessage('需求已删除');
   await loadDataOverview();
 }
 
 export async function removeBug(id) {
-  if (!confirm('????? Bug ??')) return;
+  if (!confirm('确定删除该 Bug 吗？')) return;
   await api('/bugs/' + id, { method: 'DELETE' });
-  window.showMessage && window.showMessage('Bug ???');
+  window.showMessage && window.showMessage('Bug 已删除');
   await loadDataOverview();
 }
 
 export async function editVersion(id, no, type, parent) {
-  const newNo = prompt('???', no);
+  const newNo = prompt('版本号', no);
   if (!newNo) return;
   await api('/versions/' + id, { method: 'PUT', headers: window.H, body: JSON.stringify({ version_no: newNo, version_type: type, parent_id: parent }) });
-  window.showMessage && window.showMessage('?????');
+  window.showMessage && window.showMessage('版本已更新');
   await window.loadVersions();
   await loadDataOverview();
 }
 
 export async function editReq(id, z, title, major) {
-  const zNum = prompt('???????', z.replace('r#', ''));
+  const zNum = prompt('需求号数字部分', z.replace('r#', ''));
   if (!zNum) return;
-  const t = prompt('????', title);
+  const t = prompt('需求标题', title);
   if (!t) return;
   await api('/requirements/' + id, { method: 'PUT', headers: window.H, body: JSON.stringify({ zentao_req_id: withPrefix('r#', zNum), title: t, major_version_id: major }) });
-  window.showMessage && window.showMessage('?????');
+  window.showMessage && window.showMessage('需求已更新');
   await loadDataOverview();
 }
 
 export async function editBug(id, b) {
-  const num = prompt('Bug????', b.replace('b#', ''));
+  const num = prompt('Bug数字部分', b.replace('b#', ''));
   if (!num) return;
   await api('/bugs/' + id + '?new_bug_id=' + encodeURIComponent(withPrefix('b#', num)), { method: 'PUT' });
-  window.showMessage && window.showMessage('Bug???');
+  window.showMessage && window.showMessage('Bug已更新');
   await loadDataOverview();
 }
 

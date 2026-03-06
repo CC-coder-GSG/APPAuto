@@ -67,18 +67,18 @@ export async function saveDispatchedBug(id) {
     method: 'PUT', headers: window.H,
     body: JSON.stringify({ minor_version_id: Number(document.getElementById('mineMinorSelect')?.value || 0), test_done: done, newly_found_bug_id: n, resolution: res }),
   });
-  window.showMessage && window.showMessage('???????????????');
+  window.showMessage && window.showMessage('特派专项验证已保存并同步至总盘');
   await window.OmniQAMineTab.loadMyWorkbench();
 }
 
 export async function addDerivedBug(id) {
-  const n = prompt('???????Bug?????');
+  const n = prompt('请输入引出的新Bug数字编号：');
   if (!n) return;
   const newBug = withPrefix('b#', n);
   const hiddenEl = document.getElementById('dnb_hidden_' + id);
   let arr = hiddenEl.value ? hiddenEl.value.split(',') : [];
   if (arr.includes(newBug)) {
-    window.showMessage && window.showMessage('? Bug ?????????', 'error');
+    window.showMessage && window.showMessage('该 Bug 编号已经添加过了！', 'error');
     return;
   }
   arr.push(newBug);
@@ -87,7 +87,7 @@ export async function addDerivedBug(id) {
 }
 
 export async function removeDerivedBug(id, bugToRemove) {
-  if (!confirm(`???????? Bug [${bugToRemove}] ??`)) return;
+  if (!confirm(`确定要移除引出的 Bug [${bugToRemove}] 吗？`)) return;
   const hiddenEl = document.getElementById('dnb_hidden_' + id);
   let arr = hiddenEl.value ? hiddenEl.value.split(',') : [];
   arr = arr.filter((x) => x !== bugToRemove);

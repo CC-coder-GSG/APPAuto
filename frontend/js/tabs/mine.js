@@ -139,44 +139,44 @@ export function renderMineCards() {
 
 
 export async function editWorkbenchCase(id, oldCaseId) {
-  const num = prompt('?????????????', oldCaseId.replace('u#', ''));
+  const num = prompt('请输入正确的用例数字部分：', oldCaseId.replace('u#', ''));
   if (!num) return;
   try {
     await api('/test-cases/' + id, { method: 'PUT', headers: window.H, body: JSON.stringify({ zentao_case_id: window.withPrefix('u#', num) }) });
-    window.showMessage && window.showMessage('???????', 'success');
+    window.showMessage && window.showMessage('用例编号已修改', 'success');
     await loadMyWorkbench();
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '????', 'error');
+    window.showMessage && window.showMessage(err.message || '修改失败', 'error');
   }
 }
 
 export async function editWorkbenchBug(id, oldBugId) {
-  const num = prompt('?????? Bug ?????', oldBugId.replace('b#', ''));
+  const num = prompt('请输入正确的 Bug 数字部分：', oldBugId.replace('b#', ''));
   if (!num) return;
   try {
     await api('/bugs/' + id + '?new_bug_id=' + encodeURIComponent(window.withPrefix('b#', num)), { method: 'PUT' });
-    window.showMessage && window.showMessage('Bug ?????', 'success');
+    window.showMessage && window.showMessage('Bug 编号已纠正', 'success');
     await loadMyWorkbench();
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '????', 'error');
+    window.showMessage && window.showMessage(err.message || '修改失败', 'error');
   }
 }
 
 export async function removeWorkbenchBug(id) {
-  if (!confirm('?????????????? Bug ??')) return;
+  if (!confirm('确定要在工作台中彻底删除这个 Bug 吗？')) return;
   try {
     await api('/bugs/' + id, { method: 'DELETE' });
-    window.showMessage && window.showMessage('Bug ?????', 'success');
+    window.showMessage && window.showMessage('Bug 已彻底删除', 'success');
     await loadMyWorkbench();
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '????', 'error');
+    window.showMessage && window.showMessage(err.message || '删除失败', 'error');
   }
 }
 
 export async function setReqStatus(reqId, key, checked) {
   try {
     if (!checked) {
-      const ok = confirm(key === 'case_completed' ? '??????????????' : '??????????????');
+      const ok = confirm(key === 'case_completed' ? '确认取消【用例完成】状态吗？' : '确认取消【测试完成】状态吗？');
       if (!ok) {
         await loadMyWorkbench();
         return;
@@ -185,9 +185,9 @@ export async function setReqStatus(reqId, key, checked) {
     const payload = {};
     payload[key] = checked;
     await api(`/requirements/${reqId}/status`, { method: 'PATCH', headers: window.H, body: JSON.stringify(payload) });
-    window.showMessage && window.showMessage('???????', 'success');
+    window.showMessage && window.showMessage('需求状态已更新', 'success');
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '??????', 'error');
+    window.showMessage && window.showMessage(err.message || '状态更新失败', 'error');
   } finally {
     await loadMyWorkbench();
   }
@@ -198,77 +198,77 @@ export async function addCase(reqId) {
     const n = document.getElementById(`new_case_${reqId}`).value;
     const caseId = window.withPrefix('u#', n);
     if (!caseId) {
-      window.showMessage && window.showMessage('???????????', 'error');
+      window.showMessage && window.showMessage('请输入用例编号数字部分', 'error');
       return;
     }
     await api(`/requirements/${reqId}/cases`, { method: 'POST', headers: window.H, body: JSON.stringify({ zentao_case_id: caseId }) });
-    window.showMessage && window.showMessage('??????', 'success');
+    window.showMessage && window.showMessage('用例新增成功', 'success');
     await loadMyWorkbench();
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '??????', 'error');
+    window.showMessage && window.showMessage(err.message || '新增用例失败', 'error');
   }
 }
 
 export async function deleteCase(caseId) {
-  if (!confirm('?????????')) return;
+  if (!confirm('确定删除该用例吗？')) return;
   try {
     await api(`/test-cases/${caseId}`, { method: 'DELETE' });
-    window.showMessage && window.showMessage('?????', 'success');
+    window.showMessage && window.showMessage('用例已删除', 'success');
     await loadMyWorkbench();
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '??????', 'error');
+    window.showMessage && window.showMessage(err.message || '删除用例失败', 'error');
   }
 }
 
 export async function promptCaseBug(reqId, caseId) {
   const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
   if (!minorId) {
-    window.showMessage && window.showMessage('???????????????????(???)????', 'error');
+    window.showMessage && window.showMessage('拦截：请先在页面顶部选择【当前复测发包(小版本)】环境！', 'error');
     return;
   }
-  const n = prompt('????? Bug ??????');
+  const n = prompt('请输入关联 Bug 的数字部分：');
   if (!n) return;
   const bug = window.withPrefix('b#', n);
   try {
     await api('/bugs/execution', { method: 'POST', headers: window.H, body: JSON.stringify({ bug_id: bug, minor_version_id: minorId, requirement_id: reqId, source_type: 'case', source_ref: String(caseId) }) });
-    window.showMessage && window.showMessage('??Bug????', 'success');
+    window.showMessage && window.showMessage('关联Bug新增成功', 'success');
     await loadMyWorkbench();
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '??Bug??', 'error');
+    window.showMessage && window.showMessage(err.message || '新增Bug失败', 'error');
   }
 }
 
 export async function addFreeBug(reqId) {
   const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
   if (!minorId) {
-    window.showMessage && window.showMessage('???????????????????(???)????', 'error');
+    window.showMessage && window.showMessage('拦截：请先在页面顶部选择【当前复测发包(小版本)】环境！', 'error');
     return;
   }
   const n = document.getElementById(`new_free_bug_${reqId}`).value;
   const bug = window.withPrefix('b#', n);
   if (!bug) {
-    window.showMessage && window.showMessage('?????Bug??', 'error');
+    window.showMessage && window.showMessage('请输入自由Bug数字', 'error');
     return;
   }
   try {
     await api('/bugs/execution', { method: 'POST', headers: window.H, body: JSON.stringify({ bug_id: bug, minor_version_id: minorId, requirement_id: reqId, source_type: 'manual' }) });
-    window.showMessage && window.showMessage('??Bug????', 'success');
+    window.showMessage && window.showMessage('自由Bug新增成功', 'success');
     await loadMyWorkbench();
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '????Bug??', 'error');
+    window.showMessage && window.showMessage(err.message || '新增自由Bug失败', 'error');
   }
 }
 
 export async function pushCase() {
   if (!(window.confirmPush && window.confirmPush())) return;
   await api('/push/case-progress', { method: 'POST', headers: window.H, body: JSON.stringify({ major_version_id: Number(document.getElementById('mineMajorSelect')?.value || 0) }) });
-  window.showMessage && window.showMessage('???????');
+  window.showMessage && window.showMessage('用例进度已推送');
 }
 
 export async function pushTest() {
   if (!(window.confirmPush && window.confirmPush())) return;
   await api(`/push/test-progress?minor_version_id=${Number(document.getElementById('mineMinorSelect')?.value || 0)}&major_version_id=${Number(document.getElementById('mineMajorSelect')?.value || 0)}`, { method: 'POST' });
-  window.showMessage && window.showMessage('???????');
+  window.showMessage && window.showMessage('测试进度已推送');
 }
 
 window.OmniQAMineTab = { toggleMineMode, loadMyWorkbench, renderMineCards, editWorkbenchCase, editWorkbenchBug, removeWorkbenchBug, setReqStatus, addCase, deleteCase, promptCaseBug, addFreeBug, pushCase, pushTest };

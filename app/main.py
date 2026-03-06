@@ -605,10 +605,10 @@ async def assign_and_publish(payload: AssignPublishPayload, current_user: Annota
     )
 
     if result["change_msgs"]:
-        md = "### ?????????\n" + "\n".join(result["change_msgs"]) + "\n\n*????????????????????????????*"
+        md = "### 需求负责人变更通知\n" + "\n".join(result["change_msgs"]) + "\n\n*提示：移交的需求已自动重置完成状态，请新负责人重新校验并勾选。*"
         await _send_wechat_markdown(md)
     else:
-        await _send_wechat_markdown("?????????????")
+        await _send_wechat_markdown("需求分配状态已整体更新发布")
 
     return {"message": result["message"]}
 
