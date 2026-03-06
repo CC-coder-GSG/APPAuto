@@ -358,6 +358,7 @@ function showTab(name){
   ['assign','mine','retest','stage5','report','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
   document.getElementById('tab-'+name).classList.remove('hidden');
   if(name === 'dispatch') { loadDispatchedAll(); }
+  if(name === 'data' && !dataOverviewCache) { loadDataOverview().catch(err=>showMessage(err.message||'加载数据管理台失败','error')); }
   if(name==='report'){loadReportOnDemand()}
 }
 function isAllUsersReport(){return currentUser && currentUser.role==='admin' && reportUserSelect && reportUserSelect.value==='0'}
@@ -1405,20 +1406,37 @@ async function loadDataOverview(){
   renderDataOverview();
 }
 
-function setDataView(key, checked){
+async function setDataView(key, checked){
   if(key === 'users') dataViewState.showUsers = checked;
   if(key === 'versions') dataViewState.showVersions = checked;
+  if(!dataOverviewCache){
+    await loadDataOverview();
+    return;
+  }
   renderDataOverview();
+  if(key === 'versions' && checked){
+    expandAllMajorBodies();
+  }
 }
 
-function setDataViewBatch(showAll){
+async function setDataViewBatch(showAll){
   dataViewState.showUsers = showAll;
   dataViewState.showVersions = showAll;
   const usersToggle = document.getElementById('toggleDataUsers');
   const versionsToggle = document.getElementById('toggleDataVersions');
   if(usersToggle) usersToggle.checked = showAll;
   if(versionsToggle) versionsToggle.checked = showAll;
+  if(!dataOverviewCache){
+    await loadDataOverview();
+    if(showAll) expandAllMajorBodies();
+    return;
+  }
   renderDataOverview();
+  if(showAll) expandAllMajorBodies();
+}
+
+function expandAllMajorBodies(){
+  document.querySelectorAll('[id^="major_body_"]').forEach(el=>el.classList.remove('hidden'));
 }
 
 function renderDataOverview(){
