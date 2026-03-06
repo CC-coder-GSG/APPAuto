@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 import tempfile
 import uuid
@@ -24,6 +23,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.database import SessionLocal, get_db
 from app.init_db import init_db
+from app.core.config import settings
 from app.models import (
     BugStage5Record,
     BugSourceType,
@@ -48,10 +48,10 @@ from app.services.stage5_service import Stage5Service
 from app.services.user_service import UserService
 from app.integrations.wecom import send_markdown
 
-SECRET_KEY = os.getenv("APP_SECRET_KEY", "change_me_in_production")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "720"))
-WECHAT_WEBHOOK_URL = os.getenv("WECHAT_WEBHOOK_URL", "")
+SECRET_KEY = settings.secret_key
+ALGORITHM = settings.algorithm
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
+WECHAT_WEBHOOK_URL = settings.wecom_webhook_url
 
 R_PATTERN = re.compile(r"^r#\d+$")
 U_PATTERN = re.compile(r"^u#\d+$")
