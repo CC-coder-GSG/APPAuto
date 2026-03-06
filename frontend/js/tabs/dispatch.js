@@ -24,7 +24,7 @@ export async function confirmDispatchBug() {
     await api('/bugs/' + state.currentDispatchBugId + '/dispatch', {
       method: 'POST',
       headers: window.H,
-      body: JSON.stringify({ user_id: Number(uid) }),
+      body: ({ user_id: Number(uid) }),
     });
     window.showMessage && window.showMessage('特派成功，企微已通知', 'success');
     await loadDispatchedAll();
@@ -65,7 +65,7 @@ export async function saveDispatchedBug(id) {
   const res = document.getElementById('dres_' + id).value;
   await api(`/stage5/bugs/${id}/result`, {
     method: 'PUT', headers: window.H,
-    body: JSON.stringify({ minor_version_id: Number(document.getElementById('mineMinorSelect')?.value || 0), test_done: done, newly_found_bug_id: n, resolution: res }),
+    body: ({ minor_version_id: Number(document.getElementById('mineMinorSelect')?.value || 0), test_done: done, newly_found_bug_id: n, resolution: res }),
   });
   window.showMessage && window.showMessage('特派专项验证已保存并同步至总盘');
   await window.OmniQAMineTab.loadMyWorkbench();
@@ -96,3 +96,4 @@ export async function removeDerivedBug(id, bugToRemove) {
 }
 
 window.OmniQADispatchTab = { searchDispatchBug, confirmDispatchBug, loadDispatchedAll, saveDispatchedBug, addDerivedBug, removeDerivedBug };
+

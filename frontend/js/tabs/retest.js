@@ -107,7 +107,7 @@ export async function setRetest(id, passed, hasEvidence) {
     return;
   }
   try {
-    await api(`/requirements/${id}/retest`, { method: 'PUT', headers: window.H, body: JSON.stringify({ retest_completed: true, retest_passed: passed, retest_minor_version_id: minorId }) });
+    await api(`/requirements/${id}/retest`, { method: 'PUT', headers: window.H, body: { retest_completed: true, retest_passed: passed, retest_minor_version_id: minorId } });
     window.showMessage && window.showMessage(passed ? '🎉 复测结果已标记为通过' : '🚨 已打回给原测试人', 'success');
     await loadRetest();
   } catch (err) {
@@ -116,7 +116,7 @@ export async function setRetest(id, passed, hasEvidence) {
 }
 
 export async function toggleBugFail(id, checked) {
-  await api(`/bugs/${id}/retest-fail`, { method: 'PATCH', headers: window.H, body: JSON.stringify({ is_retest_failed: checked }) });
+  await api(`/bugs/${id}/retest-fail`, { method: 'PATCH', headers: window.H, body: { is_retest_failed: checked } });
   window.showMessage && window.showMessage(checked ? '已标记未修好' : '已取消未修好标记', 'success');
   await loadRetest();
 }
@@ -134,7 +134,7 @@ export async function addRetestBug(reqId) {
       window.showMessage && window.showMessage('请选择当前复测发包(小版本)', 'error');
       return;
     }
-    await api('/bugs/execution', { method: 'POST', headers: window.H, body: JSON.stringify({ bug_id: bug, minor_version_id: minorId, requirement_id: reqId, source_type: 'retest' }) });
+    await api('/bugs/execution', { method: 'POST', headers: window.H, body: { bug_id: bug, minor_version_id: minorId, requirement_id: reqId, source_type: 'retest' } });
     window.showMessage && window.showMessage('复测漏测Bug已新增', 'success');
     await loadRetest();
   } catch (err) {

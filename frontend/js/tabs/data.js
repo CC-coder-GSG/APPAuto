@@ -16,7 +16,7 @@ export async function createVersion() {
       window.showMessage && window.showMessage('minor 版本必须选择父大版本', 'error');
       return;
     }
-    await api('/versions', { method: 'POST', headers: window.H, body: JSON.stringify({ version_no, version_type, parent_id }) });
+    await api('/versions', { method: 'POST', headers: window.H, body: { version_no, version_type, parent_id } });
     window.createVersionNo.value = '';
     window.createVersionType.value = 'major';
     window.toggleCreateVersionParent && window.toggleCreateVersionParent();
@@ -37,7 +37,7 @@ export async function createUser() {
       window.showMessage && window.showMessage('请填写用户名和密码', 'error');
       return;
     }
-    await api('/users', { method: 'POST', headers: window.H, body: JSON.stringify({ username, password, role }) });
+    await api('/users', { method: 'POST', headers: window.H, body: { username, password, role } });
     window.createUsername.value = '';
     window.createPassword.value = '';
     window.createUserRole.value = 'user';
@@ -66,7 +66,7 @@ export async function createReq() {
       window.showMessage && window.showMessage('请填写需求编号数字部分', 'error');
       return;
     }
-    await api('/requirements', { method: 'POST', headers: window.H, body: JSON.stringify({ zentao_req_id: reqNo, title, major_version_id }) });
+    await api('/requirements', { method: 'POST', headers: window.H, body: { zentao_req_id: reqNo, title, major_version_id } });
     window.createReqTitle.value = '';
     window.createReqNo.value = '';
     window.showMessage && window.showMessage('需求已创建成功，请联系管理员分配人员或刷新列表', 'success');
@@ -142,7 +142,7 @@ export async function confirmImport() {
     const res = await api('/requirements/batch', {
       method: 'POST',
       headers: window.H,
-      body: JSON.stringify({ major_version_id: majorId, items: state.pendingImportReqs }),
+      body: { major_version_id: majorId, items: state.pendingImportReqs },
     });
     const data = await res.json();
     window.showMessage && window.showMessage(`成功导入 ${data.count} 条新需求（已自动忽略系统中存在的重复项）！`, 'success');
@@ -230,7 +230,7 @@ export function renderDataOverview() {
   majors.forEach((major) => {
     const majorMinors = minors.filter((m) => m.parent_id === major.id);
     const reqs = (data.requirements || []).filter((r) => r.major_version_id === major.id);
-    let minorHtml = majorMinors.map((m) => `<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-right:8px;padding-right:2px;">版本 ${m.version_no} <button class="text-btn" title="编辑" onclick="editVersion(${m.id},'${m.version_no}','minor',${major.id})">编辑</button><button class="text-btn" title="删除" onclick="removeVersion(${m.id})">删除</button></span>`).join('');
+    let minorHtml = majorMinors.map((m) => `<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-right:8px;padding-right:2px;">🏷️ ${m.version_no} <button class="text-btn" title="编辑" onclick="editVersion(${m.id},'${m.version_no}','minor',${major.id})">✎</button><button class="text-btn" title="删除" onclick="removeVersion(${m.id})">×</button></span>`).join('');
     if (!minorHtml) minorHtml = '<span class="muted" style="font-size:13px;">暂无发包记录</span>';
     let reqHtml = reqs.map((req) => {
       const reqBugs = (data.bugs || []).filter((b) => b.requirement_id === req.id);
@@ -238,15 +238,15 @@ export function renderDataOverview() {
       const caseBugs = reqBugs.filter((b) => b.source_type === 'case');
       const casesListHtml = (req.case_ids || []).map((cId) => {
         const relatedBugs = caseBugs.filter((b) => b.source_ref === cId);
-        let bHtml = relatedBugs.map((b) => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">关联 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">编辑</button><button class="text-btn" onclick="removeBug(${b.id})">删除</button></div>`).join('');
-        if (!bHtml) bHtml = '<div style="margin-left:24px; color:#10b981; font-size:13px; margin-top:4px;">通过，无关联 Bug</div>';
-        return `<div style="margin-top:12px;">用例 [${cId}] ${bHtml}</div>`;
+        let bHtml = relatedBugs.map((b) => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 关联 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button></div>`).join('');
+        if (!bHtml) bHtml = '<div style="margin-left:24px; color:#10b981; font-size:13px; margin-top:4px;">↳ ✓ 完美通过，无关联Bug</div>';
+        return `<div style="margin-top:12px;">🧪 <b>用例 [${cId}]</b> ${bHtml}</div>`;
       }).join('');
-      const freeBugsHtml = freeBugs.map((b) => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">自由 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">编辑</button><button class="text-btn" onclick="removeBug(${b.id})">删除</button></div>`).join('');
+      const freeBugsHtml = freeBugs.map((b) => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 自由 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button></div>`).join('');
       return `
       <div style="border:1px solid #e2e8f0; border-radius:6px; margin-bottom:12px; background:#fff;">
         <div style="padding:10px 12px; cursor:pointer; background:#f8fafc; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;" onclick="document.getElementById('req_body_${req.id}').classList.toggle('hidden')">
-          <span style="font-size:14px;">需求 <b>${req.zentao_req_id}</b> ${req.title}</span>
+          <span style="font-size:14px;">📄 <b>${req.zentao_req_id}</b> ${req.title}</span>
           <span>
             <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); editReq(${req.id},'${req.zentao_req_id}','${req.title}',${major.id})">编辑</button>
             <button class="danger" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); removeReq(${req.id})">删除</button>
@@ -268,7 +268,7 @@ export function renderDataOverview() {
     treeHtml += `
     <div style="border:2px solid #cbd5e1; border-radius:8px; margin-bottom:16px; background:#fff; overflow:hidden;">
       <div style="padding:12px 16px; background:#f1f5f9; border-bottom:1px solid #cbd5e1; cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="document.getElementById('major_body_${major.id}').classList.toggle('hidden')">
-        <span style="font-size:16px; font-weight:bold; color:#0f172a;">大版本：${major.version_no}</span>
+        <span style="font-size:16px; font-weight:bold; color:#0f172a;">📦 大版本：${major.version_no}</span>
         <span>
           <button class="secondary" onclick="event.stopPropagation(); editVersion(${major.id},'${major.version_no}','major',null)">编辑版本</button>
           <button class="danger" onclick="event.stopPropagation(); removeVersion(${major.id})">删除整体</button>
@@ -294,7 +294,7 @@ export async function toggleRole(userId, currentRole) {
   const nextRole = currentRole === 'admin' ? 'user' : 'admin';
   if (!confirm(`确定将该用户设为${nextRole === 'admin' ? '管理员' : '普通用户'}吗？`)) return;
   try {
-    await api(`/users/${userId}/role`, { method: 'PUT', headers: window.H, body: JSON.stringify({ role: nextRole }) });
+    await api(`/users/${userId}/role`, { method: 'PUT', headers: window.H, body: { role: nextRole } });
     window.showMessage && window.showMessage('角色切换成功', 'success');
     await loadDataOverview();
     await window.loadUsers();
@@ -307,7 +307,7 @@ export async function toggleTeamMember(userId, targetStatus) {
   const text = targetStatus ? '组员' : '编外人员';
   if (!confirm(`确定将该用户设为${text}吗？`)) return;
   try {
-    await api(`/users/${userId}/team-status`, { method: 'PUT', headers: window.H, body: JSON.stringify({ is_team_member: targetStatus }) });
+    await api(`/users/${userId}/team-status`, { method: 'PUT', headers: window.H, body: { is_team_member: targetStatus } });
     window.showMessage && window.showMessage(`已更新为${text}`, 'success');
     await loadDataOverview();
     await window.loadUsers();
@@ -353,7 +353,7 @@ export async function removeBug(id) {
 export async function editVersion(id, no, type, parent) {
   const newNo = prompt('版本号', no);
   if (!newNo) return;
-  await api('/versions/' + id, { method: 'PUT', headers: window.H, body: JSON.stringify({ version_no: newNo, version_type: type, parent_id: parent }) });
+  await api('/versions/' + id, { method: 'PUT', headers: window.H, body: { version_no: newNo, version_type: type, parent_id: parent } });
   window.showMessage && window.showMessage('版本已更新');
   await window.loadVersions();
   await loadDataOverview();
@@ -364,7 +364,7 @@ export async function editReq(id, z, title, major) {
   if (!zNum) return;
   const t = prompt('需求标题', title);
   if (!t) return;
-  await api('/requirements/' + id, { method: 'PUT', headers: window.H, body: JSON.stringify({ zentao_req_id: withPrefix('r#', zNum), title: t, major_version_id: major }) });
+  await api('/requirements/' + id, { method: 'PUT', headers: window.H, body: { zentao_req_id: withPrefix('r#', zNum), title: t, major_version_id: major } });
   window.showMessage && window.showMessage('需求已更新');
   await loadDataOverview();
 }

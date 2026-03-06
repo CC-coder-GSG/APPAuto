@@ -67,7 +67,7 @@ export function renderS5() {
 export async function saveS5(id) {
   const done = document.getElementById('done_' + id).checked;
   const res = document.getElementById('res_' + id).value;
-  await api(`/stage5/bugs/${id}/result`, { method: 'PUT', headers: window.H, body: JSON.stringify({ minor_version_id: Number(document.getElementById('s5MinorSelect')?.value || 0), test_done: done, newly_found_bug_id: null, resolution: res }) });
+  await api(`/stage5/bugs/${id}/result`, { method: 'PUT', headers: window.H, body: { minor_version_id: Number(document.getElementById('s5MinorSelect')?.value || 0), test_done: done, newly_found_bug_id: null, resolution: res } });
   window.showMessage && window.showMessage('整体测试项已保存');
   await loadStage5();
 }
@@ -140,7 +140,7 @@ export async function submitS5Bug() {
     await api('/stage5/issues', {
       method: 'POST',
       headers: window.H,
-      body: JSON.stringify({ major_version_id: Number(document.getElementById('s5MajorSelect')?.value || 0), requirement_id: reqId, source_type: type, source_ref: sourceRef, bug_id: bugId, minor_version_id: Number(document.getElementById('s5MinorSelect')?.value || 0) }),
+      body: { major_version_id: Number(document.getElementById('s5MajorSelect')?.value || 0), requirement_id: reqId, source_type: type, source_ref: sourceRef, bug_id: bugId, minor_version_id: Number(document.getElementById('s5MinorSelect')?.value || 0) },
     });
     window.showMessage && window.showMessage('新问题已成功添加到大盘！', 'success');
     document.getElementById('s5BugId').value = '';

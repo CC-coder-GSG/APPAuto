@@ -1,4 +1,4 @@
-import { api } from '../api.js';
+ï»¿import { api } from '../api.js';
 import { state } from '../state.js';
 
 function getUsers() {
@@ -8,8 +8,11 @@ function getUsers() {
 export async function loadAssignBoard() {
   const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
   if (!majorId) {
-    window.showMessage && window.showMessage('ÇëÑ¡Ôñ´ó°æ±¾', 'error');
+    window.showMessage && window.showMessage('è¯·é€‰æ‹©å¤§ç‰ˆæœ¬', 'error');
     return;
+  }
+  if (getUsers().length === 0 && typeof window.loadUsers === 'function') {
+    await window.loadUsers();
   }
   state.assignReqs = await (await api('/requirements?major_version_id=' + majorId)).json();
   window.assignReqs = state.assignReqs;
@@ -21,7 +24,7 @@ export async function loadAssignBoard() {
       <td>${r.zentao_req_id} ${r.title}</td>
       <td>
         <select id='o_${r.id}'>
-          <option value=''>Î´·ÖÅä</option>
+          <option value=''>æœªåˆ†é…</option>
           ${users.map((u) => `<option value='${u.id}' ${u.id === r.owner_id ? 'selected' : ''}>${u.username}</option>`).join('')}
         </select>
       </td>
@@ -38,9 +41,10 @@ export async function publishAssign() {
   await api('/requirements/assign-and-publish', {
     method: 'POST',
     headers: window.H,
-    body: JSON.stringify({ major_version_id: majorId, assignments }),
+    body: ({ major_version_id: majorId, assignments }),
   });
-  window.showMessage && window.showMessage('·ÖÅä·¢²¼³É¹¦');
+  window.showMessage && window.showMessage('åˆ†é…å‘å¸ƒæˆåŠŸ');
 }
 
 window.OmniQAAssignTab = { loadAssignBoard, publishAssign };
+

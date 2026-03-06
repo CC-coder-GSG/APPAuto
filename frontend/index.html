@@ -38,10 +38,22 @@
       </div>
 
       <div style="display: flex; gap: 8px;">
+        <button style="background: transparent; color: #475569; border: 1px solid #cbd5e1; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.borderColor='#0ea5e9'; this.style.color='#0ea5e9'; this.style.background='#ecfeff'" onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#475569'; this.style.background='transparent'" onclick="runFrontendSelfCheck()">🩺 前端自检</button>
+        <button style="background: transparent; color: #475569; border: 1px solid #cbd5e1; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.borderColor='#16a34a'; this.style.color='#16a34a'; this.style.background='#f0fdf4'" onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#475569'; this.style.background='transparent'" onclick="runOnlineApiCheck()">🌐 接口探测</button>
+        <button style="background: transparent; color: #475569; border: 1px solid #cbd5e1; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.borderColor='#7c3aed'; this.style.color='#7c3aed'; this.style.background='#f5f3ff'" onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#475569'; this.style.background='transparent'" onclick="runFullHealthCheck()">🧭 全量体检</button>
         <button style="background: transparent; color: #475569; border: 1px solid #cbd5e1; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.borderColor='#2563eb'; this.style.color='#2563eb'; this.style.background='#eff6ff'" onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#475569'; this.style.background='transparent'" onclick="changeMyPassword()">🔐 修改密码</button>
         <button style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.background='#fee2e2'; this.style.borderColor='#f87171'" onmouseout="this.style.background='#fef2f2'; this.style.borderColor='#fecaca'" onclick="logout()">🚪 退出系统</button>
       </div>
     </div>
+  </div>
+
+  <div id="healthPanel" class="card hidden" style="margin-top: 12px; border-left: 4px solid #0ea5e9; background: #f8fafc;">
+    <div class="row" style="justify-content: space-between; align-items: center;">
+      <h3 style="margin:0; color:#0f172a;">系统健康检查</h3>
+      <button class="secondary" onclick="document.getElementById('healthPanel').classList.add('hidden')">收起</button>
+    </div>
+    <div id="healthPanelMeta" class="muted" style="margin-top:8px;"></div>
+    <div id="healthPanelBody" style="margin-top:8px; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;"></div>
   </div>
 
   <div class="card row" id="tabs">
@@ -386,10 +398,35 @@ function bindReportEvents(){
   });
 }
 
-async function api(url,opt={}){opt.headers={...(opt.headers||{}),Authorization:'Bearer '+token};const r=await fetch(url,opt);if(r.status===401){logout();throw new Error('401')}if(!r.ok){let t='操作失败';try{const j=await r.json();t=j.detail||t}catch{};throw new Error(t)}return r}
+async function api(url,opt={}){
+  if(window.OmniQAApi && typeof window.OmniQAApi.api === 'function'){
+    return window.OmniQAApi.api(url,opt);
+  }
+  // 兜底：模块尚未挂载时，使用同等规则发送请求，避免初始化阶段报错。
+  const headers = { ...(opt.headers || {}), Authorization: 'Bearer ' + token };
+  let body = opt.body;
+  const isJsonBodyObject =
+    body &&
+    typeof body === 'object' &&
+    !(body instanceof FormData) &&
+    !(body instanceof URLSearchParams) &&
+    !(body instanceof Blob);
+  if (isJsonBodyObject) {
+    if (!headers['Content-Type'] && !headers['content-type']) headers['Content-Type'] = 'application/json';
+    body = JSON.stringify(body);
+  }
+  const r = await fetch(url, { ...opt, headers, body });
+  if(r.status===401){logout();throw new Error('401')}
+  if(!r.ok){let t='操作失败';try{const j=await r.json();t=j.detail||j.message||t}catch{};throw new Error(t)}
+  return r;
+}
 
 async function init(){
   currentUser=await (await api('/auth/me')).json();
+  window.currentUser = currentUser;
+  if(window.OmniQAStateActions && typeof window.OmniQAStateActions.setCurrentUser === 'function'){
+    window.OmniQAStateActions.setCurrentUser(currentUser);
+  }
   window.OmniQAState && (window.OmniQAState.currentUser = currentUser);
   document.getElementById('me').innerText=`${currentUser.username}(${currentUser.role})`;
   const today = new Date().toISOString().slice(0,10);
@@ -413,10 +450,30 @@ async function init(){
   }
 }
 
-async function loadUsers(){users=await (await api('/users')).json();fillReportUsers();if(document.getElementById('dispatchUserSelect')) document.getElementById('dispatchUserSelect').innerHTML = users.map(u=>'<option value=\"'+u.id+'\">'+u.username+'</option>').join('')}
+async function loadUsers(){
+  users=await (await api('/users')).json();
+  window.users = users;
+  if(window.OmniQAStateActions && typeof window.OmniQAStateActions.setUsers === 'function'){
+    window.OmniQAStateActions.setUsers(users);
+  }
+  if(window.OmniQAState) window.OmniQAState.users = users;
+  fillReportUsers();
+  if(document.getElementById('dispatchUserSelect')) document.getElementById('dispatchUserSelect').innerHTML = users.map(u=>'<option value=\"'+u.id+'\">'+u.username+'</option>').join('')
+}
 function fillReportUsers(){const s=document.getElementById('reportUserSelect');if(!s) return; const allOpt=currentUser&&currentUser.role==='admin'?'<option value="0">全员</option>':''; s.innerHTML=allOpt+users.map(u=>`<option value="${u.id}">${u.username}${u.is_team_member===false?'(编外)':''}</option>`).join('');adjustReportChartVisibility()}
 
-async function loadVersions(){versions=await (await api('/versions')).json();window.OmniQAState && (window.OmniQAState.versions = versions);fillVersionSelects();fillCreateVersionParent();toggleCreateVersionParent();updateCreateReqControls()}
+async function loadVersions(){
+  versions=await (await api('/versions')).json();
+  window.versions = versions;
+  if(window.OmniQAStateActions && typeof window.OmniQAStateActions.setVersions === 'function'){
+    window.OmniQAStateActions.setVersions(versions);
+  }
+  window.OmniQAState && (window.OmniQAState.versions = versions);
+  fillVersionSelects();
+  fillCreateVersionParent();
+  toggleCreateVersionParent();
+  updateCreateReqControls()
+}
 function fillVersionSelects(){
   const majors=versions.filter(v=>v.version_type==='major');
   const minors=versions.filter(v=>v.version_type==='minor');
@@ -697,44 +754,6 @@ async function confirmDispatchBug() {
   return window.OmniQADispatchTab.confirmDispatchBug();
 }
 
-async function saveDispatchedBug(id) {
-  const done = document.getElementById('ddone_' + id).checked;
-  const n = document.getElementById('dnb_hidden_' + id).value || null;
-  const res = document.getElementById('dres_' + id).value;
-  await api(`/stage5/bugs/${id}/result`, {
-    method: 'PUT', headers: H,
-    body: JSON.stringify({ minor_version_id: Number(mineMinorSelect.value), test_done: done, newly_found_bug_id: n, resolution: res })
-  });
-  showMessage('特派专项验证已保存并同步至总盘');
-  loadMyWorkbench();
-}
-
-async function addDerivedBug(id) {
-  const n = prompt("请输入引出的新Bug数字编号：");
-  if(!n) return;
-  const newBug = withPrefix('b#', n);
-  const hiddenEl = document.getElementById('dnb_hidden_' + id);
-  let arr = hiddenEl.value ? hiddenEl.value.split(',') : [];
-
-  if (arr.includes(newBug)) {
-    showMessage('该 Bug 编号已经添加过了！', 'error');
-    return;
-  }
-
-  arr.push(newBug);
-  hiddenEl.value = arr.join(',');
-  await saveDispatchedBug(id);
-}
-
-async function removeDerivedBug(id, bugToRemove) {
-  if(!confirm(`确定要移除引出的 Bug [${bugToRemove}] 吗？`)) return;
-  const hiddenEl = document.getElementById('dnb_hidden_' + id);
-  let arr = hiddenEl.value ? hiddenEl.value.split(',') : [];
-  arr = arr.filter(x => x !== bugToRemove);
-  hiddenEl.value = arr.join(',');
-  await saveDispatchedBug(id);
-}
-
 async function loadDispatchedAll() {
   return window.OmniQADispatchTab.loadDispatchedAll();
 }
@@ -745,6 +764,97 @@ async function changeMyPassword() {
 
 async function resetUserPassword(id, username) {
   return window.OmniQAAuth.resetUserPassword(id, username);
+}
+
+function runFrontendSelfCheck() {
+  if (!window.OmniQAGuardrails || typeof window.OmniQAGuardrails.runFrontendSelfCheck !== 'function') {
+    showMessage('前端自检模块未加载', 'error');
+    return;
+  }
+  const result = window.OmniQAGuardrails.runFrontendSelfCheck();
+  renderHealthPanel({
+    type: 'frontend',
+    ok: result.ok,
+    checked_at: new Date().toISOString(),
+    issues: result.issues || [],
+  });
+  if (result.ok) {
+    showMessage('前端自检通过：模块与关键 DOM 均正常', 'success');
+  } else {
+    showMessage(`前端自检发现 ${result.issues.length} 个问题，请查看控制台`, 'error');
+  }
+}
+
+async function runOnlineApiCheck() {
+  if (!window.OmniQAGuardrails || typeof window.OmniQAGuardrails.runOnlineApiCheck !== 'function') {
+    showMessage('接口探测模块未加载', 'error');
+    return;
+  }
+  const result = await window.OmniQAGuardrails.runOnlineApiCheck();
+  renderHealthPanel({
+    type: 'api',
+    ok: result.ok,
+    checked_at: new Date().toISOString(),
+    issues: result.issues || [],
+    items: result.items || [],
+  });
+  if (result.ok) {
+    showMessage('接口探测通过', 'success');
+  } else {
+    showMessage(`接口探测发现 ${result.issues.length} 个问题，请查看健康面板`, 'error');
+  }
+}
+
+async function runFullHealthCheck() {
+  if (!window.OmniQAGuardrails || typeof window.OmniQAGuardrails.runFullHealthCheck !== 'function') {
+    showMessage('全量体检模块未加载', 'error');
+    return;
+  }
+  const result = await window.OmniQAGuardrails.runFullHealthCheck();
+  const issues = [
+    ...(result.frontend?.issues || []),
+    ...(result.api?.issues || []),
+  ];
+  renderHealthPanel({
+    type: 'full',
+    ok: result.ok,
+    checked_at: result.checked_at || new Date().toISOString(),
+    issues,
+    items: result.api?.items || [],
+  });
+  if (result.ok) {
+    showMessage('全量体检通过：前端与接口状态正常', 'success');
+  } else {
+    showMessage(`全量体检发现 ${issues.length} 个问题，请查看健康面板`, 'error');
+  }
+}
+
+function renderHealthPanel(data) {
+  const panel = document.getElementById('healthPanel');
+  const meta = document.getElementById('healthPanelMeta');
+  const body = document.getElementById('healthPanelBody');
+  if (!panel || !meta || !body) return;
+
+  const dt = new Date(data.checked_at || Date.now()).toLocaleString();
+  meta.innerText = `检查类型: ${data.type} | 结果: ${data.ok ? '通过' : '异常'} | 时间: ${dt}`;
+
+  const lines = [];
+  if (data.items && data.items.length > 0) {
+    lines.push('接口探测结果:');
+    data.items.forEach((it) => {
+      lines.push(`- ${it.ok ? 'OK' : 'FAIL'} ${it.name} (${it.url})${it.status ? ' -> ' + it.status : ''}${it.error ? ' | ' + it.error : ''}`);
+    });
+  }
+  if (data.issues && data.issues.length > 0) {
+    lines.push('');
+    lines.push('问题列表:');
+    data.issues.forEach((msg) => lines.push(`- ${msg}`));
+  }
+  if (lines.length === 0) {
+    lines.push('未发现异常。');
+  }
+  body.innerText = lines.join('\n');
+  panel.classList.remove('hidden');
 }
 
 window.addEventListener('error',e=>showMessage(e.message||'未知错误','error'))

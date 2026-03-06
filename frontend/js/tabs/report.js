@@ -1,17 +1,27 @@
-﻿import { api } from '../api.js';
+import { api } from '../api.js';
 import { state } from '../state.js';
 import { renderReportCharts } from '../components/charts.js';
 import { sourceTypeZh } from '../utils.js';
 
+function getCurrentUser() {
+  return state.currentUser || window.currentUser || null;
+}
+
 function isAllUsersMode() {
-  return window.currentUser && window.currentUser.role === 'admin' && window.reportUserSelect && window.reportUserSelect.value === '0';
+  const currentUser = getCurrentUser();
+  return currentUser && currentUser.role === 'admin' && window.reportUserSelect && window.reportUserSelect.value === '0';
 }
 
 export async function queryReport() {
+  const currentUser = getCurrentUser();
+  if (!currentUser) {
+    throw new Error('当前用户信息未加载，请刷新页面后重试');
+  }
+
   const start_date = window.reportStartDate.value;
   const end_date = window.reportEndDate.value;
   let url = `/reports/summary?start_date=${start_date}&end_date=${end_date}`;
-  if (window.currentUser.role === 'admin' && window.reportUserSelect.value) {
+  if (currentUser.role === 'admin' && window.reportUserSelect?.value) {
     url += `&user_id=${window.reportUserSelect.value}`;
   }
 
