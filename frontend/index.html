@@ -4,9 +4,9 @@
   <meta charset="utf-8"/>
   <title>OmniQA 测试管理系统</title>
   <link rel="stylesheet" href="/static/css/main.css">
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="/static/vendor/echarts.min.js"></script>
+  <script src="/static/vendor/html2pdf.bundle.min.js"></script>
+  <script src="/static/vendor/xlsx.full.min.js"></script>
   <script type="module" src="/static/js/app.js"></script>
   <style>
     .text-btn { background:none; border:none; color:#64748b; cursor:pointer; padding:0 4px; font-size:14px; font-weight:bold; }
@@ -694,6 +694,10 @@ function exportTreePdf() {
   const treeArea = document.getElementById('dataTreeArea');
   if (!treeArea || treeArea.innerText.includes('暂无数据')) {
     showMessage('当前没有可导出的数据！', 'error');
+    return;
+  }
+  if (typeof html2pdf === 'undefined') {
+    showMessage('PDF 导出组件未加载，请检查 /static/vendor/html2pdf.bundle.min.js', 'error');
     return;
   }
 

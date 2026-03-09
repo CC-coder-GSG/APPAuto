@@ -1,6 +1,10 @@
 ﻿import { state } from '../state.js';
 
 function initChart(key, elementId) {
+  if (typeof echarts === 'undefined') {
+    console.error('ECharts failed to load');
+    return null;
+  }
   const element = document.getElementById(elementId);
   if (!element) return null;
   if (!state.charts[key]) {

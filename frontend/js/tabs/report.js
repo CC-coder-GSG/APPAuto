@@ -63,6 +63,12 @@ export async function queryReport() {
 export function exportReportPdf() {
   const element = document.getElementById('reportContent');
   if (!element) return;
+  if (typeof html2pdf === 'undefined') {
+    window.showMessage && window.showMessage('PDF 导出组件未加载，请检查 /static/vendor/html2pdf.bundle.min.js', 'error');
+    return;
+  }
+
+  // 物理隔离 0x0 canvas，避免 html2canvas 在克隆阶段崩溃
   const badCanvases = Array.from(element.querySelectorAll('canvas')).filter((c) => c.width === 0 || c.height === 0);
   const restoredList = badCanvases.map((canvas) => {
     const placeholder = document.createComment('hidden-canvas-placeholder');

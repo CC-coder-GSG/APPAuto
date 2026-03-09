@@ -79,6 +79,11 @@ export async function createReq() {
 export function handleReqFileSelect(e) {
   const file = e.target.files[0];
   if (!file) return;
+  if (typeof XLSX === 'undefined') {
+    window.showMessage && window.showMessage('Excel 解析组件未加载，请检查 /static/vendor/xlsx.full.min.js', 'error');
+    e.target.value = '';
+    return;
+  }
   const reader = new FileReader();
   reader.onload = function(evt) {
     try {
