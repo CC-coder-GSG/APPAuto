@@ -1,13 +1,13 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
+from app.models import UserRole
 from app.services.permission_service import ensure_admin
 from app.services.user_service import UserService
-from pydantic import BaseModel, Field
-from app.models import UserRole
 
 router = APIRouter()
 
@@ -33,7 +33,6 @@ class PasswordChangePayload(BaseModel):
 
 class PasswordResetPayload(BaseModel):
     new_password: str = Field(min_length=3, max_length=128)
-
 
 
 @router.get("/users")
@@ -64,8 +63,6 @@ def update_user_team_status(user_id: int, payload: TeamStatusPayload, current_us
 def delete_user(user_id: int, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     ensure_admin(current_user)
     if user_id == current_user.id:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=400, detail="不能删除当前登录用户")
     return UserService.delete_user(db, user_id, actor_id=current_user.id)
 

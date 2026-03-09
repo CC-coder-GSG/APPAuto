@@ -1,29 +1,47 @@
-# APPAuto Windows Server 部署指南
+﻿# APPAuto / OmniQA Windows Server 部署与迁移指南
 
-本文档用于在 Windows Server 上部署 APPAuto（FastAPI + SQLite + 纯前端）。
+本文档包含两部分：
+- 新服务器部署（从 0 到可运行）
+- 旧版（main 分支未重构）升级到重构版的上线迁移步骤
 
-## 1. 前置条件
+## 1. 适用范围
+- 系统：Windows Server 2016/2019/2022
+- Python：3.10+（建议 3.11）
+- 服务形态：`uvicorn + NSSM`
+- 数据库：SQLite（默认 `app_auto.db`）
 
-- 操作系统：Windows Server 2016/2019/2022
-- 网络：可访问 Python 包源（如受限请配置企业代理）
-- 建议目录：`D:\APPAuto`
-- 端口：默认 `8000`（请在防火墙和安全组放行）
+## 2. 环境变量规范（已收口）
+项目优先读取 `APP_` 前缀变量，同时兼容旧变量名。
 
-## 2. 安装 Python
+推荐使用（新规范）：
+- `APP_ENV`
+- `APP_SECRET_KEY`
+- `APP_DATABASE_URL`
+- `APP_ACCESS_TOKEN_EXPIRE_MINUTES`
+- `APP_WECOM_WEBHOOK_URL`
+- `APP_SCHEDULER_TIMEZONE`
 
-1. 下载并安装 Python 3.10+（建议 3.11）。
-2. 安装时勾选：
-   - `Add python.exe to PATH`
-   - `Install for all users`
-3. 验证：
+兼容读取（旧变量，不推荐长期使用）：
+- `ENV`
+- `SECRET_KEY`
+- `DATABASE_URL`
+- `ACCESS_TOKEN_EXPIRE_MINUTES`
+- `WECHAT_WEBHOOK_URL`
+- `SCHEDULER_TIMEZONE`
 
+注意：
+- 生产环境（`APP_ENV != dev`）必须设置 `APP_SECRET_KEY`（或 `SECRET_KEY`），否则启动会报错。
+- 默认管理员 `admin/admin` 只在 `dev` 环境自动种子。
+
+## 3. 首次部署（全新服务器）
+
+### 3.1 安装依赖
 ```bat
 python --version
 pip --version
 ```
 
-## 3. 获取项目并创建虚拟环境
-
+### 3.2 拉取代码并安装
 ```bat
 cd /d D:\
 git clone <your-repo-url> APPAuto
@@ -35,134 +53,178 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-> 若网络受限，可在内网 PyPI 镜像或离线 whl 包方式安装。
+### 3.3 配置环境变量（推荐系统级）
+```bat
+setx APP_ENV "prod"
+setx APP_SECRET_KEY "replace_with_a_very_strong_secret"
+setx APP_DATABASE_URL "sqlite:///./app_auto.db"
+setx APP_ACCESS_TOKEN_EXPIRE_MINUTES "720"
+setx APP_WECOM_WEBHOOK_URL "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx"
+setx APP_SCHEDULER_TIMEZONE "Asia/Shanghai"
+```
 
-## 4. 初始化数据库与管理员账号
-
-执行以下命令初始化 SQLite 并自动确保默认超级管理员：`admin / admin`。
-
+### 3.4 初始化数据库
 ```bat
 .venv\Scripts\activate
 python -m app.init_db
 ```
 
-数据库文件默认位于项目根目录：`app_auto.db`。
-
-## 5. 配置环境变量（建议）
-
-建议在系统级或服务级设置：
-
-- `APP_SECRET_KEY`：JWT 密钥（生产必须修改）
-- `ACCESS_TOKEN_EXPIRE_MINUTES`：Token 过期分钟数（默认 720）
-- `WECHAT_WEBHOOK_URL`：企业微信群机器人 webhook（可空）
-
-临时设置示例：
-
-```bat
-set APP_SECRET_KEY=replace_with_strong_secret
-set ACCESS_TOKEN_EXPIRE_MINUTES=720
-set WECHAT_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx
-```
-
-## 6. 直接运行（验证阶段）
-
+### 3.5 本地前台验证
 ```bat
 .venv\Scripts\activate
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 访问：
-
 - 登录页：`http://<server-ip>:8000/login`
 - 主界面：`http://<server-ip>:8000/dashboard`
-- OpenAPI：`http://<server-ip>:8000/docs`
+- 文档：`http://<server-ip>:8000/docs`
 
-## 7. 使用 NSSM 注册为 Windows 后台服务
+## 4. 使用 NSSM 注册服务
 
-## 7.1 安装 NSSM
+### 4.1 安装 NSSM
+下载：<https://nssm.cc/download>
 
-1. 下载 NSSM：<https://nssm.cc/download>
-2. 解压后将 `nssm.exe` 放入例如：`D:\tools\nssm\nssm.exe`
-
-## 7.2 注册服务
-
-以管理员权限打开 `cmd`，执行：
-
+### 4.2 注册服务
+管理员 CMD：
 ```bat
 D:\tools\nssm\nssm.exe install APPAutoService
 ```
 
-在弹窗中配置：
+配置：
+- Application Path: `D:\APPAuto\.venv\Scripts\python.exe`
+- Startup directory: `D:\APPAuto`
+- Arguments: `-m uvicorn app.main:app --host 0.0.0.0 --port 8000`
 
-- **Application Path**：`D:\APPAuto\.venv\Scripts\python.exe`
-- **Startup directory**：`D:\APPAuto`
-- **Arguments**：`-m uvicorn app.main:app --host 0.0.0.0 --port 8000`
-
-### 环境变量（推荐在 NSSM 中设置）
-
-在 `Environment` 增加：
-
+### 4.3 配置服务环境变量
+在 NSSM 的 `Environment` 里填入（建议与系统变量一致）：
 ```text
-APP_SECRET_KEY=replace_with_strong_secret
-ACCESS_TOKEN_EXPIRE_MINUTES=720
-WECHAT_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx
+APP_ENV=prod
+APP_SECRET_KEY=replace_with_a_very_strong_secret
+APP_DATABASE_URL=sqlite:///./app_auto.db
+APP_ACCESS_TOKEN_EXPIRE_MINUTES=720
+APP_WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx
+APP_SCHEDULER_TIMEZONE=Asia/Shanghai
 ```
 
-### 日志配置（推荐）
-
-在 `I/O` 中设置：
-
-- `Output (stdout)`：`D:\APPAuto\logs\app_stdout.log`
-- `Error (stderr)`：`D:\APPAuto\logs\app_stderr.log`
-
-先创建日志目录：
+### 4.4 日志配置（推荐）
+NSSM `I/O`：
+- stdout: `D:\APPAuto\logs\app_stdout.log`
+- stderr: `D:\APPAuto\logs\app_stderr.log`
 
 ```bat
 mkdir D:\APPAuto\logs
 ```
 
-## 7.3 启动与设置自启动
-
+### 4.5 启动与自启
 ```bat
 sc start APPAutoService
 sc config APPAutoService start= auto
 sc query APPAutoService
 ```
 
-## 7.4 更新程序后的重启
+## 5. 旧版升级到重构版（上线迁移 SOP）
+以下步骤针对“服务器当前运行旧 main 分支代码”的场景。
 
+### 5.1 迁移前检查（必须）
+1. 记录当前服务状态：
+```bat
+sc query APPAutoService
+```
+2. 备份数据库：
+```bat
+copy D:\APPAuto\app_auto.db D:\APPAuto\backup\app_auto_%date:~0,10%.db
+```
+3. 备份 `.env` / NSSM 环境变量截图。
+4. 备份当前代码（可选）：
+```bat
+cd /d D:\APPAuto
+git rev-parse HEAD > backup\before_migration_commit.txt
+```
+
+### 5.2 停服务并更新代码
 ```bat
 sc stop APPAutoService
 cd /d D:\APPAuto
+git fetch --all
+git checkout <重构分支或目标tag>
 git pull
-.venv\Scripts\activate
-pip install -r requirements.txt
-sc start APPAutoService
 ```
 
-## 8. 防火墙放行 8000 端口
+### 5.3 更新依赖
+```bat
+.venv\Scripts\activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
+### 5.4 环境变量切换到新规范
+至少确保以下变量存在：
+- `APP_ENV`
+- `APP_SECRET_KEY`
+- `APP_DATABASE_URL`
+
+说明：代码已兼容旧变量，但上线建议统一改为 `APP_`，减少后续维护风险。
+
+### 5.5 执行初始化（幂等）
+```bat
+python -m app.init_db
+```
+说明：
+- `create_all` 只会补齐缺失表，不会删除已有数据。
+- 如历史库字段差异较大，建议先在预发环境验证后再上生产。
+
+### 5.6 前台冒烟验证（强烈建议）
+先不用 NSSM，前台启动看日志：
+```bat
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+重点验证：
+1. `/login` 可访问
+2. admin 登录成功
+3. 登录后 `/auth/me` 返回 200
+4. 任务分配台可加载测试人员
+5. 数据管理台可刷新版本/用户
+6. 报表中心可加载图表
+7. 企业微信推送（手动触发一个）
+
+### 5.7 启动服务
+```bat
+sc start APPAutoService
+sc query APPAutoService
+```
+
+### 5.8 回滚预案（必须准备）
+如上线失败：
+1. 停服务：`sc stop APPAutoService`
+2. 代码回滚到旧提交：`git checkout <old_commit>`
+3. 恢复数据库备份（必要时）
+4. 启动旧服务：`sc start APPAutoService`
+
+## 6. 防火墙放行
 ```bat
 netsh advfirewall firewall add rule name="APPAuto 8000" dir=in action=allow protocol=TCP localport=8000
 ```
 
-## 9. 常见问题排查
+## 7. 常见问题排查
+1. 服务启动失败
+- 看 `logs\app_stderr.log`
+- 检查虚拟环境路径、Python 路径、依赖是否安装完整
 
-1. **服务启动失败**
-   - 检查 `logs\app_stderr.log`
-   - 确认虚拟环境路径、Python 路径是否正确
-2. **无法登录 / Token 报错**
-   - 确认 `APP_SECRET_KEY` 在服务环境中已设置
-3. **企业微信不推送**
-   - 检查 `WECHAT_WEBHOOK_URL` 是否有效
-   - 确认服务器可访问企业微信域名
-4. **数据库被占用**
-   - SQLite 为单文件，避免多个写入进程并发启动
+2. 登录成功后 `/auth/me` 401
+- 检查 `APP_SECRET_KEY` 是否一致
+- 确认没有多实例混用不同密钥
 
-## 10. 生产建议
+3. 推送不生效
+- 检查 `APP_WECOM_WEBHOOK_URL`
+- 服务器是否可访问企业微信域名
 
-- 修改默认管理员密码（`admin/admin`）
-- 使用复杂随机 `APP_SECRET_KEY`
+4. 数据库被占用
+- 避免多个进程同时写同一个 SQLite 文件
+
+## 8. 生产建议
+- 首次登录后立即修改管理员密码
+- 使用高强度随机 `APP_SECRET_KEY`
 - 定期备份 `app_auto.db`
-- 通过反向代理（IIS/Nginx）启用 HTTPS
-- 若并发增长明显，后续可迁移至 MySQL/PostgreSQL
+- 建议通过 IIS/Nginx 反向代理并启用 HTTPS
+- 并发增大后考虑迁移到 MySQL/PostgreSQL
