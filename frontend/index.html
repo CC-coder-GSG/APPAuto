@@ -646,10 +646,6 @@ async function loadVersions(){
   const sid = getCurrentSoftwareId();
   const url = sid ? `/versions?software_id=${sid}` : '/versions';
   versions=await (await api(url)).json();
-  // 兜底：若按软件过滤为空，回退读取全量版本，避免页面下拉空白
-  if((!versions || versions.length===0) && sid){
-    versions = await (await api('/versions')).json();
-  }
   window.versions = versions;
   if(window.OmniQAStateActions && typeof window.OmniQAStateActions.setVersions === 'function'){
     window.OmniQAStateActions.setVersions(versions);
