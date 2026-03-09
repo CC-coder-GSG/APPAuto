@@ -85,7 +85,7 @@ async def dispatch_bug(bug_id: int, payload: DispatchPayload, current_user: User
     push_service = PushService(db)
     result, user, bug = service.dispatch_bug(bug_id, payload.user_id, actor_id=current_user.id)
     if user:
-        await push_service.push_bug_dispatch_notice(bug.bug_id, user.username)
+        await push_service.push_bug_dispatch_notice(bug.bug_id, user.shown_name)
     return result
 
 

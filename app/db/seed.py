@@ -36,6 +36,17 @@ def ensure_software_schema_compat(db: Session) -> None:
         db.commit()
 
 
+def ensure_user_schema_compat(db: Session) -> None:
+    rows = db.execute(text("PRAGMA table_info(users)")).fetchall()
+    cols = {r[1] for r in rows}
+    if "display_name" not in cols:
+        db.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(80)"))
+        db.commit()
+    # 历史用户默认显示名回填为账号名
+    db.execute(text("UPDATE users SET display_name = username WHERE display_name IS NULL OR TRIM(display_name) = ''"))
+    db.commit()
+
+
 def ensure_default_software_and_backfill(db: Session) -> None:
     software = db.query(SoftwareProduct).filter(SoftwareProduct.name == DEFAULT_SOFTWARE_NAME).first()
     if not software:

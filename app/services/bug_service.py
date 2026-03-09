@@ -136,7 +136,7 @@ class BugService:
             {
                 "id": b.id,
                 "bug_id": b.bug_id,
-                "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else "未知",
+                "dispatched_to_name": b.dispatched_to.shown_name if b.dispatched_to else "未知",
                 "closed": b.closed,
                 "resolution": b.resolution,
             }

@@ -26,6 +26,10 @@ class TeamStatusPayload(BaseModel):
     is_team_member: bool
 
 
+class DisplayNamePayload(BaseModel):
+    display_name: str = Field(min_length=1, max_length=80)
+
+
 class PasswordChangePayload(BaseModel):
     old_password: str
     new_password: str = Field(min_length=3, max_length=128)
@@ -57,6 +61,12 @@ def update_user_role(user_id: int, payload: UserRoleUpdatePayload, current_user=
 def update_user_team_status(user_id: int, payload: TeamStatusPayload, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     ensure_admin(current_user)
     return UserService.update_team_status(db, user_id, payload.is_team_member, actor_id=current_user.id)
+
+
+@router.put("/users/{user_id}/display-name")
+def update_user_display_name(user_id: int, payload: DisplayNamePayload, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    ensure_admin(current_user)
+    return UserService.update_display_name(db, user_id, payload.display_name, actor_id=current_user.id)
 
 
 @router.delete("/users/{user_id}")

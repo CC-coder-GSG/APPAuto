@@ -25,7 +25,7 @@ export async function loadAssignBoard() {
       <td>
         <select id='o_${r.id}'>
           <option value=''>未分配</option>
-          ${users.map((u) => `<option value='${u.id}' ${u.id === r.owner_id ? 'selected' : ''}>${u.username}</option>`).join('')}
+          ${users.map((u) => `<option value='${u.id}' ${u.id === r.owner_id ? 'selected' : ''}>${u.display_name || u.username}</option>`).join('')}
         </select>
       </td>
     </tr>`).join('');

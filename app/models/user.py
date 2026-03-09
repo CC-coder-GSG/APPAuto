@@ -18,6 +18,7 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(SAEnum(UserRole), default=UserRole.USER, nullable=False)
     is_team_member: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -33,6 +34,11 @@ class User(Base):
 
     def verify_password(self, raw_password: str) -> bool:
         return pwd_context.verify(raw_password, self.password_hash)
+
+    @property
+    def shown_name(self) -> str:
+        name = (self.display_name or "").strip()
+        return name or self.username
 
 
 __all__ = ["User"]

@@ -244,7 +244,7 @@ class ReportService:
             all_users = self.db.query(User).filter(User.is_team_member.is_(True)).order_by(User.id.asc()).all()
             for u in all_users:
                 m = metrics_for_user(u.id)
-                team.append({"user_id": u.id, "username": u.username, **m})
+                team.append({"user_id": u.id, "username": u.shown_name, **m})
             result["team_comparison"] = team
         return result
 
@@ -324,7 +324,7 @@ class ReportService:
 
         majors = {v.id: v.version_no for v in self.db.query(Version).filter(Version.version_type == VersionType.MAJOR).all()}
         minors = {v.id: v.version_no for v in self.db.query(Version).filter(Version.version_type == VersionType.MINOR).all()}
-        users = {u.id: u.username for u in self.db.query(User).all()}
+        users = {u.id: u.shown_name for u in self.db.query(User).all()}
 
         def _days_since(dt: datetime | None) -> int:
             if not dt:

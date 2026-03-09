@@ -102,7 +102,7 @@ async def assign_feedback(
         summary=row.summary,
         major_version_no=row.major_version.version_no if row.major_version else "-",
         minor_version_no=row.minor_version.version_no if row.minor_version else "-",
-        assignee_username=assignee.username,
+        assignee_username=assignee.shown_name,
     )
     return result
 

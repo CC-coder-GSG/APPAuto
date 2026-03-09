@@ -562,7 +562,8 @@ async function init(){
     window.OmniQAStateActions.setCurrentUser(currentUser);
   }
   window.OmniQAState && (window.OmniQAState.currentUser = currentUser);
-  document.getElementById('me').innerText=`${currentUser.username}(${currentUser.role})`;
+  const meName = currentUser.display_name || currentUser.username;
+  document.getElementById('me').innerText=`${meName}(${currentUser.role})`;
   const today = new Date().toISOString().slice(0,10);
   document.getElementById('reportStartDate').value=today;
   document.getElementById('reportEndDate').value=today;
@@ -593,9 +594,9 @@ async function loadUsers(){
   }
   if(window.OmniQAState) window.OmniQAState.users = users;
   fillReportUsers();
-  if(document.getElementById('dispatchUserSelect')) document.getElementById('dispatchUserSelect').innerHTML = users.map(u=>'<option value=\"'+u.id+'\">'+u.username+'</option>').join('')
+  if(document.getElementById('dispatchUserSelect')) document.getElementById('dispatchUserSelect').innerHTML = users.map(u=>'<option value=\"'+u.id+'\">'+(u.display_name||u.username)+'</option>').join('')
   if(document.getElementById('feedbackAssigneeSelect')) {
-    document.getElementById('feedbackAssigneeSelect').innerHTML = '<option value=\"\">全部</option>' + users.map(u=>'<option value=\"'+u.id+'\">'+u.username+'</option>').join('');
+    document.getElementById('feedbackAssigneeSelect').innerHTML = '<option value=\"\">全部</option>' + users.map(u=>'<option value=\"'+u.id+'\">'+(u.display_name||u.username)+'</option>').join('');
   }
 }
 
@@ -640,7 +641,7 @@ async function onSoftwareChange(){
     if(visible==='dispatch') await loadDispatchedAll();
   }
 }
-function fillReportUsers(){const s=document.getElementById('reportUserSelect');if(!s) return; const allOpt=currentUser&&currentUser.role==='admin'?'<option value="0">全员</option>':''; s.innerHTML=allOpt+users.map(u=>`<option value="${u.id}">${u.username}${u.is_team_member===false?'(编外)':''}</option>`).join('');adjustReportChartVisibility()}
+function fillReportUsers(){const s=document.getElementById('reportUserSelect');if(!s) return; const allOpt=currentUser&&currentUser.role==='admin'?'<option value="0">全员</option>':''; s.innerHTML=allOpt+users.map(u=>`<option value="${u.id}">${u.display_name||u.username}${u.is_team_member===false?'(编外)':''}</option>`).join('');adjustReportChartVisibility()}
 
 async function loadVersions(){
   const sid = getCurrentSoftwareId();
@@ -1030,6 +1031,10 @@ async function toggleTeamMember(userId, targetStatus){
 
 async function removeUser(userId, username){
   return window.OmniQADataTab.removeUser(userId, username);
+}
+
+async function renameUserDisplayName(userId, currentDisplayName, username){
+  return window.OmniQADataTab.renameUserDisplayName(userId, currentDisplayName, username);
 }
 
 async function removeVersion(id){

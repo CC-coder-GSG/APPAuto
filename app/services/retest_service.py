@@ -83,11 +83,11 @@ class RetestService:
                 "id": r.id,
                 "zentao_req_id": r.zentao_req_id,
                 "title": r.title,
-                "owner": r.owner.username if r.owner else None,
+                "owner": r.owner.shown_name if r.owner else None,
                 "retest_completed": r.retest_completed,
                 "retest_passed": r.retest_passed,
                 "retest_minor_version_id": r.retest_minor_version_id,
-                "retested_by": r.retester.username if r.retester else None,
+                "retested_by": r.retester.shown_name if r.retester else None,
                 "test_cases": [{"id": c.id, "zentao_case_id": c.zentao_case_id, "bugs": case_bug_map.get(str(c.id), [])} for c in r.test_cases],
                 "free_bugs": free_bug_map.get(r.id, []),
                 "retest_bugs": retest_bug_map.get(r.id, []),
@@ -139,9 +139,9 @@ class RetestService:
         if not rows:
             raise HTTPException(status_code=400, detail="No retested requirements by current user")
 
-        msg_lines = [f"### 复测结果专项通报 (复测人: @{current_user.username})"]
+        msg_lines = [f"### 复测结果专项通报 (复测人: @{current_user.shown_name})"]
         for row in rows:
-            owner_name = row.owner.username if row.owner else "未知"
+            owner_name = row.owner.shown_name if row.owner else "未知"
             minor_ver = row.retest_minor_version.version_no if row.retest_minor_version else "未知"
             if row.retest_passed:
                 msg_lines.append(f"> ✅ **[通过]** {row.zentao_req_id} (原测试: @{owner_name} | 验证发包: {minor_ver})")

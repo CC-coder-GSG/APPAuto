@@ -41,7 +41,7 @@ class ExportService:
                         "major_version": req.major_version.version_no,
                         "zentao_req_id": req.zentao_req_id,
                         "title": req.title,
-                        "owner": req.owner.username if req.owner else "",
+                        "owner": req.owner.shown_name if req.owner else "",
                         "case_ids": ", ".join(c.zentao_case_id for c in req.test_cases),
                         "case_completed": str(req.case_completed),
                         "test_completed": str(req.test_completed),

@@ -39,7 +39,7 @@ class Stage5Service:
                 if record.user_id != current_user.id:
                     other_records.append(
                         {
-                            "username": record.user.username,
+                            "username": record.user.shown_name,
                             "minor_version_no": record.minor_version.version_no if record.minor_version else "未知",
                             "test_done": record.test_done,
                             "resolution": record.resolution,
@@ -61,7 +61,7 @@ class Stage5Service:
                     "my_test_done": my_record.test_done if my_record else False,
                     "my_resolution": my_record.resolution if my_record else "fixed",
                     "other_records": other_records,
-                    "dispatched_to_name": bug.dispatched_to.username if bug.dispatched_to else None,
+                    "dispatched_to_name": bug.dispatched_to.shown_name if bug.dispatched_to else None,
                     "is_retest_failed": getattr(bug, "is_retest_failed", False),
                 }
             )
@@ -119,7 +119,7 @@ class Stage5Service:
         if test_done and old_resolution != resolution:
             res_zh_map = {"fixed": "✅修复通过", "false_alarm": "⚠️误报", "rejected": "⛔拒绝修复"}
             if resolution in ["false_alarm", "rejected"] or old_resolution in ["false_alarm", "rejected"]:
-                notice = f"📢 **Bug 状态流转通知**\n> 缺陷 **{bug.bug_id}** 的处理状态被 @{current_user.username} 更新为：**{res_zh_map.get(resolution, resolution)}** (位于发包: 🏷️{minor_version_id})"
+                notice = f"📢 **Bug 状态流转通知**\n> 缺陷 **{bug.bug_id}** 的处理状态被 @{current_user.shown_name} 更新为：**{res_zh_map.get(resolution, resolution)}** (位于发包: 🏷️{minor_version_id})"
 
         created_bug_ids: list[str] = []
         if newly_found_bug_id:

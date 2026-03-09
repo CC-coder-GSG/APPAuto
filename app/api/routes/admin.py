@@ -20,6 +20,7 @@ def admin_data_overview(current_user=Depends(get_current_user), db: Session = De
             {
                 "id": u.id,
                 "username": u.username,
+                "display_name": u.shown_name,
                 "role": u.role.value,
                 "is_team_member": u.is_team_member,
                 "created_at": u.created_at.isoformat(),

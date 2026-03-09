@@ -20,6 +20,7 @@ def auth_me(current_user=Depends(get_current_user)):
     return {
         "id": current_user.id,
         "username": current_user.username,
+        "display_name": current_user.shown_name,
         "role": current_user.role.value,
         "is_team_member": getattr(current_user, "is_team_member", True),
     }

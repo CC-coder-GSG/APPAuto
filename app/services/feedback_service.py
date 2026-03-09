@@ -107,9 +107,9 @@ class FeedbackService:
                 "minor_version_id": r.minor_version_id,
                 "minor_version_no": r.minor_version.version_no if r.minor_version else None,
                 "creator_id": r.creator_id,
-                "creator_name": r.creator.username if r.creator else None,
+                "creator_name": r.creator.shown_name if r.creator else None,
                 "assignee_id": r.assignee_id,
-                "assignee_name": r.assignee.username if r.assignee else None,
+                "assignee_name": r.assignee.shown_name if r.assignee else None,
                 "created_at": r.created_at.isoformat(),
             }
             for r in rows
@@ -170,9 +170,9 @@ class FeedbackService:
                 "minor_version_id": r.minor_version_id,
                 "minor_version_no": r.minor_version.version_no if r.minor_version else None,
                 "creator_id": r.creator_id,
-                "creator_name": r.creator.username if r.creator else None,
+                "creator_name": r.creator.shown_name if r.creator else None,
                 "assignee_id": r.assignee_id,
-                "assignee_name": r.assignee.username if r.assignee else None,
+                "assignee_name": r.assignee.shown_name if r.assignee else None,
                 "created_at": r.created_at.isoformat(),
             }
             for r in rows
@@ -224,15 +224,15 @@ class FeedbackService:
             "major_version_no": row.major_version.version_no if row.major_version else None,
             "minor_version_id": row.minor_version_id,
             "minor_version_no": row.minor_version.version_no if row.minor_version else None,
-            "creator_name": row.creator.username if row.creator else None,
+            "creator_name": row.creator.shown_name if row.creator else None,
             "assignee_id": row.assignee_id,
-            "assignee_name": row.assignee.username if row.assignee else None,
+            "assignee_name": row.assignee.shown_name if row.assignee else None,
             "handling_result": row.handling_result,
             "handled_major_version_id": row.handled_major_version_id,
             "handled_major_version_no": row.handled_major_version.version_no if row.handled_major_version else None,
             "handled_minor_version_id": row.handled_minor_version_id,
             "handled_minor_version_no": row.handled_minor_version.version_no if row.handled_minor_version else None,
-            "handled_by_name": row.handler.username if row.handler else None,
+            "handled_by_name": row.handler.shown_name if row.handler else None,
             "handled_at": row.handled_at.isoformat() if row.handled_at else None,
             "created_at": row.created_at.isoformat(),
             "attachments": [
@@ -488,7 +488,7 @@ class FeedbackService:
         )
         actor_ids = list({log.actor_id for log in logs if log.actor_id})
         users = self.db.query(User).filter(User.id.in_(actor_ids)).all() if actor_ids else []
-        umap = {u.id: u.username for u in users}
+        umap = {u.id: u.shown_name for u in users}
         return [
             {
                 "id": log.id,

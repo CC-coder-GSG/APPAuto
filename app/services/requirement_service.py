@@ -137,12 +137,12 @@ class RequirementService:
                 "id": r.id,
                 "zentao_req_id": r.zentao_req_id,
                 "title": r.title,
-                "owner": r.owner.username if r.owner else None,
+                "owner": r.owner.shown_name if r.owner else None,
                 "owner_id": r.owner_id,
                 "case_completed": r.case_completed,
                 "test_completed": r.test_completed,
                 "retest_completed": r.retest_completed,
-                "retested_by": r.retester.username if r.retester else None,
+                "retested_by": r.retester.shown_name if r.retester else None,
                 "status": r.status,
                 "case_ids": [c.zentao_case_id for c in r.test_cases],
             }
@@ -384,7 +384,7 @@ class RequirementService:
             [
                 "### 需求测试进度",
                 f"> 大版本：{major_name}",
-                f"> 提交人：@{current_user.username}",
+                f"> 提交人：@{current_user.shown_name}",
                 f"> 当前人员填写用例：{created_cases} 个",
                 f"> 需求用例未完成：{req_case_pending} 个",
                 f"> 需求用例已完成：{req_case_done} 个",
@@ -413,7 +413,7 @@ class RequirementService:
             [
                 "### 需求测试进度",
                 f"> 大版本：{major_name} | 当前发包：{minor_name}",
-                f"> 提交人：@{current_user.username}",
+                f"> 提交人：@{current_user.shown_name}",
                 f"> 当前人员已完成测试需求：{req_test_done} 个",
                 f"> 需求测试未完成：{req_test_pending} 个",
                 f"> 需求测试已完成：{req_test_done} 个",

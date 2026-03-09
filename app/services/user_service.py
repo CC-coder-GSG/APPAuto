@@ -11,6 +11,7 @@ def _user_to_dict(user: User) -> dict:
     return {
         "id": user.id,
         "username": user.username,
+        "display_name": user.shown_name,
         "role": user.role.value,
         "is_team_member": user.is_team_member,
         "created_at": user.created_at.isoformat(),
@@ -29,6 +30,7 @@ class UserService:
             raise HTTPException(status_code=400, detail="Username already exists")
         user = User(
             username=username,
+            display_name=username,
             password_hash=User.hash_password(password),
             role=role,
         )
@@ -37,6 +39,24 @@ class UserService:
         db.refresh(user)
         audit(db, action="user.create", target_type="user", actor_id=user.id, target_id=str(user.id), detail=f"username={user.username}")
         return _user_to_dict(user)
+
+    @staticmethod
+    def update_display_name(db: Session, user_id: int, display_name: str | None, actor_id: int | None = None) -> dict:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        clean_name = (display_name or "").strip()
+        user.display_name = clean_name or user.username
+        db.commit()
+        audit(
+            db,
+            action="user.rename_display",
+            target_type="user",
+            actor_id=actor_id,
+            target_id=str(user.id),
+            detail=f"display_name={user.display_name}",
+        )
+        return {"message": "显示名称已更新", "display_name": user.display_name}
 
     @staticmethod
     def update_role(db: Session, user_id: int, role, actor_id: int | None = None) -> dict:

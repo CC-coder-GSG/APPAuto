@@ -213,14 +213,17 @@ export function renderDataOverview() {
       ? '<div class="muted" style="padding: 12px 8px;">暂无用户数据</div>'
       : (data.users || []).map((u) => {
         const safeUsername = String(u.username || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const safeDisplayName = String(u.display_name || u.username || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         return `<div class="card" style="margin-bottom:12px; padding:14px 16px; border:1px solid #e2e8f0; box-shadow:none;">
           <div style="display:grid; grid-template-columns:minmax(220px, 1fr) auto; gap:12px; align-items:center;">
             <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-              <span style="font-weight:700; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${u.username}</span>
+              <span style="font-weight:700; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${u.display_name || u.username}</span>
+              <span class="badge" style="background:#f8fafc; color:#64748b;">账号: ${u.username}</span>
               <span class="badge" style="background:${u.role === 'admin' ? '#dbeafe' : '#f1f5f9'}; color:${u.role === 'admin' ? '#1d4ed8' : '#475569'}">${u.role === 'admin' ? '管理员' : '普通用户'}</span>
               <span class="badge" style="background:${u.is_team_member ? '#dcfce7' : '#fee2e2'}; color:${u.is_team_member ? '#166534' : '#991b1b'}">${u.is_team_member ? '组员' : '编外'}</span>
             </div>
             <div class="row" style="justify-content:flex-end; gap:8px; margin:0; flex-wrap:wrap;">
+              <button class="secondary" onclick="renameUserDisplayName(${u.id}, '${safeDisplayName}', '${safeUsername}')">重命名</button>
               <button onclick="toggleRole(${u.id},'${u.role}')">设为${u.role === 'admin' ? '普通用户' : '管理员'}</button>
               <button class="secondary" onclick="toggleTeamMember(${u.id}, ${u.is_team_member ? false : true})">${u.is_team_member ? '设为编外人员' : '设为组员'}</button>
               <button class="secondary" onclick="resetUserPassword(${u.id}, '${safeUsername}')">重置密码</button>
@@ -358,6 +361,21 @@ export async function removeUser(userId, username) {
   }
 }
 
+export async function renameUserDisplayName(userId, currentDisplayName, username) {
+  const next = prompt(`请输入用户【${username}】的新显示名称：`, currentDisplayName || username);
+  if (!next) return;
+  const clean = String(next).trim();
+  if (!clean) return;
+  try {
+    await api(`/users/${userId}/display-name`, { method: 'PUT', headers: window.H, body: { display_name: clean } });
+    window.showMessage && window.showMessage('用户显示名称已更新', 'success');
+    await loadDataOverview();
+    await window.loadUsers();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '重命名失败', 'error');
+  }
+}
+
 export async function removeVersion(id) {
   if (!confirm('高危操作：删除版本将级联删除所有下挂需求、用例和 Bug，确定继续吗？')) return;
   await api('/versions/' + id, { method: 'DELETE' });
@@ -429,6 +447,7 @@ window.OmniQADataTab = {
   toggleRole,
   toggleTeamMember,
   removeUser,
+  renameUserDisplayName,
   removeVersion,
   removeReq,
   removeBug,

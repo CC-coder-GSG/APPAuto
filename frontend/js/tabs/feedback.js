@@ -246,7 +246,7 @@ export async function openFeedbackDetail(feedbackId) {
   const bugsHtml = (detail.bugs || []).map((b) => `<span class="badge" style="display:inline-flex; align-items:center; margin-right:8px; margin-bottom:8px; border-radius:99px; padding:6px 10px; background:#f8fafc; color:#334155;">${b.bug_id} <a href="javascript:void(0)" style="color:#ef4444; margin-left:6px; text-decoration:none;" onclick="unlinkFeedbackBug(${detail.id}, ${b.id})">×</a></span>`).join('') || '<span class="muted">暂无关联 Bug</span>';
   const users = window.users || [];
   const isAdmin = window.currentUser && window.currentUser.role === 'admin';
-  const assigneeOpts = users.map((u) => `<option value="${u.id}" ${Number(detail.assignee_id) === Number(u.id) ? 'selected' : ''}>${u.username}</option>`).join('');
+  const assigneeOpts = users.map((u) => `<option value="${u.id}" ${Number(detail.assignee_id) === Number(u.id) ? 'selected' : ''}>${u.display_name || u.username}</option>`).join('');
   const actionZhMap = {
     'feedback.create': '创建反馈',
     'feedback.assign': '指派处理人',

@@ -146,7 +146,7 @@ def my_workbench(
                 "bug_id": b.bug_id,
                 "found_minor_version_no": minors.get(b.found_minor_version_id, "未知") if b.found_minor_version_id else "未知",
                 "fixed_minor_version_no": minors.get(b.fixed_minor_version_id, "未知") if b.fixed_minor_version_id else None,
-                "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else None,
+                "dispatched_to_name": b.dispatched_to.shown_name if b.dispatched_to else None,
             }
         )
 
@@ -158,7 +158,7 @@ def my_workbench(
                 "bug_id": b.bug_id,
                 "found_minor_version_no": minors.get(b.found_minor_version_id, "未知") if b.found_minor_version_id else "未知",
                 "fixed_minor_version_no": minors.get(b.fixed_minor_version_id, "未知") if b.fixed_minor_version_id else None,
-                "dispatched_to_name": b.dispatched_to.username if b.dispatched_to else None,
+                "dispatched_to_name": b.dispatched_to.shown_name if b.dispatched_to else None,
             }
         )
 
@@ -217,7 +217,7 @@ def delete_case(case_id: int, current_user: User = Depends(get_current_user), db
 async def assign_and_publish(payload: AssignPublishPayload, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     ensure_admin(current_user)
     service = RequirementService(db)
-    users_map = {u.id: u.username for u in db.query(User).all()}
+    users_map = {u.id: u.shown_name for u in db.query(User).all()}
     result = service.assign_and_publish(
         payload.major_version_id,
         [{"requirement_id": item.requirement_id, "owner_id": item.owner_id} for item in payload.assignments],
