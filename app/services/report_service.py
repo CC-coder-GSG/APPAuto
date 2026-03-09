@@ -36,6 +36,7 @@ class ReportService:
         current_user: User,
         user_id: int | None = None,
         major_version_id: int | None = None,
+        software_id: int | None = None,
     ) -> dict:
         all_users_mode = user_id in (None, 0)
         if all_users_mode and current_user.role != UserRole.ADMIN:
@@ -52,38 +53,41 @@ class ReportService:
         team_ids: list[int] = []
         if all_users_mode:
             team_ids = [u.id for u in self.db.query(User).filter(User.is_team_member.is_(True)).all()]
+        scoped_major_ids: list[int] | None = None
+        if major_version_id:
+            scoped_major_ids = [major_version_id]
+        elif software_id:
+            scoped_major_ids = [
+                v.id for v in self.db.query(Version.id).filter(Version.version_type == VersionType.MAJOR, Version.software_id == software_id).all()
+            ]
+            scoped_major_ids = [x[0] if isinstance(x, tuple) else x for x in scoped_major_ids]
+
+        def filter_by_major_ids(query, column):
+            if scoped_major_ids is None:
+                return query
+            if len(scoped_major_ids) == 0:
+                return query.filter(False)
+            return query.filter(column.in_(scoped_major_ids))
 
         def metrics_for_user(uid: int) -> dict:
             executed_req_count = (
                 self.db.query(func.count(func.distinct(TestExecution.requirement_id)))
                 .join(Requirement, TestExecution.requirement_id == Requirement.id)
                 .filter(TestExecution.executed_by_id == uid, TestExecution.executed_at >= sdt, TestExecution.executed_at <= edt)
-                .filter(Requirement.major_version_id == major_version_id if major_version_id else True)
-                .scalar()
-                or 0
             )
+            executed_req_count = filter_by_major_ids(executed_req_count, Requirement.major_version_id).scalar() or 0
             case_count = (
                 self.db.query(func.count(TestCase.id))
                 .join(Requirement, TestCase.requirement_id == Requirement.id)
                 .filter(TestCase.creator_id == uid, TestCase.created_at >= sdt, TestCase.created_at <= edt)
-                .filter(Requirement.major_version_id == major_version_id if major_version_id else True)
-                .scalar()
-                or 0
             )
-            bug_count = (
-                self.db.query(func.count(BugTracking.id))
-                .filter(BugTracking.created_by_id == uid, BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
-                .filter(BugTracking.major_version_id == major_version_id if major_version_id else True)
-                .scalar()
-                or 0
+            case_count = filter_by_major_ids(case_count, Requirement.major_version_id).scalar() or 0
+            bug_count = self.db.query(func.count(BugTracking.id)).filter(BugTracking.created_by_id == uid, BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
+            bug_count = filter_by_major_ids(bug_count, BugTracking.major_version_id).scalar() or 0
+            retested_reqs = self.db.query(func.count(Requirement.id)).filter(
+                Requirement.retested_by_id == uid, Requirement.retested_at >= sdt, Requirement.retested_at <= edt
             )
-            retested_reqs = (
-                self.db.query(func.count(Requirement.id))
-                .filter(Requirement.retested_by_id == uid, Requirement.retested_at >= sdt, Requirement.retested_at <= edt)
-                .filter(Requirement.major_version_id == major_version_id if major_version_id else True)
-                .scalar()
-                or 0
-            )
+            retested_reqs = filter_by_major_ids(retested_reqs, Requirement.major_version_id).scalar() or 0
             closed_bugs = (
                 self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
                 .join(BugTracking, BugStage5Record.bug_tracking_id == BugTracking.id)
@@ -94,10 +98,8 @@ class ReportService:
                     BugStage5Record.test_done.is_(True),
                     BugStage5Record.newly_found_bug_id.is_(None),
                 )
-                .filter(BugTracking.major_version_id == major_version_id if major_version_id else True)
-                .scalar()
-                or 0
             )
+            closed_bugs = filter_by_major_ids(closed_bugs, BugTracking.major_version_id).scalar() or 0
             return {
                 "executed_requirements": executed_req_count,
                 "created_cases": case_count,
@@ -107,51 +109,37 @@ class ReportService:
             }
 
         if all_users_mode:
+            q_exec = (
+                self.db.query(func.count(func.distinct(TestExecution.requirement_id)))
+                .join(Requirement, TestExecution.requirement_id == Requirement.id)
+                .filter(TestExecution.executed_at >= sdt, TestExecution.executed_at <= edt, TestExecution.executed_by_id.in_(team_ids))
+            )
+            q_case = (
+                self.db.query(func.count(TestCase.id))
+                .join(Requirement, TestCase.requirement_id == Requirement.id)
+                .filter(TestCase.created_at >= sdt, TestCase.created_at <= edt, TestCase.creator_id.in_(team_ids))
+            )
+            q_bug = self.db.query(func.count(BugTracking.id)).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt, BugTracking.created_by_id.in_(team_ids))
+            q_retest = self.db.query(func.count(Requirement.id)).filter(
+                Requirement.retested_at >= sdt, Requirement.retested_at <= edt, Requirement.retested_by_id.in_(team_ids)
+            )
+            q_closed = (
+                self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
+                .join(BugTracking, BugStage5Record.bug_tracking_id == BugTracking.id)
+                .filter(
+                    BugStage5Record.updated_at >= sdt,
+                    BugStage5Record.updated_at <= edt,
+                    BugStage5Record.user_id.in_(team_ids),
+                    BugStage5Record.test_done.is_(True),
+                    BugStage5Record.newly_found_bug_id.is_(None),
+                )
+            )
             overview = {
-                "executed_requirements": (
-                    self.db.query(func.count(func.distinct(TestExecution.requirement_id)))
-                    .join(Requirement, TestExecution.requirement_id == Requirement.id)
-                    .filter(TestExecution.executed_at >= sdt, TestExecution.executed_at <= edt, TestExecution.executed_by_id.in_(team_ids))
-                    .filter(Requirement.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
-                ),
-                "created_cases": (
-                    self.db.query(func.count(TestCase.id))
-                    .join(Requirement, TestCase.requirement_id == Requirement.id)
-                    .filter(TestCase.created_at >= sdt, TestCase.created_at <= edt, TestCase.creator_id.in_(team_ids))
-                    .filter(Requirement.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
-                ),
-                "created_bugs": (
-                    self.db.query(func.count(BugTracking.id))
-                    .filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt, BugTracking.created_by_id.in_(team_ids))
-                    .filter(BugTracking.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
-                ),
-                "retested_reqs": (
-                    self.db.query(func.count(Requirement.id))
-                    .filter(Requirement.retested_at >= sdt, Requirement.retested_at <= edt, Requirement.retested_by_id.in_(team_ids))
-                    .filter(Requirement.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
-                ),
-                "closed_bugs": (
-                    self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
-                    .join(BugTracking, BugStage5Record.bug_tracking_id == BugTracking.id)
-                    .filter(
-                        BugStage5Record.updated_at >= sdt,
-                        BugStage5Record.updated_at <= edt,
-                        BugStage5Record.user_id.in_(team_ids),
-                        BugStage5Record.test_done.is_(True),
-                        BugStage5Record.newly_found_bug_id.is_(None),
-                    )
-                    .filter(BugTracking.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
-                ),
+                "executed_requirements": filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0,
+                "created_cases": filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0,
+                "created_bugs": filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0,
+                "retested_reqs": filter_by_major_ids(q_retest, Requirement.major_version_id).scalar() or 0,
+                "closed_bugs": filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0,
             }
         else:
             overview = metrics_for_user(target_user_id)
@@ -162,37 +150,23 @@ class ReportService:
             day_s = datetime.combine(cur, datetime.min.time())
             day_e = datetime.combine(cur, datetime.max.time())
             if all_users_mode:
-                day_exec = (
+                q_exec = (
                     self.db.query(func.count(func.distinct(TestExecution.requirement_id)))
                     .join(Requirement, TestExecution.requirement_id == Requirement.id)
                     .filter(TestExecution.executed_at >= day_s, TestExecution.executed_at <= day_e, TestExecution.executed_by_id.in_(team_ids))
-                    .filter(Requirement.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
                 )
-                day_case = (
+                q_case = (
                     self.db.query(func.count(TestCase.id))
                     .join(Requirement, TestCase.requirement_id == Requirement.id)
                     .filter(TestCase.created_at >= day_s, TestCase.created_at <= day_e, TestCase.creator_id.in_(team_ids))
-                    .filter(Requirement.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
                 )
-                day_bug = (
-                    self.db.query(func.count(BugTracking.id))
-                    .filter(BugTracking.created_at >= day_s, BugTracking.created_at <= day_e, BugTracking.created_by_id.in_(team_ids))
-                    .filter(BugTracking.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
+                q_bug = self.db.query(func.count(BugTracking.id)).filter(
+                    BugTracking.created_at >= day_s, BugTracking.created_at <= day_e, BugTracking.created_by_id.in_(team_ids)
                 )
-                day_retested = (
-                    self.db.query(func.count(Requirement.id))
-                    .filter(Requirement.retested_at >= day_s, Requirement.retested_at <= day_e, Requirement.retested_by_id.in_(team_ids))
-                    .filter(Requirement.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
+                q_retested = self.db.query(func.count(Requirement.id)).filter(
+                    Requirement.retested_at >= day_s, Requirement.retested_at <= day_e, Requirement.retested_by_id.in_(team_ids)
                 )
-                day_closed = (
+                q_closed = (
                     self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
                     .join(BugTracking, BugStage5Record.bug_tracking_id == BugTracking.id)
                     .filter(
@@ -202,42 +176,30 @@ class ReportService:
                         BugStage5Record.test_done.is_(True),
                         BugStage5Record.newly_found_bug_id.is_(None),
                     )
-                    .filter(BugTracking.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
                 )
+                day_exec = filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0
+                day_case = filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0
+                day_bug = filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0
+                day_retested = filter_by_major_ids(q_retested, Requirement.major_version_id).scalar() or 0
+                day_closed = filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0
             else:
-                day_exec = (
+                q_exec = (
                     self.db.query(func.count(func.distinct(TestExecution.requirement_id)))
                     .join(Requirement, TestExecution.requirement_id == Requirement.id)
                     .filter(TestExecution.executed_by_id == target_user_id, TestExecution.executed_at >= day_s, TestExecution.executed_at <= day_e)
-                    .filter(Requirement.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
                 )
-                day_case = (
+                q_case = (
                     self.db.query(func.count(TestCase.id))
                     .join(Requirement, TestCase.requirement_id == Requirement.id)
                     .filter(TestCase.creator_id == target_user_id, TestCase.created_at >= day_s, TestCase.created_at <= day_e)
-                    .filter(Requirement.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
                 )
-                day_bug = (
-                    self.db.query(func.count(BugTracking.id))
-                    .filter(BugTracking.created_by_id == target_user_id, BugTracking.created_at >= day_s, BugTracking.created_at <= day_e)
-                    .filter(BugTracking.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
+                q_bug = self.db.query(func.count(BugTracking.id)).filter(
+                    BugTracking.created_by_id == target_user_id, BugTracking.created_at >= day_s, BugTracking.created_at <= day_e
                 )
-                day_retested = (
-                    self.db.query(func.count(Requirement.id))
-                    .filter(Requirement.retested_by_id == target_user_id, Requirement.retested_at >= day_s, Requirement.retested_at <= day_e)
-                    .filter(Requirement.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
+                q_retested = self.db.query(func.count(Requirement.id)).filter(
+                    Requirement.retested_by_id == target_user_id, Requirement.retested_at >= day_s, Requirement.retested_at <= day_e
                 )
-                day_closed = (
+                q_closed = (
                     self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
                     .join(BugTracking, BugStage5Record.bug_tracking_id == BugTracking.id)
                     .filter(
@@ -247,10 +209,12 @@ class ReportService:
                         BugStage5Record.test_done.is_(True),
                         BugStage5Record.newly_found_bug_id.is_(None),
                     )
-                    .filter(BugTracking.major_version_id == major_version_id if major_version_id else True)
-                    .scalar()
-                    or 0
                 )
+                day_exec = filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0
+                day_case = filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0
+                day_bug = filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0
+                day_retested = filter_by_major_ids(q_retested, Requirement.major_version_id).scalar() or 0
+                day_closed = filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0
             trend.append({
                 "date": cur.isoformat(),
                 "executed_requirements": day_exec,
@@ -262,8 +226,7 @@ class ReportService:
             cur += timedelta(days=1)
 
         bug_dist_query = self.db.query(BugTracking.source_type, func.count(BugTracking.id)).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
-        if major_version_id:
-            bug_dist_query = bug_dist_query.filter(BugTracking.major_version_id == major_version_id)
+        bug_dist_query = filter_by_major_ids(bug_dist_query, BugTracking.major_version_id)
         if all_users_mode:
             bug_dist_query = bug_dist_query.filter(BugTracking.created_by_id.in_(team_ids))
         else:
@@ -285,7 +248,7 @@ class ReportService:
             result["team_comparison"] = team
         return result
 
-    def advanced(self, start_date: date, end_date: date, major_version_id: int | None = None) -> dict:
+    def advanced(self, start_date: date, end_date: date, major_version_id: int | None = None, software_id: int | None = None) -> dict:
         sdt = datetime.combine(start_date, datetime.min.time())
         edt = datetime.combine(end_date, datetime.max.time())
         req_bugs_query = self.db.query(Requirement.zentao_req_id, Requirement.title, func.count(BugTracking.id).label("bug_count")) \
@@ -293,11 +256,16 @@ class ReportService:
             .filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
         if major_version_id:
             req_bugs_query = req_bugs_query.filter(Requirement.major_version_id == major_version_id)
+        elif software_id:
+            req_bugs_query = req_bugs_query.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
         req_bugs = req_bugs_query.group_by(Requirement.id).order_by(func.count(BugTracking.id).desc()).limit(7).all()
         top_reqs = [{"req_id": r[0], "title": r[1], "count": r[2]} for r in req_bugs]
         bug_base_query = self.db.query(BugTracking).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
         if major_version_id:
             bug_base_query = bug_base_query.filter(BugTracking.major_version_id == major_version_id)
+        elif software_id:
+            major_ids = [m.id for m in self.db.query(Version).filter(Version.version_type == VersionType.MAJOR, Version.software_id == software_id).all()]
+            bug_base_query = bug_base_query.filter(BugTracking.major_version_id.in_(major_ids if major_ids else [-1]))
         retest_bugs = bug_base_query.filter(BugTracking.source_type == BugSourceType.RETEST).count() or 0
         normal_bugs = bug_base_query.filter(BugTracking.source_type.in_([BugSourceType.CASE, BugSourceType.MANUAL])).count() or 0
         total_bugs = bug_base_query.count() or 0
@@ -308,6 +276,8 @@ class ReportService:
         exec_query = self.db.query(TestExecution.result_status, func.count(TestExecution.id)).filter(TestExecution.executed_at >= sdt, TestExecution.executed_at <= edt)
         if major_version_id:
             exec_query = exec_query.join(Requirement, TestExecution.requirement_id == Requirement.id).filter(Requirement.major_version_id == major_version_id)
+        elif software_id:
+            exec_query = exec_query.join(Requirement, TestExecution.requirement_id == Requirement.id).join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
         exec_results = exec_query.group_by(TestExecution.result_status).all()
         executions = [{"status": r[0], "count": r[1]} for r in exec_results]
         return {
@@ -337,6 +307,7 @@ class ReportService:
         start_date: date,
         end_date: date,
         major_version_id: int | None = None,
+        software_id: int | None = None,
         req_overdue_days: int = 14,
         feedback_overdue_days: int = 7,
         bug_overdue_days: int = 7,
@@ -385,9 +356,14 @@ class ReportService:
             avg = round(sum(days_list) / len(days_list), 2) if days_list else 0
             return {"bands": ordered, "avg_days": avg, "median_days": median, "samples": len(days_list)}
 
-        req_query = self.db.query(Requirement).filter(Requirement.created_at >= sdt, Requirement.created_at <= edt)
+        scoped_major_ids: list[int] | None = None
         if major_version_id:
-            req_query = req_query.filter(Requirement.major_version_id == major_version_id)
+            scoped_major_ids = [major_version_id]
+        elif software_id:
+            scoped_major_ids = [v.id for v in self.db.query(Version).filter(Version.version_type == VersionType.MAJOR, Version.software_id == software_id).all()]
+        req_query = self.db.query(Requirement).filter(Requirement.created_at >= sdt, Requirement.created_at <= edt)
+        if scoped_major_ids is not None:
+            req_query = req_query.filter(Requirement.major_version_id.in_(scoped_major_ids if scoped_major_ids else [-1]))
         req_rows = req_query.all()
 
         overdue_requirements = []
@@ -446,8 +422,8 @@ class ReportService:
                 req_status_stay_distribution.sort(key=lambda x: x["avg_days"], reverse=True)
 
         fb_query = self.db.query(FeedbackRecord).filter(FeedbackRecord.created_at >= sdt, FeedbackRecord.created_at <= edt)
-        if major_version_id:
-            fb_query = fb_query.filter(FeedbackRecord.major_version_id == major_version_id)
+        if scoped_major_ids is not None:
+            fb_query = fb_query.filter(FeedbackRecord.major_version_id.in_(scoped_major_ids if scoped_major_ids else [-1]))
         fb_rows = fb_query.all()
 
         feedback_overdue_rows = []
@@ -480,8 +456,8 @@ class ReportService:
             func.count(FeedbackRecord.id),
             func.sum(case((FeedbackRecord.status.in_([FeedbackStatus.RESOLVED, FeedbackStatus.CLOSED]), 1), else_=0)),
         ).filter(FeedbackRecord.created_at >= sdt, FeedbackRecord.created_at <= edt)
-        if major_version_id:
-            feedback_version_top_query = feedback_version_top_query.filter(FeedbackRecord.major_version_id == major_version_id)
+        if scoped_major_ids is not None:
+            feedback_version_top_query = feedback_version_top_query.filter(FeedbackRecord.major_version_id.in_(scoped_major_ids if scoped_major_ids else [-1]))
         feedback_version_top = []
         for maj_id, min_id, total_cnt, done_cnt in (
             feedback_version_top_query.group_by(FeedbackRecord.major_version_id, FeedbackRecord.minor_version_id)
@@ -500,8 +476,8 @@ class ReportService:
             })
 
         bug_query = self.db.query(BugTracking).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
-        if major_version_id:
-            bug_query = bug_query.filter(BugTracking.major_version_id == major_version_id)
+        if scoped_major_ids is not None:
+            bug_query = bug_query.filter(BugTracking.major_version_id.in_(scoped_major_ids if scoped_major_ids else [-1]))
         bug_rows = bug_query.all()
 
         unassigned_bugs = []
@@ -547,8 +523,8 @@ class ReportService:
             Requirement.status,
             func.count(BugTracking.id).label("bug_count"),
         ).join(BugTracking, BugTracking.requirement_id == Requirement.id).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
-        if major_version_id:
-            req_bug_top_query = req_bug_top_query.filter(Requirement.major_version_id == major_version_id)
+        if scoped_major_ids is not None:
+            req_bug_top_query = req_bug_top_query.filter(Requirement.major_version_id.in_(scoped_major_ids if scoped_major_ids else [-1]))
         req_bug_top = []
         for rid, req_id, title, maj_id, status, bug_count in (
             req_bug_top_query.group_by(Requirement.id).order_by(func.count(BugTracking.id).desc()).limit(10).all()
@@ -572,8 +548,8 @@ class ReportService:
         ).join(BugTracking, BugTracking.requirement_id == Requirement.id).join(FeedbackBugLink, FeedbackBugLink.bug_id == BugTracking.id).join(
             FeedbackRecord, FeedbackRecord.id == FeedbackBugLink.feedback_id
         ).filter(FeedbackRecord.created_at >= sdt, FeedbackRecord.created_at <= edt)
-        if major_version_id:
-            req_feedback_top_query = req_feedback_top_query.filter(Requirement.major_version_id == major_version_id)
+        if scoped_major_ids is not None:
+            req_feedback_top_query = req_feedback_top_query.filter(Requirement.major_version_id.in_(scoped_major_ids if scoped_major_ids else [-1]))
         req_feedback_top = []
         for rid, req_id, title, maj_id, status, feedback_count in (
             req_feedback_top_query.group_by(Requirement.id).order_by(func.count(func.distinct(FeedbackBugLink.feedback_id)).desc()).limit(10).all()
@@ -592,8 +568,8 @@ class ReportService:
             .join(FeedbackRecord, FeedbackRecord.id == FeedbackBugLink.feedback_id)
             .filter(FeedbackRecord.created_at >= sdt, FeedbackRecord.created_at <= edt)
         )
-        if major_version_id:
-            feedback_with_bug = feedback_with_bug.filter(FeedbackRecord.major_version_id == major_version_id)
+        if scoped_major_ids is not None:
+            feedback_with_bug = feedback_with_bug.filter(FeedbackRecord.major_version_id.in_(scoped_major_ids if scoped_major_ids else [-1]))
         feedback_with_bug_count = int(feedback_with_bug.scalar() or 0)
         feedback_total = len(fb_rows)
         feedback_to_bug_ratio = round((feedback_with_bug_count / feedback_total) * 100, 2) if feedback_total else 0.0

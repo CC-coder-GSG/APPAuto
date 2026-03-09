@@ -30,6 +30,10 @@
       </div>
     </div>
     <div style="display: flex; align-items: center; gap: 16px;">
+      <div style="display:flex; align-items:center; gap:8px; background:#f8fafc; padding:6px 10px; border-radius:999px; border:1px solid #e2e8f0;">
+        <span style="font-size:12px; color:#64748b; font-weight:700;">软件</span>
+        <select id="softwareSwitch" onchange="onSoftwareChange()" style="min-width:170px; padding:6px 10px; border-radius:999px; border:1px solid #cbd5e1; background:#fff;"></select>
+      </div>
       <div style="display: flex; align-items: center; gap: 8px; background: #f8fafc; padding: 6px 16px 6px 6px; border-radius: 999px; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
         <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--primary, #2563eb); color: white; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: inset 0 -2px 4px rgba(0,0,0,0.2);">
           👨‍💻
@@ -403,6 +407,14 @@
     </div>
 
     <div class="card">
+      <h3>新增软件</h3>
+      <div class="row">
+        <input id="createSoftwareName" placeholder="软件名称（如：WoSense）">
+        <button onclick="createSoftware()">创建软件</button>
+      </div>
+    </div>
+
+    <div class="card">
       <h3>新增版本</h3>
       <div class="row">
         <input id="createVersionNo" placeholder="版本号(如: 4030 / 40300097)">
@@ -460,7 +472,7 @@
 <script>
 const token=localStorage.getItem('token'); if(!token) location.href='/login';
 const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
-let currentUser=null, users=[], versions=[], assignReqs=[], stage5Rows=[];
+let currentUser=null, users=[], versions=[], softwares=[], currentSoftwareId=null, assignReqs=[], stage5Rows=[];
 let trendChart, sourcePieChart, radarChart, teamCompareChart, versionBugChart;
 let topReqChart, leakageChart, funnelChart, execChart;
 let reportLoaded=false;
@@ -556,6 +568,7 @@ async function init(){
   document.getElementById('reportEndDate').value=today;
   bindReportEvents();
 
+  await loadSoftwares();
   await loadVersions();
   if(currentUser.role==='admin'){
     await loadUsers();
@@ -585,10 +598,54 @@ async function loadUsers(){
     document.getElementById('feedbackAssigneeSelect').innerHTML = '<option value=\"\">全部</option>' + users.map(u=>'<option value=\"'+u.id+'\">'+u.username+'</option>').join('');
   }
 }
+
+function getCurrentSoftwareId(){
+  return Number(currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+}
+
+async function loadSoftwares(){
+  softwares = await (await api('/softwares')).json();
+  const select = document.getElementById('softwareSwitch');
+  if(!select) return;
+  if(!softwares.length){
+    select.innerHTML = "<option value=''>暂无软件</option>";
+    return;
+  }
+  const saved = Number(localStorage.getItem('currentSoftwareId') || 0);
+  const existsSaved = softwares.some(s=>Number(s.id)===saved);
+  currentSoftwareId = existsSaved ? saved : Number(softwares[0].id);
+  localStorage.setItem('currentSoftwareId', String(currentSoftwareId));
+  window.currentSoftwareId = currentSoftwareId;
+  select.innerHTML = softwares.map(s=>`<option value='${s.id}'>${s.name}</option>`).join('');
+  select.value = String(currentSoftwareId);
+}
+
+async function onSoftwareChange(){
+  const select = document.getElementById('softwareSwitch');
+  currentSoftwareId = Number(select?.value || 0);
+  localStorage.setItem('currentSoftwareId', String(currentSoftwareId || ''));
+  window.currentSoftwareId = currentSoftwareId;
+  dataOverviewCache = null;
+  await loadVersions();
+  // 切换软件后，刷新当前页内容，确保旧软件数据不残留
+  const visible = ['assign','mine','feedback','retest','stage5','report','data','dispatch'].find(x=>!document.getElementById('tab-'+x).classList.contains('hidden'));
+  if(visible){
+    if(visible==='mine') await loadMyWorkbench();
+    if(visible==='feedback') await loadFeedbackBoard();
+    if(visible==='retest') await loadRetest();
+    if(visible==='stage5') await loadStage5();
+    if(visible==='report') await queryReport();
+    if(visible==='data') await loadDataOverview();
+    if(visible==='assign') await loadAssignBoard();
+    if(visible==='dispatch') await loadDispatchedAll();
+  }
+}
 function fillReportUsers(){const s=document.getElementById('reportUserSelect');if(!s) return; const allOpt=currentUser&&currentUser.role==='admin'?'<option value="0">全员</option>':''; s.innerHTML=allOpt+users.map(u=>`<option value="${u.id}">${u.username}${u.is_team_member===false?'(编外)':''}</option>`).join('');adjustReportChartVisibility()}
 
 async function loadVersions(){
-  versions=await (await api('/versions')).json();
+  const sid = getCurrentSoftwareId();
+  const url = sid ? `/versions?software_id=${sid}` : '/versions';
+  versions=await (await api(url)).json();
   window.versions = versions;
   if(window.OmniQAStateActions && typeof window.OmniQAStateActions.setVersions === 'function'){
     window.OmniQAStateActions.setVersions(versions);
@@ -604,7 +661,7 @@ function fillVersionSelects(){
   ['assignMajorSelect','mineMajorSelect','feedbackMajorSelect','retestMajorSelect','s5MajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
   const reportMajorEl=document.getElementById('reportMajorSelect');
   if(reportMajorEl){
-    reportMajorEl.innerHTML = '<option value="0">全部大版本</option>' + majors.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('');
+    reportMajorEl.innerHTML = majors.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('');
   }
   refreshAllLinkedMinorSelects();
   bindMajorMinorCascade();
@@ -665,6 +722,10 @@ function toggleCreateVersionParent(){
 
 async function createVersion(){
   return window.OmniQADataTab.createVersion();
+}
+
+async function createSoftware(){
+  return window.OmniQADataTab.createSoftware();
 }
 
 async function createUser(){

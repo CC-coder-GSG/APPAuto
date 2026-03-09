@@ -181,6 +181,7 @@ export async function queryReport() {
   const endDate = window.reportEndDate.value;
   const reportMajorSelect = document.getElementById('reportMajorSelect');
   const selectedMajorId = Number(reportMajorSelect?.value || 0);
+  const currentSoftwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
 
   let summaryUrl = `/reports/summary?start_date=${startDate}&end_date=${endDate}`;
   if (currentUser.role === 'admin' && window.reportUserSelect?.value) {
@@ -188,6 +189,9 @@ export async function queryReport() {
   }
   if (selectedMajorId) {
     summaryUrl += `&major_version_id=${selectedMajorId}`;
+  }
+  if (currentSoftwareId) {
+    summaryUrl += `&software_id=${currentSoftwareId}`;
   }
 
   const data = await (await api(summaryUrl)).json();
@@ -204,13 +208,13 @@ export async function queryReport() {
   const versionBugs = await (await api(vbUrl)).json();
 
   const advUrl = selectedMajorId
-    ? `/reports/advanced?start_date=${startDate}&end_date=${endDate}&major_version_id=${selectedMajorId}`
-    : `/reports/advanced?start_date=${startDate}&end_date=${endDate}`;
+    ? `/reports/advanced?start_date=${startDate}&end_date=${endDate}&major_version_id=${selectedMajorId}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}`
+    : `/reports/advanced?start_date=${startDate}&end_date=${endDate}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}`;
   const advancedData = await (await api(advUrl)).json();
 
   const govUrl = selectedMajorId
-    ? `/reports/governance?start_date=${startDate}&end_date=${endDate}&major_version_id=${selectedMajorId}`
-    : `/reports/governance?start_date=${startDate}&end_date=${endDate}`;
+    ? `/reports/governance?start_date=${startDate}&end_date=${endDate}&major_version_id=${selectedMajorId}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}`
+    : `/reports/governance?start_date=${startDate}&end_date=${endDate}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}`;
   const governanceData = await (await api(govUrl)).json();
 
   renderReportCharts(data, advancedData, {

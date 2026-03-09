@@ -18,6 +18,7 @@ class Version(Base):
     version_no: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     version_type: Mapped[VersionType] = mapped_column(SAEnum(VersionType), nullable=False)
     parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("versions.id", ondelete="CASCADE"), nullable=True)
+    software_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     parent = relationship("Version", remote_side=[id], back_populates="children")

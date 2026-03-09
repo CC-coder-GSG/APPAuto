@@ -7,6 +7,7 @@ from app.models.execution import TestExecution
 from app.models.feedback import FeedbackAttachment, FeedbackBugLink, FeedbackRecord
 from app.models.requirement import Requirement
 from app.models.requirement_status_history import RequirementStatusHistory
+from app.models.software import SoftwareProduct
 from app.models.stage5 import BugStage5Record
 from app.models.testcase import TestCase
 from app.models.user import User
@@ -24,6 +25,7 @@ __all__ = [
     "Requirement",
     "RequirementStatusHistory",
     "RequirementStatus",
+    "SoftwareProduct",
     "TestCase",
     "TestExecution",
     "User",

@@ -8,6 +8,7 @@ export async function createVersion() {
     const version_type = window.createVersionType?.value;
     const parentRaw = window.createVersionParent?.value;
     const parent_id = version_type === 'minor' ? Number(parentRaw) : null;
+    const software_id = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
     if (!version_no) {
       window.showMessage && window.showMessage('请填写版本号', 'error');
       return;
@@ -16,7 +17,11 @@ export async function createVersion() {
       window.showMessage && window.showMessage('minor 版本必须选择父大版本', 'error');
       return;
     }
-    await api('/versions', { method: 'POST', headers: window.H, body: { version_no, version_type, parent_id } });
+    if (version_type === 'major' && !software_id) {
+      window.showMessage && window.showMessage('请先在顶部切换或创建软件', 'error');
+      return;
+    }
+    await api('/versions', { method: 'POST', headers: window.H, body: { version_no, version_type, parent_id, software_id: version_type === 'major' ? software_id : null } });
     window.createVersionNo.value = '';
     window.createVersionType.value = 'major';
     window.toggleCreateVersionParent && window.toggleCreateVersionParent();
@@ -199,6 +204,7 @@ export function expandAllMajorBodies() {
 
 export function renderDataOverview() {
   const data = state.dataOverviewCache || { users: [], versions: [], requirements: [], bugs: [] };
+  const activeMajorIds = new Set((window.versions || []).filter((v) => v.version_type === 'major').map((v) => Number(v.id)));
   const usersCard = document.getElementById('dataUsersCard');
   if (usersCard) usersCard.classList.toggle('hidden', !state.dataViewState.showUsers);
   const dataUsers = document.getElementById('dataUsers');
@@ -227,14 +233,14 @@ export function renderDataOverview() {
     dataUsers.innerHTML = '';
   }
 
-  const majors = (data.versions || []).filter((v) => v.version_type === 'major');
-  const minors = (data.versions || []).filter((v) => v.version_type === 'minor');
+  const majors = (data.versions || []).filter((v) => v.version_type === 'major' && activeMajorIds.has(Number(v.id)));
+  const minors = (data.versions || []).filter((v) => v.version_type === 'minor' && activeMajorIds.has(Number(v.parent_id)));
   const minorMap = {};
   minors.forEach((m) => { minorMap[m.id] = m.version_no; });
   let treeHtml = '';
   majors.forEach((major) => {
     const majorMinors = minors.filter((m) => m.parent_id === major.id);
-    const reqs = (data.requirements || []).filter((r) => r.major_version_id === major.id);
+    const reqs = (data.requirements || []).filter((r) => r.major_version_id === major.id && activeMajorIds.has(Number(r.major_version_id)));
     let minorHtml = majorMinors.map((m) => `<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-right:8px;padding-right:2px;">🏷️ ${m.version_no} <button class="text-btn" title="编辑" onclick="editVersion(${m.id},'${m.version_no}','minor',${major.id})">✎</button><button class="text-btn" title="删除" onclick="removeVersion(${m.id})">×</button></span>`).join('');
     if (!minorHtml) minorHtml = '<span class="muted" style="font-size:13px;">暂无发包记录</span>';
     let reqHtml = reqs.map((req) => {
@@ -308,6 +314,25 @@ export async function toggleRole(userId, currentRole) {
   }
 }
 
+export async function createSoftware() {
+  try {
+    const name = (window.createSoftwareName?.value || '').trim();
+    if (!name) {
+      window.showMessage && window.showMessage('请输入软件名称', 'error');
+      return;
+    }
+    await api('/softwares', { method: 'POST', headers: window.H, body: { name } });
+    window.createSoftwareName.value = '';
+    if (typeof window.loadSoftwares === 'function') {
+      await window.loadSoftwares();
+      await window.onSoftwareChange();
+    }
+    window.showMessage && window.showMessage('软件创建成功', 'success');
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '创建软件失败', 'error');
+  }
+}
+
 export async function toggleTeamMember(userId, targetStatus) {
   const text = targetStatus ? '组员' : '编外人员';
   if (!confirm(`确定将该用户设为${text}吗？`)) return;
@@ -358,7 +383,12 @@ export async function removeBug(id) {
 export async function editVersion(id, no, type, parent) {
   const newNo = prompt('版本号', no);
   if (!newNo) return;
-  await api('/versions/' + id, { method: 'PUT', headers: window.H, body: { version_no: newNo, version_type: type, parent_id: parent } });
+  const software_id = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+  await api('/versions/' + id, {
+    method: 'PUT',
+    headers: window.H,
+    body: { version_no: newNo, version_type: type, parent_id: parent, software_id: type === 'major' ? software_id : null },
+  });
   window.showMessage && window.showMessage('版本已更新');
   await window.loadVersions();
   await loadDataOverview();
@@ -383,6 +413,7 @@ export async function editBug(id, b) {
 }
 
 window.OmniQADataTab = {
+  createSoftware,
   createVersion,
   createUser,
   createReq,

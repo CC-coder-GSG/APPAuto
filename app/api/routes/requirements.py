@@ -91,7 +91,13 @@ def list_requirements(major_version_id: int = Query(...), db: Session = Depends(
 
 
 @router.get("/requirements/my-workbench")
-def my_workbench(current_user: User = Depends(get_current_user), db: Session = Depends(get_db), major_version_id: Optional[int] = None, mode: str = "version"):
+def my_workbench(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    major_version_id: Optional[int] = None,
+    mode: str = "version",
+    software_id: Optional[int] = None,
+):
     query = db.query(Requirement).options(
         joinedload(Requirement.major_version),
         joinedload(Requirement.test_cases),
@@ -101,6 +107,8 @@ def my_workbench(current_user: User = Depends(get_current_user), db: Session = D
         query = query.filter(Requirement.major_version_id == major_version_id)
     elif mode == "all_pending":
         query = query.filter(Requirement.test_completed.is_(False))
+    if software_id:
+        query = query.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
 
     reqs = query.order_by(Requirement.id.desc()).all()
 

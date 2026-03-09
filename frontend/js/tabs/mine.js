@@ -51,6 +51,8 @@ export async function loadMyWorkbench() {
   const majorId = Number(document.getElementById('mineMajorSelect')?.value || 0);
   let url = '/requirements/my-workbench?mode=' + mode;
   if (mode === 'version' && majorId) url += '&major_version_id=' + majorId;
+  const currentSoftwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+  if (currentSoftwareId) url += `&software_id=${currentSoftwareId}`;
 
   state.currentFeedbackTodoHtml = '';
   if (window.OmniQAFeedbackTab && typeof window.OmniQAFeedbackTab.loadFeedbackTodoOnMine === 'function') {

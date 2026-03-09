@@ -17,7 +17,7 @@ function buildStatusBadge(status) {
     closed: { bg: '#e2e8f0', color: '#334155' },
   };
   const c = conf[status] || conf.pending;
-  return `<span class="badge" style="background:${c.bg}; color:${c.color}; border:1px solid #cbd5e1;">${feedbackStatusZh(status)}</span>`;
+  return `<span class="badge" style="display:inline-flex; align-items:center; border-radius:99px; padding:4px 10px; background:${c.bg}; color:${c.color}; font-weight:600; font-size:12px; line-height:1;">${feedbackStatusZh(status)}</span>`;
 }
 
 function selectedMajorId() {
@@ -210,7 +210,7 @@ function renderStatusOps(feedbackId, currentStatus) {
   const statuses = isAdmin ? ['pending', 'processing', 'resolved', 'closed'] : ['pending', 'processing', 'resolved'];
   return statuses.map((s) => {
     const active = s === currentStatus;
-    return `<button class="${active ? 'secondary' : ''}" style="padding:4px 10px; font-size:12px;" onclick="setFeedbackStatus(${feedbackId}, '${s}')">${feedbackStatusZh(s)}</button>`;
+    return `<button class="${active ? 'secondary' : ''}" style="padding:6px 12px; font-size:12px; border-radius:10px; transition:all .2s ease;" onclick="setFeedbackStatus(${feedbackId}, '${s}')">${feedbackStatusZh(s)}</button>`;
   }).join('');
 }
 
@@ -220,30 +220,30 @@ export async function openFeedbackDetail(feedbackId) {
   const panel = document.getElementById('feedbackDetailPanel');
   const body = document.getElementById('feedbackDetailBody');
   if (!panel || !body) return;
-  const sectionCardStyle = 'flex:1; min-width:320px; min-height:320px; box-shadow:none; border:1px solid #e2e8f0; display:flex; flex-direction:column;';
+  const sectionCardStyle = 'flex:1; min-width:320px; min-height:320px; border-radius:12px; background:#ffffff; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); padding:22px; display:flex; flex-direction:column;';
 
   const attachmentsHtml = (detail.attachments || []).map((a) => {
     const dl = `/feedbacks/attachments/${a.id}/download`;
     if (a.is_image) {
-      return `<div style="display:inline-block; margin-right:8px; margin-bottom:8px;">
+      return `<div style="display:inline-block; margin-right:10px; margin-bottom:10px;">
         <a href="${dl}" target="_blank">
-          <img src="${dl}" alt="${a.original_name}" style="width:120px; height:90px; object-fit:cover; border:1px solid #e2e8f0; border-radius:6px;">
+          <img src="${dl}" alt="${a.original_name}" style="width:136px; height:102px; object-fit:cover; border-radius:10px; box-shadow:0 2px 8px rgba(15,23,42,0.08);">
         </a>
-        <div style="font-size:12px; margin-top:4px;">
-          <a href="javascript:void(0)" style="color:#ef4444;" onclick="deleteFeedbackAttachment(${a.id}, ${detail.id})">删除</a>
+        <div style="font-size:12px; margin-top:6px; color:#64748b;">
+          <a href="javascript:void(0)" style="color:#ef4444; text-decoration:none;" onclick="deleteFeedbackAttachment(${a.id}, ${detail.id})">删除</a>
         </div>
       </div>`;
     }
-    return `<div class="row" style="margin-bottom:6px; justify-content:space-between;">
-      <span>${fileIconByExt(a.file_ext)} ${a.original_name} <span class="muted">(${formatBytes(a.file_size)})</span></span>
+    return `<div class="row" style="margin-bottom:8px; justify-content:space-between; background:#f8fafc; border-radius:10px; padding:10px 12px;">
+      <span style="color:#0f172a;">${fileIconByExt(a.file_ext)} ${a.original_name} <span class="muted">(${formatBytes(a.file_size)})</span></span>
       <span>
-        <a href="${dl}" target="_blank">下载</a>
-        <a href="javascript:void(0)" style="color:#ef4444; margin-left:8px;" onclick="deleteFeedbackAttachment(${a.id}, ${detail.id})">删除</a>
+        <a href="${dl}" target="_blank" style="text-decoration:none;">下载</a>
+        <a href="javascript:void(0)" style="color:#ef4444; margin-left:8px; text-decoration:none;" onclick="deleteFeedbackAttachment(${a.id}, ${detail.id})">删除</a>
       </span>
     </div>`;
   }).join('') || '<span class="muted">暂无附件</span>';
 
-  const bugsHtml = (detail.bugs || []).map((b) => `<span class="badge" style="margin-right:6px;">${b.bug_id} <a href="javascript:void(0)" style="color:#ef4444; margin-left:4px;" onclick="unlinkFeedbackBug(${detail.id}, ${b.id})">×</a></span>`).join('') || '<span class="muted">暂无关联 Bug</span>';
+  const bugsHtml = (detail.bugs || []).map((b) => `<span class="badge" style="display:inline-flex; align-items:center; margin-right:8px; margin-bottom:8px; border-radius:99px; padding:6px 10px; background:#f8fafc; color:#334155;">${b.bug_id} <a href="javascript:void(0)" style="color:#ef4444; margin-left:6px; text-decoration:none;" onclick="unlinkFeedbackBug(${detail.id}, ${b.id})">×</a></span>`).join('') || '<span class="muted">暂无关联 Bug</span>';
   const users = window.users || [];
   const isAdmin = window.currentUser && window.currentUser.role === 'admin';
   const assigneeOpts = users.map((u) => `<option value="${u.id}" ${Number(detail.assignee_id) === Number(u.id) ? 'selected' : ''}>${u.username}</option>`).join('');
@@ -262,84 +262,88 @@ export async function openFeedbackDetail(feedbackId) {
     const actionZh = actionZhMap[t.action] || t.action || '未知操作';
     const actorName = t.actor_name || '系统';
     const timeText = t.created_at ? new Date(t.created_at).toLocaleString() : '-';
-    return `<div style="padding:8px 0; border-bottom:1px dashed #e2e8f0;">
+    return `<div style="padding:10px 0; border-bottom:1px dashed #e2e8f0; line-height:1.65;">
       <b>${actionZh}</b> · ${actorName} · ${timeText}
       <div class="muted">${t.detail || ''}</div>
     </div>`;
   }).join('') || '<span class="muted">暂无操作记录</span>';
 
   body.innerHTML = `
-    <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;">
-      <div class="row" style="justify-content:space-between;">
-        <h3 style="margin:0;">反馈详情：${detail.feedback_no || '未编号'}</h3>
+    <div class="card" style="border-radius:12px; background:#f8fafc; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); padding:24px;">
+      <div class="row" style="justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+        <div>
+          <h3 style="margin:0; color:#0f172a; font-size:22px; line-height:1.35;">反馈详情 ${detail.feedback_no || '未编号'}</h3>
+          <div style="margin-top:6px; color:#64748b; font-size:13px;">创建于 ${detail.created_at ? new Date(detail.created_at).toLocaleString() : '-'}</div>
+        </div>
         ${buildStatusBadge(detail.status)}
       </div>
-      <div class="row" style="margin-top:8px;">${renderStatusOps(detail.id, detail.status)}</div>
+      <div class="row" style="margin-top:12px; margin-bottom:4px; gap:8px;">${renderStatusOps(detail.id, detail.status)}</div>
 
-      <div class="row" style="align-items:stretch; gap:16px; margin-top:12px; flex-wrap:wrap;">
+      <div class="row" style="align-items:stretch; gap:20px; margin-top:16px; flex-wrap:wrap;">
         <div class="card" style="${sectionCardStyle}">
-          <div style="font-weight:700; margin-bottom:8px;">区块 A：基本信息</div>
-          <div class="muted">反馈版本：${detail.major_version_no || '-'} / ${detail.minor_version_no || '-'}</div>
-          <div class="muted">创建人：${detail.creator_name || '-'}</div>
-          <div class="muted">创建时间：${detail.created_at ? new Date(detail.created_at).toLocaleString() : '-'}</div>
-          <div class="muted">指派处理人：${detail.assignee_name || '未指派'}</div>
+          <div style="font-weight:700; margin-bottom:12px; color:#0f172a;">概览信息</div>
+          <div style="display:grid; row-gap:8px; color:#334155; line-height:1.7;">
+            <div><span style="color:#64748b;">反馈版本：</span>${detail.major_version_no || '-'} / ${detail.minor_version_no || '-'}</div>
+            <div><span style="color:#64748b;">创建人：</span>${detail.creator_name || '-'}</div>
+            <div><span style="color:#64748b;">指派处理人：</span>${detail.assignee_name || '未指派'}</div>
+          </div>
         </div>
 
         <div class="card" style="${sectionCardStyle}">
-          <div style="font-weight:700; margin-bottom:8px;">区块 B：反馈内容</div>
-          <div style="white-space:pre-wrap; margin-bottom:8px;">${detail.summary || ''}</div>
+          <div style="font-weight:700; margin-bottom:12px; color:#0f172a;">反馈内容</div>
+          <div style="white-space:pre-wrap; margin-bottom:12px; color:#334155; line-height:1.75;">${detail.summary || ''}</div>
           <div>${attachmentsHtml}</div>
-          <div class="row" style="margin-top:8px;">
+          <div class="row" style="margin-top:auto; padding-top:10px;">
             <input type="file" id="feedbackUploadInput" multiple>
-            <button onclick="uploadFeedbackFiles(${detail.id})">上传附件</button>
+            <button onclick="uploadFeedbackFiles(${detail.id})" style="border-radius:10px;">上传附件</button>
           </div>
         </div>
       </div>
 
-      <div class="row" style="align-items:stretch; gap:16px; margin-top:8px; flex-wrap:wrap;">
+      <div class="row" style="align-items:stretch; gap:20px; margin-top:16px; flex-wrap:wrap;">
         <div class="card" style="${sectionCardStyle}">
-          <div style="font-weight:700; margin-bottom:8px;">区块 C：处理信息</div>
+          <div style="font-weight:700; margin-bottom:12px; color:#0f172a;">处理信息</div>
           <div class="row" style="${isAdmin ? '' : 'display:none;'}">
             <select id="feedbackAssigneeSelectInDetail">${assigneeOpts}</select>
-            <button class="secondary" onclick="assignFeedback(${detail.id})">管理员指派</button>
+            <button class="secondary" onclick="assignFeedback(${detail.id})" style="border-radius:10px; background:#eef2ff; color:#4338ca; border:none;">管理员指派</button>
           </div>
-          <textarea id="feedbackHandleResult" rows="3" placeholder="处理结果" style="width:100%; margin-top:8px;">${detail.handling_result || ''}</textarea>
-          <div class="row" style="margin-top:8px;">
+          <textarea id="feedbackHandleResult" rows="4" placeholder="处理结果" style="width:100%; margin-top:10px; border-radius:10px; border:none; box-shadow:inset 0 0 0 1px #e2e8f0;">${detail.handling_result || ''}</textarea>
+          <div class="row" style="margin-top:10px;">
             <label>处理大版本</label><select id="feedbackHandleMajor"></select>
             <label>处理小版本</label><select id="feedbackHandleMinor"></select>
           </div>
-          <div class="row" style="margin-top:8px;">
+          <div class="row" style="margin-top:12px;">
             <select id="feedbackHandleStatus">
               <option value="processing">处理中</option>
               <option value="resolved">已处理</option>
               <option value="closed">已关闭</option>
             </select>
-            <button onclick="saveFeedbackHandle(${detail.id})">保存处理结果</button>
+            <button onclick="saveFeedbackHandle(${detail.id})" style="border-radius:10px;">保存处理结果</button>
           </div>
         </div>
 
         <div class="card" style="${sectionCardStyle}">
-          <div style="font-weight:700; margin-bottom:8px;">区块 D：关联 Bug</div>
-          <div style="margin-bottom:8px;">${bugsHtml}</div>
+          <div style="font-weight:700; margin-bottom:12px; color:#0f172a;">关联 Bug</div>
+          <div style="margin-bottom:10px; min-height:38px;">${bugsHtml}</div>
           <div class="row">
-            <div class="prefix-input" style="min-width:220px;">
+            <div class="prefix-input" style="min-width:220px; border-radius:10px;">
               <span>🔎</span>
               <input id="feedbackBugKeyword" placeholder="按 b# 搜索已有 Bug" oninput="searchFeedbackBugOptions(this.value)">
             </div>
           </div>
-          <div class="row" style="margin-top:8px;">
+          <div class="row" style="margin-top:10px;">
             <select id="feedbackLinkBugId" style="min-width:220px;"><option value="">选择已有 Bug</option></select>
-            <button class="secondary" onclick="linkFeedbackBug(${detail.id})">关联已有 Bug</button>
+            <button class="secondary" onclick="linkFeedbackBug(${detail.id})" style="border-radius:10px; background:#eef2ff; color:#4338ca; border:none;">关联已有 Bug</button>
           </div>
-          <div class="row" style="margin-top:8px;">
-            <div class="prefix-input"><span>b#</span><input id="feedbackNewBugNo" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增 Bug 数字"></div>
-            <button onclick="createFeedbackBug(${detail.id})">新增 Bug 并关联</button>
+          <div class="row" style="margin-top:10px;">
+            <div class="prefix-input" style="border-radius:10px;"><span>b#</span><input id="feedbackNewBugNo" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增 Bug 数字"></div>
+            <button onclick="createFeedbackBug(${detail.id})" style="border-radius:10px;">新增 Bug 并关联</button>
           </div>
         </div>
       </div>
 
-      <div class="card" style="margin-top:8px; box-shadow:none; border:1px solid #e2e8f0;">
-        <div style="font-weight:700; margin-bottom:8px;">操作时间线</div>
+      <div class="card" style="margin-top:16px; border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); padding:22px;">
+        <div style="font-weight:700; margin-bottom:10px; color:#0f172a;">操作时间线</div>
         <div>${timelineHtml}</div>
       </div>
     </div>
