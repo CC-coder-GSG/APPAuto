@@ -646,6 +646,10 @@ async function loadVersions(){
   const sid = getCurrentSoftwareId();
   const url = sid ? `/versions?software_id=${sid}` : '/versions';
   versions=await (await api(url)).json();
+  // 兜底：若按软件过滤为空，回退读取全量版本，避免页面下拉空白
+  if((!versions || versions.length===0) && sid){
+    versions = await (await api('/versions')).json();
+  }
   window.versions = versions;
   if(window.OmniQAStateActions && typeof window.OmniQAStateActions.setVersions === 'function'){
     window.OmniQAStateActions.setVersions(versions);
@@ -661,12 +665,19 @@ function fillVersionSelects(){
   ['assignMajorSelect','mineMajorSelect','feedbackMajorSelect','retestMajorSelect','s5MajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
   const reportMajorEl=document.getElementById('reportMajorSelect');
   if(reportMajorEl){
-    reportMajorEl.innerHTML = majors.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('');
+    reportMajorEl.innerHTML = majors.length
+      ? "<option value='0'>全部版本</option>" + majors.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('')
+      : "<option value='0'>全部版本</option>";
   }
   refreshAllLinkedMinorSelects();
   bindMajorMinorCascade();
 }
-function fillSelect(id,list){const el=document.getElementById(id); if(!el) return; el.innerHTML=list.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('')}
+function fillSelect(id,list){
+  const el=document.getElementById(id); if(!el) return;
+  el.innerHTML=list.length
+    ? list.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('')
+    : "<option value=''>暂无大版本</option>";
+}
 function fillMinorSelectByMajor(majorSelectId, minorSelectId){
   const majorEl=document.getElementById(majorSelectId);
   const minorEl=document.getElementById(minorSelectId);
