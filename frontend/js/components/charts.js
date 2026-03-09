@@ -80,18 +80,33 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
     ],
   });
 
+  const vbData = helpers.versionBugs || [];
+  const hasVersionBugData = vbData.length > 0;
   initChart('versionBugChart', 'versionBugChart')?.setOption({
     title: { text: '各发包(小版本) Bug 检出分布', textStyle: { fontSize: 15, color: '#334155' } },
     tooltip: { trigger: 'axis' },
     grid: { top: 60, bottom: '15%' },
-    xAxis: { type: 'category', data: (helpers.versionBugs || []).map((i) => i.version_name), axisLabel: { interval: 0, fontSize: 11, color: '#64748b' } },
+    xAxis: { type: 'category', data: vbData.map((i) => i.version_name), axisLabel: { interval: 0, fontSize: 11, color: '#64748b' } },
     yAxis: { type: 'value', minInterval: 1 },
     series: [{
       name: '检出 Bug 数', type: 'bar', barMaxWidth: 40,
       itemStyle: { color: '#3b82f6', borderRadius: [4, 4, 0, 0] },
-      data: (helpers.versionBugs || []).map((i) => i.bug_count),
-      label: { show: true, position: 'top', color: '#1e293b', fontWeight: 'bold' },
+      data: vbData.map((i) => i.bug_count),
+      label: { show: hasVersionBugData, position: 'top', color: '#1e293b', fontWeight: 'bold' },
     }],
+    graphic: hasVersionBugData
+      ? []
+      : [{
+        type: 'text',
+        left: 'center',
+        top: 'middle',
+        style: {
+          text: '该大版本暂无检出 Bug',
+          fill: '#94a3b8',
+          fontSize: 14,
+          fontWeight: 600,
+        },
+      }],
   });
 
   initChart('topReqChart', 'topReqChart')?.setOption({

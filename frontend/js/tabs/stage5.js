@@ -79,21 +79,41 @@ export async function pushStage5() {
 }
 
 export function toggleS5BugInputs() {
-  const type = document.getElementById('s5BugSource').value;
-  document.getElementById('s5WrapReq').classList.toggle('hidden', type !== 'requirement');
-  document.getElementById('s5WrapCase').classList.toggle('hidden', type !== 'case');
-  document.getElementById('s5WrapLegacy').classList.toggle('hidden', type !== 'legacy_bug');
-  document.getElementById('s5ReqInput').value = '';
-  document.getElementById('s5CaseInput').value = '';
-  document.getElementById('s5LegacyInput').value = '';
+  const sourceEl = document.getElementById('s5BugSource');
+  if (!sourceEl) return;
+  const type = sourceEl.value;
+
+  const reqWrap = document.getElementById('s5WrapReq');
+  const caseWrap = document.getElementById('s5WrapCase');
+  const legacyWrap = document.getElementById('s5WrapLegacy');
+  if (reqWrap) reqWrap.classList.toggle('hidden', type !== 'requirement');
+  if (caseWrap) caseWrap.classList.toggle('hidden', type !== 'case');
+  if (legacyWrap) legacyWrap.classList.toggle('hidden', type !== 'legacy_bug');
+
+  const reqSelect = document.getElementById('s5ReqSelect');
+  const caseSelect = document.getElementById('s5CaseSelect');
+  const legacySelect = document.getElementById('s5LegacySelect');
+  if (reqSelect) reqSelect.value = '';
+  if (caseSelect) caseSelect.value = '';
+  if (legacySelect) legacySelect.value = '';
 }
 
 export async function loadS5OptionsData(majorId) {
   try {
     state.globalS5Options = await (await api('/stage5/search-options?major_version_id=' + majorId)).json();
-    document.getElementById('s5ReqList').innerHTML = state.globalS5Options.reqs.map((r) => `<option value="${r.label}">`).join('');
-    document.getElementById('s5CaseList').innerHTML = state.globalS5Options.cases.map((c) => `<option value="${c.label}">`).join('');
-    document.getElementById('s5LegacyList').innerHTML = state.globalS5Options.bugs.map((b) => `<option value="${b.label}">`).join('');
+    const reqSelect = document.getElementById('s5ReqSelect');
+    const caseSelect = document.getElementById('s5CaseSelect');
+    const legacySelect = document.getElementById('s5LegacySelect');
+
+    if (reqSelect) {
+      reqSelect.innerHTML = '<option value="">请选择关联需求</option>' + state.globalS5Options.reqs.map((r) => `<option value="${r.id}">${r.label}</option>`).join('');
+    }
+    if (caseSelect) {
+      caseSelect.innerHTML = '<option value="">请选择关联用例</option>' + state.globalS5Options.cases.map((c) => `<option value="${c.id}">${c.label}</option>`).join('');
+    }
+    if (legacySelect) {
+      legacySelect.innerHTML = '<option value="">请选择关联历史Bug</option>' + state.globalS5Options.bugs.map((b) => `<option value="${b.id}">${b.label}</option>`).join('');
+    }
   } catch (e) {
     console.error('搜索数据加载失败', e);
   }
@@ -110,27 +130,27 @@ export async function submitS5Bug() {
   let reqId = null;
   let sourceRef = null;
   if (type === 'requirement') {
-    const val = document.getElementById('s5ReqInput').value;
-    const target = state.globalS5Options.reqs.find((r) => r.label === val);
+    const selectedReqId = Number(document.getElementById('s5ReqSelect').value || 0);
+    const target = state.globalS5Options.reqs.find((r) => r.id === selectedReqId);
     if (!target) {
-      window.showMessage && window.showMessage('必须从下拉列表中准确选择一个需求！', 'error');
+      window.showMessage && window.showMessage('请选择关联需求！', 'error');
       return;
     }
     reqId = target.id;
   } else if (type === 'case') {
-    const val = document.getElementById('s5CaseInput').value;
-    const target = state.globalS5Options.cases.find((c) => c.label === val);
+    const selectedCaseId = Number(document.getElementById('s5CaseSelect').value || 0);
+    const target = state.globalS5Options.cases.find((c) => c.id === selectedCaseId);
     if (!target) {
-      window.showMessage && window.showMessage('必须从下拉列表中准确选择一个用例！', 'error');
+      window.showMessage && window.showMessage('请选择关联用例！', 'error');
       return;
     }
     reqId = target.req_id;
     sourceRef = target.label;
   } else if (type === 'legacy_bug') {
-    const val = document.getElementById('s5LegacyInput').value;
-    const target = state.globalS5Options.bugs.find((b) => b.label === val);
+    const selectedLegacyBugId = Number(document.getElementById('s5LegacySelect').value || 0);
+    const target = state.globalS5Options.bugs.find((b) => b.id === selectedLegacyBugId);
     if (!target) {
-      window.showMessage && window.showMessage('必须从下拉列表中准确选择一个历史Bug！', 'error');
+      window.showMessage && window.showMessage('请选择关联历史Bug！', 'error');
       return;
     }
     reqId = target.req_id;

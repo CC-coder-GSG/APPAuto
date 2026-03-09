@@ -20,9 +20,14 @@ export async function queryReport() {
 
   const start_date = window.reportStartDate.value;
   const end_date = window.reportEndDate.value;
+  const reportMajorSelect = document.getElementById('reportMajorSelect');
+  const selectedMajorId = Number(reportMajorSelect?.value || 0);
   let url = `/reports/summary?start_date=${start_date}&end_date=${end_date}`;
   if (currentUser.role === 'admin' && window.reportUserSelect?.value) {
     url += `&user_id=${window.reportUserSelect.value}`;
+  }
+  if (selectedMajorId) {
+    url += `&major_version_id=${selectedMajorId}`;
   }
 
   const data = await (await api(url)).json();
@@ -34,8 +39,12 @@ export async function queryReport() {
   window.mRetest.innerText = data.overview.retested_reqs || 0;
   window.mClosed.innerText = data.overview.closed_bugs || 0;
 
-  const versionBugs = await (await api('/reports/version-bugs')).json();
-  const advancedData = await (await api(`/reports/advanced?start_date=${start_date}&end_date=${end_date}`)).json();
+  const vbUrl = selectedMajorId ? `/reports/version-bugs?major_version_id=${selectedMajorId}` : '/reports/version-bugs';
+  const versionBugs = await (await api(vbUrl)).json();
+  const advUrl = selectedMajorId
+    ? `/reports/advanced?start_date=${start_date}&end_date=${end_date}&major_version_id=${selectedMajorId}`
+    : `/reports/advanced?start_date=${start_date}&end_date=${end_date}`;
+  const advancedData = await (await api(advUrl)).json();
 
   renderReportCharts(data, advancedData, {
     sourceTypeZh,

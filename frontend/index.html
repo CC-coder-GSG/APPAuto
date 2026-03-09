@@ -162,20 +162,23 @@
 
       <div id="s5WrapReq" class="hidden" style="margin-left: 12px;">
         <label style="font-weight:bold; color:#334155;">关联需求 <span style="color:#ef4444">*必选</span></label>
-        <input list="s5ReqList" id="s5ReqInput" placeholder="键盘输入名称或编号搜索..." style="width: 260px; padding: 6px;">
-        <datalist id="s5ReqList"></datalist>
+        <select id="s5ReqSelect" style="width: 300px; padding: 6px;">
+          <option value="">请选择关联需求</option>
+        </select>
       </div>
 
       <div id="s5WrapCase" class="hidden" style="margin-left: 12px;">
         <label style="font-weight:bold; color:#334155;">关联用例 <span style="color:#ef4444">*必选</span></label>
-        <input list="s5CaseList" id="s5CaseInput" placeholder="键盘输入编号搜索..." style="width: 220px; padding: 6px;">
-        <datalist id="s5CaseList"></datalist>
+        <select id="s5CaseSelect" style="width: 260px; padding: 6px;">
+          <option value="">请选择关联用例</option>
+        </select>
       </div>
 
       <div id="s5WrapLegacy" class="hidden" style="margin-left: 12px;">
         <label style="font-weight:bold; color:#334155;">关联历史Bug <span style="color:#ef4444">*必选</span></label>
-        <input list="s5LegacyList" id="s5LegacyInput" placeholder="键盘输入编号搜索..." style="width: 220px; padding: 6px;">
-        <datalist id="s5LegacyList"></datalist>
+        <select id="s5LegacySelect" style="width: 260px; padding: 6px;">
+          <option value="">请选择关联历史Bug</option>
+        </select>
       </div>
 
       <div style="margin-left: 12px;">
@@ -190,6 +193,7 @@
   <section id="tab-report" class="hidden card">
     <h2>报表中心</h2>
     <div class="row">
+      <label>大版本</label><select id="reportMajorSelect"></select>
       <label>开始日期</label><input type="date" id="reportStartDate">
       <label>结束日期</label><input type="date" id="reportEndDate">
       <span id="reportUserWrap" class="row hidden"><label>人员</label><select id="reportUserSelect"></select></span>
@@ -372,6 +376,9 @@ function showTab(name){
   document.getElementById('tab-'+name).classList.remove('hidden');
   if(name === 'dispatch') { loadDispatchedAll(); }
   if(name === 'data' && !dataOverviewCache) { loadDataOverview().catch(err=>showMessage(err.message||'加载数据管理台失败','error')); }
+  if(name === 'mine') { loadMyWorkbench().catch(err=>showMessage(err.message||'加载我的工作台失败','error')); }
+  if(name === 'retest') { loadRetest().catch(err=>showMessage(err.message||'加载复测工作台失败','error')); }
+  if(name === 'stage5') { loadStage5().catch(err=>showMessage(err.message||'加载整体测试大盘失败','error')); }
   if(name==='report'){loadReportOnDemand()}
 }
 function isAllUsersReport(){return currentUser && currentUser.role==='admin' && reportUserSelect && reportUserSelect.value==='0'}
@@ -393,6 +400,8 @@ function bindReportEvents(){
   reportStartDate.addEventListener('change',onFilterChange);
   reportEndDate.addEventListener('change',onFilterChange);
   reportUserSelect.addEventListener('change',onFilterChange);
+  const reportMajorEl=document.getElementById('reportMajorSelect');
+  if(reportMajorEl) reportMajorEl.addEventListener('change',onFilterChange);
   window.addEventListener('resize',()=>{
     [trendChart,sourcePieChart,radarChart,teamCompareChart,versionBugChart,topReqChart,leakageChart,funnelChart,execChart].forEach(c=>c&&c.resize())
   });
@@ -476,11 +485,43 @@ async function loadVersions(){
 }
 function fillVersionSelects(){
   const majors=versions.filter(v=>v.version_type==='major');
-  const minors=versions.filter(v=>v.version_type==='minor');
   ['assignMajorSelect','mineMajorSelect','retestMajorSelect','s5MajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
-  ['mineMinorSelect','s5MinorSelect','retestMinorSelect'].forEach(id=>fillSelect(id,minors));
+  const reportMajorEl=document.getElementById('reportMajorSelect');
+  if(reportMajorEl){
+    reportMajorEl.innerHTML = '<option value="0">全部大版本</option>' + majors.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('');
+  }
+  refreshAllLinkedMinorSelects();
+  bindMajorMinorCascade();
 }
 function fillSelect(id,list){const el=document.getElementById(id); if(!el) return; el.innerHTML=list.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('')}
+function fillMinorSelectByMajor(majorSelectId, minorSelectId){
+  const majorEl=document.getElementById(majorSelectId);
+  const minorEl=document.getElementById(minorSelectId);
+  if(!majorEl||!minorEl) return;
+  const majorId=Number(majorEl.value||0);
+  const linkedMinors=versions.filter(v=>v.version_type==='minor' && Number(v.parent_id)===majorId);
+  if(linkedMinors.length===0){
+    minorEl.innerHTML="<option value=''>暂无子版本</option>";
+    return;
+  }
+  minorEl.innerHTML=linkedMinors.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('');
+}
+function refreshAllLinkedMinorSelects(){
+  fillMinorSelectByMajor('mineMajorSelect','mineMinorSelect');
+  fillMinorSelectByMajor('retestMajorSelect','retestMinorSelect');
+  fillMinorSelectByMajor('s5MajorSelect','s5MinorSelect');
+}
+function bindMajorMinorCascade(){
+  const bind=(majorId,minorId)=>{
+    const majorEl=document.getElementById(majorId);
+    if(!majorEl || majorEl.dataset.linkedMinorBound==='1') return;
+    majorEl.addEventListener('change',()=>fillMinorSelectByMajor(majorId,minorId));
+    majorEl.dataset.linkedMinorBound='1';
+  };
+  bind('mineMajorSelect','mineMinorSelect');
+  bind('retestMajorSelect','retestMinorSelect');
+  bind('s5MajorSelect','s5MinorSelect');
+}
 function updateCreateReqControls(){
   const majorSel=document.getElementById('createReqMajorSelect');
   const createBtn=document.getElementById('createReqBtn');

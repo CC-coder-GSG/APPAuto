@@ -1,5 +1,24 @@
-﻿import { api } from '../api.js';
+import { api } from '../api.js';
 import { state } from '../state.js';
+
+function getFoldStorageKey() {
+  const uid = state.currentUser?.id || window.currentUser?.id || 'anonymous';
+  return `omniqa_mine_fold_state_v1_${uid}`;
+}
+
+function getFoldStateMap() {
+  try {
+    const raw = localStorage.getItem(getFoldStorageKey());
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function setFoldStateMap(map) {
+  localStorage.setItem(getFoldStorageKey(), JSON.stringify(map || {}));
+}
 
 function getMode() {
   return document.getElementById('mineDisplayMode')?.value || 'version';
@@ -93,12 +112,14 @@ export function renderMineCards() {
   const searchKw = (document.getElementById('mineSearchInput')?.value || '').trim().toLowerCase();
   const filteredData = state.currentMineData.filter((req) => !searchKw || (req.zentao_req_id && req.zentao_req_id.toLowerCase().includes(searchKw)) || (req.title && req.title.toLowerCase().includes(searchKw)));
   const mode = getMode();
+  const foldStateMap = getFoldStateMap();
   const reqsHtml = filteredData.map((req) => {
     const caseDisabled = req.case_completed ? 'disabled' : '';
     const testDisabled = req.test_completed ? 'disabled' : '';
     const casePrefixColor = req.case_completed ? 'color:#94a3b8;' : '';
     const testPrefixColor = req.test_completed ? 'color:#94a3b8;' : '';
     const isFullyCompleted = req.test_completed && req.case_completed;
+    const isOpen = Object.prototype.hasOwnProperty.call(foldStateMap, String(req.id)) ? !!foldStateMap[String(req.id)] : !isFullyCompleted;
     const vTag = mode === 'all_pending' && req.major_version_name ? `<span class="badge" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; margin-right:8px; padding:2px 6px;">🏷️${req.major_version_name}</span>` : '';
     const caseHtml = (req.test_cases || []).map((c) => `
       <div class="case-item">
@@ -112,7 +133,7 @@ export function renderMineCards() {
       </div>`).join('');
     const freeBugHtml = (req.free_bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无自由Bug</span>';
     return `
-      <details class="mine-req-card" ${isFullyCompleted ? '' : 'open'} style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; transition: all 0.3s;">
+      <details class="mine-req-card" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
           <div>${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${req.zentao_req_id} ${req.title}</span></div>
           ${isFullyCompleted ? '<span style="color:#16a34a; font-size:14px; background:#f0fdf4; padding:4px 8px; border-radius:4px; border:1px solid #bbf7d0;">✅ 测试已完成</span>' : '<span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开卡片)</span>'}
@@ -137,6 +158,11 @@ export function renderMineCards() {
   if (mineCards) mineCards.innerHTML = state.currentDispatchHtml + reqsHtml;
 }
 
+export function rememberMineReqFold(reqId, isOpen) {
+  const map = getFoldStateMap();
+  map[String(reqId)] = !!isOpen;
+  setFoldStateMap(map);
+}
 
 export async function editWorkbenchCase(id, oldCaseId) {
   const num = prompt('请输入正确的用例数字部分：', oldCaseId.replace('u#', ''));
@@ -271,4 +297,5 @@ export async function pushTest() {
   window.showMessage && window.showMessage('测试进度已推送');
 }
 
-window.OmniQAMineTab = { toggleMineMode, loadMyWorkbench, renderMineCards, editWorkbenchCase, editWorkbenchBug, removeWorkbenchBug, setReqStatus, addCase, deleteCase, promptCaseBug, addFreeBug, pushCase, pushTest };
+window.rememberMineReqFold = rememberMineReqFold;
+window.OmniQAMineTab = { toggleMineMode, loadMyWorkbench, renderMineCards, rememberMineReqFold, editWorkbenchCase, editWorkbenchBug, removeWorkbenchBug, setReqStatus, addCase, deleteCase, promptCaseBug, addFreeBug, pushCase, pushTest };
