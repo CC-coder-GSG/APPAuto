@@ -52,6 +52,15 @@ export async function loadMyWorkbench() {
   let url = '/requirements/my-workbench?mode=' + mode;
   if (mode === 'version' && majorId) url += '&major_version_id=' + majorId;
 
+  state.currentFeedbackTodoHtml = '';
+  if (window.OmniQAFeedbackTab && typeof window.OmniQAFeedbackTab.loadFeedbackTodoOnMine === 'function') {
+    try {
+      await window.OmniQAFeedbackTab.loadFeedbackTodoOnMine(mode === 'version' ? majorId : null);
+    } catch {
+      state.currentFeedbackTodoHtml = '';
+    }
+  }
+
   state.currentDispatchHtml = '';
   if (mode === 'version' && majorId) {
     const ddata = await (await api('/bugs/dispatched-to-me?major_version_id=' + majorId)).json();
@@ -155,7 +164,7 @@ export function renderMineCards() {
       </details>`;
   }).join('');
   const mineCards = document.getElementById('mineCards');
-  if (mineCards) mineCards.innerHTML = state.currentDispatchHtml + reqsHtml;
+  if (mineCards) mineCards.innerHTML = (state.currentFeedbackTodoHtml || '') + state.currentDispatchHtml + reqsHtml;
 }
 
 export function rememberMineReqFold(reqId, isOpen) {

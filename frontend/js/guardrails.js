@@ -1,10 +1,11 @@
-import { syncLegacyGlobalsToState } from './state.js';
+﻿import { syncLegacyGlobalsToState } from './state.js';
 
 const REQUIRED_NAMESPACES = {
   OmniQAApi: ['api'],
   OmniQAAuth: ['logout', 'changeMyPassword', 'resetUserPassword'],
   OmniQAAssignTab: ['loadAssignBoard', 'publishAssign'],
   OmniQAMineTab: ['loadMyWorkbench', 'renderMineCards', 'pushCase', 'pushTest'],
+  OmniQAFeedbackTab: ['loadFeedbackBoard', 'createFeedback', 'openFeedbackDetail'],
   OmniQARetestTab: ['loadRetest', 'setRetest', 'addRetestBug'],
   OmniQAStage5Tab: ['loadStage5', 'renderS5', 'submitS5Bug'],
   OmniQAReportTab: ['queryReport', 'exportReportPdf'],
@@ -15,6 +16,7 @@ const REQUIRED_NAMESPACES = {
 const REQUIRED_DOM_IDS = [
   'tab-assign',
   'tab-mine',
+  'tab-feedback',
   'tab-retest',
   'tab-stage5',
   'tab-report',
@@ -29,6 +31,9 @@ const REQUIRED_DOM_IDS = [
   's5MinorSelect',
   'reportStartDate',
   'reportEndDate',
+  'feedbackMajorSelect',
+  'feedbackMinorSelect',
+  'feedbackTable',
 ];
 
 function collectNamespaceIssues() {
@@ -89,6 +94,7 @@ const API_PROBES = [
   { name: '当前用户', url: '/auth/me' },
   { name: '版本列表', url: '/versions' },
   { name: '我的工作台', url: '/requirements/my-workbench?mode=all_pending' },
+  { name: '反馈列表', url: '/feedbacks/paged?page=1&page_size=1' },
 ];
 
 export async function runOnlineApiCheck() {
@@ -108,8 +114,9 @@ export async function runOnlineApiCheck() {
       const resp = await checker(probe.url, { method: 'GET' });
       items.push({ name: probe.name, url: probe.url, ok: true, status: resp.status });
     } catch (err) {
-      items.push({ name: probe.name, url: probe.url, ok: false, status: null, error: err?.message || '未知错误' });
-      issues.push(`${probe.name} 探测失败: ${err?.message || '未知错误'}`);
+      const message = err?.message || '未知错误';
+      items.push({ name: probe.name, url: probe.url, ok: false, status: null, error: message });
+      issues.push(`${probe.name} 探测失败: ${message}`);
     }
   }
   return { ok: issues.length === 0, items, issues };

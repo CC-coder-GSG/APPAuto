@@ -31,4 +31,11 @@ class BugSourceType(str, Enum):
     RETEST = "retest"
 
 
-__all__ = ["UserRole", "VersionType", "RequirementStatus", "BugSourceType"]
+class FeedbackStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    RESOLVED = "resolved"
+    CLOSED = "closed"
+
+
+__all__ = ["UserRole", "VersionType", "RequirementStatus", "BugSourceType", "FeedbackStatus"]

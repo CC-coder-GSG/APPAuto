@@ -164,4 +164,65 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
   if (teamEl) teamEl.style.display = isAllUsersMode ? '' : 'none';
 }
 
-window.OmniQACharts = { renderReportCharts, resizeAllCharts };
+export function renderGovernanceCharts(governanceData) {
+  if (!governanceData) return;
+  const reqAging = governanceData?.requirements?.close_aging?.bands || [];
+  const reqStay = governanceData?.requirements?.status_stay_distribution || [];
+  const bugAging = governanceData?.bugs?.close_aging?.bands || [];
+
+  if (reqStay.length > 0) {
+    initChart('governReqAgingChart', 'governReqAgingChart')?.setOption({
+      title: { text: '需求状态停留时长（平均天）', textStyle: { fontSize: 15 } },
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['平均停留天数', '最大停留天数'], top: 28 },
+      grid: { top: 60, bottom: 40, left: 50, right: 30 },
+      xAxis: { type: 'category', data: reqStay.map((i) => i.status) },
+      yAxis: { type: 'value', minInterval: 1 },
+      series: [
+        {
+          name: '平均停留天数',
+          type: 'bar',
+          data: reqStay.map((i) => i.avg_days),
+          itemStyle: { color: '#2563eb', borderRadius: [4, 4, 0, 0] },
+          label: { show: true, position: 'top' },
+        },
+        {
+          name: '最大停留天数',
+          type: 'line',
+          data: reqStay.map((i) => i.max_days),
+          smooth: true,
+          lineStyle: { color: '#f97316' },
+          itemStyle: { color: '#f97316' },
+        },
+      ],
+    });
+  } else {
+    initChart('governReqAgingChart', 'governReqAgingChart')?.setOption({
+      title: { text: '需求关闭耗时分布（降级）', textStyle: { fontSize: 15 } },
+      tooltip: { trigger: 'axis' },
+      xAxis: { type: 'category', data: reqAging.map((i) => i.bucket) },
+      yAxis: { type: 'value', minInterval: 1 },
+      series: [{
+        type: 'bar',
+        data: reqAging.map((i) => i.count),
+        itemStyle: { color: '#2563eb', borderRadius: [4, 4, 0, 0] },
+        label: { show: true, position: 'top' },
+      }],
+    });
+  }
+
+  initChart('governBugAgingChart', 'governBugAgingChart')?.setOption({
+    title: { text: 'Bug关闭耗时分布', textStyle: { fontSize: 15 } },
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'category', data: bugAging.map((i) => i.bucket) },
+    yAxis: { type: 'value', minInterval: 1 },
+    series: [{
+      type: 'bar',
+      data: bugAging.map((i) => i.count),
+      itemStyle: { color: '#16a34a', borderRadius: [4, 4, 0, 0] },
+      label: { show: true, position: 'top' },
+    }],
+  });
+}
+
+window.OmniQACharts = { renderReportCharts, renderGovernanceCharts, resizeAllCharts };

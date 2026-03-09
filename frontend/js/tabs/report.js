@@ -1,7 +1,9 @@
-import { api } from '../api.js';
+﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { renderReportCharts } from '../components/charts.js';
+import { renderGovernanceCharts, renderReportCharts } from '../components/charts.js';
 import { sourceTypeZh } from '../utils.js';
+
+let governanceCache = null;
 
 function getCurrentUser() {
   return state.currentUser || window.currentUser || null;
@@ -12,27 +14,186 @@ function isAllUsersMode() {
   return currentUser && currentUser.role === 'admin' && window.reportUserSelect && window.reportUserSelect.value === '0';
 }
 
+function reqStatusZh(v) {
+  const m = {
+    pending: '待开始',
+    assigned: '已分配',
+    case_done: '用例完成',
+    testing: '测试中',
+    test_done: '测试完成',
+    retest_pending: '待复测',
+    retest_done: '复测完成',
+  };
+  return m[v] || v;
+}
+
+function renderSimpleTable(tbodyId, rows, renderer, emptyText = '暂无数据') {
+  const el = document.getElementById(tbodyId);
+  if (!el) return;
+  if (!rows || rows.length === 0) {
+    el.innerHTML = `<tr><td colspan="99" style="text-align:center; color:#94a3b8; padding:12px;">${emptyText}</td></tr>`;
+    return;
+  }
+  el.innerHTML = rows.map(renderer).join('');
+}
+
+function renderGovernanceBoard(data) {
+  if (!data) return;
+  governanceCache = data;
+  const k = data.kpis || {};
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.innerText = val;
+  };
+
+  setVal('gReqOverdue', k.overdue_requirements || 0);
+  setVal('gFbOverdue', k.overdue_feedbacks || 0);
+  setVal('gBugUnassigned', k.unassigned_bugs || 0);
+  setVal('gBugOverdue', k.overdue_bugs || 0);
+  setVal('gBugStale', k.stale_bugs || 0);
+  setVal('gBugAssignedNoProgress', k.assigned_no_progress_bugs || 0);
+  setVal('gFeedbackToBugRatio', `${k.feedback_to_bug_ratio || 0}%`);
+  const metaHintEl = document.getElementById('governanceMetaHint');
+  if (metaHintEl) {
+    metaHintEl.innerText = data.meta?.degraded_reason || '';
+  }
+
+  renderSimpleTable('gTopReqFeedbackTable', data.requirements?.top_feedback_reqs || [], (r) => `
+    <tr>
+      <td>${r.zentao_req_id} ${r.title || ''}</td>
+      <td>${r.major_version_no || '-'}</td>
+      <td>${reqStatusZh(r.status)}</td>
+      <td><b>${r.feedback_count || 0}</b></td>
+    </tr>
+  `);
+
+  renderSimpleTable('gTopReqBugTable', data.requirements?.top_bug_reqs || [], (r) => `
+    <tr>
+      <td>${r.zentao_req_id} ${r.title || ''}</td>
+      <td>${r.major_version_no || '-'}</td>
+      <td>${reqStatusZh(r.status)}</td>
+      <td><b>${r.bug_count || 0}</b></td>
+    </tr>
+  `);
+
+  renderSimpleTable('gFeedbackVersionTopTable', data.feedback?.version_top10 || [], (r) => `
+    <tr>
+      <td>${r.major_version_no || '-'} / ${r.minor_version_no || '-'}</td>
+      <td>${r.total || 0}</td>
+      <td>${r.done || 0}</td>
+      <td>${r.undone || 0}</td>
+    </tr>
+  `);
+
+  renderSimpleTable('gStaleBugTopTable', data.bugs?.top_stale || [], (r) => `
+    <tr>
+      <td>${r.bug_id}</td>
+      <td>${r.major_version_no || '-'}</td>
+      <td>${r.dispatched_to_name || '未指派'}</td>
+      <td><b>${r.stale_days || 0}</b></td>
+    </tr>
+  `);
+
+  renderGovernanceCharts(data);
+}
+
+function renderGovernanceDetail(headers, rows, emptyText = '暂无数据') {
+  const headEl = document.getElementById('governanceDetailHead');
+  const bodyEl = document.getElementById('governanceDetailBody');
+  if (!headEl || !bodyEl) return;
+  headEl.innerHTML = `<tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr>`;
+  if (!rows || rows.length === 0) {
+    bodyEl.innerHTML = `<tr><td colspan="${headers.length}" style="text-align:center; color:#94a3b8; padding:12px;">${emptyText}</td></tr>`;
+    return;
+  }
+  bodyEl.innerHTML = rows.join('');
+}
+
+export function closeGovernanceDetail() {
+  const card = document.getElementById('governanceDetailCard');
+  if (card) card.classList.add('hidden');
+}
+
+export function openGovernanceDetail(type) {
+  const card = document.getElementById('governanceDetailCard');
+  const titleEl = document.getElementById('governanceDetailTitle');
+  const hintEl = document.getElementById('governanceDetailHint');
+  if (!card || !titleEl || !hintEl || !governanceCache) return;
+
+  let headers = [];
+  let rows = [];
+  let title = '治理明细';
+  let hint = '';
+
+  if (type === 'overdue_requirements') {
+    title = '超时未关闭需求明细';
+    hint = `超时阈值：${governanceCache.meta?.req_overdue_days || 14} 天`;
+    headers = ['需求', '版本', '状态', '负责人', '创建时间', '持续天数'];
+    rows = (governanceCache.requirements?.overdue_list || []).map((r) => `<tr>
+      <td>${r.zentao_req_id} ${r.title || ''}</td><td>${r.major_version_no || '-'}</td><td>${reqStatusZh(r.status)}</td>
+      <td>${r.owner_name || '未分配'}</td><td>${r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td><td><b>${r.age_days || 0}</b></td></tr>`);
+  } else if (type === 'overdue_feedbacks') {
+    title = '超时未处理反馈明细';
+    hint = `超时阈值：${governanceCache.meta?.feedback_overdue_days || 7} 天`;
+    headers = ['反馈编号', '概览', '来源版本', '状态', '处理人', '创建时间', '持续天数'];
+    rows = (governanceCache.feedback?.overdue_list || []).map((r) => `<tr>
+      <td>${r.feedback_no || '-'}</td><td>${(r.summary || '').slice(0, 40)}</td><td>${r.major_version_no || '-'} / ${r.minor_version_no || '-'}</td>
+      <td>${r.status || '-'}</td><td>${r.assignee_name || '未指派'}</td><td>${r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td><td><b>${r.age_days || 0}</b></td></tr>`);
+  } else if (type === 'unassigned_bugs') {
+    title = '无人处理 Bug 明细';
+    hint = '口径：未关闭且未指派';
+    headers = ['Bug编号', '版本', '状态', '创建时间', '持续天数'];
+    rows = (governanceCache.bugs?.unassigned_list || []).map((r) => `<tr>
+      <td>${r.bug_id}</td><td>${r.major_version_no || '-'}</td><td>${r.status || '-'}</td><td>${r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td><td><b>${r.age_days || 0}</b></td></tr>`);
+  } else if (type === 'overdue_bugs') {
+    title = '超时未关闭 Bug 明细';
+    hint = `超时阈值：${governanceCache.meta?.bug_overdue_days || 7} 天`;
+    headers = ['Bug编号', '版本', '指派给', '创建时间', '持续天数'];
+    rows = (governanceCache.bugs?.overdue_list || []).map((r) => `<tr>
+      <td>${r.bug_id}</td><td>${r.major_version_no || '-'}</td><td>${r.dispatched_to_name || '未指派'}</td><td>${r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td><td><b>${r.age_days || 0}</b></td></tr>`);
+  } else if (type === 'stale_bugs') {
+    title = '长期未更新 Bug 明细';
+    hint = `未更新阈值：${governanceCache.meta?.stale_bug_days || 14} 天`;
+    headers = ['Bug编号', '版本', '指派给', '最后更新时间', '未更新天数'];
+    rows = (governanceCache.bugs?.stale_list || []).map((r) => `<tr>
+      <td>${r.bug_id}</td><td>${r.major_version_no || '-'}</td><td>${r.dispatched_to_name || '未指派'}</td><td>${r.updated_at ? new Date(r.updated_at).toLocaleString() : '-'}</td><td><b>${r.stale_days || 0}</b></td></tr>`);
+  } else if (type === 'assigned_no_progress_bugs') {
+    title = '已指派但未处理 Bug 明细';
+    hint = `口径：已指派 + 未关闭 + 连续${governanceCache.meta?.bug_overdue_days || 7}天无更新`;
+    headers = ['Bug编号', '版本', '指派给', '最后更新时间', '未更新天数'];
+    rows = (governanceCache.bugs?.assigned_no_progress_list || []).map((r) => `<tr>
+      <td>${r.bug_id}</td><td>${r.major_version_no || '-'}</td><td>${r.dispatched_to_name || '未指派'}</td><td>${r.updated_at ? new Date(r.updated_at).toLocaleString() : '-'}</td><td><b>${r.stale_days || 0}</b></td></tr>`);
+  }
+
+  titleEl.innerText = title;
+  hintEl.innerText = hint;
+  renderGovernanceDetail(headers, rows);
+  card.classList.remove('hidden');
+}
+
 export async function queryReport() {
   const currentUser = getCurrentUser();
   if (!currentUser) {
     throw new Error('当前用户信息未加载，请刷新页面后重试');
   }
 
-  const start_date = window.reportStartDate.value;
-  const end_date = window.reportEndDate.value;
+  const startDate = window.reportStartDate.value;
+  const endDate = window.reportEndDate.value;
   const reportMajorSelect = document.getElementById('reportMajorSelect');
   const selectedMajorId = Number(reportMajorSelect?.value || 0);
-  let url = `/reports/summary?start_date=${start_date}&end_date=${end_date}`;
+
+  let summaryUrl = `/reports/summary?start_date=${startDate}&end_date=${endDate}`;
   if (currentUser.role === 'admin' && window.reportUserSelect?.value) {
-    url += `&user_id=${window.reportUserSelect.value}`;
+    summaryUrl += `&user_id=${window.reportUserSelect.value}`;
   }
   if (selectedMajorId) {
-    url += `&major_version_id=${selectedMajorId}`;
+    summaryUrl += `&major_version_id=${selectedMajorId}`;
   }
 
-  const data = await (await api(url)).json();
+  const data = await (await api(summaryUrl)).json();
   state.reportLoaded = true;
   window.reportLoaded = true;
+
   window.mReq.innerText = data.overview.executed_requirements || 0;
   window.mCase.innerText = data.overview.created_cases || 0;
   window.mBug.innerText = data.overview.created_bugs || 0;
@@ -41,16 +202,23 @@ export async function queryReport() {
 
   const vbUrl = selectedMajorId ? `/reports/version-bugs?major_version_id=${selectedMajorId}` : '/reports/version-bugs';
   const versionBugs = await (await api(vbUrl)).json();
+
   const advUrl = selectedMajorId
-    ? `/reports/advanced?start_date=${start_date}&end_date=${end_date}&major_version_id=${selectedMajorId}`
-    : `/reports/advanced?start_date=${start_date}&end_date=${end_date}`;
+    ? `/reports/advanced?start_date=${startDate}&end_date=${endDate}&major_version_id=${selectedMajorId}`
+    : `/reports/advanced?start_date=${startDate}&end_date=${endDate}`;
   const advancedData = await (await api(advUrl)).json();
+
+  const govUrl = selectedMajorId
+    ? `/reports/governance?start_date=${startDate}&end_date=${endDate}&major_version_id=${selectedMajorId}`
+    : `/reports/governance?start_date=${startDate}&end_date=${endDate}`;
+  const governanceData = await (await api(govUrl)).json();
 
   renderReportCharts(data, advancedData, {
     sourceTypeZh,
     isAllUsersMode: isAllUsersMode(),
     versionBugs,
   });
+  renderGovernanceBoard(governanceData);
 
   if (typeof window.adjustReportChartVisibility === 'function') {
     window.adjustReportChartVisibility();
@@ -105,3 +273,5 @@ export function exportReportPdf() {
 }
 
 window.OmniQAReportTab = { queryReport, exportReportPdf };
+window.openGovernanceDetail = openGovernanceDetail;
+window.closeGovernanceDetail = closeGovernanceDetail;

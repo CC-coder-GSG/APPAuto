@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.routes import admin, auth, bugs, executions, export, push, reports, requirements, retest, stage5, users, versions
+from app.api.routes import admin, auth, bugs, executions, export, feedback, push, reports, requirements, retest, stage5, users, versions
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
@@ -15,3 +15,4 @@ api_router.include_router(retest.router)
 api_router.include_router(stage5.router)
 api_router.include_router(push.router)
 api_router.include_router(export.router)
+api_router.include_router(feedback.router)

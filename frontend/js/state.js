@@ -7,6 +7,7 @@ export const state = {
   dataOverviewCache: null,
   dataViewState: { showUsers: true, showVersions: true },
   currentMineData: [],
+  currentFeedbackTodoHtml: '',
   currentDispatchHtml: '',
   currentRetestData: [],
   stage5Rows: [],
@@ -23,6 +24,8 @@ export const state = {
     leakageChart: null,
     funnelChart: null,
     execChart: null,
+    governReqAgingChart: null,
+    governBugAgingChart: null,
   },
 };
 

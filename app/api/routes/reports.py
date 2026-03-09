@@ -36,3 +36,27 @@ def reports_advanced(start_date: date, end_date: date, major_version_id: Optiona
 def reports_version_bugs(major_version_id: Optional[int] = None, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     service = ReportService(db)
     return service.version_bugs(major_version_id=major_version_id)
+
+
+@router.get("/reports/governance")
+def reports_governance(
+    start_date: date,
+    end_date: date,
+    major_version_id: Optional[int] = None,
+    req_overdue_days: int = 14,
+    feedback_overdue_days: int = 7,
+    bug_overdue_days: int = 7,
+    stale_bug_days: int = 14,
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = ReportService(db)
+    return service.governance(
+        start_date=start_date,
+        end_date=end_date,
+        major_version_id=major_version_id,
+        req_overdue_days=req_overdue_days,
+        feedback_overdue_days=feedback_overdue_days,
+        bug_overdue_days=bug_overdue_days,
+        stale_bug_days=stale_bug_days,
+    )

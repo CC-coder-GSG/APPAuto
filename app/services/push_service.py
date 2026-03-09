@@ -48,6 +48,27 @@ class PushService:
             md = "需求分配状态已整体更新发布"
         await self.send_markdown(md)
 
+    async def push_feedback_assignment_notice(
+        self,
+        *,
+        feedback_no: str,
+        summary: str,
+        major_version_no: str,
+        minor_version_no: str,
+        assignee_username: str,
+    ) -> None:
+        md = "\n".join(
+            [
+                "### 反馈指派通知",
+                f"> 反馈编号：{feedback_no}",
+                f"> 反馈概览：{summary}",
+                f"> 反馈版本：{major_version_no} / {minor_version_no}",
+                f"> 指派给：@{assignee_username}",
+                "> 请及时进入【反馈记录与处理】查看并处理。",
+            ]
+        )
+        await self.send_markdown(md)
+
     def build_daily_report_message(self) -> str:
         today = datetime.utcnow().date()
         total = self.db.query(Requirement).count()

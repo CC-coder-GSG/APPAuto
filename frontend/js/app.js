@@ -5,6 +5,7 @@ import './utils.js';
 import './components/common.js';
 import { resizeAllCharts } from './components/charts.js';
 import './tabs/mine.js';
+import './tabs/feedback.js';
 import './tabs/report.js';
 import './tabs/retest.js';
 import './tabs/stage5.js';

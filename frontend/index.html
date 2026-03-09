@@ -59,6 +59,7 @@
   <div class="card row" id="tabs">
     <button id="tabAssignBtn" onclick="showTab('assign')">任务分配台</button>
     <button id="tabMineBtn" onclick="showTab('mine')">我的工作台</button>
+    <button onclick="showTab('feedback')">反馈记录与处理</button>
     <button onclick="showTab('retest')">复测工作台</button>
     <button onclick="showTab('stage5')">整体测试</button>
     <button onclick="showTab('report')">报表中心</button>
@@ -105,6 +106,65 @@
     <div id="mineSummaryText" style="margin-bottom: 16px; font-weight: bold; color: #ea580c; background: #ffedd5; padding: 10px 16px; border-radius: 6px; display: none; border-left: 4px solid #f97316;"></div>
 
     <div id="mineCards"></div>
+  </section>
+
+  <section id="tab-feedback" class="hidden card">
+    <h2>反馈记录与处理</h2>
+    <div class="row" style="margin-bottom: 12px; flex-wrap: wrap;">
+      <label>大版本</label><select id="feedbackMajorSelect" onchange="loadFeedbackMinorOptions(); loadFeedbackBoard();"></select>
+      <label>小版本</label><select id="feedbackMinorSelect" onchange="loadFeedbackBoard()"></select>
+      <label>状态</label>
+      <select id="feedbackStatusSelect" onchange="loadFeedbackBoard()">
+        <option value="">全部</option>
+        <option value="pending">待处理</option>
+        <option value="processing">处理中</option>
+        <option value="resolved">已处理</option>
+        <option value="closed">已关闭</option>
+      </select>
+      <label>指派人</label><select id="feedbackAssigneeSelect" onchange="loadFeedbackBoard()"><option value="">全部</option></select>
+      <label>排序</label>
+      <select id="feedbackSortBy" onchange="loadFeedbackBoard(1)">
+        <option value="created_at">创建时间</option>
+        <option value="updated_at">更新时间</option>
+        <option value="status">状态</option>
+      </select>
+      <select id="feedbackSortOrder" onchange="loadFeedbackBoard(1)">
+        <option value="desc">倒序</option>
+        <option value="asc">正序</option>
+      </select>
+      <label>每页</label>
+      <select id="feedbackPageSize" onchange="loadFeedbackBoard(1)">
+        <option value="10">10</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+      </select>
+      <div class="prefix-input"><span>🔍</span><input id="feedbackKeyword" placeholder="按反馈编号/概览搜索"></div>
+      <button onclick="loadFeedbackBoard(1)">刷新列表</button>
+    </div>
+
+    <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;">
+      <h3>新建反馈</h3>
+      <div class="row" style="align-items:flex-end; flex-wrap:wrap;">
+        <div class="prefix-input"><span>f#</span><input id="newFeedbackNoNum" inputmode="numeric" oninput="digitsOnly(this)" placeholder="仅填写数字，例如 12"></div>
+        <textarea id="newFeedbackSummary" rows="2" placeholder="反馈概览（必填）" style="min-width:320px;"></textarea>
+        <input id="newFeedbackFiles" type="file" multiple>
+        <button onclick="createFeedback()">提交反馈</button>
+      </div>
+    </div>
+
+    <table style="margin-top:12px;">
+      <thead><tr><th>反馈编号</th><th>反馈概览</th><th>反馈版本</th><th>状态</th><th>指派给</th><th>创建人</th><th>创建时间</th><th>操作</th></tr></thead>
+      <tbody id="feedbackTable"></tbody>
+    </table>
+    <div class="row" style="justify-content:flex-end; align-items:center; gap:8px; margin-top:8px;">
+      <span id="feedbackPaginationText" class="muted">第 1 / 1 页，共 0 条</span>
+      <button id="feedbackPrevBtn" class="secondary" onclick="prevFeedbackPage()">上一页</button>
+      <button id="feedbackNextBtn" class="secondary" onclick="nextFeedbackPage()">下一页</button>
+    </div>
+
+    <div id="feedbackDetailPanel" class="hidden" style="margin-top: 16px;">
+      <div id="feedbackDetailBody"></div>
+    </div>
   </section>
 
   <section id="tab-retest" class="hidden card">
@@ -227,6 +287,58 @@
         <div class="row" style="flex-wrap: wrap;">
           <div class="card" style="flex:1; min-width:45%;"><div id="funnelChart" style="height:350px;"></div></div>
           <div class="card" style="flex:1; min-width:45%;"><div id="execChart" style="height:350px;"></div></div>
+        </div>
+      </div>
+
+      <div style="margin-top: 30px; border-top: 2px dashed #cbd5e1; padding-top: 20px; width: 100%;">
+        <h3 style="color: #334155; margin-bottom: 20px; text-align: center;">🛡️ 治理风险看板（阶段一）</h3>
+        <div id="governanceMetaHint" class="muted" style="margin-bottom: 12px; text-align: center;"></div>
+        <div class="metrics-grid">
+          <div class="metric-card" style="cursor:pointer;" onclick="openGovernanceDetail('overdue_requirements')"><div class="metric-title">超时未关闭需求</div><div class="metric-value" id="gReqOverdue">0</div></div>
+          <div class="metric-card" style="cursor:pointer;" onclick="openGovernanceDetail('overdue_feedbacks')"><div class="metric-title">超时未处理反馈</div><div class="metric-value" id="gFbOverdue">0</div></div>
+          <div class="metric-card" style="cursor:pointer;" onclick="openGovernanceDetail('unassigned_bugs')"><div class="metric-title">无人处理Bug</div><div class="metric-value" id="gBugUnassigned">0</div></div>
+          <div class="metric-card" style="cursor:pointer;" onclick="openGovernanceDetail('overdue_bugs')"><div class="metric-title">超时未关闭Bug</div><div class="metric-value" id="gBugOverdue">0</div></div>
+          <div class="metric-card" style="cursor:pointer;" onclick="openGovernanceDetail('stale_bugs')"><div class="metric-title">长期未更新Bug</div><div class="metric-value" id="gBugStale">0</div></div>
+          <div class="metric-card" style="cursor:pointer;" onclick="openGovernanceDetail('assigned_no_progress_bugs')"><div class="metric-title">已指派未处理Bug</div><div class="metric-value" id="gBugAssignedNoProgress">0</div></div>
+          <div class="metric-card"><div class="metric-title">反馈转Bug占比</div><div class="metric-value" id="gFeedbackToBugRatio">0%</div></div>
+        </div>
+        <div id="governanceDetailCard" class="card hidden" style="margin-top:12px; border:1px dashed #cbd5e1; box-shadow:none;">
+          <div class="row" style="justify-content:space-between; align-items:center;">
+            <h4 id="governanceDetailTitle" style="margin:0;">治理明细</h4>
+            <button class="secondary" onclick="closeGovernanceDetail()">收起</button>
+          </div>
+          <div class="muted" id="governanceDetailHint" style="margin-top:6px;"></div>
+          <table style="margin-top:10px;">
+            <thead id="governanceDetailHead"></thead>
+            <tbody id="governanceDetailBody"></tbody>
+          </table>
+        </div>
+
+        <div class="row" style="flex-wrap: wrap; margin-top: 12px;">
+          <div class="card" style="flex:1; min-width:45%;"><div id="governReqAgingChart" style="height:320px;"></div></div>
+          <div class="card" style="flex:1; min-width:45%;"><div id="governBugAgingChart" style="height:320px;"></div></div>
+        </div>
+
+        <div class="row" style="flex-wrap: wrap; margin-top: 12px;">
+          <div class="card" style="flex:1; min-width:45%;">
+            <h4 style="margin-top:0;">反馈最多需求 Top10</h4>
+            <table><thead><tr><th>需求</th><th>版本</th><th>状态</th><th>反馈数</th></tr></thead><tbody id="gTopReqFeedbackTable"></tbody></table>
+          </div>
+          <div class="card" style="flex:1; min-width:45%;">
+            <h4 style="margin-top:0;">缺陷最多需求 Top10</h4>
+            <table><thead><tr><th>需求</th><th>版本</th><th>状态</th><th>Bug数</th></tr></thead><tbody id="gTopReqBugTable"></tbody></table>
+          </div>
+        </div>
+
+        <div class="row" style="flex-wrap: wrap; margin-top: 12px;">
+          <div class="card" style="flex:1; min-width:45%;">
+            <h4 style="margin-top:0;">反馈最多版本 Top10</h4>
+            <table><thead><tr><th>版本</th><th>反馈数</th><th>已处理</th><th>未处理</th></tr></thead><tbody id="gFeedbackVersionTopTable"></tbody></table>
+          </div>
+          <div class="card" style="flex:1; min-width:45%;">
+            <h4 style="margin-top:0;">长期未更新 Bug Top10</h4>
+            <table><thead><tr><th>Bug</th><th>版本</th><th>指派给</th><th>未更新天数</th></tr></thead><tbody id="gStaleBugTopTable"></tbody></table>
+          </div>
         </div>
       </div>
     </div>
@@ -372,11 +484,12 @@ function sourceTypeZh(v){
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
 function showTab(name){
-  ['assign','mine','retest','stage5','report','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
+  ['assign','mine','feedback','retest','stage5','report','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
   document.getElementById('tab-'+name).classList.remove('hidden');
   if(name === 'dispatch') { loadDispatchedAll(); }
   if(name === 'data' && !dataOverviewCache) { loadDataOverview().catch(err=>showMessage(err.message||'加载数据管理台失败','error')); }
   if(name === 'mine') { loadMyWorkbench().catch(err=>showMessage(err.message||'加载我的工作台失败','error')); }
+  if(name === 'feedback') { loadFeedbackBoard().catch(err=>showMessage(err.message||'加载反馈列表失败','error')); }
   if(name === 'retest') { loadRetest().catch(err=>showMessage(err.message||'加载复测工作台失败','error')); }
   if(name === 'stage5') { loadStage5().catch(err=>showMessage(err.message||'加载整体测试大盘失败','error')); }
   if(name==='report'){loadReportOnDemand()}
@@ -468,6 +581,9 @@ async function loadUsers(){
   if(window.OmniQAState) window.OmniQAState.users = users;
   fillReportUsers();
   if(document.getElementById('dispatchUserSelect')) document.getElementById('dispatchUserSelect').innerHTML = users.map(u=>'<option value=\"'+u.id+'\">'+u.username+'</option>').join('')
+  if(document.getElementById('feedbackAssigneeSelect')) {
+    document.getElementById('feedbackAssigneeSelect').innerHTML = '<option value=\"\">全部</option>' + users.map(u=>'<option value=\"'+u.id+'\">'+u.username+'</option>').join('');
+  }
 }
 function fillReportUsers(){const s=document.getElementById('reportUserSelect');if(!s) return; const allOpt=currentUser&&currentUser.role==='admin'?'<option value="0">全员</option>':''; s.innerHTML=allOpt+users.map(u=>`<option value="${u.id}">${u.username}${u.is_team_member===false?'(编外)':''}</option>`).join('');adjustReportChartVisibility()}
 
@@ -485,7 +601,7 @@ async function loadVersions(){
 }
 function fillVersionSelects(){
   const majors=versions.filter(v=>v.version_type==='major');
-  ['assignMajorSelect','mineMajorSelect','retestMajorSelect','s5MajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
+  ['assignMajorSelect','mineMajorSelect','feedbackMajorSelect','retestMajorSelect','s5MajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
   const reportMajorEl=document.getElementById('reportMajorSelect');
   if(reportMajorEl){
     reportMajorEl.innerHTML = '<option value="0">全部大版本</option>' + majors.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('');
@@ -508,6 +624,7 @@ function fillMinorSelectByMajor(majorSelectId, minorSelectId){
 }
 function refreshAllLinkedMinorSelects(){
   fillMinorSelectByMajor('mineMajorSelect','mineMinorSelect');
+  fillMinorSelectByMajor('feedbackMajorSelect','feedbackMinorSelect');
   fillMinorSelectByMajor('retestMajorSelect','retestMinorSelect');
   fillMinorSelectByMajor('s5MajorSelect','s5MinorSelect');
 }
@@ -519,6 +636,7 @@ function bindMajorMinorCascade(){
     majorEl.dataset.linkedMinorBound='1';
   };
   bind('mineMajorSelect','mineMinorSelect');
+  bind('feedbackMajorSelect','feedbackMinorSelect');
   bind('retestMajorSelect','retestMinorSelect');
   bind('s5MajorSelect','s5MinorSelect');
 }
@@ -627,6 +745,97 @@ async function addFreeBug(reqId){
 
 async function pushCase(){return window.OmniQAMineTab.pushCase()}
 async function pushTest(){return window.OmniQAMineTab.pushTest()}
+
+async function ensureFeedbackTab(){
+  if(window.OmniQAFeedbackTab) return window.OmniQAFeedbackTab;
+  try{
+    await import('/static/js/tabs/feedback.js');
+  }catch(_e){}
+  if(!window.OmniQAFeedbackTab){
+    showMessage('反馈模块未加载，请按 Ctrl+F5 强制刷新页面后重试', 'error');
+    throw new Error('Feedback module not loaded');
+  }
+  return window.OmniQAFeedbackTab;
+}
+
+async function loadFeedbackBoard(){
+  const tab = await ensureFeedbackTab();
+  return tab.loadFeedbackBoard(...arguments);
+}
+
+async function loadFeedbackMinorOptions(){
+  const tab = await ensureFeedbackTab();
+  return tab.loadFeedbackMinorOptions();
+}
+
+async function nextFeedbackPage(){
+  const tab = await ensureFeedbackTab();
+  return tab.nextFeedbackPage();
+}
+
+async function prevFeedbackPage(){
+  const tab = await ensureFeedbackTab();
+  return tab.prevFeedbackPage();
+}
+
+async function createFeedback(){
+  const tab = await ensureFeedbackTab();
+  return tab.createFeedback();
+}
+
+async function openFeedbackDetail(id){
+  try{
+    const tab = await ensureFeedbackTab();
+    return await tab.openFeedbackDetail(id);
+  }catch(err){
+    showMessage(err.message || '加载反馈详情失败', 'error');
+  }
+}
+
+async function uploadFeedbackFiles(id){
+  const tab = await ensureFeedbackTab();
+  return tab.uploadFeedbackFiles(id);
+}
+
+async function deleteFeedbackAttachment(attachmentId, feedbackId){
+  const tab = await ensureFeedbackTab();
+  return tab.deleteFeedbackAttachment(attachmentId, feedbackId);
+}
+
+async function assignFeedback(id){
+  const tab = await ensureFeedbackTab();
+  return tab.assignFeedback(id);
+}
+
+async function saveFeedbackHandle(id){
+  const tab = await ensureFeedbackTab();
+  return tab.saveFeedbackHandle(id);
+}
+
+async function linkFeedbackBug(id){
+  const tab = await ensureFeedbackTab();
+  return tab.linkFeedbackBug(id);
+}
+
+async function createFeedbackBug(id){
+  const tab = await ensureFeedbackTab();
+  return tab.createFeedbackBug(id);
+}
+
+async function unlinkFeedbackBug(feedbackId, bugId){
+  const tab = await ensureFeedbackTab();
+  return tab.unlinkFeedbackBug(feedbackId, bugId);
+}
+
+async function searchFeedbackBugOptions(keyword){
+  const tab = await ensureFeedbackTab();
+  return tab.searchFeedbackBugOptions(keyword);
+}
+
+async function setFeedbackStatus(id, status){
+  const tab = await ensureFeedbackTab();
+  return tab.setFeedbackStatus(id, status);
+}
 
 async function loadRetest(){
   return window.OmniQARetestTab.loadRetest();

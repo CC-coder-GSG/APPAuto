@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Requirement, RequirementStatus, TestCase, TestExecution, User, Version, VersionType
+from app.models import Requirement, RequirementStatus, RequirementStatusHistory, TestCase, TestExecution, User, Version, VersionType
 from app.services.audit_service import audit
 from app.utils.state_machine import ensure_requirement_transition
 from app.utils.validators import validate_req_id
@@ -40,6 +40,8 @@ class RequirementService:
         self.db.add(requirement)
         self.db.commit()
         self.db.refresh(requirement)
+        self._record_status_history(requirement, None, RequirementStatus.PENDING, actor_id=actor_id)
+        self.db.commit()
         audit(
             self.db,
             action="requirement.create",
@@ -78,6 +80,14 @@ class RequirementService:
         if new_reqs:
             self.db.bulk_save_objects(new_reqs)
             self.db.commit()
+            created_rows = (
+                self.db.query(Requirement)
+                .filter(Requirement.major_version_id == major_version_id, Requirement.zentao_req_id.in_([r.zentao_req_id for r in new_reqs]))
+                .all()
+            )
+            for row in created_rows:
+                self._record_status_history(row, None, RequirementStatus.PENDING, actor_id=actor_id)
+            self.db.commit()
             audit(
                 self.db,
                 action="requirement.batch_create",
@@ -89,8 +99,9 @@ class RequirementService:
 
         return {"message": "导入成功", "count": len(new_reqs)}
 
-    def recalculate_requirement_status(self, requirement: Requirement) -> Requirement:
-        current_status = requirement.status.value if hasattr(requirement.status, "value") else str(requirement.status)
+    def recalculate_requirement_status(self, requirement: Requirement, actor_id: int | None = None) -> Requirement:
+        old_status_obj = requirement.status
+        current_status = old_status_obj.value if hasattr(old_status_obj, "value") else str(old_status_obj)
         if requirement.retest_completed:
             next_status = RequirementStatus.RETEST_DONE
         elif requirement.test_completed:
@@ -109,6 +120,8 @@ class RequirementService:
             # 保守迁移：历史数据存在旧状态时，不阻断线上流程，先统一回写到目标状态。
             pass
         requirement.status = next_status
+        if old_status_obj != next_status:
+            self._record_status_history(requirement, old_status_obj, next_status, actor_id=actor_id)
         return requirement
 
     def list_requirements(self, major_version_id: int) -> list[dict]:
@@ -179,7 +192,7 @@ class RequirementService:
             req.case_completed = False
             req.test_completed = False
             req.retest_completed = False
-            self.recalculate_requirement_status(req)
+            self.recalculate_requirement_status(req, actor_id=actor_id)
 
             if new_owner_id:
                 old_name = users_map.get(old_owner_id, "未分配")
@@ -217,7 +230,7 @@ class RequirementService:
         if test_completed is not None:
             requirement.test_completed = test_completed
 
-        self.recalculate_requirement_status(requirement)
+        self.recalculate_requirement_status(requirement, actor_id=current_user.id)
         self.db.commit()
         audit(
             self.db,
@@ -242,7 +255,7 @@ class RequirementService:
         for cid in case_ids:
             self.db.add(TestCase(requirement_id=requirement.id, zentao_case_id=cid, creator_id=actor_id))
         requirement.case_completed = case_completed
-        self.recalculate_requirement_status(requirement)
+        self.recalculate_requirement_status(requirement, actor_id=actor_id)
         self.db.commit()
         audit(
             self.db,
@@ -259,7 +272,7 @@ class RequirementService:
         if not requirement:
             raise HTTPException(status_code=404, detail="Requirement not found")
         requirement.test_completed = test_completed
-        self.recalculate_requirement_status(requirement)
+        self.recalculate_requirement_status(requirement, actor_id=actor_id)
         self.db.commit()
         audit(
             self.db,
@@ -405,4 +418,20 @@ class RequirementService:
                 f"> 需求测试未完成：{req_test_pending} 个",
                 f"> 需求测试已完成：{req_test_done} 个",
             ]
+        )
+    def _record_status_history(
+        self,
+        requirement: Requirement,
+        from_status: RequirementStatus | None,
+        to_status: RequirementStatus,
+        actor_id: int | None = None,
+    ) -> None:
+        self.db.add(
+            RequirementStatusHistory(
+                requirement_id=requirement.id,
+                from_status=from_status,
+                to_status=to_status,
+                changed_by_id=actor_id,
+                changed_at=datetime.utcnow(),
+            )
         )

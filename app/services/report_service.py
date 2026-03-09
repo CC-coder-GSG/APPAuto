@@ -3,10 +3,26 @@
 from datetime import date, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
-from app.models import BugSourceType, BugStage5Record, BugTracking, Requirement, TestCase, TestExecution, User, UserRole, Version, VersionType
+from app.models import (
+    BugSourceType,
+    BugStage5Record,
+    BugTracking,
+    FeedbackBugLink,
+    FeedbackRecord,
+    FeedbackStatus,
+    Requirement,
+    RequirementStatus,
+    RequirementStatusHistory,
+    TestCase,
+    TestExecution,
+    User,
+    UserRole,
+    Version,
+    VersionType,
+)
 
 
 class ReportService:
@@ -315,3 +331,321 @@ class ReportService:
                 display_name = f"{parent_name}\n{mv.version_no}"
                 result.append({"version_name": display_name, "bug_count": bug_count})
         return result
+
+    def governance(
+        self,
+        start_date: date,
+        end_date: date,
+        major_version_id: int | None = None,
+        req_overdue_days: int = 14,
+        feedback_overdue_days: int = 7,
+        bug_overdue_days: int = 7,
+        stale_bug_days: int = 14,
+    ) -> dict:
+        sdt = datetime.combine(start_date, datetime.min.time())
+        edt = datetime.combine(end_date, datetime.max.time())
+        now = datetime.utcnow()
+
+        req_overdue_dt = now - timedelta(days=req_overdue_days)
+        fb_overdue_dt = now - timedelta(days=feedback_overdue_days)
+        bug_overdue_dt = now - timedelta(days=bug_overdue_days)
+        stale_bug_dt = now - timedelta(days=stale_bug_days)
+
+        majors = {v.id: v.version_no for v in self.db.query(Version).filter(Version.version_type == VersionType.MAJOR).all()}
+        minors = {v.id: v.version_no for v in self.db.query(Version).filter(Version.version_type == VersionType.MINOR).all()}
+        users = {u.id: u.username for u in self.db.query(User).all()}
+
+        def _days_since(dt: datetime | None) -> int:
+            if not dt:
+                return 0
+            return max(0, (now - dt).days)
+
+        def _build_aging(days_list: list[int]) -> dict:
+            bands = {"0-3天": 0, "4-7天": 0, "8-14天": 0, "15-30天": 0, "30天以上": 0}
+            for d in days_list:
+                if d <= 3:
+                    bands["0-3天"] += 1
+                elif d <= 7:
+                    bands["4-7天"] += 1
+                elif d <= 14:
+                    bands["8-14天"] += 1
+                elif d <= 30:
+                    bands["15-30天"] += 1
+                else:
+                    bands["30天以上"] += 1
+            ordered = [{"bucket": k, "count": v} for k, v in bands.items()]
+            sorted_days = sorted(days_list)
+            median = 0
+            if sorted_days:
+                n = len(sorted_days)
+                if n % 2 == 1:
+                    median = float(sorted_days[n // 2])
+                else:
+                    median = (sorted_days[n // 2 - 1] + sorted_days[n // 2]) / 2
+            avg = round(sum(days_list) / len(days_list), 2) if days_list else 0
+            return {"bands": ordered, "avg_days": avg, "median_days": median, "samples": len(days_list)}
+
+        req_query = self.db.query(Requirement).filter(Requirement.created_at >= sdt, Requirement.created_at <= edt)
+        if major_version_id:
+            req_query = req_query.filter(Requirement.major_version_id == major_version_id)
+        req_rows = req_query.all()
+
+        overdue_requirements = []
+        for r in req_rows:
+            is_done = (r.status == RequirementStatus.RETEST_DONE)
+            if (not is_done) and r.created_at <= req_overdue_dt:
+                overdue_requirements.append({
+                    "id": r.id,
+                    "zentao_req_id": r.zentao_req_id,
+                    "title": r.title,
+                    "major_version_no": majors.get(r.major_version_id, "未知"),
+                    "status": r.status.value if hasattr(r.status, "value") else str(r.status),
+                    "owner_name": users.get(r.owner_id, "未分配"),
+                    "created_at": r.created_at.isoformat(),
+                    "age_days": _days_since(r.created_at),
+                })
+        overdue_requirements.sort(key=lambda x: x["age_days"], reverse=True)
+        req_closed_days = []
+        for r in req_rows:
+            if r.status == RequirementStatus.RETEST_DONE and r.updated_at:
+                req_closed_days.append(max(0, (r.updated_at - r.created_at).days))
+
+        req_status_stay_distribution: list[dict] = []
+        req_ids = [r.id for r in req_rows]
+        if req_ids:
+            hist_rows = (
+                self.db.query(RequirementStatusHistory)
+                .filter(RequirementStatusHistory.requirement_id.in_(req_ids))
+                .order_by(RequirementStatusHistory.requirement_id.asc(), RequirementStatusHistory.changed_at.asc())
+                .all()
+            )
+            hist_map: dict[int, list[RequirementStatusHistory]] = {}
+            for h in hist_rows:
+                hist_map.setdefault(h.requirement_id, []).append(h)
+
+            stay_bucket: dict[str, list[float]] = {}
+            req_map = {r.id: r for r in req_rows}
+            for rid, items in hist_map.items():
+                req = req_map.get(rid)
+                if not req:
+                    continue
+                for idx, cur_h in enumerate(items):
+                    end_time = items[idx + 1].changed_at if idx + 1 < len(items) else (req.updated_at or now)
+                    dur_days = max(0.0, (end_time - cur_h.changed_at).total_seconds() / 86400.0)
+                    key = cur_h.to_status.value if hasattr(cur_h.to_status, "value") else str(cur_h.to_status)
+                    stay_bucket.setdefault(key, []).append(dur_days)
+
+            if stay_bucket:
+                for status_key, values in stay_bucket.items():
+                    req_status_stay_distribution.append({
+                        "status": status_key,
+                        "avg_days": round(sum(values) / len(values), 2),
+                        "max_days": round(max(values), 2),
+                        "samples": len(values),
+                    })
+                req_status_stay_distribution.sort(key=lambda x: x["avg_days"], reverse=True)
+
+        fb_query = self.db.query(FeedbackRecord).filter(FeedbackRecord.created_at >= sdt, FeedbackRecord.created_at <= edt)
+        if major_version_id:
+            fb_query = fb_query.filter(FeedbackRecord.major_version_id == major_version_id)
+        fb_rows = fb_query.all()
+
+        feedback_overdue_rows = []
+        for f in fb_rows:
+            is_done = f.status in [FeedbackStatus.RESOLVED, FeedbackStatus.CLOSED]
+            if (not is_done) and f.created_at <= fb_overdue_dt:
+                feedback_overdue_rows.append({
+                    "id": f.id,
+                    "feedback_no": f.feedback_no or "-",
+                    "summary": f.summary,
+                    "major_version_no": majors.get(f.major_version_id, "未知"),
+                    "minor_version_no": minors.get(f.minor_version_id, "未知"),
+                    "status": f.status.value if hasattr(f.status, "value") else str(f.status),
+                    "assignee_name": users.get(f.assignee_id, "未指派"),
+                    "created_at": f.created_at.isoformat(),
+                    "age_days": _days_since(f.created_at),
+                })
+        feedback_overdue_rows.sort(key=lambda x: x["age_days"], reverse=True)
+
+        fb_closed_days = []
+        for f in fb_rows:
+            if f.status in [FeedbackStatus.RESOLVED, FeedbackStatus.CLOSED]:
+                end_dt = f.handled_at or f.updated_at
+                if end_dt:
+                    fb_closed_days.append(max(0, (end_dt - f.created_at).days))
+
+        feedback_version_top_query = self.db.query(
+            FeedbackRecord.major_version_id,
+            FeedbackRecord.minor_version_id,
+            func.count(FeedbackRecord.id),
+            func.sum(case((FeedbackRecord.status.in_([FeedbackStatus.RESOLVED, FeedbackStatus.CLOSED]), 1), else_=0)),
+        ).filter(FeedbackRecord.created_at >= sdt, FeedbackRecord.created_at <= edt)
+        if major_version_id:
+            feedback_version_top_query = feedback_version_top_query.filter(FeedbackRecord.major_version_id == major_version_id)
+        feedback_version_top = []
+        for maj_id, min_id, total_cnt, done_cnt in (
+            feedback_version_top_query.group_by(FeedbackRecord.major_version_id, FeedbackRecord.minor_version_id)
+            .order_by(func.count(FeedbackRecord.id).desc())
+            .limit(10)
+            .all()
+        ):
+            done = int(done_cnt or 0)
+            total = int(total_cnt or 0)
+            feedback_version_top.append({
+                "major_version_no": majors.get(maj_id, "未知"),
+                "minor_version_no": minors.get(min_id, "未知"),
+                "total": total,
+                "done": done,
+                "undone": max(0, total - done),
+            })
+
+        bug_query = self.db.query(BugTracking).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
+        if major_version_id:
+            bug_query = bug_query.filter(BugTracking.major_version_id == major_version_id)
+        bug_rows = bug_query.all()
+
+        unassigned_bugs = []
+        overdue_bugs = []
+        stale_bugs = []
+        assigned_no_progress = []
+        for b in bug_rows:
+            b_item = {
+                "id": b.id,
+                "bug_id": b.bug_id,
+                "major_version_no": majors.get(b.major_version_id, "未知"),
+                "status": "closed" if b.closed else "open",
+                "dispatched_to_name": users.get(b.dispatched_to_id, "未指派"),
+                "created_at": b.created_at.isoformat(),
+                "updated_at": b.updated_at.isoformat() if b.updated_at else None,
+                "age_days": _days_since(b.created_at),
+                "stale_days": _days_since(b.updated_at),
+            }
+            if (not b.closed) and (b.dispatched_to_id is None):
+                unassigned_bugs.append(b_item)
+            if (not b.closed) and b.created_at <= bug_overdue_dt:
+                overdue_bugs.append(b_item)
+            if (not b.closed) and b.updated_at and b.updated_at <= stale_bug_dt:
+                stale_bugs.append(b_item)
+            if (not b.closed) and b.dispatched_to_id is not None and b.updated_at and b.updated_at <= bug_overdue_dt:
+                assigned_no_progress.append(b_item)
+
+        unassigned_bugs.sort(key=lambda x: x["age_days"], reverse=True)
+        overdue_bugs.sort(key=lambda x: x["age_days"], reverse=True)
+        stale_bugs.sort(key=lambda x: x["stale_days"], reverse=True)
+        assigned_no_progress.sort(key=lambda x: x["stale_days"], reverse=True)
+
+        bug_closed_days = []
+        for b in bug_rows:
+            if b.closed and b.updated_at:
+                bug_closed_days.append(max(0, (b.updated_at - b.created_at).days))
+
+        req_bug_top_query = self.db.query(
+            Requirement.id,
+            Requirement.zentao_req_id,
+            Requirement.title,
+            Requirement.major_version_id,
+            Requirement.status,
+            func.count(BugTracking.id).label("bug_count"),
+        ).join(BugTracking, BugTracking.requirement_id == Requirement.id).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
+        if major_version_id:
+            req_bug_top_query = req_bug_top_query.filter(Requirement.major_version_id == major_version_id)
+        req_bug_top = []
+        for rid, req_id, title, maj_id, status, bug_count in (
+            req_bug_top_query.group_by(Requirement.id).order_by(func.count(BugTracking.id).desc()).limit(10).all()
+        ):
+            req_bug_top.append({
+                "id": rid,
+                "zentao_req_id": req_id,
+                "title": title,
+                "major_version_no": majors.get(maj_id, "未知"),
+                "status": status.value if hasattr(status, "value") else str(status),
+                "bug_count": int(bug_count or 0),
+            })
+
+        req_feedback_top_query = self.db.query(
+            Requirement.id,
+            Requirement.zentao_req_id,
+            Requirement.title,
+            Requirement.major_version_id,
+            Requirement.status,
+            func.count(func.distinct(FeedbackBugLink.feedback_id)).label("feedback_count"),
+        ).join(BugTracking, BugTracking.requirement_id == Requirement.id).join(FeedbackBugLink, FeedbackBugLink.bug_id == BugTracking.id).join(
+            FeedbackRecord, FeedbackRecord.id == FeedbackBugLink.feedback_id
+        ).filter(FeedbackRecord.created_at >= sdt, FeedbackRecord.created_at <= edt)
+        if major_version_id:
+            req_feedback_top_query = req_feedback_top_query.filter(Requirement.major_version_id == major_version_id)
+        req_feedback_top = []
+        for rid, req_id, title, maj_id, status, feedback_count in (
+            req_feedback_top_query.group_by(Requirement.id).order_by(func.count(func.distinct(FeedbackBugLink.feedback_id)).desc()).limit(10).all()
+        ):
+            req_feedback_top.append({
+                "id": rid,
+                "zentao_req_id": req_id,
+                "title": title,
+                "major_version_no": majors.get(maj_id, "未知"),
+                "status": status.value if hasattr(status, "value") else str(status),
+                "feedback_count": int(feedback_count or 0),
+            })
+
+        feedback_with_bug = (
+            self.db.query(func.count(func.distinct(FeedbackBugLink.feedback_id)))
+            .join(FeedbackRecord, FeedbackRecord.id == FeedbackBugLink.feedback_id)
+            .filter(FeedbackRecord.created_at >= sdt, FeedbackRecord.created_at <= edt)
+        )
+        if major_version_id:
+            feedback_with_bug = feedback_with_bug.filter(FeedbackRecord.major_version_id == major_version_id)
+        feedback_with_bug_count = int(feedback_with_bug.scalar() or 0)
+        feedback_total = len(fb_rows)
+        feedback_to_bug_ratio = round((feedback_with_bug_count / feedback_total) * 100, 2) if feedback_total else 0.0
+
+        return {
+            "meta": {
+                "req_overdue_days": req_overdue_days,
+                "feedback_overdue_days": feedback_overdue_days,
+                "bug_overdue_days": bug_overdue_days,
+                "stale_bug_days": stale_bug_days,
+                "degraded_state_duration": len(req_status_stay_distribution) == 0,
+                "degraded_reason": (
+                    "当前缺少完整状态流转历史，阶段一用关闭耗时分布替代状态停留时长分布。"
+                    if len(req_status_stay_distribution) == 0
+                    else "已基于需求状态流转历史计算停留时长分布。"
+                ),
+            },
+            "kpis": {
+                "overdue_requirements": len(overdue_requirements),
+                "overdue_feedbacks": len(feedback_overdue_rows),
+                "unassigned_bugs": len(unassigned_bugs),
+                "overdue_bugs": len(overdue_bugs),
+                "stale_bugs": len(stale_bugs),
+                "assigned_no_progress_bugs": len(assigned_no_progress),
+                "feedback_total": feedback_total,
+                "feedback_pending": len([f for f in fb_rows if f.status == FeedbackStatus.PENDING]),
+                "feedback_processing": len([f for f in fb_rows if f.status == FeedbackStatus.PROCESSING]),
+                "feedback_resolved": len([f for f in fb_rows if f.status == FeedbackStatus.RESOLVED]),
+                "feedback_closed": len([f for f in fb_rows if f.status == FeedbackStatus.CLOSED]),
+                "feedback_with_bug_count": feedback_with_bug_count,
+                "feedback_to_bug_ratio": feedback_to_bug_ratio,
+            },
+            "requirements": {
+                "overdue_list": overdue_requirements[:100],
+                "close_aging": _build_aging(req_closed_days),
+                "status_stay_distribution": req_status_stay_distribution,
+                "top_feedback_reqs": req_feedback_top,
+                "top_bug_reqs": req_bug_top,
+            },
+            "feedback": {
+                "overdue_list": feedback_overdue_rows[:100],
+                "close_aging": _build_aging(fb_closed_days),
+                "version_top10": feedback_version_top,
+            },
+            "bugs": {
+                "unassigned_list": unassigned_bugs[:100],
+                "overdue_list": overdue_bugs[:100],
+                "stale_list": stale_bugs[:100],
+                "assigned_no_progress_list": assigned_no_progress[:100],
+                "close_aging": _build_aging(bug_closed_days),
+                "top_overdue": overdue_bugs[:10],
+                "top_stale": stale_bugs[:10],
+                "top_assigned_no_progress": assigned_no_progress[:10],
+            },
+        }
