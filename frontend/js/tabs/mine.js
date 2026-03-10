@@ -69,20 +69,43 @@ function initTestExecutionModal() {
   }
 }
 
+function syncModalMinorSelect() {
+  const pageMinorSel = document.getElementById('mineMinorSelect');
+  const modalMinorSel = document.getElementById('mineTestExecMinorSelect');
+  if (!pageMinorSel || !modalMinorSel) return;
+
+  modalMinorSel.innerHTML = Array.from(pageMinorSel.options || [])
+    .map((o) => `<option value="${o.value}">${o.text}</option>`)
+    .join('');
+
+  if (pageMinorSel.value) {
+    modalMinorSel.value = pageMinorSel.value;
+  }
+
+  if (!modalMinorSel.value) {
+    const firstValid = Array.from(modalMinorSel.options || []).find((o) => Number(o.value || 0) > 0);
+    if (firstValid) modalMinorSel.value = firstValid.value;
+  }
+}
+
 function openTestExecutionModal(reqId, checkboxEl) {
   initTestExecutionModal();
-  const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
-  const minorNo = getMinorText(minorId);
+  syncModalMinorSelect();
+  const minorId = Number(document.getElementById('mineTestExecMinorSelect')?.value || 0);
   const modal = document.getElementById('mineTestExecModal');
-  const minorInput = document.getElementById('mineTestExecMinorText');
+  const minorSel = document.getElementById('mineTestExecMinorSelect');
   const noteInput = document.getElementById('mineTestExecNotes');
   const resultSel = document.getElementById('mineTestExecResult');
-  if (!modal || !minorInput || !noteInput || !resultSel) return;
+  if (!modal || !minorSel || !noteInput || !resultSel) return;
+  if (!minorId) {
+    if (checkboxEl) checkboxEl.checked = false;
+    window.showMessage && window.showMessage('请先在页面顶部选择当前大版本对应的小版本', 'error');
+    return;
+  }
 
   modalState.reqId = reqId;
   modalState.checkboxEl = checkboxEl || null;
 
-  minorInput.value = `${minorNo}`;
   noteInput.value = '';
   resultSel.value = 'passed';
   openModal(modal);
@@ -110,13 +133,16 @@ export async function confirmMineTestExecutionModal() {
     closeMineTestExecutionModal();
     return;
   }
-  const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
+  const minorId = Number(document.getElementById('mineTestExecMinorSelect')?.value || 0);
   const resultStatus = document.getElementById('mineTestExecResult')?.value || 'passed';
   const notes = (document.getElementById('mineTestExecNotes')?.value || '').trim();
   if (!minorId) {
     window.showMessage && window.showMessage('请先选择当前复测发包（小版本）', 'error');
     return;
   }
+
+  const pageMinorSel = document.getElementById('mineMinorSelect');
+  if (pageMinorSel) pageMinorSel.value = String(minorId);
 
   try {
     await submitTestExecution(reqId, {
@@ -178,6 +204,7 @@ export function toggleMineMode() {
 }
 
 export async function loadMyWorkbench() {
+  initTestExecutionModal();
   const mode = getMode();
   const majorId = Number(document.getElementById('mineMajorSelect')?.value || 0);
   let url = '/requirements/my-workbench?mode=' + mode;

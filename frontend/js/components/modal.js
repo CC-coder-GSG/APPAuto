@@ -10,6 +10,7 @@ export function openModal(target, opts = {}) {
   const el = resolveEl(target);
   if (!el) return false;
   el.classList.remove('hidden');
+  el.style.display = opts.display || el.dataset.modalDisplay || 'block';
   el.dataset.open = '1';
   if (opts.onClose && typeof opts.onClose === 'function') {
     modalHooks.set(el.id || String(Math.random()), opts.onClose);
@@ -22,6 +23,7 @@ export function closeModal(target, opts = {}) {
   const el = resolveEl(target);
   if (!el) return false;
   el.classList.add('hidden');
+  el.style.display = 'none';
   el.dataset.open = '0';
   if (opts.onClose && typeof opts.onClose === 'function') opts.onClose(el);
   return true;
