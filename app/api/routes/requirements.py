@@ -169,6 +169,7 @@ def my_workbench(
             "title": r.title,
             "case_completed": r.case_completed,
             "test_completed": r.test_completed,
+            "major_version_id": r.major_version_id,
             "major_version_name": r.major_version.version_no if r.major_version else "",
             "test_cases": [{"id": c.id, "zentao_case_id": c.zentao_case_id, "bugs": case_bug_map.get(str(c.id), [])} for c in r.test_cases],
             "free_bugs": free_bug_map.get(r.id, []),

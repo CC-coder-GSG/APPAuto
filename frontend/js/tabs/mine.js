@@ -69,15 +69,32 @@ function initTestExecutionModal() {
   }
 }
 
-function syncModalMinorSelect() {
-  const pageMinorSel = document.getElementById('mineMinorSelect');
-  const modalMinorSel = document.getElementById('mineTestExecMinorSelect');
-  if (!pageMinorSel || !modalMinorSel) return;
+function getRequirementById(reqId) {
+  return (state.currentMineData || []).find((r) => Number(r.id) === Number(reqId)) || null;
+}
 
-  modalMinorSel.innerHTML = Array.from(pageMinorSel.options || [])
-    .map((o) => `<option value="${o.value}">${o.text}</option>`)
+function getMinorOptionsByMajor(majorId) {
+  const allVersions = window.versions || [];
+  return allVersions.filter((v) => v.version_type === 'minor' && Number(v.parent_id) === Number(majorId));
+}
+
+function syncModalMinorSelect(reqId) {
+  const modalMinorSel = document.getElementById('mineTestExecMinorSelect');
+  if (!modalMinorSel) return;
+
+  const req = getRequirementById(reqId);
+  const reqMajorId = Number(req?.major_version_id || 0);
+  const linkedMinors = reqMajorId ? getMinorOptionsByMajor(reqMajorId) : [];
+  if (linkedMinors.length === 0) {
+    modalMinorSel.innerHTML = "<option value=''>暂无子版本</option>";
+    return;
+  }
+
+  modalMinorSel.innerHTML = linkedMinors
+    .map((o) => `<option value="${o.id}">${o.version_no}</option>`)
     .join('');
 
+  const pageMinorSel = document.getElementById('mineMinorSelect');
   if (pageMinorSel.value) {
     modalMinorSel.value = pageMinorSel.value;
   }
@@ -90,7 +107,7 @@ function syncModalMinorSelect() {
 
 function openTestExecutionModal(reqId, checkboxEl) {
   initTestExecutionModal();
-  syncModalMinorSelect();
+  syncModalMinorSelect(reqId);
   const minorId = Number(document.getElementById('mineTestExecMinorSelect')?.value || 0);
   const modal = document.getElementById('mineTestExecModal');
   const minorSel = document.getElementById('mineTestExecMinorSelect');
@@ -166,10 +183,11 @@ export async function confirmMineTestExecutionModal() {
 
 export async function handleTestCompletedToggle(reqId, checked, checkboxEl) {
   if (checked) {
-    const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
-    if (!minorId) {
+    const req = getRequirementById(reqId);
+    const linkedMinors = getMinorOptionsByMajor(Number(req?.major_version_id || 0));
+    if (linkedMinors.length === 0) {
       if (checkboxEl) checkboxEl.checked = false;
-      window.showMessage && window.showMessage('请先选择当前复测发包（小版本）', 'error');
+      window.showMessage && window.showMessage('当前需求所属大版本下暂无可用小版本，请先补充小版本', 'error');
       return;
     }
     openTestExecutionModal(reqId, checkboxEl);
@@ -200,11 +218,36 @@ export function toggleMineMode() {
   const mode = getMode();
   const wrap = document.getElementById('mineVersionWrap');
   if (wrap) wrap.style.display = mode === 'version' ? 'flex' : 'none';
+  refreshMineMinorSelectByMode();
   return loadMyWorkbench();
+}
+
+function refreshMineMinorSelectByMode() {
+  const minorSel = document.getElementById('mineMinorSelect');
+  if (!minorSel) return;
+  const mode = getMode();
+
+  if (mode === 'all_pending') {
+    const allMinors = (window.versions || []).filter((v) => v.version_type === 'minor');
+    if (allMinors.length === 0) {
+      minorSel.innerHTML = "<option value=''>暂无子版本</option>";
+      return;
+    }
+    const prev = minorSel.value;
+    minorSel.innerHTML = allMinors.map((v) => `<option value="${v.id}">${v.version_no}</option>`).join('');
+    if (prev) minorSel.value = prev;
+    if (!minorSel.value && allMinors[0]) minorSel.value = String(allMinors[0].id);
+    return;
+  }
+
+  if (typeof window.fillMinorSelectByMajor === 'function') {
+    window.fillMinorSelectByMajor('mineMajorSelect', 'mineMinorSelect');
+  }
 }
 
 export async function loadMyWorkbench() {
   initTestExecutionModal();
+  refreshMineMinorSelectByMode();
   const mode = getMode();
   const majorId = Number(document.getElementById('mineMajorSelect')?.value || 0);
   let url = '/requirements/my-workbench?mode=' + mode;
