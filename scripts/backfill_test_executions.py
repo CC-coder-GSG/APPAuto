@@ -1,10 +1,17 @@
 ﻿from __future__ import annotations
 
 import argparse
+import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
+
+# 兼容从任意目录执行脚本，确保可以导入 app 包
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.db.session import SessionLocal
 from app.models import BugTracking, Requirement, TestExecution, TestResultStatus, Version, VersionType
