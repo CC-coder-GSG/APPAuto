@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Requirement, RequirementStatus, RequirementStatusHistory, TestCase, TestExecution, User, Version, VersionType
+from app.models import Requirement, RequirementStatus, RequirementStatusHistory, TestCase, TestExecution, TestResultStatus, User, Version, VersionType
 from app.services.audit_service import audit
 from app.utils.state_machine import ensure_requirement_transition
 from app.utils.validators import validate_req_id
@@ -337,25 +337,60 @@ class RequirementService:
         test_completed: bool,
         actor_id: int | None = None,
     ) -> dict:
+        allowed_result_status = {e.value for e in TestResultStatus}
         requirement = self.db.query(Requirement).filter(Requirement.id == requirement_id).first()
         if not requirement:
-            raise HTTPException(status_code=404, detail="Requirement not found")
+            raise HTTPException(status_code=404, detail="需求不存在")
+        actor = self.db.query(User).filter(User.id == actor_id).first() if actor_id else None
+        if requirement.owner_id and actor and requirement.owner_id != actor.id and actor.role.value != "admin":
+            raise HTTPException(status_code=403, detail="仅需求负责人或管理员可提交测试执行记录")
+
+        minor_version = self.db.query(Version).filter(Version.id == minor_version_id).first()
+        if not minor_version:
+            raise HTTPException(status_code=400, detail="小版本不存在")
+        if minor_version.version_type != VersionType.MINOR:
+            raise HTTPException(status_code=400, detail="minor_version_id 必须是小版本")
+        if minor_version.parent_id != requirement.major_version_id:
+            raise HTTPException(status_code=400, detail="小版本与需求所属大版本不匹配")
+
+        if result_status not in allowed_result_status:
+            raise HTTPException(status_code=400, detail="测试结果非法，仅支持：passed/failed/blocked/partial/untested")
+
         execution = self.db.query(TestExecution).filter(
             TestExecution.requirement_id == requirement_id,
             TestExecution.minor_version_id == minor_version_id,
         ).first()
+        is_create = execution is None
         if not execution:
             execution = TestExecution(requirement_id=requirement_id, minor_version_id=minor_version_id)
             self.db.add(execution)
         execution.bug_id = bug_id
         execution.source_case_id = source_case_id
-        execution.result_status = result_status
+        execution.result_status = TestResultStatus(result_status)
         execution.notes = notes
         execution.executed_by_id = actor_id
         execution.executed_at = datetime.utcnow()
-        self.db.flush()
-        self.update_test_execution_completion(requirement_id, test_completed, actor_id=actor_id)
-        return {"message": "Test execution updated"}
+        requirement.test_completed = test_completed
+        self.recalculate_requirement_status(requirement, actor_id=actor_id)
+        self.db.commit()
+        self.db.refresh(execution)
+        audit(
+            self.db,
+            action="requirement.upsert_test_execution",
+            target_type="requirement",
+            actor_id=actor_id,
+            target_id=str(requirement.id),
+            detail=f"minor={minor_version_id},result={result_status},test_completed={test_completed}",
+        )
+        return {
+            "message": "测试执行记录已保存" if is_create else "测试执行记录更新成功",
+            "execution_id": execution.id,
+            "requirement_id": requirement.id,
+            "minor_version_id": execution.minor_version_id,
+            "result_status": execution.result_status.value if hasattr(execution.result_status, "value") else str(execution.result_status),
+            "test_completed": requirement.test_completed,
+            "executed_at": execution.executed_at.isoformat() if execution.executed_at else None,
+        }
 
     def build_case_progress_message(self, major_version_id: int, current_user: User) -> str:
         major = self.db.query(Version).filter(Version.id == major_version_id).first()

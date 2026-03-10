@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.models.enums import TestResultStatus
 
 
 class TestExecution(Base):
@@ -18,7 +19,7 @@ class TestExecution(Base):
 
     bug_id: Mapped[Optional[str]] = mapped_column(String(30), nullable=True, index=True)
     source_case_id: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
-    result_status: Mapped[str] = mapped_column(String(30), default="untested", nullable=False)
+    result_status: Mapped[TestResultStatus] = mapped_column(SAEnum(TestResultStatus), default=TestResultStatus.UNTESTED, nullable=False)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     executed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)

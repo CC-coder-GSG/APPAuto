@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.models.audit import AuditLog
 from app.models.bug import BugTracking
-from app.models.enums import BugSourceType, FeedbackStatus, RequirementStatus, UserRole, VersionType
+from app.models.enums import BugSourceType, FeedbackStatus, RequirementStatus, TestResultStatus, UserRole, VersionType
 from app.models.execution import TestExecution
 from app.models.feedback import FeedbackAttachment, FeedbackBugLink, FeedbackRecord
 from app.models.requirement import Requirement
@@ -28,6 +28,7 @@ __all__ = [
     "SoftwareProduct",
     "TestCase",
     "TestExecution",
+    "TestResultStatus",
     "User",
     "UserRole",
     "Version",

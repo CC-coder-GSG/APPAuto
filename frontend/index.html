@@ -110,6 +110,28 @@
     <div id="mineSummaryText" style="margin-bottom: 16px; font-weight: bold; color: #ea580c; background: #ffedd5; padding: 10px 16px; border-radius: 6px; display: none; border-left: 4px solid #f97316;"></div>
 
     <div id="mineCards"></div>
+
+    <div id="mineTestExecModal" class="hidden" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: flex; align-items: center; justify-content: center;">
+      <div style="width: min(560px, 92vw); background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px 18px 14px 18px;">
+        <h3 style="margin: 0 0 12px 0; color:#0f172a;">提交测试结果</h3>
+        <div class="row" style="margin-bottom: 10px;">
+          <label style="min-width: 90px;">当前小版本</label>
+          <input id="mineTestExecMinorText" readonly style="flex:1; background:#f8fafc;">
+        </div>
+        <div class="row" style="margin-bottom: 10px;">
+          <label style="min-width: 90px;">测试结果</label>
+          <select id="mineTestExecResult" style="flex:1;"></select>
+        </div>
+        <div style="margin-bottom: 14px;">
+          <label style="display:block; margin-bottom:6px;">备注</label>
+          <textarea id="mineTestExecNotes" rows="4" placeholder="可填写本轮验证说明、问题现象或补充信息" style="width:100%;"></textarea>
+        </div>
+        <div class="row" style="justify-content: flex-end; gap: 8px;">
+          <button class="secondary" onclick="closeMineTestExecutionModal()">取消</button>
+          <button onclick="confirmMineTestExecutionModal()">确认提交</button>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section id="tab-feedback" class="hidden card">
@@ -794,6 +816,18 @@ async function removeWorkbenchBug(id){
 }
 async function setReqStatus(reqId, key, checked){
   return window.OmniQAMineTab.setReqStatus(reqId, key, checked);
+}
+
+async function handleTestCompletedToggle(reqId, checked, checkboxEl){
+  return window.OmniQAMineTab.handleTestCompletedToggle(reqId, checked, checkboxEl);
+}
+
+async function confirmMineTestExecutionModal(){
+  return window.OmniQAMineTab.confirmMineTestExecutionModal();
+}
+
+function closeMineTestExecutionModal(){
+  return window.OmniQAMineTab.closeMineTestExecutionModal();
 }
 
 async function addCase(reqId){

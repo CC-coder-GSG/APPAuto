@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
-from app.models import User
+from app.models import TestResultStatus, User
 from app.services.requirement_service import RequirementService
 
 router = APIRouter()
@@ -17,7 +17,7 @@ class TestExecutionPayload(BaseModel):
     minor_version_id: int
     bug_id: Optional[str] = None
     source_case_id: Optional[str] = None
-    result_status: str = "passed"
+    result_status: TestResultStatus = TestResultStatus.PASSED
     test_completed: bool
     notes: Optional[str] = None
 
@@ -35,7 +35,7 @@ def upsert_test_execution(
         minor_version_id=payload.minor_version_id,
         bug_id=payload.bug_id,
         source_case_id=payload.source_case_id,
-        result_status=payload.result_status,
+        result_status=payload.result_status.value,
         notes=payload.notes,
         test_completed=payload.test_completed,
         actor_id=current_user.id,

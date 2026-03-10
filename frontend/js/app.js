@@ -3,6 +3,7 @@ import './auth.js';
 import './state.js';
 import './utils.js';
 import './components/common.js';
+import './components/modal.js';
 import { resizeAllCharts } from './components/charts.js';
 import './tabs/mine.js';
 import './tabs/feedback.js';

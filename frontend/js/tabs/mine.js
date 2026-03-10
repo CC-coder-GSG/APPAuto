@@ -1,5 +1,19 @@
-import { api } from '../api.js';
+﻿import { api } from '../api.js';
 import { state } from '../state.js';
+import { closeModal, openModal } from '../components/modal.js';
+
+const RESULT_OPTIONS = [
+  { value: 'passed', label: '通过' },
+  { value: 'failed', label: '失败' },
+  { value: 'blocked', label: '阻塞' },
+  { value: 'partial', label: '部分完成' },
+  { value: 'untested', label: '未测试' },
+];
+
+const modalState = {
+  reqId: null,
+  checkboxEl: null,
+};
 
 function getFoldStorageKey() {
   const uid = state.currentUser?.id || window.currentUser?.id || 'anonymous';
@@ -24,19 +38,136 @@ function getMode() {
   return document.getElementById('mineDisplayMode')?.value || 'version';
 }
 
+function getMinorText(minorId) {
+  const sel = document.getElementById('mineMinorSelect');
+  if (!sel) return String(minorId || '未选择');
+  const opt = Array.from(sel.options || []).find((o) => Number(o.value || 0) === Number(minorId || 0));
+  return opt?.text || String(minorId || '未选择');
+}
+
 function renderBugChip(req, bug) {
-  const dBadge = bug.dispatched_to_name ? `<span style="color:#ea580c; background:#ffedd5; padding:1px 4px; border-radius:4px; font-size:11px; margin-left:6px;">🪂已特派给:${bug.dispatched_to_name}</span>` : '';
-  let verText = '';
-  if (bug.fixed_minor_version_no) {
-    verText = `<span style="color:#16a34a; font-size:11px; margin-left:4px;">(✅解决于: 🏷️${bug.fixed_minor_version_no})</span>`;
-  } else {
-    verText = `<span style="color:#94a3b8; font-size:11px; margin-left:4px;">(发现于: 🏷️${bug.found_minor_version_no || '未知'})</span>`;
-  }
+  const dBadge = bug.dispatched_to_name
+    ? `<span style="color:#ea580c; background:#ffedd5; padding:1px 4px; border-radius:4px; font-size:11px; margin-left:6px;">🪂已特派给:${bug.dispatched_to_name}</span>`
+    : '';
+  const verText = bug.fixed_minor_version_no
+    ? `<span style="color:#16a34a; font-size:11px; margin-left:4px;">(✅解决于: 🏷️${bug.fixed_minor_version_no})</span>`
+    : `<span style="color:#94a3b8; font-size:11px; margin-left:4px;">(发现于: 🏷️${bug.found_minor_version_no || '未知'})</span>`;
+
   return `<span class="badge" style="background:#f1f5f9; border:1px solid #cbd5e1; padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
       ${bug.bug_id} ${verText} ${dBadge}
       <a href="javascript:void(0)" title="编辑" onclick="${req.test_completed ? 'return false;' : `editWorkbenchBug(${bug.id}, '${bug.bug_id}')`}" style="color:${req.test_completed ? '#94a3b8' : '#3b82f6'}; margin-left:4px; text-decoration:none;">✎</a>
       <a href="javascript:void(0)" title="删除" onclick="${req.test_completed ? 'return false;' : `removeWorkbenchBug(${bug.id})`}" style="color:${req.test_completed ? '#94a3b8' : '#ef4444'}; margin-left:2px; text-decoration:none;">×</a>
   </span>`;
+}
+
+function initTestExecutionModal() {
+  const resultSel = document.getElementById('mineTestExecResult');
+  if (resultSel && !resultSel.dataset.initialized) {
+    resultSel.innerHTML = RESULT_OPTIONS.map((r) => `<option value="${r.value}">${r.label}</option>`).join('');
+    resultSel.value = 'passed';
+    resultSel.dataset.initialized = '1';
+  }
+}
+
+function openTestExecutionModal(reqId, checkboxEl) {
+  initTestExecutionModal();
+  const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
+  const minorNo = getMinorText(minorId);
+  const modal = document.getElementById('mineTestExecModal');
+  const minorInput = document.getElementById('mineTestExecMinorText');
+  const noteInput = document.getElementById('mineTestExecNotes');
+  const resultSel = document.getElementById('mineTestExecResult');
+  if (!modal || !minorInput || !noteInput || !resultSel) return;
+
+  modalState.reqId = reqId;
+  modalState.checkboxEl = checkboxEl || null;
+
+  minorInput.value = `${minorNo}`;
+  noteInput.value = '';
+  resultSel.value = 'passed';
+  openModal(modal);
+}
+
+export function closeMineTestExecutionModal() {
+  const modal = document.getElementById('mineTestExecModal');
+  if (modal) closeModal(modal);
+  if (modalState.checkboxEl) modalState.checkboxEl.checked = false;
+  modalState.reqId = null;
+  modalState.checkboxEl = null;
+}
+
+export async function submitTestExecution(reqId, payload) {
+  return api(`/requirements/${reqId}/test-execution`, {
+    method: 'PUT',
+    headers: window.H,
+    body: payload,
+  });
+}
+
+export async function confirmMineTestExecutionModal() {
+  const reqId = Number(modalState.reqId || 0);
+  if (!reqId) {
+    closeMineTestExecutionModal();
+    return;
+  }
+  const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
+  const resultStatus = document.getElementById('mineTestExecResult')?.value || 'passed';
+  const notes = (document.getElementById('mineTestExecNotes')?.value || '').trim();
+  if (!minorId) {
+    window.showMessage && window.showMessage('请先选择当前复测发包（小版本）', 'error');
+    return;
+  }
+
+  try {
+    await submitTestExecution(reqId, {
+      minor_version_id: minorId,
+      result_status: resultStatus,
+      test_completed: true,
+      notes,
+    });
+    window.showMessage && window.showMessage('测试执行记录已提交，并同步标记需求测试完成', 'success');
+    const modal = document.getElementById('mineTestExecModal');
+    if (modal) closeModal(modal);
+    await loadMyWorkbench();
+  } catch (err) {
+    if (modalState.checkboxEl) modalState.checkboxEl.checked = false;
+    window.showMessage && window.showMessage(err.message || '提交失败，请稍后重试', 'error');
+  } finally {
+    modalState.reqId = null;
+    modalState.checkboxEl = null;
+  }
+}
+
+export async function handleTestCompletedToggle(reqId, checked, checkboxEl) {
+  if (checked) {
+    const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
+    if (!minorId) {
+      if (checkboxEl) checkboxEl.checked = false;
+      window.showMessage && window.showMessage('请先选择当前复测发包（小版本）', 'error');
+      return;
+    }
+    openTestExecutionModal(reqId, checkboxEl);
+    return;
+  }
+
+  const ok = confirm('确认取消该需求的测试完成状态吗？');
+  if (!ok) {
+    if (checkboxEl) checkboxEl.checked = true;
+    return;
+  }
+  try {
+    await api(`/requirements/${reqId}/status`, {
+      method: 'PATCH',
+      headers: window.H,
+      body: { test_completed: false },
+    });
+    window.showMessage && window.showMessage('已取消测试完成状态', 'success');
+  } catch (err) {
+    if (checkboxEl) checkboxEl.checked = true;
+    window.showMessage && window.showMessage(err.message || '状态更新失败', 'error');
+  } finally {
+    await loadMyWorkbench();
+  }
 }
 
 export function toggleMineMode() {
@@ -72,13 +203,13 @@ export async function loadMyWorkbench() {
         <table style="background:#fff; border-radius:6px; overflow:hidden;">
           <thead><tr><th>Bug 编号 / 归属需求</th><th>引出的新Bug</th><th>专项处理操作</th></tr></thead>
           <tbody>
-            ${ddata.map(b => `
+            ${ddata.map((b) => `
               <tr style="${b.test_done ? 'background:#f8fafc; color:#94a3b8; text-decoration:line-through;' : ''}">
                 <td><b>${b.bug_id}</b> <span style="font-size:12px;color:#64748b;">(${b.req_title})</span></td>
                 <td>
                   <input type="hidden" id="dnb_hidden_${b.id}" value="${b.newly_found_bug_id || ''}">
                   <div style="margin-bottom:6px;">
-                    ${(b.newly_found_bug_id ? b.newly_found_bug_id.split(',') : []).map(dbug => `
+                    ${(b.newly_found_bug_id ? b.newly_found_bug_id.split(',') : []).map((dbug) => `
                       <span class="badge" style="background:#fef2f2; color:#b91c1c; border:1px solid #fca5a5; margin-right:4px; margin-bottom:4px; display:inline-block;">
                         ${dbug} <a href="javascript:void(0)" onclick="${b.test_done ? 'return false;' : `removeDerivedBug(${b.id}, '${dbug}')`}" style="color:#7f1d1d; text-decoration:none; margin-left:4px; font-weight:bold;">×</a>
                       </span>
@@ -124,6 +255,7 @@ export function renderMineCards() {
   const filteredData = state.currentMineData.filter((req) => !searchKw || (req.zentao_req_id && req.zentao_req_id.toLowerCase().includes(searchKw)) || (req.title && req.title.toLowerCase().includes(searchKw)));
   const mode = getMode();
   const foldStateMap = getFoldStateMap();
+
   const reqsHtml = filteredData.map((req) => {
     const caseDisabled = req.case_completed ? 'disabled' : '';
     const testDisabled = req.test_completed ? 'disabled' : '';
@@ -131,7 +263,10 @@ export function renderMineCards() {
     const testPrefixColor = req.test_completed ? 'color:#94a3b8;' : '';
     const isFullyCompleted = req.test_completed && req.case_completed;
     const isOpen = Object.prototype.hasOwnProperty.call(foldStateMap, String(req.id)) ? !!foldStateMap[String(req.id)] : !isFullyCompleted;
-    const vTag = mode === 'all_pending' && req.major_version_name ? `<span class="badge" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; margin-right:8px; padding:2px 6px;">🏷️${req.major_version_name}</span>` : '';
+    const vTag = mode === 'all_pending' && req.major_version_name
+      ? `<span class="badge" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; margin-right:8px; padding:2px 6px;">🏷️${req.major_version_name}</span>`
+      : '';
+
     const caseHtml = (req.test_cases || []).map((c) => `
       <div class="case-item">
         <div class="row">
@@ -142,7 +277,9 @@ export function renderMineCards() {
         </div>
         <div class="case-bugs" style="margin-top:6px;">${(c.bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无关联Bug</span>'}</div>
       </div>`).join('');
+
     const freeBugHtml = (req.free_bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无自由Bug</span>';
+
     return `
       <details class="mine-req-card" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
@@ -152,7 +289,7 @@ export function renderMineCards() {
         <div style="margin-top: 12px;">
           <div class="row" style="margin-bottom:8px">
             <label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked).then(()=>loadMyWorkbench())">✅用例完成</label>
-            <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'test_completed', this.checked).then(()=>loadMyWorkbench())">✅测试完成</label>
+            <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">✅测试完成</label>
           </div>
           <div>${caseHtml}</div>
           <div class="free-bug-box"><div><b>自由Bug</b></div><div style="margin-top:6px;">${freeBugHtml}</div></div>
@@ -165,6 +302,7 @@ export function renderMineCards() {
         </div>
       </details>`;
   }).join('');
+
   const mineCards = document.getElementById('mineCards');
   if (mineCards) mineCards.innerHTML = (state.currentFeedbackTodoHtml || '') + state.currentDispatchHtml + reqsHtml;
 }
@@ -309,4 +447,25 @@ export async function pushTest() {
 }
 
 window.rememberMineReqFold = rememberMineReqFold;
-window.OmniQAMineTab = { toggleMineMode, loadMyWorkbench, renderMineCards, rememberMineReqFold, editWorkbenchCase, editWorkbenchBug, removeWorkbenchBug, setReqStatus, addCase, deleteCase, promptCaseBug, addFreeBug, pushCase, pushTest };
+window.OmniQAMineTab = {
+  toggleMineMode,
+  loadMyWorkbench,
+  renderMineCards,
+  rememberMineReqFold,
+  editWorkbenchCase,
+  editWorkbenchBug,
+  removeWorkbenchBug,
+  setReqStatus,
+  addCase,
+  deleteCase,
+  promptCaseBug,
+  addFreeBug,
+  pushCase,
+  pushTest,
+  handleTestCompletedToggle,
+  submitTestExecution,
+  confirmMineTestExecutionModal,
+  closeMineTestExecutionModal,
+};
+
+

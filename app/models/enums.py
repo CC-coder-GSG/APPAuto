@@ -38,4 +38,12 @@ class FeedbackStatus(str, Enum):
     CLOSED = "closed"
 
 
-__all__ = ["UserRole", "VersionType", "RequirementStatus", "BugSourceType", "FeedbackStatus"]
+class TestResultStatus(str, Enum):
+    PASSED = "passed"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+    PARTIAL = "partial"
+    UNTESTED = "untested"
+
+
+__all__ = ["UserRole", "VersionType", "RequirementStatus", "BugSourceType", "FeedbackStatus", "TestResultStatus"]

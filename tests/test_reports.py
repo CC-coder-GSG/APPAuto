@@ -2,8 +2,10 @@
 
 from fastapi import HTTPException
 
-from app.models import BugSourceType, BugTracking, Requirement, TestCase, TestExecution, User, UserRole, Version, VersionType
+from app.models import BugSourceType, BugTracking, Requirement, TestCase, TestExecution, TestResultStatus, User, UserRole, Version, VersionType
 from app.services.report_service import ReportService
+from app.services.requirement_service import RequirementService
+from scripts.backfill_test_executions import backfill_test_executions
 
 
 def _create_user(db_session, username: str, role: UserRole = UserRole.USER, is_team_member: bool = True) -> User:
@@ -52,7 +54,7 @@ def test_summary_returns_expected_structure(db_session):
     db_session.commit()
     db_session.refresh(req)
     db_session.add(TestCase(requirement_id=req.id, zentao_case_id="u#7001", creator_id=user.id, created_at=datetime(2026, 1, 1, 10, 0, 0)))
-    db_session.add(TestExecution(requirement_id=req.id, minor_version_id=minor.id, executed_by_id=user.id, executed_at=datetime(2026, 1, 1, 11, 0, 0), result_status="passed"))
+    db_session.add(TestExecution(requirement_id=req.id, minor_version_id=minor.id, executed_by_id=user.id, executed_at=datetime(2026, 1, 1, 11, 0, 0), result_status=TestResultStatus.PASSED))
     db_session.add(BugTracking(major_version_id=major.id, requirement_id=req.id, source_type=BugSourceType.MANUAL, bug_id="b#7001", found_minor_version_id=minor.id, created_by_id=user.id, created_at=datetime(2026, 1, 1, 12, 0, 0)))
     db_session.commit()
 
@@ -75,7 +77,7 @@ def test_advanced_and_version_bugs_return_expected_shapes(db_session):
     db_session.commit()
     db_session.refresh(req)
     db_session.add(BugTracking(major_version_id=major.id, requirement_id=req.id, source_type=BugSourceType.MANUAL, bug_id="b#7002", found_minor_version_id=minor.id, created_by_id=user.id, created_at=datetime(2026, 1, 2, 9, 0, 0), closed=True, resolution="fixed"))
-    db_session.add(TestExecution(requirement_id=req.id, minor_version_id=minor.id, executed_by_id=user.id, executed_at=datetime(2026, 1, 2, 10, 0, 0), result_status="passed"))
+    db_session.add(TestExecution(requirement_id=req.id, minor_version_id=minor.id, executed_by_id=user.id, executed_at=datetime(2026, 1, 2, 10, 0, 0), result_status=TestResultStatus.PASSED))
     db_session.commit()
 
     service = ReportService(db_session)
@@ -85,3 +87,58 @@ def test_advanced_and_version_bugs_return_expected_shapes(db_session):
     assert set(advanced.keys()) == {"top_reqs", "leakage", "funnel", "executions"}
     assert isinstance(version_bugs, list)
     assert version_bugs[0]["bug_count"] >= 1
+
+
+def test_summary_executed_requirements_not_increased_by_requirement_flag_only(db_session):
+    user = _create_user(db_session, "report_user4")
+    major = _create_major(db_session, "V7100")
+    req = Requirement(zentao_req_id="r#7101", title="仅勾选测试完成", major_version_id=major.id, owner_id=user.id, test_completed=True)
+    db_session.add(req)
+    db_session.commit()
+
+    service = ReportService(db_session)
+    result = service.summary(date(2026, 1, 1), date(2026, 12, 31), user)
+    assert result["overview"]["executed_requirements"] == 0
+
+
+def test_summary_executed_requirements_increased_after_upsert_execution(db_session):
+    user = _create_user(db_session, "report_user5")
+    major = _create_major(db_session, "V7200")
+    minor = _create_minor(db_session, major.id, "V7200.1")
+    req = Requirement(zentao_req_id="r#7201", title="执行写入后统计", major_version_id=major.id, owner_id=user.id)
+    db_session.add(req)
+    db_session.commit()
+
+    RequirementService(db_session).upsert_test_execution(
+        requirement_id=req.id,
+        minor_version_id=minor.id,
+        bug_id=None,
+        source_case_id=None,
+        result_status="passed",
+        notes="报表统计测试",
+        test_completed=True,
+        actor_id=user.id,
+    )
+
+    service = ReportService(db_session)
+    result = service.summary(date(2026, 1, 1), date(2026, 12, 31), user)
+    assert result["overview"]["executed_requirements"] == 1
+
+
+def test_summary_executed_requirements_increased_after_backfill(db_session):
+    user = _create_user(db_session, "report_user6")
+    major = _create_major(db_session, "V7300")
+    req = Requirement(zentao_req_id="r#7301", title="历史补录统计", major_version_id=major.id, owner_id=user.id, test_completed=True)
+    db_session.add(req)
+    db_session.commit()
+
+    # 回填前统计为 0
+    service = ReportService(db_session)
+    before = service.summary(date(2026, 1, 1), date(2026, 12, 31), user)
+    assert before["overview"]["executed_requirements"] == 0
+
+    backfill_result = backfill_test_executions(db_session, apply=True, major_id=major.id, verbose=False)
+    assert backfill_result["failed"] == 0
+
+    after = service.summary(date(2026, 1, 1), date(2026, 12, 31), user)
+    assert after["overview"]["executed_requirements"] == 1
