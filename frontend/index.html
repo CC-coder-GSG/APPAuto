@@ -681,7 +681,13 @@ async function loadVersions(){
 }
 function fillVersionSelects(){
   const majors=versions.filter(v=>v.version_type==='major');
-  ['assignMajorSelect','mineMajorSelect','feedbackMajorSelect','retestMajorSelect','s5MajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
+  ['assignMajorSelect','mineMajorSelect','retestMajorSelect','s5MajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
+  const feedbackMajorEl=document.getElementById('feedbackMajorSelect');
+  if(feedbackMajorEl){
+    feedbackMajorEl.innerHTML = majors.length
+      ? "<option value='0'>全部版本</option>" + majors.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('')
+      : "<option value='0'>全部版本</option>";
+  }
   const reportMajorEl=document.getElementById('reportMajorSelect');
   if(reportMajorEl){
     reportMajorEl.innerHTML = majors.length
@@ -702,6 +708,15 @@ function fillMinorSelectByMajor(majorSelectId, minorSelectId){
   const minorEl=document.getElementById(minorSelectId);
   if(!majorEl||!minorEl) return;
   const majorId=Number(majorEl.value||0);
+  if(majorSelectId==='feedbackMajorSelect' && majorId===0){
+    const allMinors=versions.filter(v=>v.version_type==='minor');
+    if(allMinors.length===0){
+      minorEl.innerHTML="<option value=''>暂无子版本</option>";
+      return;
+    }
+    minorEl.innerHTML="<option value='0'>全部小版本</option>"+allMinors.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('');
+    return;
+  }
   const linkedMinors=versions.filter(v=>v.version_type==='minor' && Number(v.parent_id)===majorId);
   if(linkedMinors.length===0){
     minorEl.innerHTML="<option value=''>暂无子版本</option>";

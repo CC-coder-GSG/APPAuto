@@ -100,12 +100,28 @@ class ReportService:
                 )
             )
             closed_bugs = filter_by_major_ids(closed_bugs, BugTracking.major_version_id).scalar() or 0
+            created_feedbacks = self.db.query(func.count(FeedbackRecord.id)).filter(
+                FeedbackRecord.creator_id == uid,
+                FeedbackRecord.created_at >= sdt,
+                FeedbackRecord.created_at <= edt,
+            )
+            created_feedbacks = filter_by_major_ids(created_feedbacks, FeedbackRecord.major_version_id).scalar() or 0
+            processed_feedbacks = self.db.query(func.count(FeedbackRecord.id)).filter(
+                FeedbackRecord.handled_by_id == uid,
+                FeedbackRecord.handled_at.isnot(None),
+                FeedbackRecord.handled_at >= sdt,
+                FeedbackRecord.handled_at <= edt,
+                FeedbackRecord.status.in_([FeedbackStatus.RESOLVED, FeedbackStatus.CLOSED]),
+            )
+            processed_feedbacks = filter_by_major_ids(processed_feedbacks, FeedbackRecord.major_version_id).scalar() or 0
             return {
                 "executed_requirements": executed_req_count,
                 "created_cases": case_count,
                 "created_bugs": bug_count,
                 "retested_reqs": retested_reqs,
                 "closed_bugs": closed_bugs,
+                "created_feedbacks": created_feedbacks,
+                "processed_feedbacks": processed_feedbacks,
             }
 
         if all_users_mode:
@@ -134,12 +150,26 @@ class ReportService:
                     BugStage5Record.newly_found_bug_id.is_(None),
                 )
             )
+            q_fb_created = self.db.query(func.count(FeedbackRecord.id)).filter(
+                FeedbackRecord.created_at >= sdt,
+                FeedbackRecord.created_at <= edt,
+                FeedbackRecord.creator_id.in_(team_ids),
+            )
+            q_fb_processed = self.db.query(func.count(FeedbackRecord.id)).filter(
+                FeedbackRecord.handled_at.isnot(None),
+                FeedbackRecord.handled_at >= sdt,
+                FeedbackRecord.handled_at <= edt,
+                FeedbackRecord.handled_by_id.in_(team_ids),
+                FeedbackRecord.status.in_([FeedbackStatus.RESOLVED, FeedbackStatus.CLOSED]),
+            )
             overview = {
                 "executed_requirements": filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0,
                 "created_cases": filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0,
                 "created_bugs": filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0,
                 "retested_reqs": filter_by_major_ids(q_retest, Requirement.major_version_id).scalar() or 0,
                 "closed_bugs": filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0,
+                "created_feedbacks": filter_by_major_ids(q_fb_created, FeedbackRecord.major_version_id).scalar() or 0,
+                "processed_feedbacks": filter_by_major_ids(q_fb_processed, FeedbackRecord.major_version_id).scalar() or 0,
             }
         else:
             overview = metrics_for_user(target_user_id)
@@ -177,11 +207,25 @@ class ReportService:
                         BugStage5Record.newly_found_bug_id.is_(None),
                     )
                 )
+                q_fb_created = self.db.query(func.count(FeedbackRecord.id)).filter(
+                    FeedbackRecord.created_at >= day_s,
+                    FeedbackRecord.created_at <= day_e,
+                    FeedbackRecord.creator_id.in_(team_ids),
+                )
+                q_fb_processed = self.db.query(func.count(FeedbackRecord.id)).filter(
+                    FeedbackRecord.handled_at.isnot(None),
+                    FeedbackRecord.handled_at >= day_s,
+                    FeedbackRecord.handled_at <= day_e,
+                    FeedbackRecord.handled_by_id.in_(team_ids),
+                    FeedbackRecord.status.in_([FeedbackStatus.RESOLVED, FeedbackStatus.CLOSED]),
+                )
                 day_exec = filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0
                 day_case = filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0
                 day_bug = filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0
                 day_retested = filter_by_major_ids(q_retested, Requirement.major_version_id).scalar() or 0
                 day_closed = filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0
+                day_fb_created = filter_by_major_ids(q_fb_created, FeedbackRecord.major_version_id).scalar() or 0
+                day_fb_processed = filter_by_major_ids(q_fb_processed, FeedbackRecord.major_version_id).scalar() or 0
             else:
                 q_exec = (
                     self.db.query(func.count(func.distinct(TestExecution.requirement_id)))
@@ -210,11 +254,25 @@ class ReportService:
                         BugStage5Record.newly_found_bug_id.is_(None),
                     )
                 )
+                q_fb_created = self.db.query(func.count(FeedbackRecord.id)).filter(
+                    FeedbackRecord.created_at >= day_s,
+                    FeedbackRecord.created_at <= day_e,
+                    FeedbackRecord.creator_id == target_user_id,
+                )
+                q_fb_processed = self.db.query(func.count(FeedbackRecord.id)).filter(
+                    FeedbackRecord.handled_at.isnot(None),
+                    FeedbackRecord.handled_at >= day_s,
+                    FeedbackRecord.handled_at <= day_e,
+                    FeedbackRecord.handled_by_id == target_user_id,
+                    FeedbackRecord.status.in_([FeedbackStatus.RESOLVED, FeedbackStatus.CLOSED]),
+                )
                 day_exec = filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0
                 day_case = filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0
                 day_bug = filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0
                 day_retested = filter_by_major_ids(q_retested, Requirement.major_version_id).scalar() or 0
                 day_closed = filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0
+                day_fb_created = filter_by_major_ids(q_fb_created, FeedbackRecord.major_version_id).scalar() or 0
+                day_fb_processed = filter_by_major_ids(q_fb_processed, FeedbackRecord.major_version_id).scalar() or 0
             trend.append({
                 "date": cur.isoformat(),
                 "executed_requirements": day_exec,
@@ -222,6 +280,8 @@ class ReportService:
                 "created_bugs": day_bug,
                 "retested_reqs": day_retested,
                 "closed_bugs": day_closed,
+                "created_feedbacks": day_fb_created,
+                "processed_feedbacks": day_fb_processed,
             })
             cur += timedelta(days=1)
 

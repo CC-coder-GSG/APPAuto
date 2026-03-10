@@ -50,8 +50,16 @@ export async function loadFeedbackMinorOptions() {
   const majorId = selectedMajorId();
   const sel = document.getElementById('feedbackMinorSelect');
   const all = (window.versions || []).filter((v) => v.version_type === 'minor');
-  const rows = all.filter((v) => Number(v.parent_id) === majorId);
   if (!sel) return;
+  if (majorId === 0) {
+    if (all.length === 0) {
+      sel.innerHTML = "<option value=''>暂无子版本</option>";
+      return;
+    }
+    sel.innerHTML = "<option value='0'>全部小版本</option>" + all.map((v) => `<option value='${v.id}'>${v.version_no}</option>`).join('');
+    return;
+  }
+  const rows = all.filter((v) => Number(v.parent_id) === majorId);
   if (rows.length === 0) {
     sel.innerHTML = "<option value=''>暂无子版本</option>";
     return;

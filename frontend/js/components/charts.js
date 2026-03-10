@@ -26,22 +26,31 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
   const yBug = data.trend.map((i) => i.created_bugs);
   const yRetest = data.trend.map((i) => i.retested_reqs || 0);
   const yClosed = data.trend.map((i) => i.closed_bugs || 0);
+  const yCreatedFeedback = data.trend.map((i) => i.created_feedbacks || 0);
+  const yProcessedFeedback = data.trend.map((i) => i.processed_feedbacks || 0);
 
   initChart('trendChart', 'trendChart')?.setOption({
     title: { text: '趋势折线图' },
     tooltip: { trigger: 'axis' },
     grid: { top: 60, bottom: 40, left: 50, right: 30 },
-    legend: { data: ['执行需求', '创建用例', '创建Bug', '复测需求', '关闭Bug'], top: 30 },
+    legend: { data: ['执行需求', '创建用例', '创建Bug', '创建反馈', '处理反馈', '复测需求', '关闭Bug'], top: 30 },
     xAxis: { type: 'category', data: x },
     yAxis: { type: 'value' },
     series: [
       { name: '执行需求', type: 'line', data: yReq, smooth: true },
       { name: '创建用例', type: 'line', data: yCase, smooth: true },
       { name: '创建Bug', type: 'line', data: yBug, smooth: true },
+      { name: '创建反馈', type: 'line', data: yCreatedFeedback, smooth: true },
+      { name: '处理反馈', type: 'line', data: yProcessedFeedback, smooth: true },
       { name: '复测需求', type: 'line', data: yRetest, smooth: true },
       { name: '关闭Bug', type: 'line', data: yClosed, smooth: true },
     ],
   });
+
+  const radarEl = document.getElementById('radarChart');
+  const teamEl = document.getElementById('teamCompareChart');
+  if (radarEl) radarEl.style.display = isAllUsersMode ? 'none' : '';
+  if (teamEl) teamEl.style.display = isAllUsersMode ? '' : 'none';
 
   initChart('sourcePieChart', 'sourcePieChart')?.setOption({
     title: { text: 'Bug来源分布', left: 'center' },
@@ -50,39 +59,47 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
     series: [{ type: 'pie', radius: '50%', center: ['50%', '55%'], data: (data.bug_source_dist || []).map((i) => ({ name: sourceTypeZh(i.source_type), value: i.count })) }],
   });
 
-  initChart('radarChart', 'radarChart')?.setOption({
-    title: { text: '个人能力雷达图' },
-    tooltip: {},
-    radar: {
-      radius: '60%',
-      center: ['50%', '55%'],
-      indicator: [
-        { name: '执行需求', max: Math.max(10, data.overview.executed_requirements || 0) },
-        { name: '创建用例', max: Math.max(10, data.overview.created_cases || 0) },
-        { name: '创建Bug', max: Math.max(10, data.overview.created_bugs || 0) },
-        { name: '复测需求', max: Math.max(10, data.overview.retested_reqs || 0) },
-        { name: '关闭Bug', max: Math.max(10, data.overview.closed_bugs || 0) },
-      ],
-    },
-    series: [{ type: 'radar', data: [{ value: [data.overview.executed_requirements || 0, data.overview.created_cases || 0, data.overview.created_bugs || 0, data.overview.retested_reqs || 0, data.overview.closed_bugs || 0], name: '指标' }] }],
-  });
+  if (!isAllUsersMode) {
+    const radar = initChart('radarChart', 'radarChart');
+    radar?.setOption({
+      title: { text: '个人能力雷达图' },
+      tooltip: {},
+      radar: {
+        radius: '60%',
+        center: ['50%', '55%'],
+        indicator: [
+          { name: '执行需求', max: Math.max(10, data.overview.executed_requirements || 0) },
+          { name: '创建用例', max: Math.max(10, data.overview.created_cases || 0) },
+          { name: '创建Bug', max: Math.max(10, data.overview.created_bugs || 0) },
+          { name: '复测需求', max: Math.max(10, data.overview.retested_reqs || 0) },
+          { name: '关闭Bug', max: Math.max(10, data.overview.closed_bugs || 0) },
+        ],
+      },
+      series: [{ type: 'radar', data: [{ value: [data.overview.executed_requirements || 0, data.overview.created_cases || 0, data.overview.created_bugs || 0, data.overview.retested_reqs || 0, data.overview.closed_bugs || 0], name: '指标' }] }],
+    });
+    radar?.resize();
+  }
 
   const team = data.team_comparison || [];
-  initChart('teamCompareChart', 'teamCompareChart')?.setOption({
-    title: { text: '团队对比（全员模式）' },
-    tooltip: { trigger: 'axis' },
-    grid: { top: 60, bottom: 40, left: 50, right: 30 },
-    legend: { data: ['执行需求', '创建用例', '创建Bug', '复测需求', '关闭Bug'], top: 30 },
-    xAxis: { type: 'category', data: team.map((i) => i.username) },
-    yAxis: { type: 'value' },
-    series: [
-      { name: '执行需求', type: 'bar', data: team.map((i) => i.executed_requirements || 0) },
-      { name: '创建用例', type: 'bar', data: team.map((i) => i.created_cases || 0) },
-      { name: '创建Bug', type: 'bar', data: team.map((i) => i.created_bugs || 0) },
-      { name: '复测需求', type: 'bar', data: team.map((i) => i.retested_reqs || 0) },
-      { name: '关闭Bug', type: 'bar', data: team.map((i) => i.closed_bugs || 0) },
-    ],
-  });
+  if (isAllUsersMode) {
+    const teamChart = initChart('teamCompareChart', 'teamCompareChart');
+    teamChart?.setOption({
+      title: { text: '团队对比（全员模式）' },
+      tooltip: { trigger: 'axis' },
+      grid: { top: 60, bottom: 40, left: 50, right: 30 },
+      legend: { data: ['执行需求', '创建用例', '创建Bug', '复测需求', '关闭Bug'], top: 30 },
+      xAxis: { type: 'category', data: team.map((i) => i.username) },
+      yAxis: { type: 'value' },
+      series: [
+        { name: '执行需求', type: 'bar', data: team.map((i) => i.executed_requirements || 0) },
+        { name: '创建用例', type: 'bar', data: team.map((i) => i.created_cases || 0) },
+        { name: '创建Bug', type: 'bar', data: team.map((i) => i.created_bugs || 0) },
+        { name: '复测需求', type: 'bar', data: team.map((i) => i.retested_reqs || 0) },
+        { name: '关闭Bug', type: 'bar', data: team.map((i) => i.closed_bugs || 0) },
+      ],
+    });
+    teamChart?.resize();
+  }
 
   const vbData = helpers.versionBugs || [];
   const hasVersionBugData = vbData.length > 0;
@@ -158,10 +175,6 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
     series: [{ type: 'pie', radius: '60%', center: ['50%', '50%'], data: advancedData.executions.map((e) => ({ name: execMap[e.status] || e.status, value: e.count })) }],
   });
 
-  const radarEl = document.getElementById('radarChart');
-  const teamEl = document.getElementById('teamCompareChart');
-  if (radarEl) radarEl.style.display = isAllUsersMode ? 'none' : '';
-  if (teamEl) teamEl.style.display = isAllUsersMode ? '' : 'none';
 }
 
 export function renderGovernanceCharts(governanceData) {
