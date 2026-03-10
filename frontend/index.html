@@ -734,7 +734,21 @@ function bindMajorMinorCascade(){
   const bind=(majorId,minorId)=>{
     const majorEl=document.getElementById(majorId);
     if(!majorEl || majorEl.dataset.linkedMinorBound==='1') return;
-    majorEl.addEventListener('change',()=>fillMinorSelectByMajor(majorId,minorId));
+    majorEl.addEventListener('change',async ()=>{
+      fillMinorSelectByMajor(majorId,minorId);
+      if(majorId==='retestMajorSelect'){
+        const tab=document.getElementById('tab-retest');
+        if(tab && !tab.classList.contains('hidden')){
+          try{ await loadRetest(); }catch(err){ showMessage(err.message||'加载待复测需求失败','error'); }
+        }
+      }
+      if(majorId==='s5MajorSelect'){
+        const tab=document.getElementById('tab-stage5');
+        if(tab && !tab.classList.contains('hidden')){
+          try{ await loadStage5(); }catch(err){ showMessage(err.message||'加载全景大盘失败','error'); }
+        }
+      }
+    });
     majorEl.dataset.linkedMinorBound='1';
   };
   bind('mineMajorSelect','mineMinorSelect');
