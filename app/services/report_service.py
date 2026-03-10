@@ -7,6 +7,7 @@ from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.models import (
+    AuditLog,
     BugSourceType,
     BugStage5Record,
     BugTracking,
@@ -28,6 +29,79 @@ from app.models import (
 class ReportService:
     def __init__(self, db: Session):
         self.db = db
+
+    def _parse_feedback_status_from_audit_detail(self, detail: str | None) -> FeedbackStatus | None:
+        if not detail:
+            return None
+        text = (detail or "").strip().lower()
+        if text.startswith("status="):
+            text = text.split("=", 1)[1].strip().lower()
+        try:
+            return FeedbackStatus(text)
+        except Exception:
+            return None
+
+    def _feedback_processing_event_stats(
+        self,
+        sdt: datetime,
+        edt: datetime,
+        major_ids: list[int] | None = None,
+        actor_ids: list[int] | None = None,
+    ) -> dict:
+        """
+        处理反馈统计口径（统一）：
+        仅当状态从“非终态”切换到“已处理/已关闭”时计 1 次。
+        终态定义：resolved / closed
+        """
+        if major_ids is not None and len(major_ids) == 0:
+            return {"total": 0, "by_actor": {}, "by_day": {}}
+
+        feedback_ids: list[int] | None = None
+        if major_ids is not None:
+            feedback_ids = [x[0] for x in self.db.query(FeedbackRecord.id).filter(FeedbackRecord.major_version_id.in_(major_ids)).all()]
+            if not feedback_ids:
+                return {"total": 0, "by_actor": {}, "by_day": {}}
+
+        q = (
+            self.db.query(AuditLog)
+            .filter(
+                AuditLog.target_type == "feedback",
+                AuditLog.action.in_(["feedback.status", "feedback.handle"]),
+                AuditLog.created_at <= edt,
+                AuditLog.target_id.isnot(None),
+                AuditLog.actor_id.isnot(None),
+            )
+            .order_by(AuditLog.target_id.asc(), AuditLog.created_at.asc(), AuditLog.id.asc())
+        )
+        if actor_ids:
+            q = q.filter(AuditLog.actor_id.in_(actor_ids))
+        if feedback_ids is not None:
+            q = q.filter(AuditLog.target_id.in_([str(fid) for fid in feedback_ids]))
+
+        logs = q.all()
+        terminal = {FeedbackStatus.RESOLVED, FeedbackStatus.CLOSED}
+        prev_status_map: dict[str, FeedbackStatus] = {}
+        by_actor: dict[int, int] = {}
+        by_day: dict[str, int] = {}
+        total = 0
+
+        for log in logs:
+            fid = (log.target_id or "").strip()
+            if not fid:
+                continue
+            new_status = self._parse_feedback_status_from_audit_detail(log.detail)
+            if not new_status:
+                continue
+            prev_status = prev_status_map.get(fid, FeedbackStatus.PENDING)
+            if log.created_at >= sdt and new_status in terminal and prev_status not in terminal:
+                total += 1
+                if log.actor_id:
+                    by_actor[log.actor_id] = by_actor.get(log.actor_id, 0) + 1
+                day_key = log.created_at.date().isoformat()
+                by_day[day_key] = by_day.get(day_key, 0) + 1
+            prev_status_map[fid] = new_status
+
+        return {"total": total, "by_actor": by_actor, "by_day": by_day}
 
     def summary(
         self,
@@ -61,6 +135,14 @@ class ReportService:
                 v.id for v in self.db.query(Version.id).filter(Version.version_type == VersionType.MAJOR, Version.software_id == software_id).all()
             ]
             scoped_major_ids = [x[0] if isinstance(x, tuple) else x for x in scoped_major_ids]
+
+        actor_scope_ids = team_ids if all_users_mode else [target_user_id]
+        processed_feedback_stats = self._feedback_processing_event_stats(
+            sdt=sdt,
+            edt=edt,
+            major_ids=scoped_major_ids,
+            actor_ids=actor_scope_ids,
+        )
 
         def filter_by_major_ids(query, column):
             if scoped_major_ids is None:
@@ -106,14 +188,7 @@ class ReportService:
                 FeedbackRecord.created_at <= edt,
             )
             created_feedbacks = filter_by_major_ids(created_feedbacks, FeedbackRecord.major_version_id).scalar() or 0
-            processed_feedbacks = self.db.query(func.count(FeedbackRecord.id)).filter(
-                FeedbackRecord.handled_by_id == uid,
-                FeedbackRecord.handled_at.isnot(None),
-                FeedbackRecord.handled_at >= sdt,
-                FeedbackRecord.handled_at <= edt,
-                FeedbackRecord.status.in_([FeedbackStatus.RESOLVED, FeedbackStatus.CLOSED]),
-            )
-            processed_feedbacks = filter_by_major_ids(processed_feedbacks, FeedbackRecord.major_version_id).scalar() or 0
+            processed_feedbacks = processed_feedback_stats["by_actor"].get(uid, 0)
             return {
                 "executed_requirements": executed_req_count,
                 "created_cases": case_count,
@@ -155,13 +230,6 @@ class ReportService:
                 FeedbackRecord.created_at <= edt,
                 FeedbackRecord.creator_id.in_(team_ids),
             )
-            q_fb_processed = self.db.query(func.count(FeedbackRecord.id)).filter(
-                FeedbackRecord.handled_at.isnot(None),
-                FeedbackRecord.handled_at >= sdt,
-                FeedbackRecord.handled_at <= edt,
-                FeedbackRecord.handled_by_id.in_(team_ids),
-                FeedbackRecord.status.in_([FeedbackStatus.RESOLVED, FeedbackStatus.CLOSED]),
-            )
             overview = {
                 "executed_requirements": filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0,
                 "created_cases": filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0,
@@ -169,7 +237,7 @@ class ReportService:
                 "retested_reqs": filter_by_major_ids(q_retest, Requirement.major_version_id).scalar() or 0,
                 "closed_bugs": filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0,
                 "created_feedbacks": filter_by_major_ids(q_fb_created, FeedbackRecord.major_version_id).scalar() or 0,
-                "processed_feedbacks": filter_by_major_ids(q_fb_processed, FeedbackRecord.major_version_id).scalar() or 0,
+                "processed_feedbacks": processed_feedback_stats["total"],
             }
         else:
             overview = metrics_for_user(target_user_id)
@@ -212,20 +280,13 @@ class ReportService:
                     FeedbackRecord.created_at <= day_e,
                     FeedbackRecord.creator_id.in_(team_ids),
                 )
-                q_fb_processed = self.db.query(func.count(FeedbackRecord.id)).filter(
-                    FeedbackRecord.handled_at.isnot(None),
-                    FeedbackRecord.handled_at >= day_s,
-                    FeedbackRecord.handled_at <= day_e,
-                    FeedbackRecord.handled_by_id.in_(team_ids),
-                    FeedbackRecord.status.in_([FeedbackStatus.RESOLVED, FeedbackStatus.CLOSED]),
-                )
                 day_exec = filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0
                 day_case = filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0
                 day_bug = filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0
                 day_retested = filter_by_major_ids(q_retested, Requirement.major_version_id).scalar() or 0
                 day_closed = filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0
                 day_fb_created = filter_by_major_ids(q_fb_created, FeedbackRecord.major_version_id).scalar() or 0
-                day_fb_processed = filter_by_major_ids(q_fb_processed, FeedbackRecord.major_version_id).scalar() or 0
+                day_fb_processed = processed_feedback_stats["by_day"].get(cur.isoformat(), 0)
             else:
                 q_exec = (
                     self.db.query(func.count(func.distinct(TestExecution.requirement_id)))
@@ -259,20 +320,13 @@ class ReportService:
                     FeedbackRecord.created_at <= day_e,
                     FeedbackRecord.creator_id == target_user_id,
                 )
-                q_fb_processed = self.db.query(func.count(FeedbackRecord.id)).filter(
-                    FeedbackRecord.handled_at.isnot(None),
-                    FeedbackRecord.handled_at >= day_s,
-                    FeedbackRecord.handled_at <= day_e,
-                    FeedbackRecord.handled_by_id == target_user_id,
-                    FeedbackRecord.status.in_([FeedbackStatus.RESOLVED, FeedbackStatus.CLOSED]),
-                )
                 day_exec = filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0
                 day_case = filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0
                 day_bug = filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0
                 day_retested = filter_by_major_ids(q_retested, Requirement.major_version_id).scalar() or 0
                 day_closed = filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0
                 day_fb_created = filter_by_major_ids(q_fb_created, FeedbackRecord.major_version_id).scalar() or 0
-                day_fb_processed = filter_by_major_ids(q_fb_processed, FeedbackRecord.major_version_id).scalar() or 0
+                day_fb_processed = processed_feedback_stats["by_day"].get(cur.isoformat(), 0)
             trend.append({
                 "date": cur.isoformat(),
                 "executed_requirements": day_exec,

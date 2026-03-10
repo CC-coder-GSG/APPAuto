@@ -71,11 +71,12 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
           { name: '执行需求', max: Math.max(10, data.overview.executed_requirements || 0) },
           { name: '创建用例', max: Math.max(10, data.overview.created_cases || 0) },
           { name: '创建Bug', max: Math.max(10, data.overview.created_bugs || 0) },
+          { name: '处理反馈', max: Math.max(10, data.overview.processed_feedbacks || 0) },
           { name: '复测需求', max: Math.max(10, data.overview.retested_reqs || 0) },
           { name: '关闭Bug', max: Math.max(10, data.overview.closed_bugs || 0) },
         ],
       },
-      series: [{ type: 'radar', data: [{ value: [data.overview.executed_requirements || 0, data.overview.created_cases || 0, data.overview.created_bugs || 0, data.overview.retested_reqs || 0, data.overview.closed_bugs || 0], name: '指标' }] }],
+      series: [{ type: 'radar', data: [{ value: [data.overview.executed_requirements || 0, data.overview.created_cases || 0, data.overview.created_bugs || 0, data.overview.processed_feedbacks || 0, data.overview.retested_reqs || 0, data.overview.closed_bugs || 0], name: '指标' }] }],
     });
     radar?.resize();
   }
@@ -87,13 +88,14 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
       title: { text: '团队对比（全员模式）' },
       tooltip: { trigger: 'axis' },
       grid: { top: 60, bottom: 40, left: 50, right: 30 },
-      legend: { data: ['执行需求', '创建用例', '创建Bug', '复测需求', '关闭Bug'], top: 30 },
+      legend: { data: ['执行需求', '创建用例', '创建Bug', '处理反馈', '复测需求', '关闭Bug'], top: 30 },
       xAxis: { type: 'category', data: team.map((i) => i.username) },
       yAxis: { type: 'value' },
       series: [
         { name: '执行需求', type: 'bar', data: team.map((i) => i.executed_requirements || 0) },
         { name: '创建用例', type: 'bar', data: team.map((i) => i.created_cases || 0) },
         { name: '创建Bug', type: 'bar', data: team.map((i) => i.created_bugs || 0) },
+        { name: '处理反馈', type: 'bar', data: team.map((i) => i.processed_feedbacks || 0) },
         { name: '复测需求', type: 'bar', data: team.map((i) => i.retested_reqs || 0) },
         { name: '关闭Bug', type: 'bar', data: team.map((i) => i.closed_bugs || 0) },
       ],
