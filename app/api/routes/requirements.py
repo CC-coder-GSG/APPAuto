@@ -230,14 +230,14 @@ async def assign_and_publish(payload: AssignPublishPayload, current_user=Depends
 
     if result.get("change_msgs"):
         md = (
-            "### ?? ?????????\n"
-            f"> ????**{major_text}**\n\n"
+            "### 📢 需求负责人变更通知\n"
+            f"> 大版本：**{major_text}**\n\n"
             + "\n".join(result["change_msgs"])
-            + "\n\n*??????????????????????????????*"
+            + "\n\n*提示：移交需求已自动重置完成状态，请新负责人重新校验并勾选。*"
         )
         await send_markdown(md)
     else:
-        await send_markdown(f"? ???????????\n> ????**{major_text}**")
+        await send_markdown(f"✅ 需求分配状态已更新发布\n> 大版本：**{major_text}**")
     return {"message": result.get("message", "Assignments updated")}
 
 

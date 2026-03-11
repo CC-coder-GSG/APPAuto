@@ -1,16 +1,18 @@
 ﻿import { state } from '../state.js';
 
 function reqStatusZh(v) {
+  const raw = String(v || '').trim();
+  const key = raw.includes('.') ? raw.split('.').pop().toLowerCase() : raw.toLowerCase();
   const m = {
-    pending: '???',
-    assigned: '???',
-    case_done: '????',
-    testing: '???',
-    test_done: '????',
-    retest_pending: '???',
-    retest_done: '????',
+    pending: '待开始',
+    assigned: '已分配',
+    case_done: '用例完成',
+    testing: '测试中',
+    test_done: '测试完成',
+    retest_pending: '待复测',
+    retest_done: '复测完成',
   };
-  return m[v] || v;
+  return m[key] || raw;
 }
 
 function initChart(key, elementId) {
@@ -182,12 +184,27 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
     }],
   });
 
-  const execMap = { passed: '✅通过', failed: '❌失败', blocked: '⛔阻塞', untested: '⏳未测' };
+  const execMap = {
+    passed: '✅通过',
+    failed: '❌失败',
+    blocked: '⛔阻塞',
+    partial: '🟨部分完成',
+    untested: '⏳未测',
+  };
   initChart('execChart', 'execChart')?.setOption({
     title: { text: '用例执行结果分布', left: 'center', textStyle: { fontSize: 15 } },
     tooltip: { trigger: 'item', formatter: '{b}: {c}个 ({d}%)' },
     legend: { top: 'bottom' },
-    series: [{ type: 'pie', radius: '60%', center: ['50%', '50%'], data: advancedData.executions.map((e) => ({ name: execMap[e.status] || e.status, value: e.count })) }],
+    series: [{
+      type: 'pie',
+      radius: '60%',
+      center: ['50%', '50%'],
+      data: advancedData.executions.map((e) => {
+        const raw = String(e.status || '').trim();
+        const key = raw.includes('.') ? raw.split('.').pop().toLowerCase() : raw.toLowerCase();
+        return { name: execMap[key] || raw, value: e.count };
+      }),
+    }],
   });
 
 }
