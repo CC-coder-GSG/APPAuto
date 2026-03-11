@@ -120,7 +120,8 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
 
   const vbData = helpers.versionBugs || [];
   const hasVersionBugData = vbData.length > 0;
-  initChart('versionBugChart', 'versionBugChart')?.setOption({
+  const versionBugChart = initChart('versionBugChart', 'versionBugChart');
+  versionBugChart?.setOption({
     title: { text: '各发包(小版本) Bug 检出分布', textStyle: { fontSize: 15, color: '#334155' } },
     tooltip: { trigger: 'axis' },
     grid: { top: 60, bottom: '15%' },
@@ -145,7 +146,7 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
           fontWeight: 600,
         },
       }],
-  });
+  }, { replaceMerge: ['graphic'] });
 
   initChart('topReqChart', 'topReqChart')?.setOption({
     title: { text: '需求质量“刺客”排行榜 (Top 7)', textStyle: { fontSize: 15 } },
