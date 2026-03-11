@@ -90,6 +90,44 @@ def list_requirements(major_version_id: int = Query(...), db: Session = Depends(
     service = RequirementService(db)
     return service.list_requirements(major_version_id)
 
+@router.get("/requirements/admin/list")
+def admin_list_requirements(
+    major_version_id: Optional[int] = None,
+    software_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_admin(current_user)
+    q = (
+        db.query(Requirement)
+        .options(joinedload(Requirement.owner), joinedload(Requirement.retester), joinedload(Requirement.test_cases), joinedload(Requirement.major_version))
+        .order_by(Requirement.major_version_id.asc(), Requirement.id.asc())
+    )
+    if major_version_id:
+        q = q.filter(Requirement.major_version_id == major_version_id)
+    elif software_id:
+        q = q.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
+
+    rows = q.all()
+    return [
+        {
+            "id": r.id,
+            "zentao_req_id": r.zentao_req_id,
+            "title": r.title,
+            "owner": r.owner.shown_name if r.owner else None,
+            "owner_id": r.owner_id,
+            "case_completed": r.case_completed,
+            "test_completed": r.test_completed,
+            "retest_completed": r.retest_completed,
+            "retested_by": r.retester.shown_name if r.retester else None,
+            "status": r.status,
+            "case_ids": [c.zentao_case_id for c in r.test_cases],
+            "major_version_id": r.major_version_id,
+            "major_version_name": r.major_version.version_no if r.major_version else "未知",
+        }
+        for r in rows
+    ]
+
 
 @router.get("/requirements/admin/progress")
 def admin_requirements_progress(

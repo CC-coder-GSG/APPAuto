@@ -97,14 +97,16 @@ function renderAssignProgress(data) {
 
 export async function loadAssignBoard() {
   const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
-  if (!majorId) {
-    window.showMessage && window.showMessage('请选择大版本', 'error');
-    return;
-  }
+  const sid = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
   if (getUsers().length === 0 && typeof window.loadUsers === 'function') {
     await window.loadUsers();
   }
-  state.assignReqs = await (await api('/requirements?major_version_id=' + majorId)).json();
+  let reqUrl = '/requirements/admin/list';
+  const reqParams = [];
+  if (majorId) reqParams.push('major_version_id=' + majorId);
+  if (sid) reqParams.push('software_id=' + sid);
+  if (reqParams.length) reqUrl += '?' + reqParams.join('&');
+  state.assignReqs = await (await api(reqUrl)).json();
   window.assignReqs = state.assignReqs;
   const assignTable = document.getElementById('assignTable');
   if (!assignTable) return;
@@ -143,6 +145,10 @@ export function toggleAssignProgressPendingOnly() {
 export async function publishAssign() {
   if (!(window.confirmPush && window.confirmPush())) return;
   const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
+  if (!majorId) {
+    window.showMessage && window.showMessage('“全部版本”仅用于查看；发布分配前请先选择一个具体大版本', 'error');
+    return;
+  }
   const assignments = state.assignReqs.map((r) => ({
     requirement_id: r.id,
     owner_id: Number(document.getElementById('o_' + r.id)?.value || 0) || null,

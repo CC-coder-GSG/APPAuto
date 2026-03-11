@@ -73,7 +73,7 @@
 
   <section id="tab-assign" class="hidden card">
     <h2>任务分配台（仅管理员）</h2>
-    <div class="row"><label>大版本</label><select id="assignMajorSelect"></select><button onclick="loadAssignBoard()">加载</button><button onclick="publishAssign()">一键发布（更新分配）</button></div>
+    <div class="row"><label>大版本</label><select id="assignMajorSelect" onchange="loadAssignBoard()"></select><button onclick="loadAssignBoard()">加载</button><button onclick="publishAssign()">一键发布（更新分配）</button></div>
     <table><thead><tr><th>需求</th><th>负责人</th></tr></thead><tbody id="assignTable"></tbody></table>
     <div class="card" style="margin-top:16px; border:1px solid #e2e8f0; background:#f8fafc;">
       <h3 style="margin-top:0; color:#1e293b;">任务进行状态</h3>
@@ -692,7 +692,13 @@ async function loadVersions(){
 }
 function fillVersionSelects(){
   const majors=versions.filter(v=>v.version_type==='major');
-  ['assignMajorSelect','mineMajorSelect','retestMajorSelect','s5MajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
+  ['mineMajorSelect','retestMajorSelect','s5MajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
+  const assignMajorEl=document.getElementById('assignMajorSelect');
+  if(assignMajorEl){
+    assignMajorEl.innerHTML = majors.length
+      ? "<option value='0'>全部版本</option>" + majors.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('')
+      : "<option value='0'>全部版本</option>";
+  }
   const feedbackMajorEl=document.getElementById('feedbackMajorSelect');
   if(feedbackMajorEl){
     feedbackMajorEl.innerHTML = majors.length
