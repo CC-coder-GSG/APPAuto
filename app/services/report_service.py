@@ -103,6 +103,84 @@ class ReportService:
 
         return {"total": total, "by_actor": by_actor, "by_day": by_day}
 
+    def _parse_retest_passed_from_detail(self, detail: str | None) -> bool | None:
+        if not detail:
+            return None
+        text = (detail or "").strip().lower()
+        # 兼容审计 detail 形如: passed=True,minor=12
+        for part in text.split(","):
+            p = part.strip()
+            if p.startswith("passed="):
+                val = p.split("=", 1)[1].strip()
+                if val in {"true", "1", "yes", "y"}:
+                    return True
+                if val in {"false", "0", "no", "n"}:
+                    return False
+        return None
+
+    def _retest_transition_stats(
+        self,
+        sdt: datetime,
+        edt: datetime,
+        major_ids: list[int] | None = None,
+        actor_ids: list[int] | None = None,
+    ) -> dict:
+        """
+        复测计次口径（统一）：
+        - 基于审计事件 retest.submit
+        - 同一需求仅在“复测结论(passed)发生变化”时计次
+        - 首次有效提交计 1 次
+        """
+        if major_ids is not None and len(major_ids) == 0:
+            return {"total": 0, "by_actor": {}, "by_day": {}}
+
+        req_ids: list[int] | None = None
+        if major_ids is not None:
+            req_ids = [x[0] for x in self.db.query(Requirement.id).filter(Requirement.major_version_id.in_(major_ids)).all()]
+            if not req_ids:
+                return {"total": 0, "by_actor": {}, "by_day": {}}
+
+        q = (
+            self.db.query(AuditLog)
+            .filter(
+                AuditLog.target_type == "requirement",
+                AuditLog.action == "retest.submit",
+                AuditLog.created_at <= edt,
+                AuditLog.target_id.isnot(None),
+                AuditLog.actor_id.isnot(None),
+            )
+            .order_by(AuditLog.target_id.asc(), AuditLog.created_at.asc(), AuditLog.id.asc())
+        )
+        if actor_ids:
+            q = q.filter(AuditLog.actor_id.in_(actor_ids))
+        if req_ids is not None:
+            q = q.filter(AuditLog.target_id.in_([str(rid) for rid in req_ids]))
+
+        logs = q.all()
+        prev_passed: dict[str, bool] = {}
+        by_actor: dict[int, int] = {}
+        by_day: dict[str, int] = {}
+        total = 0
+
+        for log in logs:
+            rid = (log.target_id or "").strip()
+            if not rid:
+                continue
+            passed = self._parse_retest_passed_from_detail(log.detail)
+            if passed is None:
+                continue
+            prev = prev_passed.get(rid)
+            changed = prev is None or prev != passed
+            if changed and log.created_at >= sdt:
+                total += 1
+                if log.actor_id:
+                    by_actor[log.actor_id] = by_actor.get(log.actor_id, 0) + 1
+                day_key = log.created_at.date().isoformat()
+                by_day[day_key] = by_day.get(day_key, 0) + 1
+            prev_passed[rid] = passed
+
+        return {"total": total, "by_actor": by_actor, "by_day": by_day}
+
     def summary(
         self,
         start_date: date,
@@ -143,6 +221,12 @@ class ReportService:
             major_ids=scoped_major_ids,
             actor_ids=actor_scope_ids,
         )
+        retest_transition_stats = self._retest_transition_stats(
+            sdt=sdt,
+            edt=edt,
+            major_ids=scoped_major_ids,
+            actor_ids=actor_scope_ids,
+        )
 
         def filter_by_major_ids(query, column):
             if scoped_major_ids is None:
@@ -166,10 +250,7 @@ class ReportService:
             case_count = filter_by_major_ids(case_count, Requirement.major_version_id).scalar() or 0
             bug_count = self.db.query(func.count(BugTracking.id)).filter(BugTracking.created_by_id == uid, BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
             bug_count = filter_by_major_ids(bug_count, BugTracking.major_version_id).scalar() or 0
-            retested_reqs = self.db.query(func.count(Requirement.id)).filter(
-                Requirement.retested_by_id == uid, Requirement.retested_at >= sdt, Requirement.retested_at <= edt
-            )
-            retested_reqs = filter_by_major_ids(retested_reqs, Requirement.major_version_id).scalar() or 0
+            retested_reqs = retest_transition_stats["by_actor"].get(uid, 0)
             closed_bugs = (
                 self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
                 .join(BugTracking, BugStage5Record.bug_tracking_id == BugTracking.id)
@@ -211,9 +292,6 @@ class ReportService:
                 .filter(TestCase.created_at >= sdt, TestCase.created_at <= edt, TestCase.creator_id.in_(team_ids))
             )
             q_bug = self.db.query(func.count(BugTracking.id)).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt, BugTracking.created_by_id.in_(team_ids))
-            q_retest = self.db.query(func.count(Requirement.id)).filter(
-                Requirement.retested_at >= sdt, Requirement.retested_at <= edt, Requirement.retested_by_id.in_(team_ids)
-            )
             q_closed = (
                 self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
                 .join(BugTracking, BugStage5Record.bug_tracking_id == BugTracking.id)
@@ -234,7 +312,7 @@ class ReportService:
                 "executed_requirements": filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0,
                 "created_cases": filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0,
                 "created_bugs": filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0,
-                "retested_reqs": filter_by_major_ids(q_retest, Requirement.major_version_id).scalar() or 0,
+                "retested_reqs": retest_transition_stats["total"],
                 "closed_bugs": filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0,
                 "created_feedbacks": filter_by_major_ids(q_fb_created, FeedbackRecord.major_version_id).scalar() or 0,
                 "processed_feedbacks": processed_feedback_stats["total"],
@@ -261,9 +339,6 @@ class ReportService:
                 q_bug = self.db.query(func.count(BugTracking.id)).filter(
                     BugTracking.created_at >= day_s, BugTracking.created_at <= day_e, BugTracking.created_by_id.in_(team_ids)
                 )
-                q_retested = self.db.query(func.count(Requirement.id)).filter(
-                    Requirement.retested_at >= day_s, Requirement.retested_at <= day_e, Requirement.retested_by_id.in_(team_ids)
-                )
                 q_closed = (
                     self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
                     .join(BugTracking, BugStage5Record.bug_tracking_id == BugTracking.id)
@@ -283,7 +358,7 @@ class ReportService:
                 day_exec = filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0
                 day_case = filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0
                 day_bug = filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0
-                day_retested = filter_by_major_ids(q_retested, Requirement.major_version_id).scalar() or 0
+                day_retested = retest_transition_stats["by_day"].get(cur.isoformat(), 0)
                 day_closed = filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0
                 day_fb_created = filter_by_major_ids(q_fb_created, FeedbackRecord.major_version_id).scalar() or 0
                 day_fb_processed = processed_feedback_stats["by_day"].get(cur.isoformat(), 0)
@@ -300,9 +375,6 @@ class ReportService:
                 )
                 q_bug = self.db.query(func.count(BugTracking.id)).filter(
                     BugTracking.created_by_id == target_user_id, BugTracking.created_at >= day_s, BugTracking.created_at <= day_e
-                )
-                q_retested = self.db.query(func.count(Requirement.id)).filter(
-                    Requirement.retested_by_id == target_user_id, Requirement.retested_at >= day_s, Requirement.retested_at <= day_e
                 )
                 q_closed = (
                     self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
@@ -323,7 +395,7 @@ class ReportService:
                 day_exec = filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0
                 day_case = filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0
                 day_bug = filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0
-                day_retested = filter_by_major_ids(q_retested, Requirement.major_version_id).scalar() or 0
+                day_retested = retest_transition_stats["by_day"].get(cur.isoformat(), 0)
                 day_closed = filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0
                 day_fb_created = filter_by_major_ids(q_fb_created, FeedbackRecord.major_version_id).scalar() or 0
                 day_fb_processed = processed_feedback_stats["by_day"].get(cur.isoformat(), 0)

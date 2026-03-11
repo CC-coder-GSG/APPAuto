@@ -75,6 +75,10 @@
     <h2>任务分配台（仅管理员）</h2>
     <div class="row"><label>大版本</label><select id="assignMajorSelect"></select><button onclick="loadAssignBoard()">加载</button><button onclick="publishAssign()">一键发布（更新分配）</button></div>
     <table><thead><tr><th>需求</th><th>负责人</th></tr></thead><tbody id="assignTable"></tbody></table>
+    <div class="card" style="margin-top:16px; border:1px solid #e2e8f0; background:#f8fafc;">
+      <h3 style="margin-top:0; color:#1e293b;">任务进行状态</h3>
+      <div id="assignProgressArea"></div>
+    </div>
   </section>
 
   <section id="tab-mine" class="hidden card">
@@ -196,7 +200,14 @@
   <section id="tab-retest" class="hidden card">
     <h2>复测工作台 (交叉验证)</h2>
     <div class="row" style="margin-bottom: 16px;">
-      <label>大版本</label><select id="retestMajorSelect"></select>
+      <label>查看模式</label>
+      <select id="retestDisplayMode" onchange="toggleRetestMode()">
+        <option value="version">按大版本查看</option>
+        <option value="all_pending">查看所有待复测需求</option>
+      </select>
+      <span id="retestVersionWrap" class="row" style="display:flex;">
+        <label>大版本</label><select id="retestMajorSelect"></select>
+      </span>
       <button onclick="loadRetest()">加载待复测需求</button>
       <label style="margin-left:16px; border-left:1px solid #cbd5e1; padding-left:16px;">当前复测发包(小版本)</label>
       <select id="retestMinorSelect"></select>
@@ -739,7 +750,11 @@ function bindMajorMinorCascade(){
       if(majorId==='retestMajorSelect'){
         const tab=document.getElementById('tab-retest');
         if(tab && !tab.classList.contains('hidden')){
-          try{ await loadRetest(); }catch(err){ showMessage(err.message||'加载待复测需求失败','error'); }
+          const modeEl=document.getElementById('retestDisplayMode');
+          const mode=modeEl?modeEl.value:'version';
+          if(mode==='version'){
+            try{ await loadRetest(); }catch(err){ showMessage(err.message||'加载待复测需求失败','error'); }
+          }
         }
       }
       if(majorId==='s5MajorSelect'){
@@ -813,6 +828,11 @@ async function confirmImport() {
 
 async function loadAssignBoard(){
   return window.OmniQAAssignTab.loadAssignBoard();
+}
+function toggleAssignProgressPendingOnly(){
+  if(window.OmniQAAssignTab && typeof window.OmniQAAssignTab.toggleAssignProgressPendingOnly==='function'){
+    return window.OmniQAAssignTab.toggleAssignProgressPendingOnly();
+  }
 }
 
 async function publishAssign(){
@@ -975,6 +995,12 @@ async function loadRetest(){
 
 function renderRetestCards() {
   return window.OmniQARetestTab.loadRetest();
+}
+
+async function toggleRetestMode(){
+  if(window.OmniQARetestTab && typeof window.OmniQARetestTab.toggleRetestMode==='function'){
+    return window.OmniQARetestTab.toggleRetestMode();
+  }
 }
 
 async function setRetest(id, passed, hasEvidence){

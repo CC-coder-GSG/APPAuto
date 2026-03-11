@@ -3,6 +3,7 @@ export const state = {
   users: [],
   versions: [],
   assignReqs: [],
+  assignProgressData: null,
   reportLoaded: false,
   dataOverviewCache: null,
   dataViewState: { showUsers: true, showVersions: true },

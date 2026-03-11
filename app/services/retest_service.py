@@ -13,19 +13,35 @@ class RetestService:
     def __init__(self, db: Session):
         self.db = db
 
-    def get_workbench(self, major_version_id: int, current_user: User) -> list[dict]:
-        reqs = (
+    def get_workbench(
+        self,
+        current_user: User,
+        *,
+        major_version_id: int | None = None,
+        mode: str = "version",
+        software_id: int | None = None,
+    ) -> list[dict]:
+        q = (
             self.db.query(Requirement)
-            .options(joinedload(Requirement.owner), joinedload(Requirement.test_cases), joinedload(Requirement.retester))
+            .options(joinedload(Requirement.owner), joinedload(Requirement.test_cases), joinedload(Requirement.retester), joinedload(Requirement.major_version))
             .filter(
-                Requirement.major_version_id == major_version_id,
                 Requirement.test_completed.is_(True),
                 Requirement.owner_id.isnot(None),
                 Requirement.owner_id != current_user.id,
             )
-            .order_by(Requirement.id.asc())
-            .all()
         )
+        if mode == "version":
+            if not major_version_id:
+                return []
+            q = q.filter(Requirement.major_version_id == major_version_id)
+        elif mode == "all_pending":
+            q = q.filter(Requirement.retest_completed.is_(False))
+            if software_id:
+                q = q.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
+        else:
+            raise HTTPException(status_code=400, detail="mode only supports version/all_pending")
+
+        reqs = q.order_by(Requirement.id.asc()).all()
 
         minors = {v.id: v.version_no for v in self.db.query(Version).filter(Version.version_type == VersionType.MINOR).all()}
         req_ids = [r.id for r in reqs]
@@ -83,6 +99,8 @@ class RetestService:
                 "id": r.id,
                 "zentao_req_id": r.zentao_req_id,
                 "title": r.title,
+                "major_version_id": r.major_version_id,
+                "major_version_name": r.major_version.version_no if r.major_version else "未知",
                 "owner": r.owner.shown_name if r.owner else None,
                 "retest_completed": r.retest_completed,
                 "retest_passed": r.retest_passed,

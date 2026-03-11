@@ -1,20 +1,62 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { withPrefix, sourceTypeZh } from '../utils.js';
+import { withPrefix } from '../utils.js';
+
+function getRetestMode() {
+  return document.getElementById('retestDisplayMode')?.value || 'version';
+}
+
+function syncRetestMinorOptionsByMode() {
+  const mode = getRetestMode();
+  const minorSel = document.getElementById('retestMinorSelect');
+  const majorWrap = document.getElementById('retestVersionWrap');
+  if (!minorSel) return;
+
+  if (majorWrap) majorWrap.style.display = mode === 'version' ? 'flex' : 'none';
+
+  if (mode === 'all_pending') {
+    const allMinors = (window.versions || []).filter((v) => v.version_type === 'minor');
+    if (allMinors.length === 0) {
+      minorSel.innerHTML = "<option value=''>暂无子版本</option>";
+      return;
+    }
+    const prev = minorSel.value;
+    minorSel.innerHTML = allMinors.map((v) => `<option value='${v.id}'>${v.version_no}</option>`).join('');
+    if (prev) minorSel.value = prev;
+    if (!minorSel.value && allMinors[0]) minorSel.value = String(allMinors[0].id);
+    return;
+  }
+
+  if (typeof window.fillMinorSelectByMajor === 'function') {
+    window.fillMinorSelectByMajor('retestMajorSelect', 'retestMinorSelect');
+  }
+}
+
+export function toggleRetestMode() {
+  syncRetestMinorOptionsByMode();
+  return loadRetest();
+}
 
 export async function loadRetest() {
+  syncRetestMinorOptionsByMode();
+  const mode = getRetestMode();
   const majorId = Number(document.getElementById('retestMajorSelect')?.value || 0);
-  if (!majorId) {
+  if (mode === 'version' && !majorId) {
     window.showMessage && window.showMessage('请选择大版本', 'error');
     return;
   }
-  const data = await (await api('/retest/workbench?major_version_id=' + majorId)).json();
+  const sid = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+  let url = '/retest/workbench?mode=' + mode;
+  if (mode === 'version' && majorId) url += '&major_version_id=' + majorId;
+  if (sid) url += '&software_id=' + sid;
+
+  const data = await (await api(url)).json();
   state.currentRetestData = data;
 
   const container = document.getElementById('retestCardsArea');
   if (!container) return;
   if (!data || data.length === 0) {
-    container.innerHTML = '<div class="muted" style="padding: 20px; text-align: center; background: #f8fafc; border-radius: 8px;">🎉 当前大版本下没有需要您复测的需求（仅显示其他同事已完成测试的需求）</div>';
+    container.innerHTML = '<div class="muted" style="padding: 20px; text-align: center; background: #f8fafc; border-radius: 8px;">🎉 当前筛选条件下没有需要您复测的需求</div>';
     return;
   }
 
@@ -60,6 +102,7 @@ export async function loadRetest() {
         <summary style="outline:none; cursor:pointer; list-style:none; display: flex; justify-content: space-between; align-items: center; border-bottom: ${isCompleted ? 'none' : '1px dashed #cbd5e1'}; padding-bottom: ${isCompleted ? '0' : '12px'}; margin-bottom: ${isCompleted ? '0' : '12px'};">
           <div>
             <span style="font-size: 16px; font-weight: bold; color: ${isCompleted ? '#94a3b8; text-decoration:line-through;' : '#0f172a'};">📄 ${req.zentao_req_id} ${req.title}</span>
+            ${mode === 'all_pending' ? `<span class="badge" style="margin-left:8px; background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd;">🏷️${req.major_version_name || '未知版本'}</span>` : ''}
             <span class="badge" style="margin-left: 12px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;">👤 原测试人: ${req.owner || '未知'}</span>
             <span style="margin-left:8px;">${statusTag}</span>
           </div>
@@ -144,8 +187,12 @@ export async function addRetestBug(reqId) {
 
 export async function pushRetest() {
   if (!(window.confirmPush && window.confirmPush())) return;
+  if (getRetestMode() !== 'version') {
+    window.showMessage && window.showMessage('查看所有待复测需求模式下不支持一键推送，请切换到按大版本查看后再推送', 'error');
+    return;
+  }
   await api(`/push/retest-result?major_version_id=${Number(document.getElementById('retestMajorSelect')?.value || 0)}`, { method: 'POST' });
   window.showMessage && window.showMessage('复测结果已推送');
 }
 
-window.OmniQARetestTab = { loadRetest, setRetest, toggleBugFail, addRetestBug, pushRetest };
+window.OmniQARetestTab = { loadRetest, toggleRetestMode, setRetest, toggleBugFail, addRetestBug, pushRetest };
