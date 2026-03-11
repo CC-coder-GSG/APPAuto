@@ -72,6 +72,29 @@ export async function saveS5(id) {
   await loadStage5();
 }
 
+export async function editS5Bug(id, oldBugId) {
+  const num = prompt('请输入正确的 Bug 数字部分：', String(oldBugId || '').replace('b#', ''));
+  if (!num) return;
+  try {
+    await api('/bugs/' + id + '?new_bug_id=' + encodeURIComponent(withPrefix('b#', num)), { method: 'PUT' });
+    window.showMessage && window.showMessage('Bug 编号已纠正', 'success');
+    await loadStage5();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '更新失败', 'error');
+  }
+}
+
+export async function removeS5Bug(id) {
+  if (!confirm('确定要在该大版本下移除这个 Bug 吗？')) return;
+  try {
+    await api('/bugs/' + id, { method: 'DELETE' });
+    window.showMessage && window.showMessage('Bug 已彻底移除', 'success');
+    await loadStage5();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '删除失败', 'error');
+  }
+}
+
 export async function pushStage5() {
   if (!(window.confirmPush && window.confirmPush())) return;
   const res = await (await api(`/stage5/push-status?major_version_id=${Number(document.getElementById('s5MajorSelect')?.value || 0)}&minor_version_id=${Number(document.getElementById('s5MinorSelect')?.value || 0)}`, { method: 'POST' })).json();
@@ -170,4 +193,6 @@ export async function submitS5Bug() {
   }
 }
 
-window.OmniQAStage5Tab = { loadStage5, renderS5, saveS5, pushStage5, toggleS5BugInputs, loadS5OptionsData, submitS5Bug };
+window.OmniQAStage5Tab = { loadStage5, renderS5, saveS5, editS5Bug, removeS5Bug, pushStage5, toggleS5BugInputs, loadS5OptionsData, submitS5Bug };
+window.editS5Bug = editS5Bug;
+window.removeS5Bug = removeS5Bug;
