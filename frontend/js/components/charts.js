@@ -1,5 +1,18 @@
 ﻿import { state } from '../state.js';
 
+function reqStatusZh(v) {
+  const m = {
+    pending: '???',
+    assigned: '???',
+    case_done: '????',
+    testing: '???',
+    test_done: '????',
+    retest_pending: '???',
+    retest_done: '????',
+  };
+  return m[v] || v;
+}
+
 function initChart(key, elementId) {
   if (typeof echarts === 'undefined') {
     console.error('ECharts failed to load');
@@ -191,7 +204,7 @@ export function renderGovernanceCharts(governanceData) {
       tooltip: { trigger: 'axis' },
       legend: { data: ['平均停留天数', '最大停留天数'], top: 28 },
       grid: { top: 60, bottom: 40, left: 50, right: 30 },
-      xAxis: { type: 'category', data: reqStay.map((i) => i.status) },
+      xAxis: { type: 'category', data: reqStay.map((i) => reqStatusZh(i.status)) },
       yAxis: { type: 'value', minInterval: 1 },
       series: [
         {

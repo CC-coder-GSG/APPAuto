@@ -225,11 +225,19 @@ async def assign_and_publish(payload: AssignPublishPayload, current_user=Depends
         users_map,
         actor_id=current_user.id,
     )
+    major = db.query(Version).filter(Version.id == payload.major_version_id).first()
+    major_text = major.version_no if major else f"ID:{payload.major_version_id}"
+
     if result.get("change_msgs"):
-        md = "### 🔄 需求负责人变更通知\n" + "\n".join(result["change_msgs"]) + "\n\n*提示：移交的需求已自动重置【完成状态】，请新负责人重新校验并打勾。*"
+        md = (
+            "### ?? ?????????\n"
+            f"> ????**{major_text}**\n\n"
+            + "\n".join(result["change_msgs"])
+            + "\n\n*??????????????????????????????*"
+        )
         await send_markdown(md)
     else:
-        await send_markdown("✅ 需求分配状态已整体更新发布")
+        await send_markdown(f"? ???????????\n> ????**{major_text}**")
     return {"message": result.get("message", "Assignments updated")}
 
 
