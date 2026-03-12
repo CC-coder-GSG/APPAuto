@@ -134,6 +134,7 @@ export async function loadAssignBoard() {
       <td>
         <select id='o_${r.id}'>
           <option value=''>未分配</option>
+          ${(r.owner_id && !users.some((u) => Number(u.id) === Number(r.owner_id))) ? `<option value='${r.owner_id}' selected>原负责人(账号不存在 #${r.owner_id})</option>` : ''}
           ${users.map((u) => `<option value='${u.id}' ${u.id === r.owner_id ? 'selected' : ''}>${u.display_name || u.username}</option>`).join('')}
         </select>
       </td>

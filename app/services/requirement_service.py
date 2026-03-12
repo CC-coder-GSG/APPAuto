@@ -156,6 +156,7 @@ class RequirementService:
             r[0]
             for r in self.db.query(Requirement.zentao_req_id).filter(Requirement.major_version_id == target_major_version_id).all()
         }
+        valid_user_ids = {u[0] for u in self.db.query(User.id).all()}
 
         created_count = 0
         skipped_count = 0
@@ -167,11 +168,12 @@ class RequirementService:
 
             try:
                 with self.db.begin_nested():
+                    owner_id = src.owner_id if (src.owner_id in valid_user_ids) else None
                     new_req = Requirement(
                         zentao_req_id=src.zentao_req_id,
                         title=src.title,
                         major_version_id=target_major_version_id,
-                        owner_id=src.owner_id,
+                        owner_id=owner_id,
                         case_completed=src.case_completed if copy_status else False,
                         test_completed=src.test_completed if copy_status else False,
                         retest_completed=False,
@@ -203,7 +205,19 @@ class RequirementService:
                     )
                 created_count += 1
                 existing_ids.add(src.zentao_req_id)
-            except IntegrityError:
+            except IntegrityError as e:
+                err_text = ""
+                try:
+                    err_text = str(e).lower()
+                except Exception:
+                    err_text = ""
+                # 若仍是旧库全局唯一约束，会导致跨版本同需求号全部冲突
+                # 给出明确错误，避免用户看到“都被冲突拦截”但不知道原因。
+                if "requirements.zentao_req_id" in err_text:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="检测到数据库仍使用旧唯一约束（requirements.zentao_req_id 全局唯一），请先重启服务触发自动迁移后再执行关联。",
+                    )
                 # 容错：单条冲突跳过，避免整批失败
                 conflict_count += 1
                 skipped_count += 1
