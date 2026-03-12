@@ -2,8 +2,9 @@
 
 from fastapi import HTTPException
 
-from app.models import BugSourceType, BugTracking, Requirement, TestCase, TestExecution, TestResultStatus, User, UserRole, Version, VersionType
+from app.models import BugSourceType, BugTracking, FieldTestPurposeType, FieldTestResultStatus, Requirement, TestCase, TestExecution, TestResultStatus, User, UserRole, Version, VersionType
 from app.services.report_service import ReportService
+from app.services.field_test_service import FieldTestService
 from app.services.requirement_service import RequirementService
 from scripts.backfill_test_executions import backfill_test_executions
 
@@ -142,3 +143,29 @@ def test_summary_executed_requirements_increased_after_backfill(db_session):
 
     after = service.summary(date(2026, 1, 1), date(2026, 12, 31), user)
     assert after["overview"]["executed_requirements"] == 1
+
+
+def test_bug_source_distribution_includes_field_test(db_session):
+    user = _create_user(db_session, "report_user7")
+    major = _create_major(db_session, "V7400")
+    minor = _create_minor(db_session, major.id, "V7400.1")
+
+    ft = FieldTestService(db_session)
+    ft.create_record(
+        major_version_id=major.id,
+        minor_version_id=minor.id,
+        purpose_type=FieldTestPurposeType.FEATURE,
+        requirement_id=None,
+        test_content="外业功能点",
+        start_time=datetime(2026, 1, 10, 10, 0, 0),
+        end_time=datetime(2026, 1, 10, 11, 0, 0),
+        result_status=FieldTestResultStatus.FAILED,
+        bug_ids=["b#7401"],
+        notes=None,
+        actor=user,
+    )
+
+    service = ReportService(db_session)
+    result = service.summary(date(2026, 1, 1), date(2026, 1, 31), user)
+    source_map = {x["source_type"]: x["count"] for x in result["bug_source_dist"]}
+    assert source_map.get("field_test", 0) >= 1

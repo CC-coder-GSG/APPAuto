@@ -134,3 +134,25 @@ def test_stage5_overview_separates_my_record_and_other_records(db_session):
     assert len(row["other_records"]) == 1
     assert row["other_records"][0]["username"] == other.username
     assert row["other_records"][0]["resolution"] == "rejected"
+
+
+def test_stage5_overview_contains_field_test_source_type(db_session):
+    major = _create_major(db_session, "V6003")
+    minor = _create_minor(db_session, major.id, "V6003.1")
+    me = _create_user(db_session, "stage5_field_user")
+    req = _create_requirement(db_session, major.id)
+    bug = BugTracking(
+        major_version_id=major.id,
+        requirement_id=req.id,
+        source_type=BugSourceType.FIELD_TEST,
+        source_ref="field_test:1",
+        bug_id="b#6006",
+        found_minor_version_id=minor.id,
+        created_by_id=me.id,
+    )
+    db_session.add(bug)
+    db_session.commit()
+
+    service = Stage5Service(db_session)
+    data = service.overview(major.id, me)
+    assert data["bug_pool"][0]["source_type"] == "field_test"

@@ -33,7 +33,7 @@ export function resizeAllCharts() {
 }
 
 export function renderReportCharts(data, advancedData, helpers = {}) {
-  const { sourceTypeZh = (v) => v, isAllUsersMode = false } = helpers;
+  const { sourceTypeZh = (v) => v, isAllUsersMode = false, fieldTestData = null } = helpers;
 
   const x = data.trend.map((i) => i.date);
   const yReq = data.trend.map((i) => i.executed_requirements);
@@ -207,6 +207,65 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
       }),
     }],
   });
+
+  const ft = fieldTestData || { overview: {}, by_day: [], by_purpose: [], by_user: [], mode: 'personal' };
+  const daySeries = (ft.by_day || []).map((x) => x.minutes || 0);
+  const hasDayData = daySeries.some((v) => v > 0);
+  initChart('fieldTestTrendChart', 'fieldTestTrendChart')?.setOption({
+    title: { text: '外业测试时长趋势（分钟）', textStyle: { fontSize: 15 } },
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'category', data: (ft.by_day || []).map((x) => x.date) },
+    yAxis: { type: 'value', minInterval: 1 },
+    series: [{ type: 'line', smooth: true, data: daySeries, lineStyle: { color: '#0ea5e9' }, itemStyle: { color: '#0284c7' } }],
+    graphic: hasDayData ? [] : [{
+      type: 'text',
+      left: 'center',
+      top: 'middle',
+      style: { text: '当前筛选条件下暂无外业测试时长数据', fill: '#94a3b8', fontSize: 13 },
+    }],
+  }, { replaceMerge: ['graphic'] });
+
+  const purposeMap = { requirement: '需求测试', feature: '功能测试' };
+  const purposeRows = ft.by_purpose || [];
+  const hasPurpose = purposeRows.length > 0;
+  initChart('fieldTestPurposeChart', 'fieldTestPurposeChart')?.setOption({
+    title: { text: '外业测试目的分布（时长）', textStyle: { fontSize: 15 } },
+    tooltip: { trigger: 'item' },
+    legend: { top: 'bottom' },
+    series: [{
+      type: 'pie',
+      radius: '58%',
+      center: ['50%', '50%'],
+      data: purposeRows.map((x) => ({ name: purposeMap[x.purpose_type] || x.purpose_type, value: x.minutes || 0 })),
+    }],
+    graphic: hasPurpose ? [] : [{
+      type: 'text',
+      left: 'center',
+      top: 'middle',
+      style: { text: '暂无外业测试目的数据', fill: '#94a3b8', fontSize: 13 },
+    }],
+  }, { replaceMerge: ['graphic'] });
+
+  const userChartEl = document.getElementById('fieldTestUserChart');
+  if (userChartEl) userChartEl.style.display = isAllUsersMode ? '' : 'none';
+  if (isAllUsersMode) {
+    const userRows = (ft.by_user || []).slice().sort((a, b) => (b.minutes || 0) - (a.minutes || 0));
+    const hasUserRows = userRows.length > 0;
+    initChart('fieldTestUserChart', 'fieldTestUserChart')?.setOption({
+      title: { text: '人员外业测试时长对比（分钟）', textStyle: { fontSize: 15 } },
+      tooltip: { trigger: 'axis' },
+      grid: { top: 56, bottom: 40, left: 50, right: 20 },
+      xAxis: { type: 'category', data: userRows.map((x) => x.username) },
+      yAxis: { type: 'value', minInterval: 1 },
+      series: [{ type: 'bar', data: userRows.map((x) => x.minutes || 0), itemStyle: { color: '#06b6d4', borderRadius: [4, 4, 0, 0] } }],
+      graphic: hasUserRows ? [] : [{
+        type: 'text',
+        left: 'center',
+        top: 'middle',
+        style: { text: '暂无人员外业测试数据', fill: '#94a3b8', fontSize: 13 },
+      }],
+    }, { replaceMerge: ['graphic'] });
+  }
 
 }
 

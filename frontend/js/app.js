@@ -10,6 +10,7 @@ import './tabs/feedback.js';
 import './tabs/report.js';
 import './tabs/retest.js';
 import './tabs/stage5.js';
+import './tabs/field-test.js';
 import './tabs/assign.js';
 import './tabs/dispatch.js';
 import './tabs/data.js';

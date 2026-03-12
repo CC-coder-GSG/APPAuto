@@ -14,6 +14,7 @@ export function sourceTypeZh(value) {
     requirement: '需求来源',
     legacy_bug: '历史Bug来源',
     retest: '复测漏测',
+    field_test: '外业测试',
   };
   return map[value] || value;
 }

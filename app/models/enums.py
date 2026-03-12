@@ -29,6 +29,7 @@ class BugSourceType(str, Enum):
     LEGACY_BUG = "legacy_bug"
     MANUAL = "manual"
     RETEST = "retest"
+    FIELD_TEST = "field_test"
 
 
 class FeedbackStatus(str, Enum):

@@ -216,11 +216,21 @@ export async function queryReport() {
     ? `/reports/governance?start_date=${startDate}&end_date=${endDate}&major_version_id=${selectedMajorId}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}`
     : `/reports/governance?start_date=${startDate}&end_date=${endDate}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}`;
   const governanceData = await (await api(govUrl)).json();
+  const fieldTestUrl = selectedMajorId
+    ? `/reports/field-test?start_date=${startDate}&end_date=${endDate}&major_version_id=${selectedMajorId}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}${currentUser.role === 'admin' && window.reportUserSelect?.value ? `&user_id=${window.reportUserSelect.value}` : ''}`
+    : `/reports/field-test?start_date=${startDate}&end_date=${endDate}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}${currentUser.role === 'admin' && window.reportUserSelect?.value ? `&user_id=${window.reportUserSelect.value}` : ''}`;
+  let fieldTestData = null;
+  try {
+    fieldTestData = await (await api(fieldTestUrl)).json();
+  } catch (e) {
+    fieldTestData = { overview: {}, by_day: [], by_purpose: [], by_user: [], mode: 'personal' };
+  }
 
   renderReportCharts(data, advancedData, {
     sourceTypeZh,
     isAllUsersMode: isAllUsersMode(),
     versionBugs,
+    fieldTestData,
   });
   renderGovernanceBoard(governanceData);
 

@@ -5,6 +5,7 @@ from app.models.bug import BugTracking
 from app.models.enums import BugSourceType, FeedbackStatus, RequirementStatus, TestResultStatus, UserRole, VersionType
 from app.models.execution import TestExecution
 from app.models.feedback import FeedbackAttachment, FeedbackBugLink, FeedbackRecord
+from app.models.field_test import FieldTestBugLink, FieldTestPurposeType, FieldTestRecord, FieldTestResultStatus
 from app.models.requirement import Requirement
 from app.models.requirement_status_history import RequirementStatusHistory
 from app.models.software import SoftwareProduct
@@ -22,6 +23,10 @@ __all__ = [
     "FeedbackAttachment",
     "FeedbackBugLink",
     "FeedbackRecord",
+    "FieldTestBugLink",
+    "FieldTestPurposeType",
+    "FieldTestRecord",
+    "FieldTestResultStatus",
     "Requirement",
     "RequirementStatusHistory",
     "RequirementStatus",

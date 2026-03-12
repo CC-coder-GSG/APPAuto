@@ -13,6 +13,8 @@ from app.models import (
     AuditLog,
     BugStage5Record,
     BugTracking,
+    FieldTestBugLink,
+    FieldTestRecord,
     FeedbackAttachment,
     FeedbackBugLink,
     FeedbackRecord,
