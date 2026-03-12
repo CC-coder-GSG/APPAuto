@@ -181,6 +181,37 @@ class ReportService:
 
         return {"total": total, "by_actor": by_actor, "by_day": by_day}
 
+    def _linked_requirement_ids(self, major_ids: list[int] | None = None) -> set[int]:
+        """
+        取“关联版本复制”产生的目标需求ID（audit: requirement.link_major）。
+        这些需求下的用例不参与“创建用例”统计。
+        """
+        q = (
+            self.db.query(AuditLog.target_id)
+            .filter(
+                AuditLog.action == "requirement.link_major",
+                AuditLog.target_type == "requirement",
+                AuditLog.target_id.isnot(None),
+            )
+        )
+        ids: set[int] = set()
+        for (tid,) in q.all():
+            try:
+                ids.add(int(str(tid)))
+            except Exception:
+                continue
+        if not ids:
+            return set()
+        if major_ids is None:
+            return ids
+        scoped = {
+            r[0]
+            for r in self.db.query(Requirement.id)
+            .filter(Requirement.id.in_(list(ids)), Requirement.major_version_id.in_(major_ids))
+            .all()
+        }
+        return scoped
+
     def summary(
         self,
         start_date: date,
@@ -227,6 +258,7 @@ class ReportService:
             major_ids=scoped_major_ids,
             actor_ids=actor_scope_ids,
         )
+        linked_req_ids = self._linked_requirement_ids(scoped_major_ids)
 
         def filter_by_major_ids(query, column):
             if scoped_major_ids is None:
@@ -247,6 +279,8 @@ class ReportService:
                 .join(Requirement, TestCase.requirement_id == Requirement.id)
                 .filter(TestCase.creator_id == uid, TestCase.created_at >= sdt, TestCase.created_at <= edt)
             )
+            if linked_req_ids:
+                case_count = case_count.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
             case_count = filter_by_major_ids(case_count, Requirement.major_version_id).scalar() or 0
             bug_count = self.db.query(func.count(BugTracking.id)).filter(BugTracking.created_by_id == uid, BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
             bug_count = filter_by_major_ids(bug_count, BugTracking.major_version_id).scalar() or 0
@@ -291,6 +325,8 @@ class ReportService:
                 .join(Requirement, TestCase.requirement_id == Requirement.id)
                 .filter(TestCase.created_at >= sdt, TestCase.created_at <= edt, TestCase.creator_id.in_(team_ids))
             )
+            if linked_req_ids:
+                q_case = q_case.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
             q_bug = self.db.query(func.count(BugTracking.id)).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt, BugTracking.created_by_id.in_(team_ids))
             q_closed = (
                 self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
@@ -336,6 +372,8 @@ class ReportService:
                     .join(Requirement, TestCase.requirement_id == Requirement.id)
                     .filter(TestCase.created_at >= day_s, TestCase.created_at <= day_e, TestCase.creator_id.in_(team_ids))
                 )
+                if linked_req_ids:
+                    q_case = q_case.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
                 q_bug = self.db.query(func.count(BugTracking.id)).filter(
                     BugTracking.created_at >= day_s, BugTracking.created_at <= day_e, BugTracking.created_by_id.in_(team_ids)
                 )
@@ -373,6 +411,8 @@ class ReportService:
                     .join(Requirement, TestCase.requirement_id == Requirement.id)
                     .filter(TestCase.creator_id == target_user_id, TestCase.created_at >= day_s, TestCase.created_at <= day_e)
                 )
+                if linked_req_ids:
+                    q_case = q_case.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
                 q_bug = self.db.query(func.count(BugTracking.id)).filter(
                     BugTracking.created_by_id == target_user_id, BugTracking.created_at >= day_s, BugTracking.created_at <= day_e
                 )
