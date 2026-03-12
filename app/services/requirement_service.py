@@ -4,6 +4,7 @@ from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Requirement, RequirementStatus, RequirementStatusHistory, TestCase, TestExecution, TestResultStatus, User, Version, VersionType
@@ -158,53 +159,65 @@ class RequirementService:
 
         created_count = 0
         skipped_count = 0
+        conflict_count = 0
         for src in source_rows:
             if src.zentao_req_id in existing_ids:
                 skipped_count += 1
                 continue
 
-            new_req = Requirement(
-                zentao_req_id=src.zentao_req_id,
-                title=src.title,
-                major_version_id=target_major_version_id,
-                owner_id=src.owner_id,
-                case_completed=src.case_completed if copy_status else False,
-                test_completed=src.test_completed if copy_status else False,
-                retest_completed=False,
-                retested_by_id=None,
-                retested_at=None,
-                retest_minor_version_id=None,
-                retest_passed=None,
-                status=RequirementStatus.PENDING,
-            )
-            self.recalculate_requirement_status(new_req, actor_id=actor_id)
-            self.db.add(new_req)
-            self.db.flush()
-
-            for c in (src.test_cases or []):
-                self.db.add(
-                    TestCase(
-                        requirement_id=new_req.id,
-                        zentao_case_id=c.zentao_case_id,
-                        creator_id=c.creator_id,
+            try:
+                with self.db.begin_nested():
+                    new_req = Requirement(
+                        zentao_req_id=src.zentao_req_id,
+                        title=src.title,
+                        major_version_id=target_major_version_id,
+                        owner_id=src.owner_id,
+                        case_completed=src.case_completed if copy_status else False,
+                        test_completed=src.test_completed if copy_status else False,
+                        retest_completed=False,
+                        retested_by_id=None,
+                        retested_at=None,
+                        retest_minor_version_id=None,
+                        retest_passed=None,
+                        status=RequirementStatus.PENDING,
                     )
-                )
-            created_count += 1
-            existing_ids.add(src.zentao_req_id)
-            audit(
-                self.db,
-                action="requirement.link_major",
-                target_type="requirement",
-                actor_id=actor_id,
-                target_id=str(new_req.id),
-                detail=f"from_major={source_major_version_id},from_req={src.id},copy_status={copy_status}",
-            )
+                    self.recalculate_requirement_status(new_req, actor_id=actor_id)
+                    self.db.add(new_req)
+                    self.db.flush()
+
+                    for c in (src.test_cases or []):
+                        self.db.add(
+                            TestCase(
+                                requirement_id=new_req.id,
+                                zentao_case_id=c.zentao_case_id,
+                                creator_id=c.creator_id,
+                            )
+                        )
+                    audit(
+                        self.db,
+                        action="requirement.link_major",
+                        target_type="requirement",
+                        actor_id=actor_id,
+                        target_id=str(new_req.id),
+                        detail=f"from_major={source_major_version_id},from_req={src.id},copy_status={copy_status}",
+                    )
+                created_count += 1
+                existing_ids.add(src.zentao_req_id)
+            except IntegrityError:
+                # 容错：单条冲突跳过，避免整批失败
+                conflict_count += 1
+                skipped_count += 1
+                continue
 
         self.db.commit()
+        msg = f"关联完成：新增 {created_count} 条，跳过 {skipped_count} 条"
+        if conflict_count > 0:
+            msg += f"（其中 {conflict_count} 条因数据约束冲突被跳过）"
         return {
-            "message": f"关联完成：新增 {created_count} 条，跳过 {skipped_count} 条",
+            "message": msg,
             "created_count": created_count,
             "skipped_count": skipped_count,
+            "conflict_count": conflict_count,
         }
 
     def recalculate_requirement_status(self, requirement: Requirement, actor_id: int | None = None) -> Requirement:

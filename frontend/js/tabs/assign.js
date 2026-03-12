@@ -274,10 +274,11 @@ export async function confirmLinkRequirements() {
     const data = await res.json();
     const created = Number(data?.created_count || 0);
     const skipped = Number(data?.skipped_count || 0);
+    const backendMsg = data?.message || '';
     if (created > 0) {
-      window.showMessage && window.showMessage(`关联成功：新增 ${created} 条，跳过 ${skipped} 条重复需求`, 'success');
+      window.showMessage && window.showMessage(backendMsg || `关联成功：新增 ${created} 条，跳过 ${skipped} 条重复需求`, 'success');
     } else {
-      window.showMessage && window.showMessage(`未新增需求：所选需求均已存在（跳过 ${skipped} 条）`, 'error');
+      window.showMessage && window.showMessage(backendMsg || `未新增需求：所选需求均已存在（跳过 ${skipped} 条）`, 'error');
     }
     await loadAssignBoard();
   } catch (err) {
