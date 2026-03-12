@@ -138,6 +138,19 @@ function resultBadge(status) {
   return `<span class="badge" style="background:${passed ? '#dcfce7' : '#fee2e2'}; color:${passed ? '#166534' : '#991b1b'};">${RESULT_ZH[status] || status}</span>`;
 }
 
+function purposeBadge(status) {
+  const isReq = status === 'requirement';
+  return `<span class="badge" style="background:${isReq ? '#dbeafe' : '#fef3c7'}; color:${isReq ? '#1d4ed8' : '#92400e'};">${PURPOSE_ZH[status] || status}</span>`;
+}
+
+function openFormModal() {
+  document.getElementById('fieldTestFormModal')?.classList.remove('hidden');
+}
+
+function closeFormModal() {
+  document.getElementById('fieldTestFormModal')?.classList.add('hidden');
+}
+
 function purposeText(row) { return row.purpose_type === 'requirement' ? (row.requirement_label || '未选择需求') : (row.test_content || '-'); }
 function canEditRow(row) { const me = currentUser(); return !!me && (me.role === 'admin' || Number(row.tester_id) === Number(me.id)); }
 
@@ -167,7 +180,8 @@ function fillFormFromRecord(row) {
   state.editingId = row.id;
   document.getElementById('fieldTestFormTitle').innerText = `编辑外业测试记录 #${row.id}`;
   document.getElementById('fieldTestSubmitBtn').innerText = '保存修改';
-  document.getElementById('fieldTestCancelEditBtn').classList.remove('hidden');
+  document.getElementById('fieldTestCancelEditBtn').innerText = '取消编辑';
+  openFormModal();
 }
 
 export function cancelFieldTestEdit() {
@@ -175,7 +189,7 @@ export function cancelFieldTestEdit() {
   state.bugDrafts = [];
   document.getElementById('fieldTestFormTitle').innerText = '新增外业测试记录';
   document.getElementById('fieldTestSubmitBtn').innerText = '提交外业测试记录';
-  document.getElementById('fieldTestCancelEditBtn').classList.add('hidden');
+  document.getElementById('fieldTestCancelEditBtn').innerText = '取消';
   document.getElementById('fieldTestRequirementSelect').value = '';
   document.getElementById('fieldTestContentInput').value = '';
   document.getElementById('fieldTestStartTime').value = '';
@@ -185,13 +199,18 @@ export function cancelFieldTestEdit() {
   document.getElementById('fieldTestNotes').value = '';
   onFieldTestResultChange();
   renderBugDrafts();
+  closeFormModal();
+}
+
+export function openFieldTestCreate() {
+  cancelFieldTestEdit();
+  openFormModal();
 }
 
 export async function editFieldTestRecord(recordId) {
   try {
     const row = await (await api(`/field-tests/${recordId}`)).json();
     fillFormFromRecord(row);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '加载记录详情失败', 'error');
   }
@@ -368,23 +387,23 @@ function renderList(rows) {
   const tbody = document.getElementById('fieldTestTable');
   if (!tbody) return;
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; color:#94a3b8; padding:18px;">暂无外业测试记录</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:#94a3b8; padding:18px;">暂无外业测试记录</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map((r) => `
     <tr>
       <td>${(r.start_time || '').slice(0, 10)}</td>
-      <td>${r.major_version_no || '-'}</td>
-      <td>${r.minor_version_no || '-'}</td>
-      <td>${PURPOSE_ZH[r.purpose_type] || r.purpose_type}</td>
-      <td>${purposeText(r)}</td>
-      <td>${r.start_time ? new Date(r.start_time).toLocaleString() : '-'}</td>
-      <td>${r.end_time ? new Date(r.end_time).toLocaleString() : '-'}</td>
-      <td>${r.duration_minutes || 0} 分钟</td>
+      <td>${r.major_version_no || '-'} / ${r.minor_version_no || '-'}</td>
+      <td>${purposeBadge(r.purpose_type)}</td>
+      <td class="ft-ellipsis-cell" title="${purposeText(r).replace(/"/g, '&quot;')}">${purposeText(r)}</td>
+      <td>
+        <div>${r.start_time ? new Date(r.start_time).toLocaleString() : '-'}</div>
+        <div class="muted" style="font-size:12px;">${r.end_time ? new Date(r.end_time).toLocaleString() : '-'} · ${r.duration_minutes || 0} 分钟</div>
+      </td>
       <td>${resultBadge(r.result_status)}</td>
       <td>${r.bug_count || 0}</td>
       <td>${r.tester_name || '-'}</td>
-      <td title="${(r.notes || '').replace(/"/g, '&quot;')}">${(r.notes || '').slice(0, 24)}${(r.notes || '').length > 24 ? '...' : ''}</td>
+      <td class="ft-ellipsis-cell" title="${(r.notes || '').replace(/"/g, '&quot;')}">${r.notes || '-'}</td>
       <td>
         <button class="secondary" onclick="openFieldTestDetail(${r.id})">详情</button>
         ${canEditRow(r) ? `<button class="secondary" onclick="editFieldTestRecord(${r.id})" style="margin-left:6px;">编辑</button>` : ''}
@@ -505,4 +524,5 @@ window.OmniQAFieldTestTab = {
   linkFieldTestDetailBug,
   nextFieldTestPage,
   prevFieldTestPage,
+  openFieldTestCreate,
 };

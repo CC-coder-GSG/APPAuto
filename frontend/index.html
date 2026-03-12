@@ -318,52 +318,18 @@
   <section id="tab-field-test" class="hidden card">
     <h2>外业测试</h2>
     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;">
-      <div class="row" style="justify-content:space-between; align-items:center;">
-        <h3 id="fieldTestFormTitle" style="margin:0;">新增外业测试记录</h3>
-        <button id="fieldTestCancelEditBtn" class="secondary hidden" onclick="cancelFieldTestEdit()">取消编辑</button>
-      </div>
-      <div class="row" style="margin-top:12px; align-items:flex-end; flex-wrap:wrap; gap:12px;">
-        <div><label>大版本</label><select id="fieldTestMajorSelect" onchange="onFieldTestMajorChange()"></select></div>
-        <div><label>小版本</label><select id="fieldTestMinorSelect"></select></div>
-        <div><label>测试目的</label><select id="fieldTestPurpose" onchange="onFieldTestPurposeChange()"><option value="requirement">需求测试</option><option value="feature">功能测试</option></select></div>
-        <div id="fieldTestRequirementWrap"><label>关联需求</label><select id="fieldTestRequirementSelect"></select></div>
-        <div id="fieldTestContentWrap" class="hidden"><label>测试内容</label><input id="fieldTestContentInput" placeholder="请输入功能点或测试对象"></div>
-      </div>
-      <div class="row" style="margin-top:10px; align-items:flex-end; flex-wrap:wrap; gap:12px;">
-        <div><label>开始时间</label><input id="fieldTestStartTime" type="datetime-local"></div>
-        <div><label>结束时间</label><input id="fieldTestEndTime" type="datetime-local"></div>
-        <div><label>本次时长</label><input id="fieldTestDurationText" readonly placeholder="自动计算"></div>
-        <div><label>测试结果</label><select id="fieldTestResult" onchange="onFieldTestResultChange()"><option value="passed">测试通过</option><option value="failed">测试未通过</option></select></div>
-      </div>
-      <div id="fieldTestBugWrap" class="hidden" style="margin-top:10px;">
-        <label>Bug 编号（测试未通过时必填）</label>
-        <div class="row" style="margin-top:6px;">
-          <div class="prefix-input"><span>b#</span><input id="fieldTestBugInput" inputmode="numeric" oninput="digitsOnly(this)" placeholder="输入数字部分"></div>
-          <button class="secondary" onclick="addFieldTestBug()">添加 Bug</button>
-        </div>
-        <div id="fieldTestBugList" style="margin-top:8px;"></div>
-      </div>
-      <div style="margin-top:10px;">
-        <label>备注</label>
-        <textarea id="fieldTestNotes" rows="3" placeholder="可填写本次外业环境、问题现象、补充说明等"></textarea>
-      </div>
-      <div class="row" style="margin-top:12px;">
-        <button id="fieldTestSubmitBtn" onclick="submitFieldTestRecord()">提交外业测试记录</button>
-      </div>
-    </div>
-
-    <div class="card" style="box-shadow:none; border:1px solid #e2e8f0; margin-top:12px;">
-      <div class="row" style="align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div class="row ft-filter-row">
         <div><label>大版本</label><select id="fieldTestFilterMajor" onchange="onFieldTestFilterMajorChange()"></select></div>
         <div><label>小版本</label><select id="fieldTestFilterMinor"></select></div>
         <div><label>测试目的</label><select id="fieldTestFilterPurpose"><option value="">全部</option><option value="requirement">需求测试</option><option value="feature">功能测试</option></select></div>
         <div id="fieldTestFilterTesterWrap" class="hidden"><label>测试人</label><select id="fieldTestFilterTester"><option value="">全部</option></select></div>
         <div class="prefix-input"><span>🔍</span><input id="fieldTestFilterKeyword" placeholder="模糊搜索：需求/内容/备注/Bug/测试人"></div>
         <div><label>每页</label><select id="fieldTestPageSize"><option value="10">10</option><option value="20" selected>20</option><option value="50">50</option></select></div>
+        <button class="ft-primary-btn" onclick="openFieldTestCreate()">➕ 新增测试记录</button>
         <button onclick="loadFieldTestBoard()">刷新列表</button>
       </div>
       <table style="margin-top:10px;">
-        <thead><tr><th>日期</th><th>大版本</th><th>小版本</th><th>测试目的</th><th>关联需求/测试内容</th><th>开始时间</th><th>结束时间</th><th>时长</th><th>测试结果</th><th>Bug 数量</th><th>测试人</th><th>备注</th><th>操作</th></tr></thead>
+        <thead><tr><th>日期</th><th>版本(大/小)</th><th>测试目的</th><th>关联需求/测试内容</th><th>测试时段 & 时长</th><th>测试结果</th><th>Bug 数量</th><th>测试人</th><th>备注</th><th>操作</th></tr></thead>
         <tbody id="fieldTestTable"></tbody>
       </table>
       <div class="row" style="justify-content:flex-end; align-items:center; gap:8px; margin-top:8px;">
@@ -379,6 +345,49 @@
         <button class="secondary" onclick="closeFieldTestDetail()">关闭</button>
       </div>
       <div id="fieldTestDetailBody" style="margin-top:12px;"></div>
+    </div>
+
+    <div id="fieldTestFormModal" class="hidden ft-modal-mask" onclick="if(event.target===this) cancelFieldTestEdit();">
+      <div class="ft-modal-card">
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <h3 id="fieldTestFormTitle" style="margin:0;">新增外业测试记录</h3>
+          <button id="fieldTestCancelEditBtn" class="secondary" onclick="cancelFieldTestEdit()">取消</button>
+        </div>
+
+        <div class="ft-form-grid" style="margin-top:14px;">
+          <div><label>大版本</label><select id="fieldTestMajorSelect" onchange="onFieldTestMajorChange()"></select></div>
+          <div><label>小版本</label><select id="fieldTestMinorSelect"></select></div>
+          <div><label>测试目的</label><select id="fieldTestPurpose" onchange="onFieldTestPurposeChange()"><option value="requirement">需求测试</option><option value="feature">功能测试</option></select></div>
+          <div id="fieldTestRequirementWrap"><label>关联需求</label><select id="fieldTestRequirementSelect"></select></div>
+          <div id="fieldTestContentWrap" class="hidden"><label>测试内容</label><input id="fieldTestContentInput" placeholder="请输入功能点或测试对象"></div>
+        </div>
+
+        <div class="ft-form-grid" style="margin-top:12px;">
+          <div><label>开始时间</label><input id="fieldTestStartTime" type="datetime-local"></div>
+          <div><label>结束时间</label><input id="fieldTestEndTime" type="datetime-local"></div>
+          <div><label>本次时长</label><input id="fieldTestDurationText" readonly placeholder="自动计算"></div>
+          <div><label>测试结果</label><select id="fieldTestResult" onchange="onFieldTestResultChange()"><option value="passed">测试通过</option><option value="failed">测试未通过</option></select></div>
+        </div>
+
+        <div id="fieldTestBugWrap" class="hidden" style="margin-top:12px;">
+          <label>Bug 编号（测试未通过时必填）</label>
+          <div class="row" style="margin-top:6px;">
+            <div class="prefix-input"><span>b#</span><input id="fieldTestBugInput" inputmode="numeric" oninput="digitsOnly(this)" placeholder="输入数字部分"></div>
+            <button class="secondary" onclick="addFieldTestBug()">添加 Bug</button>
+          </div>
+          <div id="fieldTestBugList" style="margin-top:8px;"></div>
+        </div>
+
+        <div style="margin-top:12px;">
+          <label>备注</label>
+          <textarea id="fieldTestNotes" rows="3" placeholder="可填写本次外业环境、问题现象、补充说明等"></textarea>
+        </div>
+
+        <div class="row" style="margin-top:14px; justify-content:flex-end;">
+          <button class="secondary" onclick="cancelFieldTestEdit()">取消编辑</button>
+          <button id="fieldTestSubmitBtn" onclick="submitFieldTestRecord()">提交外业测试记录</button>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -1170,6 +1179,10 @@ function onFieldTestResultChange(){
 
 function addFieldTestBug(){
   return window.OmniQAFieldTestTab.addFieldTestBug();
+}
+
+function openFieldTestCreate(){
+  return window.OmniQAFieldTestTab.openFieldTestCreate();
 }
 
 function removeFieldTestBug(index){

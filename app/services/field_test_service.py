@@ -35,7 +35,7 @@ class FieldTestService:
             return [major_version_id]
         if software_id:
             rows = self.db.query(Version.id).filter(Version.version_type == VersionType.MAJOR, Version.software_id == software_id).all()
-            return [r[0] if isinstance(r, tuple) else r for r in rows]
+            return [int(r[0]) for r in rows]
         return None
 
     def _validate_major_minor(self, major_version_id: int, minor_version_id: int) -> tuple[Version, Version]:
