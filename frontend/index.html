@@ -349,7 +349,7 @@
 
     <div id="fieldTestFormModal" class="hidden ft-modal-mask" onclick="if(event.target===this) cancelFieldTestEdit();">
       <div class="ft-modal-card">
-        <div class="row" style="justify-content:space-between; align-items:center;">
+        <div class="row ft-modal-header" style="justify-content:space-between; align-items:center;">
           <h3 id="fieldTestFormTitle" style="margin:0;">新增外业测试记录</h3>
           <button id="fieldTestCancelEditBtn" class="secondary" onclick="cancelFieldTestEdit()">取消</button>
         </div>
@@ -366,14 +366,14 @@
           <div><label>开始时间</label><input id="fieldTestStartTime" type="datetime-local"></div>
           <div><label>结束时间</label><input id="fieldTestEndTime" type="datetime-local"></div>
           <div><label>本次时长</label><input id="fieldTestDurationText" readonly placeholder="自动计算"></div>
-          <div><label>测试结果</label><select id="fieldTestResult" onchange="onFieldTestResultChange()"><option value="passed">测试通过</option><option value="failed">测试未通过</option></select></div>
+          <div><label>测试结果</label><select id="fieldTestResult" onchange="onFieldTestResultChange()"><option value="passed">✅ 测试通过</option><option value="failed">❌ 测试未通过</option></select></div>
         </div>
 
-        <div id="fieldTestBugWrap" class="hidden" style="margin-top:12px;">
+        <div id="fieldTestBugWrap" class="hidden ft-bug-wrap">
           <label>Bug 编号（测试未通过时必填）</label>
-          <div class="row" style="margin-top:6px;">
+          <div class="ft-bug-input-group">
             <div class="prefix-input"><span>b#</span><input id="fieldTestBugInput" inputmode="numeric" oninput="digitsOnly(this)" placeholder="输入数字部分"></div>
-            <button class="secondary" onclick="addFieldTestBug()">添加 Bug</button>
+            <button class="secondary" onclick="addFieldTestBug()">➕ 添加 Bug</button>
           </div>
           <div id="fieldTestBugList" style="margin-top:8px;"></div>
         </div>
@@ -383,7 +383,7 @@
           <textarea id="fieldTestNotes" rows="3" placeholder="可填写本次外业环境、问题现象、补充说明等"></textarea>
         </div>
 
-        <div class="row" style="margin-top:14px; justify-content:flex-end;">
+        <div class="row ft-modal-footer" style="justify-content:flex-end;">
           <button class="secondary" onclick="cancelFieldTestEdit()">取消编辑</button>
           <button id="fieldTestSubmitBtn" onclick="submitFieldTestRecord()">提交外业测试记录</button>
         </div>
