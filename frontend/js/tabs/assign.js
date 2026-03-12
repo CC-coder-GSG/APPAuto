@@ -201,25 +201,35 @@ export async function loadLinkCandidates() {
     area.innerHTML = '<div class="muted">来源大版本不能与目标大版本相同</div>';
     return;
   }
+  area.innerHTML = '<div class="muted">正在加载来源需求...</div>';
+  try {
+    const data = await (await api(`/requirements/admin/link-options?source_major_version_id=${sourceMajorId}&target_major_version_id=${targetMajorId}`)).json();
+    if (!data || data.length === 0) {
+      area.innerHTML = '<div class="muted">来源版本暂无可关联需求</div>';
+      return;
+    }
+    const canLinkCount = data.filter((x) => !x.already_linked).length;
+    if (canLinkCount === 0) {
+      area.innerHTML = '<div class="muted">来源版本需求均已存在于当前目标版本，无需重复关联</div>';
+      return;
+    }
 
-  const data = await (await api(`/requirements/admin/link-options?source_major_version_id=${sourceMajorId}&target_major_version_id=${targetMajorId}`)).json();
-  if (!data || data.length === 0) {
-    area.innerHTML = '<div class="muted">来源版本暂无可关联需求</div>';
-    return;
-  }
-
-  area.innerHTML = data.map((r) => `
-    <label class="row" style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px dashed #e2e8f0; padding:8px 0;">
-      <span style="display:flex; align-items:flex-start; gap:8px;">
-        <input type="checkbox" class="link-req-check" value="${r.id}" ${r.already_linked ? 'disabled' : ''}>
-        <span>
-          <b>${r.zentao_req_id}</b> ${r.title || ''}
-          <span class="muted" style="margin-left:8px;">负责人：${r.owner_name || '未分配'} ｜ 用例：${r.case_count || 0}</span>
+    area.innerHTML = data.map((r) => `
+      <label class="row" style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px dashed #e2e8f0; padding:8px 0;">
+        <span style="display:flex; align-items:flex-start; gap:8px;">
+          <input type="checkbox" class="link-req-check" value="${r.id}" ${r.already_linked ? 'disabled' : ''}>
+          <span>
+            <b>${r.zentao_req_id}</b> ${r.title || ''}
+            <span class="muted" style="margin-left:8px;">负责人：${r.owner_name || '未分配'} ｜ 用例：${r.case_count || 0}</span>
+          </span>
         </span>
-      </span>
-      ${r.already_linked ? '<span class="badge" style="background:#ecfeff;color:#0369a1;">已在目标版本</span>' : ''}
-    </label>
-  `).join('');
+        ${r.already_linked ? '<span class="badge" style="background:#ecfeff;color:#0369a1;">已在目标版本</span>' : ''}
+      </label>
+    `).join('');
+  } catch (err) {
+    area.innerHTML = '<div class="muted" style="color:#dc2626;">来源需求加载失败</div>';
+    window.showMessage && window.showMessage(err.message || '来源需求加载失败', 'error');
+  }
 }
 
 export function toggleLinkSelectAll(checked) {
@@ -249,18 +259,28 @@ export async function confirmLinkRequirements() {
     return;
   }
 
-  await api('/requirements/admin/link-major', {
-    method: 'POST',
-    headers: window.H,
-    body: {
-      target_major_version_id: targetMajorId,
-      source_major_version_id: sourceMajorId,
-      source_requirement_ids: ids,
-    },
-  });
-
-  window.showMessage && window.showMessage('关联成功，已复制需求与用例（不含Bug）', 'success');
-  await loadAssignBoard();
+  try {
+    const res = await api('/requirements/admin/link-major', {
+      method: 'POST',
+      headers: window.H,
+      body: {
+        target_major_version_id: targetMajorId,
+        source_major_version_id: sourceMajorId,
+        source_requirement_ids: ids,
+      },
+    });
+    const data = await res.json();
+    const created = Number(data?.created_count || 0);
+    const skipped = Number(data?.skipped_count || 0);
+    if (created > 0) {
+      window.showMessage && window.showMessage(`关联成功：新增 ${created} 条，跳过 ${skipped} 条重复需求`, 'success');
+    } else {
+      window.showMessage && window.showMessage(`未新增需求：所选需求均已存在（跳过 ${skipped} 条）`, 'error');
+    }
+    await loadAssignBoard();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '关联失败', 'error');
+  }
 }
 
 window.OmniQAAssignTab = {

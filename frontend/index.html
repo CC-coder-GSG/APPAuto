@@ -84,7 +84,7 @@
     <div class="card" style="margin-top:16px; border:1px solid #e2e8f0; background:#f8fafc;">
       <h3 style="margin-top:0; color:#1e293b;">关联版本需求</h3>
       <div class="row" style="flex-wrap:wrap; gap:10px; align-items:center;">
-        <label>来源大版本</label><select id="linkSourceMajorSelect"></select>
+        <label>来源大版本</label><select id="linkSourceMajorSelect" onchange="loadLinkCandidates()"></select>
         <button class="secondary" onclick="loadLinkCandidates()">加载来源需求</button>
         <label style="margin-left:10px; cursor:pointer;">
           <input type="checkbox" id="linkSelectAll" onchange="toggleLinkSelectAll(this.checked)"> 全选
