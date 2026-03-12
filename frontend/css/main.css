@@ -37,6 +37,10 @@
   padding: 20px;
 }
 
+.ft-modal-mask.hidden {
+  display: none !important;
+}
+
 .ft-modal-card {
   width: min(980px, 96vw);
   max-height: 92vh;
