@@ -15,6 +15,10 @@ const modalState = {
   checkboxEl: null,
 };
 
+const notesModalState = {
+  reqId: null,
+};
+
 function getFoldStorageKey() {
   const uid = state.currentUser?.id || window.currentUser?.id || 'anonymous';
   return `omniqa_mine_fold_state_v1_${uid}`;
@@ -134,6 +138,61 @@ export function closeMineTestExecutionModal() {
   if (modalState.checkboxEl) modalState.checkboxEl.checked = false;
   modalState.reqId = null;
   modalState.checkboxEl = null;
+}
+
+export function closeReqTestNotesModal() {
+  const modal = document.getElementById('mineReqNotesModal');
+  if (modal) closeModal(modal);
+  notesModalState.reqId = null;
+}
+
+export function openReqTestNotesModal(reqId) {
+  const req = getRequirementById(reqId);
+  if (!req) {
+    window.showMessage && window.showMessage('需求不存在', 'error');
+    return;
+  }
+  const modal = document.getElementById('mineReqNotesModal');
+  const titleEl = document.getElementById('mineReqNotesTitle');
+  const textarea = document.getElementById('mineReqNotesText');
+  const metaEl = document.getElementById('mineReqNotesMeta');
+  if (!modal || !titleEl || !textarea || !metaEl) return;
+
+  notesModalState.reqId = reqId;
+  titleEl.innerText = `需求测试要点 - ${req.zentao_req_id} ${req.title}`;
+  textarea.value = req.test_notes || '';
+
+  if (req.test_notes_updated_at || req.test_notes_updated_by_name) {
+    const t = req.test_notes_updated_at ? new Date(req.test_notes_updated_at).toLocaleString() : '未知时间';
+    const u = req.test_notes_updated_by_name || '未知';
+    metaEl.innerText = `最后更新：${u} ${t}`;
+  } else {
+    metaEl.innerText = '尚未填写测试要点';
+  }
+
+  openModal(modal);
+}
+
+export async function saveReqTestNotes() {
+  const reqId = Number(notesModalState.reqId || 0);
+  if (!reqId) {
+    closeReqTestNotesModal();
+    return;
+  }
+  const textarea = document.getElementById('mineReqNotesText');
+  const text = (textarea?.value || '').trim();
+  try {
+    await api(`/requirements/${reqId}/test-notes`, {
+      method: 'PUT',
+      headers: window.H,
+      body: { test_notes: text || null },
+    });
+    window.showMessage && window.showMessage('测试要点保存成功', 'success');
+    closeReqTestNotesModal();
+    await loadMyWorkbench();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '保存测试要点失败', 'error');
+  }
 }
 
 export async function submitTestExecution(reqId, payload) {
@@ -360,6 +419,10 @@ export function renderMineCards() {
           <div class="row" style="margin-bottom:8px">
             <label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked).then(()=>loadMyWorkbench())">✅用例完成</label>
             <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">✅测试完成</label>
+            <span class="badge" style="background:${req.test_notes ? '#dcfce7' : '#f1f5f9'}; color:${req.test_notes ? '#166534' : '#64748b'}; border:1px solid ${req.test_notes ? '#bbf7d0' : '#e2e8f0'};">
+              测试要点：${req.test_notes ? '已填写' : '未填写'}
+            </span>
+            <button class="secondary" style="padding:2px 8px; font-size:12px;" onclick="openReqTestNotesModal(${req.id})">${req.test_notes ? '查看/编辑测试要点' : '填写测试要点'}</button>
           </div>
           <div>${caseHtml}</div>
           <div class="free-bug-box"><div><b>自由Bug</b></div><div style="margin-top:6px;">${freeBugHtml}</div></div>
@@ -536,6 +599,9 @@ window.OmniQAMineTab = {
   submitTestExecution,
   confirmMineTestExecutionModal,
   closeMineTestExecutionModal,
+  openReqTestNotesModal,
+  closeReqTestNotesModal,
+  saveReqTestNotes,
 };
 
 

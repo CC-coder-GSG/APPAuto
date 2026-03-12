@@ -319,6 +319,10 @@ export function renderDataOverview() {
       const reqBugs = (data.bugs || []).filter((b) => b.requirement_id === req.id);
       const freeBugs = reqBugs.filter((b) => b.source_type === 'manual');
       const caseBugs = reqBugs.filter((b) => b.source_type === 'case');
+      const notesSummary = (req.test_notes || '').trim();
+      const notesMeta = req.test_notes_updated_at
+        ? `最后更新：${req.test_notes_updated_by_name || '未知'} ${new Date(req.test_notes_updated_at).toLocaleString()}`
+        : '';
       const casesListHtml = (req.case_ids || []).map((cId) => {
         const relatedBugs = caseBugs.filter((b) => b.source_ref === cId);
         let bHtml = relatedBugs.map((b) => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 关联 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button></div>`).join('');
@@ -336,6 +340,13 @@ export function renderDataOverview() {
           </span>
         </div>
         <div id="req_body_${req.id}" class="hidden" style="padding:12px; background:#fff;">
+          <div style="margin-bottom:12px; padding:10px; border:1px dashed #cbd5e1; border-radius:6px; background:#f8fafc;">
+            <div style="font-weight:bold; color:#334155; margin-bottom:6px;">[测试要点]</div>
+            <div style="color:${notesSummary ? '#334155' : '#94a3b8'}; font-size:13px; line-height:1.5;">
+              ${notesSummary ? (notesSummary.length > 60 ? `${notesSummary.slice(0, 60)}...` : notesSummary) : '无'}
+            </div>
+            ${notesMeta ? `<div class="muted" style="margin-top:6px; font-size:12px;">${notesMeta}</div>` : ''}
+          </div>
           <div style="margin-bottom:16px;">
             <div style="font-weight:bold; color:#334155; border-bottom:1px solid #f1f5f9; padding-bottom:4px;">[区块 A：测试用例与关联 Bug]</div>
             ${casesListHtml || '<div class="muted" style="margin-left:24px; margin-top:8px;">暂无用例</div>'}

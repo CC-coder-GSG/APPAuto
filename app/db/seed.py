@@ -83,6 +83,18 @@ def ensure_requirement_schema_compat(db: Session) -> None:
     - 新结构调整为 (major_version_id, zentao_req_id) 组合唯一
     该迁移为轻量自动迁移，启动时自动执行，无需手工改库。
     """
+    req_cols_rows = db.execute(text("PRAGMA table_info(requirements)")).fetchall()
+    req_cols = {r[1] for r in req_cols_rows}
+    if "test_notes" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN test_notes TEXT"))
+        db.commit()
+    if "test_notes_updated_at" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN test_notes_updated_at DATETIME"))
+        db.commit()
+    if "test_notes_updated_by_id" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN test_notes_updated_by_id INTEGER"))
+        db.commit()
+
     idx_rows = db.execute(text("PRAGMA index_list(requirements)")).fetchall()
     need_rebuild = False
     has_target_unique = False
@@ -126,6 +138,9 @@ def ensure_requirement_schema_compat(db: Session) -> None:
                     retested_at DATETIME,
                     retest_minor_version_id INTEGER,
                     retest_passed BOOLEAN,
+                    test_notes TEXT,
+                    test_notes_updated_at DATETIME,
+                    test_notes_updated_by_id INTEGER,
                     status VARCHAR(50) NOT NULL DEFAULT 'pending',
                     created_at DATETIME NOT NULL,
                     updated_at DATETIME NOT NULL,
@@ -133,6 +148,7 @@ def ensure_requirement_schema_compat(db: Session) -> None:
                     FOREIGN KEY(major_version_id) REFERENCES versions (id) ON DELETE CASCADE,
                     FOREIGN KEY(owner_id) REFERENCES users (id),
                     FOREIGN KEY(retested_by_id) REFERENCES users (id),
+                    FOREIGN KEY(test_notes_updated_by_id) REFERENCES users (id),
                     FOREIGN KEY(retest_minor_version_id) REFERENCES versions (id)
                 )
                 """
@@ -144,13 +160,13 @@ def ensure_requirement_schema_compat(db: Session) -> None:
                 INSERT INTO requirements (
                     id, zentao_req_id, title, major_version_id, owner_id,
                     case_completed, test_completed, retest_completed,
-                    retested_by_id, retested_at, retest_minor_version_id, retest_passed,
+                    retested_by_id, retested_at, retest_minor_version_id, retest_passed, test_notes, test_notes_updated_at, test_notes_updated_by_id,
                     status, created_at, updated_at
                 )
                 SELECT
                     id, zentao_req_id, title, major_version_id, owner_id,
                     case_completed, test_completed, retest_completed,
-                    retested_by_id, retested_at, retest_minor_version_id, retest_passed,
+                    retested_by_id, retested_at, retest_minor_version_id, retest_passed, test_notes, test_notes_updated_at, test_notes_updated_by_id,
                     status, created_at, updated_at
                 FROM requirements_old
                 """

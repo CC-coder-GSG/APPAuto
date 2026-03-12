@@ -74,7 +74,12 @@ def _build_requirement_link_logs(db: Session, limit: int = 300) -> list[dict]:
 @router.get("/admin/data-overview")
 def admin_data_overview(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     ensure_admin(current_user)
-    reqs = db.query(Requirement).options(joinedload(Requirement.test_cases)).order_by(Requirement.id.desc()).all()
+    reqs = (
+        db.query(Requirement)
+        .options(joinedload(Requirement.test_cases), joinedload(Requirement.test_notes_updated_by))
+        .order_by(Requirement.id.desc())
+        .all()
+    )
 
     return {
         "users": [
@@ -105,6 +110,9 @@ def admin_data_overview(current_user=Depends(get_current_user), db: Session = De
                 "title": r.title,
                 "major_version_id": r.major_version_id,
                 "case_ids": [c.zentao_case_id for c in r.test_cases],
+                "test_notes": r.test_notes,
+                "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
+                "test_notes_updated_by_name": r.test_notes_updated_by.shown_name if r.test_notes_updated_by else None,
             }
             for r in reqs
         ],

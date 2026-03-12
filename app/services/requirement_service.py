@@ -7,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Requirement, RequirementStatus, RequirementStatusHistory, TestCase, TestExecution, TestResultStatus, User, Version, VersionType
+from app.models import Requirement, RequirementStatus, RequirementStatusHistory, TestCase, TestExecution, TestResultStatus, User, UserRole, Version, VersionType
 from app.services.audit_service import audit
 from app.utils.state_machine import ensure_requirement_transition
 from app.utils.validators import validate_req_id
@@ -268,7 +268,12 @@ class RequirementService:
     def list_requirements(self, major_version_id: int) -> list[dict]:
         rows = (
             self.db.query(Requirement)
-            .options(joinedload(Requirement.owner), joinedload(Requirement.retester), joinedload(Requirement.test_cases))
+            .options(
+                joinedload(Requirement.owner),
+                joinedload(Requirement.retester),
+                joinedload(Requirement.test_cases),
+                joinedload(Requirement.test_notes_updated_by),
+            )
             .filter(Requirement.major_version_id == major_version_id)
             .order_by(Requirement.id.asc())
             .all()
@@ -286,9 +291,50 @@ class RequirementService:
                 "retested_by": r.retester.shown_name if r.retester else None,
                 "status": r.status,
                 "case_ids": [c.zentao_case_id for c in r.test_cases],
+                "test_notes": r.test_notes,
+                "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
+                "test_notes_updated_by_id": r.test_notes_updated_by_id,
+                "test_notes_updated_by_name": r.test_notes_updated_by.shown_name if r.test_notes_updated_by else None,
             }
             for r in rows
         ]
+
+    def update_test_notes(self, requirement_id: int, test_notes: str | None, current_user: User) -> dict:
+        req = (
+            self.db.query(Requirement)
+            .options(joinedload(Requirement.test_notes_updated_by))
+            .filter(Requirement.id == requirement_id)
+            .first()
+        )
+        if not req:
+            raise HTTPException(status_code=404, detail="需求不存在")
+
+        if current_user.role != UserRole.ADMIN and req.owner_id != current_user.id:
+            raise HTTPException(status_code=403, detail="无权限修改该需求的测试要点")
+
+        req.test_notes = (test_notes or "").strip() or None
+        req.test_notes_updated_at = datetime.utcnow()
+        req.test_notes_updated_by_id = current_user.id
+        self.db.commit()
+        self.db.refresh(req)
+
+        audit(
+            self.db,
+            action="requirement.update_test_notes",
+            target_type="requirement",
+            actor_id=current_user.id,
+            target_id=str(req.id),
+            detail=f"has_notes={bool(req.test_notes)}",
+        )
+
+        return {
+            "message": "测试要点保存成功",
+            "requirement_id": req.id,
+            "test_notes": req.test_notes,
+            "test_notes_updated_at": req.test_notes_updated_at.isoformat() if req.test_notes_updated_at else None,
+            "test_notes_updated_by_id": req.test_notes_updated_by_id,
+            "test_notes_updated_by_name": current_user.shown_name,
+        }
 
     def update_requirement(self, requirement_id: int, zentao_req_id: str, title: str, major_version_id: int, actor_id: int | None = None) -> dict:
         req = self.db.query(Requirement).filter(Requirement.id == requirement_id).first()

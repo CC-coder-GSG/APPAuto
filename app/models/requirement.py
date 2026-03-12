@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -28,6 +28,9 @@ class Requirement(Base):
     retested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     retest_minor_version_id: Mapped[Optional[int]] = mapped_column(ForeignKey("versions.id"), nullable=True)
     retest_passed: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    test_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    test_notes_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    test_notes_updated_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     status: Mapped[RequirementStatus] = mapped_column(SAEnum(RequirementStatus), default=RequirementStatus.PENDING, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
@@ -37,6 +40,7 @@ class Requirement(Base):
     retest_minor_version = relationship("Version", foreign_keys=[retest_minor_version_id])
     owner = relationship("User", back_populates="assigned_requirements", foreign_keys=[owner_id])
     retester = relationship("User", back_populates="retested_requirements", foreign_keys=[retested_by_id])
+    test_notes_updated_by = relationship("User", foreign_keys=[test_notes_updated_by_id])
     test_cases = relationship("TestCase", back_populates="requirement", cascade="all, delete-orphan")
     test_executions = relationship("TestExecution", back_populates="requirement", cascade="all, delete-orphan")
     bug_tracks = relationship("BugTracking", back_populates="requirement", cascade="all, delete-orphan")

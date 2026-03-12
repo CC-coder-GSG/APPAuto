@@ -164,6 +164,27 @@
         </div>
       </div>
     </div>
+
+    <div id="mineReqNotesModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
+      <div style="width: min(680px, 94vw); background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px 18px 14px 18px;">
+        <h3 id="mineReqNotesTitle" style="margin: 0 0 12px 0; color:#0f172a;">需求测试要点</h3>
+        <div id="mineReqNotesMeta" class="muted" style="margin-bottom:10px;"></div>
+        <div style="margin-bottom: 14px;">
+          <label style="display:block; margin-bottom:6px;">测试要点</label>
+          <textarea id="mineReqNotesText" rows="10" placeholder="建议记录：
+1. 核心测试目标
+2. 重点场景
+3. 边界条件
+4. 风险点/易错点
+5. 依赖条件
+6. 外场/设备/环境注意事项" style="width:100%;"></textarea>
+        </div>
+        <div class="row" style="justify-content: flex-end; gap: 8px;">
+          <button class="secondary" onclick="closeReqTestNotesModal()">取消</button>
+          <button onclick="saveReqTestNotes()">保存</button>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section id="tab-feedback" class="hidden card">
@@ -1042,6 +1063,18 @@ async function confirmMineTestExecutionModal(){
 
 function closeMineTestExecutionModal(){
   return window.OmniQAMineTab.closeMineTestExecutionModal();
+}
+
+function openReqTestNotesModal(reqId){
+  return window.OmniQAMineTab.openReqTestNotesModal(reqId);
+}
+
+function closeReqTestNotesModal(){
+  return window.OmniQAMineTab.closeReqTestNotesModal();
+}
+
+async function saveReqTestNotes(){
+  return window.OmniQAMineTab.saveReqTestNotes();
 }
 
 async function addCase(reqId){

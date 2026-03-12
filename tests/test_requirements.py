@@ -265,3 +265,72 @@ def test_upsert_test_execution_permission_rejected_for_non_owner(db_session):
         assert False, "expected HTTPException"
     except Exception as exc:
         assert getattr(exc, "status_code", None) == 403
+
+
+def test_update_test_notes_owner_allowed(db_session):
+    major = _create_major(db_session, "V4500")
+    owner = _create_user(db_session, "owner_notes_1")
+    req = _create_requirement(db_session, major.id, "r#4501")
+    req.owner_id = owner.id
+    db_session.commit()
+
+    service = RequirementService(db_session)
+    result = service.update_test_notes(req.id, "核心场景+边界校验", owner)
+    db_session.refresh(req)
+
+    assert result["message"] == "测试要点保存成功"
+    assert req.test_notes == "核心场景+边界校验"
+    assert req.test_notes_updated_by_id == owner.id
+    assert req.test_notes_updated_at is not None
+
+
+def test_update_test_notes_admin_allowed(db_session):
+    major = _create_major(db_session, "V4600")
+    owner = _create_user(db_session, "owner_notes_2")
+    admin = User(username="admin_notes", password_hash=User.hash_password("pass123"), role=UserRole.ADMIN)
+    db_session.add(admin)
+    db_session.commit()
+    db_session.refresh(admin)
+    req = _create_requirement(db_session, major.id, "r#4601")
+    req.owner_id = owner.id
+    db_session.commit()
+
+    service = RequirementService(db_session)
+    service.update_test_notes(req.id, "管理员补充测试策略", admin)
+    db_session.refresh(req)
+    assert req.test_notes == "管理员补充测试策略"
+    assert req.test_notes_updated_by_id == admin.id
+
+
+def test_update_test_notes_forbidden_for_other_user(db_session):
+    major = _create_major(db_session, "V4700")
+    owner = _create_user(db_session, "owner_notes_3")
+    other = _create_user(db_session, "other_notes_3")
+    req = _create_requirement(db_session, major.id, "r#4701")
+    req.owner_id = owner.id
+    db_session.commit()
+
+    service = RequirementService(db_session)
+    try:
+        service.update_test_notes(req.id, "无权限用户尝试修改", other)
+        assert False, "expected HTTPException"
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 403
+
+
+def test_list_requirements_contains_test_notes_fields(db_session):
+    major = _create_major(db_session, "V4800")
+    owner = _create_user(db_session, "owner_notes_4")
+    req = _create_requirement(db_session, major.id, "r#4801")
+    req.owner_id = owner.id
+    req.test_notes = "需要重点关注边界输入"
+    req.test_notes_updated_by_id = owner.id
+    req.test_notes_updated_at = req.updated_at
+    db_session.commit()
+
+    service = RequirementService(db_session)
+    rows = service.list_requirements(major.id)
+    assert len(rows) == 1
+    assert rows[0]["test_notes"] == "需要重点关注边界输入"
+    assert "test_notes_updated_at" in rows[0]
+    assert rows[0]["test_notes_updated_by_name"] == owner.username

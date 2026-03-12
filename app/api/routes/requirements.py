@@ -65,6 +65,10 @@ class CaseUpdatePayload(BaseModel):
     case_completed: bool
 
 
+class ReqTestNotesPayload(BaseModel):
+    test_notes: Optional[str] = None
+
+
 def _parse_multiple_ids(raw_ids: list[str], pattern: re.Pattern[str], label: str) -> list[str]:
     clean = []
     for item in raw_ids:
@@ -307,6 +311,7 @@ def my_workbench(
     query = db.query(Requirement).options(
         joinedload(Requirement.major_version),
         joinedload(Requirement.test_cases),
+        joinedload(Requirement.test_notes_updated_by),
     ).filter(Requirement.owner_id == current_user.id)
 
     if mode == "version" and major_version_id:
@@ -377,6 +382,9 @@ def my_workbench(
             "test_completed": r.test_completed,
             "major_version_id": r.major_version_id,
             "major_version_name": r.major_version.version_no if r.major_version else "",
+            "test_notes": r.test_notes,
+            "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
+            "test_notes_updated_by_name": r.test_notes_updated_by.shown_name if r.test_notes_updated_by else None,
             "test_cases": [{"id": c.id, "zentao_case_id": c.zentao_case_id, "bugs": case_bug_map.get(str(c.id), [])} for c in r.test_cases],
             "free_bugs": free_bug_map.get(r.id, []),
         }
@@ -461,6 +469,17 @@ def patch_requirement_status(
         case_completed=payload.case_completed,
         test_completed=payload.test_completed,
     )
+
+
+@router.put("/requirements/{requirement_id}/test-notes")
+def update_requirement_test_notes(
+    requirement_id: int,
+    payload: ReqTestNotesPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = RequirementService(db)
+    return service.update_test_notes(requirement_id, payload.test_notes, current_user)
 
 
 @router.put("/requirements/{requirement_id}/cases")
