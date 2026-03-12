@@ -350,7 +350,7 @@ class FieldTestService:
                     FieldTestRecord.notes.like(kw),
                     Requirement.zentao_req_id.like(kw),
                     Requirement.title.like(kw),
-                    User.shown_name.like(kw),
+                    User.display_name.like(kw),
                     User.username.like(kw),
                     FieldTestRecord.id.in_(self.db.query(bug_record_subq.c.field_test_record_id)),
                 )
