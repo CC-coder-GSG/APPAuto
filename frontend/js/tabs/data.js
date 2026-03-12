@@ -2,6 +2,22 @@
 import { state } from '../state.js';
 import { withPrefix } from '../utils.js';
 
+function isMajorExpanded(majorId) {
+  return state.dataTreeExpandedMajors[String(majorId)] === true;
+}
+
+function setMajorExpanded(majorId, expanded) {
+  state.dataTreeExpandedMajors[String(majorId)] = !!expanded;
+}
+
+export function toggleMajorBody(majorId) {
+  const body = document.getElementById('major_body_' + majorId);
+  if (!body) return;
+  const willExpand = body.classList.contains('hidden');
+  body.classList.toggle('hidden');
+  setMajorExpanded(majorId, willExpand);
+}
+
 export async function createVersion() {
   try {
     const version_no = (window.createVersionNo?.value || '').trim();
@@ -166,7 +182,30 @@ export async function confirmImport() {
 export async function loadDataOverview() {
   state.dataOverviewCache = await (await api('/admin/data-overview')).json();
   window.dataOverviewCache = state.dataOverviewCache;
+  if (!state.requirementLinkLogsLoaded) {
+    state.requirementLinkLogsCache = [];
+  }
   renderDataOverview();
+}
+
+export async function loadRequirementLinkLogs() {
+  const block = document.getElementById('dataLinkLogsBlock');
+  const logsBody = document.getElementById('dataLinkLogs');
+  if (logsBody) {
+    logsBody.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;">正在加载日志...</td></tr>';
+  }
+  try {
+    const res = await api('/admin/requirement-link-logs');
+    const rows = await res.json();
+    state.requirementLinkLogsCache = Array.isArray(rows) ? rows : [];
+    state.requirementLinkLogsLoaded = true;
+    if (block) block.open = true;
+    renderDataOverview();
+    window.showMessage && window.showMessage('关联日志加载完成', 'success');
+  } catch (err) {
+    if (logsBody) logsBody.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;color:#dc2626;">日志加载失败</td></tr>';
+    window.showMessage && window.showMessage(err.message || '加载日志失败', 'error');
+  }
 }
 
 export async function setDataView(key, checked) {
@@ -199,7 +238,11 @@ export async function setDataViewBatch(showAll) {
 }
 
 export function expandAllMajorBodies() {
-  document.querySelectorAll('[id^="major_body_"]').forEach((el) => el.classList.remove('hidden'));
+  document.querySelectorAll('[id^="major_body_"]').forEach((el) => {
+    el.classList.remove('hidden');
+    const idText = String(el.id || '').replace('major_body_', '');
+    if (idText) setMajorExpanded(idText, true);
+  });
 }
 
 export function renderDataOverview() {
@@ -238,23 +281,27 @@ export function renderDataOverview() {
 
   const logsBody = document.getElementById('dataLinkLogs');
   if (logsBody) {
-    const logs = (data.requirement_link_logs || [])
+    if (!state.requirementLinkLogsLoaded) {
+      logsBody.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;">点击“加载日志”后显示内容</td></tr>';
+    } else {
+      const logs = (state.requirementLinkLogsCache || [])
       .filter((x) => activeMajorIds.size === 0 || activeMajorIds.has(Number(x.target_major_id || 0)) || activeMajorIds.has(Number(x.source_major_id || 0)));
-    logsBody.innerHTML = logs.length === 0
-      ? '<tr><td colspan="6" class="muted" style="text-align:center;">暂无关联记录</td></tr>'
-      : logs.map((l) => {
-        const timeText = l.created_at ? new Date(l.created_at).toLocaleString() : '-';
-        const srcReq = l.source_zentao_req_id ? `${l.source_zentao_req_id} ${l.source_title || ''}` : '-';
-        const dstReq = l.target_zentao_req_id ? `${l.target_zentao_req_id} ${l.target_title || ''}` : '-';
-        return `<tr>
-          <td>${timeText}</td>
-          <td>${l.actor_name || '未知'}</td>
-          <td>${l.source_major_name || '未知'}</td>
-          <td>${l.target_major_name || '未知'}</td>
-          <td>${srcReq}</td>
-          <td>${dstReq}</td>
-        </tr>`;
-      }).join('');
+      logsBody.innerHTML = logs.length === 0
+        ? '<tr><td colspan="6" class="muted" style="text-align:center;">暂无关联记录</td></tr>'
+        : logs.map((l) => {
+          const timeText = l.created_at ? new Date(l.created_at).toLocaleString() : '-';
+          const srcReq = l.source_zentao_req_id ? `${l.source_zentao_req_id} ${l.source_title || ''}` : '-';
+          const dstReq = l.target_zentao_req_id ? `${l.target_zentao_req_id} ${l.target_title || ''}` : '-';
+          return `<tr>
+            <td>${timeText}</td>
+            <td>${l.actor_name || '未知'}</td>
+            <td>${l.source_major_name || '未知'}</td>
+            <td>${l.target_major_name || '未知'}</td>
+            <td>${srcReq}</td>
+            <td>${dstReq}</td>
+          </tr>`;
+        }).join('');
+    }
   }
 
   const majors = (data.versions || []).filter((v) => v.version_type === 'major' && activeMajorIds.has(Number(v.id)));
@@ -265,6 +312,7 @@ export function renderDataOverview() {
   majors.forEach((major) => {
     const majorMinors = minors.filter((m) => m.parent_id === major.id);
     const reqs = (data.requirements || []).filter((r) => r.major_version_id === major.id && activeMajorIds.has(Number(r.major_version_id)));
+    const majorOpen = isMajorExpanded(major.id);
     let minorHtml = majorMinors.map((m) => `<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-right:8px;padding-right:2px;">🏷️ ${m.version_no} <button class="text-btn" title="编辑" onclick="editVersion(${m.id},'${m.version_no}','minor',${major.id})">✎</button><button class="text-btn" title="删除" onclick="removeVersion(${m.id})">×</button></span>`).join('');
     if (!minorHtml) minorHtml = '<span class="muted" style="font-size:13px;">暂无发包记录</span>';
     let reqHtml = reqs.map((req) => {
@@ -302,14 +350,14 @@ export function renderDataOverview() {
     if (!reqHtml) reqHtml = '<div class="muted" style="font-size:13px;">暂无下辖需求</div>';
     treeHtml += `
     <div style="border:2px solid #cbd5e1; border-radius:8px; margin-bottom:16px; background:#fff; overflow:hidden;">
-      <div style="padding:12px 16px; background:#f1f5f9; border-bottom:1px solid #cbd5e1; cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="document.getElementById('major_body_${major.id}').classList.toggle('hidden')">
+      <div style="padding:12px 16px; background:#f1f5f9; border-bottom:1px solid #cbd5e1; cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="toggleMajorBody(${major.id})">
         <span style="font-size:16px; font-weight:bold; color:#0f172a;">📦 大版本：${major.version_no}</span>
         <span>
           <button class="secondary" onclick="event.stopPropagation(); editVersion(${major.id},'${major.version_no}','major',null)">编辑版本</button>
           <button class="danger" onclick="event.stopPropagation(); removeVersion(${major.id})">删除整体</button>
         </span>
       </div>
-      <div id="major_body_${major.id}" class="hidden" style="padding:16px; background:#f8fafc;">
+      <div id="major_body_${major.id}" class="${majorOpen ? '' : 'hidden'}" style="padding:16px; background:#f8fafc;">
         ${state.dataViewState.showVersions ? `<div style="margin-bottom:20px; padding-bottom:12px; border-bottom:1px dashed #cbd5e1;">
           <div style="font-weight:bold; margin-bottom:8px; color:#334155;">【版本发包履历】</div>
           <div>${minorHtml}</div>
@@ -461,6 +509,7 @@ window.OmniQADataTab = {
   cancelImport,
   confirmImport,
   loadDataOverview,
+  loadRequirementLinkLogs,
   setDataView,
   setDataViewBatch,
   expandAllMajorBodies,
@@ -475,4 +524,7 @@ window.OmniQADataTab = {
   editVersion,
   editReq,
   editBug,
+  toggleMajorBody,
 };
+
+window.toggleMajorBody = toggleMajorBody;

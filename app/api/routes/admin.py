@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, joinedload
@@ -10,20 +10,17 @@ from app.services.permission_service import ensure_admin
 router = APIRouter()
 
 
-@router.get("/admin/data-overview")
-def admin_data_overview(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
-    ensure_admin(current_user)
-    reqs = db.query(Requirement).options(joinedload(Requirement.test_cases)).order_by(Requirement.id.desc()).all()
+def _build_requirement_link_logs(db: Session, limit: int = 300) -> list[dict]:
     req_map = {r.id: r for r in db.query(Requirement).options(joinedload(Requirement.major_version)).all()}
     version_map = {v.id: v for v in db.query(Version).all()}
     user_map = {u.id: u for u in db.query(User).all()}
 
-    link_logs = []
+    link_logs: list[dict] = []
     rows = (
         db.query(AuditLog)
         .filter(AuditLog.action == "requirement.link_major")
         .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
-        .limit(300)
+        .limit(limit)
         .all()
     )
     for log in rows:
@@ -52,6 +49,7 @@ def admin_data_overview(current_user=Depends(get_current_user), db: Session = De
         from_major = version_map.get(from_major_id or -1)
         to_major = target_req.major_version if target_req else None
         actor = user_map.get(log.actor_id or -1)
+
         link_logs.append(
             {
                 "id": log.id,
@@ -70,6 +68,14 @@ def admin_data_overview(current_user=Depends(get_current_user), db: Session = De
             }
         )
 
+    return link_logs
+
+
+@router.get("/admin/data-overview")
+def admin_data_overview(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    ensure_admin(current_user)
+    reqs = db.query(Requirement).options(joinedload(Requirement.test_cases)).order_by(Requirement.id.desc()).all()
+
     return {
         "users": [
             {
@@ -82,8 +88,42 @@ def admin_data_overview(current_user=Depends(get_current_user), db: Session = De
             }
             for u in db.query(User).order_by(User.id.asc()).all()
         ],
-        "versions": [{"id": v.id, "version_no": v.version_no, "version_type": v.version_type.value, "parent_id": v.parent_id, "software_id": v.software_id} for v in db.query(Version).order_by(Version.created_at.desc()).all()],
-        "requirements": [{"id": r.id, "zentao_req_id": r.zentao_req_id, "title": r.title, "major_version_id": r.major_version_id, "case_ids": [c.zentao_case_id for c in r.test_cases]} for r in reqs],
-        "bugs": [{"id": b.id, "bug_id": b.bug_id, "major_version_id": b.major_version_id, "requirement_id": b.requirement_id, "source_type": b.source_type.value, "source_ref": b.source_ref, "found_minor_version_id": b.found_minor_version_id} for b in db.query(BugTracking).order_by(BugTracking.id.desc()).all()],
-        "requirement_link_logs": link_logs,
+        "versions": [
+            {
+                "id": v.id,
+                "version_no": v.version_no,
+                "version_type": v.version_type.value,
+                "parent_id": v.parent_id,
+                "software_id": v.software_id,
+            }
+            for v in db.query(Version).order_by(Version.created_at.desc()).all()
+        ],
+        "requirements": [
+            {
+                "id": r.id,
+                "zentao_req_id": r.zentao_req_id,
+                "title": r.title,
+                "major_version_id": r.major_version_id,
+                "case_ids": [c.zentao_case_id for c in r.test_cases],
+            }
+            for r in reqs
+        ],
+        "bugs": [
+            {
+                "id": b.id,
+                "bug_id": b.bug_id,
+                "major_version_id": b.major_version_id,
+                "requirement_id": b.requirement_id,
+                "source_type": b.source_type.value,
+                "source_ref": b.source_ref,
+                "found_minor_version_id": b.found_minor_version_id,
+            }
+            for b in db.query(BugTracking).order_by(BugTracking.id.desc()).all()
+        ],
     }
+
+
+@router.get("/admin/requirement-link-logs")
+def admin_requirement_link_logs(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    ensure_admin(current_user)
+    return _build_requirement_link_logs(db, limit=300)

@@ -517,22 +517,27 @@
       <div id="dataUsers"></div>
     </div>
 
-    <div class="card">
-      <h3>关联记录日志明细</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>时间</th>
-            <th>操作人</th>
-            <th>来源大版本</th>
-            <th>目标大版本</th>
-            <th>来源需求</th>
-            <th>目标需求</th>
-          </tr>
-        </thead>
-        <tbody id="dataLinkLogs"></tbody>
-      </table>
-    </div>
+    <details id="dataLinkLogsBlock" class="card">
+      <summary style="cursor:pointer; font-weight:700; color:#0f172a;">关联记录日志明细</summary>
+      <div style="margin-top:10px;">
+        <div class="row" style="justify-content:flex-end; margin-bottom:8px;">
+          <button class="secondary" onclick="loadRequirementLinkLogs()">加载日志</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>操作人</th>
+              <th>来源大版本</th>
+              <th>目标大版本</th>
+              <th>来源需求</th>
+              <th>目标需求</th>
+            </tr>
+          </thead>
+          <tbody id="dataLinkLogs"><tr><td colspan="6" class="muted" style="text-align:center;">点击“加载日志”后显示内容</td></tr></tbody>
+        </table>
+      </div>
+    </details>
 
     <p class="warn">危险操作：删除大版本会级联删除其下需求、用例和Bug。</p>
     <div class="row" style="justify-content: space-between; align-items: center; margin-top: 24px; margin-bottom: 12px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">
@@ -1152,6 +1157,9 @@ function exportTreePdf() {
 
 async function loadDataOverview(){
   return window.OmniQADataTab.loadDataOverview();
+}
+async function loadRequirementLinkLogs(){
+  return window.OmniQADataTab.loadRequirementLinkLogs();
 }
 
 async function setDataView(key, checked){
