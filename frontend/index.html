@@ -711,7 +711,19 @@ async function api(url,opt={}){
   }
   const r = await fetch(url, { ...opt, headers, body });
   if(r.status===401){logout();throw new Error('401')}
-  if(!r.ok){let t='操作失败';try{const j=await r.json();t=j.detail||j.message||t}catch{};throw new Error(t)}
+  if(!r.ok){
+    let t=`请求失败 (HTTP ${r.status})`;
+    try{
+      const j=await r.json();
+      t=j.detail||j.message||t;
+    }catch{
+      try{
+        const raw=await r.text();
+        if(raw&&raw.trim()) t=`${t}: ${raw.slice(0,160)}`;
+      }catch{}
+    }
+    throw new Error(t)
+  }
   return r;
 }
 
@@ -1134,6 +1146,9 @@ async function setFeedbackStatus(id, status){
 }
 
 async function loadFieldTestBoard(){
+  if(!window.OmniQAFieldTestTab || typeof window.OmniQAFieldTestTab.loadFieldTestBoard !== 'function'){
+    throw new Error('外业测试模块未加载，请刷新页面后重试');
+  }
   return window.OmniQAFieldTestTab.loadFieldTestBoard();
 }
 
