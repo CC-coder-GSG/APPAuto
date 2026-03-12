@@ -183,9 +183,10 @@ class RequirementService:
                         retest_passed=None,
                         status=RequirementStatus.PENDING,
                     )
-                    self.recalculate_requirement_status(new_req, actor_id=actor_id)
                     self.db.add(new_req)
                     self.db.flush()
+                    # 必须在 flush 后再重算状态；否则状态历史 requirement_id 可能为 None 导致写入失败
+                    self.recalculate_requirement_status(new_req, actor_id=actor_id)
 
                     for c in (src.test_cases or []):
                         self.db.add(
@@ -219,6 +220,11 @@ class RequirementService:
                         detail="检测到数据库仍使用旧唯一约束（requirements.zentao_req_id 全局唯一），请先重启服务触发自动迁移后再执行关联。",
                     )
                 # 容错：单条冲突跳过，避免整批失败
+                conflict_count += 1
+                skipped_count += 1
+                continue
+            except Exception as e:
+                # 单条兜底容错，避免整批失败；同时将这类错误计入冲突数供前端提示
                 conflict_count += 1
                 skipped_count += 1
                 continue
