@@ -73,8 +73,32 @@
 
   <section id="tab-assign" class="hidden card">
     <h2>任务分配台（仅管理员）</h2>
-    <div class="row"><label>大版本</label><select id="assignMajorSelect" onchange="loadAssignBoard()"></select><button onclick="loadAssignBoard()">加载</button><button onclick="publishAssign()">一键发布（更新分配）</button></div>
-    <table><thead><tr><th>需求</th><th>负责人</th></tr></thead><tbody id="assignTable"></tbody></table>
+    <details id="assignCreateBlock" open style="border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; background:#fff;">
+      <summary style="cursor:pointer; font-weight:700; color:#0f172a; list-style:none;">任务创建台</summary>
+      <div style="margin-top:10px;">
+        <div class="row"><label>大版本</label><select id="assignMajorSelect" onchange="loadAssignBoard()"></select><button onclick="loadAssignBoard()">加载</button><button onclick="publishAssign()">一键发布（更新分配）</button></div>
+        <table><thead><tr><th>需求</th><th>负责人</th></tr></thead><tbody id="assignTable"></tbody></table>
+      </div>
+    </details>
+
+    <div class="card" style="margin-top:16px; border:1px solid #e2e8f0; background:#f8fafc;">
+      <h3 style="margin-top:0; color:#1e293b;">关联版本需求</h3>
+      <div class="row" style="flex-wrap:wrap; gap:10px; align-items:center;">
+        <label>来源大版本</label><select id="linkSourceMajorSelect"></select>
+        <button class="secondary" onclick="loadLinkCandidates()">加载来源需求</button>
+        <label style="margin-left:10px; cursor:pointer;">
+          <input type="checkbox" id="linkSelectAll" onchange="toggleLinkSelectAll(this.checked)"> 全选
+        </label>
+      </div>
+      <div id="linkCandidatesArea" style="margin-top:10px; max-height:260px; overflow:auto; border:1px dashed #e2e8f0; border-radius:8px; padding:10px; background:#fff;">
+        <div class="muted">请选择来源大版本后加载需求</div>
+      </div>
+      <div class="row" style="margin-top:10px; justify-content:flex-end;">
+        <button onclick="confirmLinkRequirements()">成功关联到当前大版本</button>
+      </div>
+      <div class="muted" style="margin-top:6px; font-size:12px;">说明：会复制需求与用例及负责人分配，不复制历史 Bug。</div>
+    </div>
+
     <div class="card" style="margin-top:16px; border:1px solid #e2e8f0; background:#f8fafc;">
       <h3 style="margin-top:0; color:#1e293b;">任务进行状态</h3>
       <div id="assignProgressArea"></div>
@@ -490,6 +514,23 @@
       <div id="dataUsers"></div>
     </div>
 
+    <div class="card">
+      <h3>关联记录日志明细</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>操作人</th>
+            <th>来源大版本</th>
+            <th>目标大版本</th>
+            <th>来源需求</th>
+            <th>目标需求</th>
+          </tr>
+        </thead>
+        <tbody id="dataLinkLogs"></tbody>
+      </table>
+    </div>
+
     <p class="warn">危险操作：删除大版本会级联删除其下需求、用例和Bug。</p>
     <div class="row" style="justify-content: space-between; align-items: center; margin-top: 24px; margin-bottom: 12px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">
       <h3 style="margin: 0;">🌳 质量资产大盘 (树形追溯)</h3>
@@ -693,6 +734,7 @@ async function loadVersions(){
 function fillVersionSelects(){
   const majors=versions.filter(v=>v.version_type==='major');
   ['mineMajorSelect','retestMajorSelect','s5MajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
+  fillSelect('linkSourceMajorSelect', majors);
   const assignMajorEl=document.getElementById('assignMajorSelect');
   if(assignMajorEl){
     assignMajorEl.innerHTML = majors.length
@@ -834,6 +876,15 @@ async function confirmImport() {
 
 async function loadAssignBoard(){
   return window.OmniQAAssignTab.loadAssignBoard();
+}
+async function loadLinkCandidates(){
+  return window.OmniQAAssignTab.loadLinkCandidates();
+}
+function toggleLinkSelectAll(checked){
+  return window.OmniQAAssignTab.toggleLinkSelectAll(checked);
+}
+async function confirmLinkRequirements(){
+  return window.OmniQAAssignTab.confirmLinkRequirements();
 }
 function toggleAssignProgressPendingOnly(){
   if(window.OmniQAAssignTab && typeof window.OmniQAAssignTab.toggleAssignProgressPendingOnly==='function'){

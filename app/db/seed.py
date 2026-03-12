@@ -74,3 +74,92 @@ def ensure_default_software_and_backfill(db: Session) -> None:
         {"minor": VersionType.MINOR.value},
     )
     db.commit()
+
+
+def ensure_requirement_schema_compat(db: Session) -> None:
+    """
+    兼容历史 SQLite：
+    - 旧结构为 zentao_req_id 全局唯一
+    - 新结构调整为 (major_version_id, zentao_req_id) 组合唯一
+    该迁移为轻量自动迁移，启动时自动执行，无需手工改库。
+    """
+    idx_rows = db.execute(text("PRAGMA index_list(requirements)")).fetchall()
+    need_rebuild = False
+    has_target_unique = False
+    has_global_unique = False
+
+    for r in idx_rows:
+        # PRAGMA index_list: seq, name, unique, origin, partial
+        idx_name = r[1]
+        is_unique = bool(r[2])
+        cols_rows = db.execute(text(f"PRAGMA index_info('{idx_name}')")).fetchall()
+        cols = [c[2] for c in cols_rows]
+        if is_unique and cols == ["major_version_id", "zentao_req_id"]:
+            has_target_unique = True
+        if is_unique and cols == ["zentao_req_id"]:
+            has_global_unique = True
+
+    if has_target_unique:
+        return
+    if has_global_unique:
+        need_rebuild = True
+
+    if not need_rebuild:
+        return
+
+    db.execute(text("PRAGMA foreign_keys=OFF"))
+    try:
+        db.execute(text("ALTER TABLE requirements RENAME TO requirements_old"))
+        db.execute(
+            text(
+                """
+                CREATE TABLE requirements (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    zentao_req_id VARCHAR(20) NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    major_version_id INTEGER NOT NULL,
+                    owner_id INTEGER,
+                    case_completed BOOLEAN NOT NULL DEFAULT 0,
+                    test_completed BOOLEAN NOT NULL DEFAULT 0,
+                    retest_completed BOOLEAN NOT NULL DEFAULT 0,
+                    retested_by_id INTEGER,
+                    retested_at DATETIME,
+                    retest_minor_version_id INTEGER,
+                    retest_passed BOOLEAN,
+                    status VARCHAR(50) NOT NULL DEFAULT 'pending',
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    CONSTRAINT uq_requirements_major_reqid UNIQUE (major_version_id, zentao_req_id),
+                    FOREIGN KEY(major_version_id) REFERENCES versions (id) ON DELETE CASCADE,
+                    FOREIGN KEY(owner_id) REFERENCES users (id),
+                    FOREIGN KEY(retested_by_id) REFERENCES users (id),
+                    FOREIGN KEY(retest_minor_version_id) REFERENCES versions (id)
+                )
+                """
+            )
+        )
+        db.execute(
+            text(
+                """
+                INSERT INTO requirements (
+                    id, zentao_req_id, title, major_version_id, owner_id,
+                    case_completed, test_completed, retest_completed,
+                    retested_by_id, retested_at, retest_minor_version_id, retest_passed,
+                    status, created_at, updated_at
+                )
+                SELECT
+                    id, zentao_req_id, title, major_version_id, owner_id,
+                    case_completed, test_completed, retest_completed,
+                    retested_by_id, retested_at, retest_minor_version_id, retest_passed,
+                    status, created_at, updated_at
+                FROM requirements_old
+                """
+            )
+        )
+        db.execute(text("DROP TABLE requirements_old"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_requirements_zentao_req_id ON requirements (zentao_req_id)"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_requirements_id ON requirements (id)"))
+        db.commit()
+    finally:
+        db.execute(text("PRAGMA foreign_keys=ON"))
+        db.commit()

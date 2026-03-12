@@ -236,6 +236,27 @@ export function renderDataOverview() {
     dataUsers.innerHTML = '';
   }
 
+  const logsBody = document.getElementById('dataLinkLogs');
+  if (logsBody) {
+    const logs = (data.requirement_link_logs || [])
+      .filter((x) => activeMajorIds.size === 0 || activeMajorIds.has(Number(x.target_major_id || 0)) || activeMajorIds.has(Number(x.source_major_id || 0)));
+    logsBody.innerHTML = logs.length === 0
+      ? '<tr><td colspan="6" class="muted" style="text-align:center;">暂无关联记录</td></tr>'
+      : logs.map((l) => {
+        const timeText = l.created_at ? new Date(l.created_at).toLocaleString() : '-';
+        const srcReq = l.source_zentao_req_id ? `${l.source_zentao_req_id} ${l.source_title || ''}` : '-';
+        const dstReq = l.target_zentao_req_id ? `${l.target_zentao_req_id} ${l.target_title || ''}` : '-';
+        return `<tr>
+          <td>${timeText}</td>
+          <td>${l.actor_name || '未知'}</td>
+          <td>${l.source_major_name || '未知'}</td>
+          <td>${l.target_major_name || '未知'}</td>
+          <td>${srcReq}</td>
+          <td>${dstReq}</td>
+        </tr>`;
+      }).join('');
+  }
+
   const majors = (data.versions || []).filter((v) => v.version_type === 'major' && activeMajorIds.has(Number(v.id)));
   const minors = (data.versions || []).filter((v) => v.version_type === 'minor' && activeMajorIds.has(Number(v.parent_id)));
   const minorMap = {};

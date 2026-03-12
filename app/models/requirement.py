@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -12,9 +12,10 @@ from app.models.enums import RequirementStatus
 
 class Requirement(Base):
     __tablename__ = "requirements"
+    __table_args__ = (UniqueConstraint("major_version_id", "zentao_req_id", name="uq_requirements_major_reqid"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    zentao_req_id: Mapped[str] = mapped_column(String(20), nullable=False, unique=True, index=True)
+    zentao_req_id: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
 
     major_version_id: Mapped[int] = mapped_column(ForeignKey("versions.id", ondelete="CASCADE"), nullable=False)

@@ -28,7 +28,7 @@ class RequirementService:
         self.ensure_major_version_exists(major_version_id)
         if not validate_req_id(zentao_req_id):
             raise HTTPException(status_code=400, detail="zentao_req_id must be like r#xxxx")
-        if self.db.query(Requirement).filter(Requirement.zentao_req_id == zentao_req_id).first():
+        if self.db.query(Requirement).filter(Requirement.major_version_id == major_version_id, Requirement.zentao_req_id == zentao_req_id).first():
             raise HTTPException(status_code=400, detail="Requirement already exists")
 
         requirement = Requirement(
@@ -59,7 +59,9 @@ class RequirementService:
 
     def batch_create_requirements(self, major_version_id: int, items: list[dict], actor_id: int | None = None) -> dict:
         self.ensure_major_version_exists(major_version_id)
-        existing_reqs = {r[0] for r in self.db.query(Requirement.zentao_req_id).all()}
+        existing_reqs = {
+            r[0] for r in self.db.query(Requirement.zentao_req_id).filter(Requirement.major_version_id == major_version_id).all()
+        }
 
         new_reqs: list[Requirement] = []
         for item in items:
@@ -98,6 +100,110 @@ class RequirementService:
             )
 
         return {"message": "导入成功", "count": len(new_reqs)}
+
+    def list_requirements_for_link(self, source_major_version_id: int, target_major_version_id: int) -> list[dict]:
+        self.ensure_major_version_exists(source_major_version_id)
+        self.ensure_major_version_exists(target_major_version_id)
+        source_rows = (
+            self.db.query(Requirement)
+            .options(joinedload(Requirement.owner), joinedload(Requirement.test_cases))
+            .filter(Requirement.major_version_id == source_major_version_id)
+            .order_by(Requirement.id.asc())
+            .all()
+        )
+        target_ids = {
+            r[0]
+            for r in self.db.query(Requirement.zentao_req_id).filter(Requirement.major_version_id == target_major_version_id).all()
+        }
+        return [
+            {
+                "id": r.id,
+                "zentao_req_id": r.zentao_req_id,
+                "title": r.title,
+                "owner_id": r.owner_id,
+                "owner_name": r.owner.shown_name if r.owner else "未分配",
+                "case_count": len(r.test_cases or []),
+                "already_linked": r.zentao_req_id in target_ids,
+            }
+            for r in source_rows
+        ]
+
+    def link_requirements_from_major(
+        self,
+        *,
+        target_major_version_id: int,
+        source_major_version_id: int,
+        source_requirement_ids: list[int],
+        actor_id: int | None = None,
+    ) -> dict:
+        if target_major_version_id == source_major_version_id:
+            raise HTTPException(status_code=400, detail="来源大版本与目标大版本不能相同")
+        self.ensure_major_version_exists(target_major_version_id)
+        self.ensure_major_version_exists(source_major_version_id)
+
+        source_rows = (
+            self.db.query(Requirement)
+            .options(joinedload(Requirement.test_cases))
+            .filter(Requirement.major_version_id == source_major_version_id, Requirement.id.in_(source_requirement_ids))
+            .all()
+        )
+        if not source_rows:
+            return {"message": "没有可关联的需求", "created_count": 0, "skipped_count": 0}
+
+        existing_ids = {
+            r[0]
+            for r in self.db.query(Requirement.zentao_req_id).filter(Requirement.major_version_id == target_major_version_id).all()
+        }
+
+        created_count = 0
+        skipped_count = 0
+        for src in source_rows:
+            if src.zentao_req_id in existing_ids:
+                skipped_count += 1
+                continue
+
+            new_req = Requirement(
+                zentao_req_id=src.zentao_req_id,
+                title=src.title,
+                major_version_id=target_major_version_id,
+                owner_id=src.owner_id,
+                case_completed=src.case_completed,
+                test_completed=src.test_completed,
+                retest_completed=src.retest_completed,
+                retested_by_id=src.retested_by_id,
+                retested_at=src.retested_at,
+                retest_minor_version_id=None,
+                retest_passed=src.retest_passed,
+                status=src.status,
+            )
+            self.db.add(new_req)
+            self.db.flush()
+
+            for c in (src.test_cases or []):
+                self.db.add(
+                    TestCase(
+                        requirement_id=new_req.id,
+                        zentao_case_id=c.zentao_case_id,
+                        creator_id=c.creator_id,
+                    )
+                )
+            created_count += 1
+            existing_ids.add(src.zentao_req_id)
+            audit(
+                self.db,
+                action="requirement.link_major",
+                target_type="requirement",
+                actor_id=actor_id,
+                target_id=str(new_req.id),
+                detail=f"from_major={source_major_version_id},from_req={src.id}",
+            )
+
+        self.db.commit()
+        return {
+            "message": f"关联完成：新增 {created_count} 条，跳过 {skipped_count} 条",
+            "created_count": created_count,
+            "skipped_count": skipped_count,
+        }
 
     def recalculate_requirement_status(self, requirement: Requirement, actor_id: int | None = None) -> Requirement:
         old_status_obj = requirement.status

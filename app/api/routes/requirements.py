@@ -48,6 +48,11 @@ class AssignPublishPayload(BaseModel):
     major_version_id: int
     assignments: list[AssignItemPayload]
 
+class LinkMajorPayload(BaseModel):
+    target_major_version_id: int
+    source_major_version_id: int
+    source_requirement_ids: list[int] = Field(default_factory=list)
+
 
 class ReqStatusUpdatePayload(BaseModel):
     case_completed: Optional[bool] = None
@@ -261,6 +266,32 @@ def admin_requirements_progress(
         "owners": owners,
         "retest_pending_by_major": retest_pending_by_major,
     }
+
+@router.get("/requirements/admin/link-options")
+def admin_link_options(
+    source_major_version_id: int,
+    target_major_version_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_admin(current_user)
+    service = RequirementService(db)
+    return service.list_requirements_for_link(source_major_version_id, target_major_version_id)
+
+@router.post("/requirements/admin/link-major")
+def admin_link_major(
+    payload: LinkMajorPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_admin(current_user)
+    service = RequirementService(db)
+    return service.link_requirements_from_major(
+        target_major_version_id=payload.target_major_version_id,
+        source_major_version_id=payload.source_major_version_id,
+        source_requirement_ids=payload.source_requirement_ids,
+        actor_id=current_user.id,
+    )
 
 
 @router.get("/requirements/my-workbench")

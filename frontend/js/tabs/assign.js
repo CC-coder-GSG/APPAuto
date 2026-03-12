@@ -9,6 +9,18 @@ function isPendingReq(req) {
   return !(req.case_completed && req.test_completed);
 }
 
+function syncLinkSourceMajorOptions() {
+  const assignMajorEl = document.getElementById('assignMajorSelect');
+  const sourceEl = document.getElementById('linkSourceMajorSelect');
+  if (!assignMajorEl || !sourceEl) return;
+  const currentTarget = Number(assignMajorEl.value || 0);
+  const allMajors = (window.versions || state.versions || []).filter((v) => v.version_type === 'major');
+  sourceEl.innerHTML = allMajors
+    .filter((v) => Number(v.id) !== currentTarget)
+    .map((v) => `<option value="${v.id}">${v.version_no}</option>`)
+    .join('');
+}
+
 function renderAssignProgress(data) {
   const area = document.getElementById('assignProgressArea');
   if (!area) return;
@@ -98,16 +110,21 @@ function renderAssignProgress(data) {
 export async function loadAssignBoard() {
   const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
   const sid = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+  syncLinkSourceMajorOptions();
+
   if (getUsers().length === 0 && typeof window.loadUsers === 'function') {
     await window.loadUsers();
   }
+
   let reqUrl = '/requirements/admin/list';
   const reqParams = [];
   if (majorId) reqParams.push('major_version_id=' + majorId);
   if (sid) reqParams.push('software_id=' + sid);
   if (reqParams.length) reqUrl += '?' + reqParams.join('&');
+
   state.assignReqs = await (await api(reqUrl)).json();
   window.assignReqs = state.assignReqs;
+
   const assignTable = document.getElementById('assignTable');
   if (!assignTable) return;
   const users = getUsers();
@@ -121,7 +138,9 @@ export async function loadAssignBoard() {
         </select>
       </td>
     </tr>`).join('');
+
   await loadAssignProgress();
+  await loadLinkCandidates();
 }
 
 export async function loadAssignProgress() {
@@ -161,6 +180,96 @@ export async function publishAssign() {
   window.showMessage && window.showMessage('分配发布成功');
 }
 
-window.OmniQAAssignTab = { loadAssignBoard, loadAssignProgress, toggleAssignProgressPendingOnly, publishAssign };
-window.toggleAssignProgressPendingOnly = toggleAssignProgressPendingOnly;
+export async function loadLinkCandidates() {
+  const targetMajorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
+  const sourceMajorId = Number(document.getElementById('linkSourceMajorSelect')?.value || 0);
+  const area = document.getElementById('linkCandidatesArea');
+  if (!area) return;
 
+  const allEl = document.getElementById('linkSelectAll');
+  if (allEl) allEl.checked = false;
+
+  if (!targetMajorId) {
+    area.innerHTML = '<div class="muted">当前处于“全部版本”模式，请先选择一个目标大版本再做关联</div>';
+    return;
+  }
+  if (!sourceMajorId) {
+    area.innerHTML = '<div class="muted">请选择来源大版本</div>';
+    return;
+  }
+  if (targetMajorId === sourceMajorId) {
+    area.innerHTML = '<div class="muted">来源大版本不能与目标大版本相同</div>';
+    return;
+  }
+
+  const data = await (await api(`/requirements/admin/link-options?source_major_version_id=${sourceMajorId}&target_major_version_id=${targetMajorId}`)).json();
+  if (!data || data.length === 0) {
+    area.innerHTML = '<div class="muted">来源版本暂无可关联需求</div>';
+    return;
+  }
+
+  area.innerHTML = data.map((r) => `
+    <label class="row" style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px dashed #e2e8f0; padding:8px 0;">
+      <span style="display:flex; align-items:flex-start; gap:8px;">
+        <input type="checkbox" class="link-req-check" value="${r.id}" ${r.already_linked ? 'disabled' : ''}>
+        <span>
+          <b>${r.zentao_req_id}</b> ${r.title || ''}
+          <span class="muted" style="margin-left:8px;">负责人：${r.owner_name || '未分配'} ｜ 用例：${r.case_count || 0}</span>
+        </span>
+      </span>
+      ${r.already_linked ? '<span class="badge" style="background:#ecfeff;color:#0369a1;">已在目标版本</span>' : ''}
+    </label>
+  `).join('');
+}
+
+export function toggleLinkSelectAll(checked) {
+  const items = document.querySelectorAll('.link-req-check');
+  items.forEach((el) => {
+    if (!el.disabled) el.checked = !!checked;
+  });
+}
+
+export async function confirmLinkRequirements() {
+  const targetMajorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
+  const sourceMajorId = Number(document.getElementById('linkSourceMajorSelect')?.value || 0);
+  if (!targetMajorId) {
+    window.showMessage && window.showMessage('请先选择目标大版本', 'error');
+    return;
+  }
+  if (!sourceMajorId) {
+    window.showMessage && window.showMessage('请先选择来源大版本', 'error');
+    return;
+  }
+
+  const ids = Array.from(document.querySelectorAll('.link-req-check'))
+    .filter((el) => el.checked && !el.disabled)
+    .map((el) => Number(el.value));
+  if (!ids.length) {
+    window.showMessage && window.showMessage('请至少勾选一条需求', 'error');
+    return;
+  }
+
+  await api('/requirements/admin/link-major', {
+    method: 'POST',
+    headers: window.H,
+    body: {
+      target_major_version_id: targetMajorId,
+      source_major_version_id: sourceMajorId,
+      source_requirement_ids: ids,
+    },
+  });
+
+  window.showMessage && window.showMessage('关联成功，已复制需求与用例（不含Bug）', 'success');
+  await loadAssignBoard();
+}
+
+window.OmniQAAssignTab = {
+  loadAssignBoard,
+  loadAssignProgress,
+  toggleAssignProgressPendingOnly,
+  publishAssign,
+  loadLinkCandidates,
+  toggleLinkSelectAll,
+  confirmLinkRequirements,
+};
+window.toggleAssignProgressPendingOnly = toggleAssignProgressPendingOnly;
