@@ -134,6 +134,7 @@ class RequirementService:
         target_major_version_id: int,
         source_major_version_id: int,
         source_requirement_ids: list[int],
+        copy_status: bool = True,
         actor_id: int | None = None,
     ) -> dict:
         if target_major_version_id == source_major_version_id:
@@ -167,15 +168,16 @@ class RequirementService:
                 title=src.title,
                 major_version_id=target_major_version_id,
                 owner_id=src.owner_id,
-                case_completed=src.case_completed,
-                test_completed=src.test_completed,
-                retest_completed=src.retest_completed,
-                retested_by_id=src.retested_by_id,
-                retested_at=src.retested_at,
+                case_completed=src.case_completed if copy_status else False,
+                test_completed=src.test_completed if copy_status else False,
+                retest_completed=False,
+                retested_by_id=None,
+                retested_at=None,
                 retest_minor_version_id=None,
-                retest_passed=src.retest_passed,
-                status=src.status,
+                retest_passed=None,
+                status=RequirementStatus.PENDING,
             )
+            self.recalculate_requirement_status(new_req, actor_id=actor_id)
             self.db.add(new_req)
             self.db.flush()
 
@@ -195,7 +197,7 @@ class RequirementService:
                 target_type="requirement",
                 actor_id=actor_id,
                 target_id=str(new_req.id),
-                detail=f"from_major={source_major_version_id},from_req={src.id}",
+                detail=f"from_major={source_major_version_id},from_req={src.id},copy_status={copy_status}",
             )
 
         self.db.commit()

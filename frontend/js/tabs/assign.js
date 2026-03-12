@@ -242,6 +242,7 @@ export function toggleLinkSelectAll(checked) {
 export async function confirmLinkRequirements() {
   const targetMajorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
   const sourceMajorId = Number(document.getElementById('linkSourceMajorSelect')?.value || 0);
+  const copyStatus = !!document.getElementById('linkCopyStatus')?.checked;
   if (!targetMajorId) {
     window.showMessage && window.showMessage('请先选择目标大版本', 'error');
     return;
@@ -267,6 +268,7 @@ export async function confirmLinkRequirements() {
         target_major_version_id: targetMajorId,
         source_major_version_id: sourceMajorId,
         source_requirement_ids: ids,
+        copy_status: copyStatus,
       },
     });
     const data = await res.json();

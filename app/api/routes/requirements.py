@@ -52,6 +52,7 @@ class LinkMajorPayload(BaseModel):
     target_major_version_id: int
     source_major_version_id: int
     source_requirement_ids: list[int] = Field(default_factory=list)
+    copy_status: bool = True
 
 
 class ReqStatusUpdatePayload(BaseModel):
@@ -290,6 +291,7 @@ def admin_link_major(
         target_major_version_id=payload.target_major_version_id,
         source_major_version_id=payload.source_major_version_id,
         source_requirement_ids=payload.source_requirement_ids,
+        copy_status=payload.copy_status,
         actor_id=current_user.id,
     )
 
