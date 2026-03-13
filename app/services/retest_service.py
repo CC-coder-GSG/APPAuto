@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import BugSourceType, BugTracking, Requirement, User, Version, VersionType
@@ -91,6 +92,7 @@ class RetestService:
                     "bug_id": bug.bug_id,
                     "found_minor_version_no": minors.get(bug.found_minor_version_id, "未知"),
                     "is_retest_failed": bug.is_retest_failed,
+                    "closed": bool(bug.closed),
                 }
             )
 
@@ -133,6 +135,19 @@ class RetestService:
             has_new_retest = self.db.query(BugTracking).filter(BugTracking.requirement_id == requirement_id, BugTracking.source_type == BugSourceType.RETEST).first()
             if not has_failed_old and not has_new_retest:
                 raise HTTPException(status_code=400, detail="打回无效：请至少勾选一个未修好的旧 Bug，或新增一个漏测 Bug 作为证据！")
+
+        if retest_completed and retest_passed is True:
+            has_failed_old = self.db.query(BugTracking).filter(
+                BugTracking.requirement_id == requirement_id,
+                BugTracking.is_retest_failed.is_(True),
+            ).first()
+            has_open_retest = self.db.query(BugTracking).filter(
+                BugTracking.requirement_id == requirement_id,
+                BugTracking.source_type == BugSourceType.RETEST,
+                or_(BugTracking.closed.is_(False), BugTracking.closed.is_(None)),
+            ).first()
+            if has_failed_old or has_open_retest:
+                raise HTTPException(status_code=400, detail="???????????????? Bug ???????????????")
 
         req.retest_completed = retest_completed
         req.retest_passed = retest_passed if retest_completed else None

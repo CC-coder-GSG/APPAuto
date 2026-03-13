@@ -85,9 +85,12 @@ export async function loadRetest() {
     }).join('');
 
     const retestBugHtml = (req.retest_bugs || []).map((b) => {
-      evidenceCount++;
+      if (!b.closed) evidenceCount++;
+      const closedTag = b.closed
+        ? '<span class="badge" style="background:#dcfce7; color:#166534; margin-left:6px; padding:1px 6px;">✅已闭环</span>'
+        : '<span class="badge" style="background:#fee2e2; color:#b91c1c; margin-left:6px; padding:1px 6px;">⏳未闭环</span>';
       return `<div style="margin-bottom:6px;">
-      <span class="badge" style="background:#fee2e2; color:#b91c1c; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(复测新增)</span></span>
+      <span class="badge" style="background:#fee2e2; color:#b91c1c; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(复测新增)</span></span>${closedTag}
     </div>`;
     }).join('');
 
