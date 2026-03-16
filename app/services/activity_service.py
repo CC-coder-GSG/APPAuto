@@ -170,18 +170,18 @@ class ActivityService:
 
         ctx: dict[str, dict[int, Any]] = {}
         if ids_by_type.get("bug"):
-            rows = self.db.query(BugTracking).options(joinedload(BugTracking.requirement)).filter(BugTracking.id.in_(ids_by_type["bug"])).all()
+            rows = self.db.query(BugTracking).options(joinedload(BugTracking.requirement), joinedload(BugTracking.major_version)).filter(BugTracking.id.in_(ids_by_type["bug"])).all()
             ctx["bug"] = {row.id: row for row in rows}
         if ids_by_type.get("requirement"):
-            rows = self.db.query(Requirement).options(joinedload(Requirement.owner)).filter(Requirement.id.in_(ids_by_type["requirement"])).all()
+            rows = self.db.query(Requirement).options(joinedload(Requirement.owner), joinedload(Requirement.major_version)).filter(Requirement.id.in_(ids_by_type["requirement"])).all()
             ctx["requirement"] = {row.id: row for row in rows}
         if ids_by_type.get("feedback"):
-            rows = self.db.query(FeedbackRecord).filter(FeedbackRecord.id.in_(ids_by_type["feedback"])).all()
+            rows = self.db.query(FeedbackRecord).options(joinedload(FeedbackRecord.major_version)).filter(FeedbackRecord.id.in_(ids_by_type["feedback"])).all()
             ctx["feedback"] = {row.id: row for row in rows}
         if ids_by_type.get("field_test"):
             rows = (
                 self.db.query(FieldTestRecord)
-                .options(joinedload(FieldTestRecord.requirement), joinedload(FieldTestRecord.tester))
+                .options(joinedload(FieldTestRecord.requirement), joinedload(FieldTestRecord.tester), joinedload(FieldTestRecord.major_version))
                 .filter(FieldTestRecord.id.in_(ids_by_type["field_test"]))
                 .all()
             )
@@ -221,6 +221,22 @@ class ActivityService:
         if target_type == "version" and item:
             return numeric_target_id, item.version_no, getattr(item.version_type, "value", "")
         return numeric_target_id, log.target_id, None
+
+    def _resolve_item_software_id(self, log: AuditLog, ctx: dict[str, dict[int, Any]]) -> int | None:
+        numeric_target_id = self._parse_int(log.target_id)
+        if numeric_target_id is None:
+            return None
+        target_type = log.target_type or ""
+        item = ctx.get(target_type, {}).get(numeric_target_id)
+        if target_type == "bug" and item and item.major_version:
+            return item.major_version.software_id
+        if target_type == "requirement" and item and item.major_version:
+            return item.major_version.software_id
+        if target_type == "feedback" and item and item.major_version:
+            return item.major_version.software_id
+        if target_type == "field_test" and item and item.major_version:
+            return item.major_version.software_id
+        return None
 
     def _render_detail(self, action: str, detail: str | None) -> str | None:
         raw = (detail or "").strip()
@@ -357,6 +373,7 @@ class ActivityService:
             "detail": detail_text,
             "level": meta["level"],
             "important": bool(meta["important"]),
+            "software_id": self._resolve_item_software_id(log, ctx),
         }
 
     def _hydrate_logs(self, logs: list[AuditLog]) -> list[dict[str, Any]]:
@@ -372,6 +389,7 @@ class ActivityService:
         target_type: str | None = None,
         action: str | None = None,
         actor_id: int | None = None,
+        software_id: int | None = None,
         keyword: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
@@ -397,6 +415,8 @@ class ActivityService:
 
         if target_type:
             items = [item for item in items if item["module"] == target_type or item["target_type"] == target_type]
+        if software_id:
+            items = [item for item in items if item.get("software_id") == software_id]
         if keyword:
             lowered = keyword.strip().lower()
             items = [
@@ -420,9 +440,10 @@ class ActivityService:
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         target_types: list[str] | None = None,
+        software_id: int | None = None,
         only_important: bool = False,
     ) -> dict[str, Any]:
-        items = self.list_feed(date_from=date_from, date_to=date_to, only_important=only_important, limit=500, offset=0)["items"]
+        items = self.list_feed(date_from=date_from, date_to=date_to, software_id=software_id, only_important=only_important, limit=500, offset=0)["items"]
         if target_types:
             items = [item for item in items if item["module"] in target_types or item["target_type"] in target_types]
 
@@ -437,14 +458,15 @@ class ActivityService:
         highlights = [item for item in items if item["important"]][:8]
         return {"cards": cards, "highlights": highlights}
 
-    def build_push_markdown(self, *, hours: int = 24, target_types: list[str] | None = None, only_important: bool = True) -> str:
+    def build_push_markdown(self, *, hours: int = 24, target_types: list[str] | None = None, software_id: int | None = None, only_important: bool = True) -> str:
         end_at = datetime.utcnow()
         start_at = end_at - timedelta(hours=hours)
-        summary = self.get_summary(date_from=start_at, date_to=end_at, target_types=target_types, only_important=only_important)
+        summary = self.get_summary(date_from=start_at, date_to=end_at, target_types=target_types, software_id=software_id, only_important=only_important)
         items = self.list_feed(
             date_from=start_at,
             date_to=end_at,
             target_type=target_types[0] if target_types and len(target_types) == 1 else None,
+            software_id=software_id,
             only_important=only_important,
             limit=10,
             offset=0,

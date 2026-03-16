@@ -3,7 +3,7 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import BugSourceType, BugStage5Record, BugTracking, Requirement, User
+from app.models import BugSourceType, BugStage5Record, BugTracking, Requirement, User, Version
 from app.services.audit_service import audit
 
 
@@ -78,8 +78,11 @@ class BugService:
         audit(self.db, action="bug.toggle_retest_fail", target_type="bug", actor_id=actor_id, target_id=str(bug.id), detail=str(is_retest_failed))
         return {"message": "Bug retest status updated"}
 
-    def search_bug(self, bug_id: str) -> dict:
-        bug = self.db.query(BugTracking).options(joinedload(BugTracking.requirement)).filter(BugTracking.bug_id == bug_id).first()
+    def search_bug(self, bug_id: str, software_id: int | None = None) -> dict:
+        query = self.db.query(BugTracking).options(joinedload(BugTracking.requirement)).filter(BugTracking.bug_id == bug_id)
+        if software_id:
+            query = query.join(Version, BugTracking.major_version_id == Version.id).filter(Version.software_id == software_id)
+        bug = query.first()
         if not bug:
             raise HTTPException(status_code=404, detail="未找到该 Bug 编号")
         return {
@@ -124,14 +127,16 @@ class BugService:
             )
         return rows
 
-    def dispatched_all(self) -> list[dict]:
-        bugs = (
+    def dispatched_all(self, software_id: int | None = None) -> list[dict]:
+        query = (
             self.db.query(BugTracking)
             .options(joinedload(BugTracking.dispatched_to))
             .filter(BugTracking.dispatched_to_id.isnot(None))
             .order_by(BugTracking.id.desc())
-            .all()
         )
+        if software_id:
+            query = query.join(Version, BugTracking.major_version_id == Version.id).filter(Version.software_id == software_id)
+        bugs = query.all()
         return [
             {
                 "id": b.id,

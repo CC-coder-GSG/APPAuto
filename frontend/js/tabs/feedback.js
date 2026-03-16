@@ -81,11 +81,13 @@ function getListFilters() {
 
 async function listFeedbacksPaged(page = 1) {
   const { keyword, status, assigneeId, majorId, minorId, sortBy, sortOrder, pageSize } = getListFilters();
+  const softwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
   currentPageSize = pageSize;
   const params = new URLSearchParams();
   if (keyword) params.set('keyword', keyword);
   if (status) params.set('status', status);
   if (assigneeId) params.set('assignee_id', String(assigneeId));
+  if (softwareId) params.set('software_id', String(softwareId));
   if (majorId) params.set('major_version_id', String(majorId));
   if (minorId) params.set('minor_version_id', String(minorId));
   params.set('page', String(page));
@@ -205,8 +207,10 @@ export async function deleteFeedbackAttachment(attachmentId, feedbackId) {
 }
 
 async function loadBugOptions(keyword = '') {
+  const softwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
   const params = new URLSearchParams();
   if (keyword) params.set('keyword', keyword);
+  if (softwareId) params.set('software_id', String(softwareId));
   const rows = await (await api(`/feedbacks/bug-options?${params.toString()}`)).json();
   const sel = document.getElementById('feedbackLinkBugId');
   if (!sel) return;

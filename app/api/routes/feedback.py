@@ -33,6 +33,7 @@ def list_feedbacks(
     assignee_id: Optional[int] = None,
     major_version_id: Optional[int] = None,
     minor_version_id: Optional[int] = None,
+    software_id: Optional[int] = None,
     _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -42,6 +43,7 @@ def list_feedbacks(
         assignee_id=assignee_id,
         major_version_id=major_version_id,
         minor_version_id=minor_version_id,
+        software_id=software_id,
     )
 
 @router.get("/feedbacks/paged")
@@ -51,6 +53,7 @@ def list_feedbacks_paged(
     assignee_id: Optional[int] = None,
     major_version_id: Optional[int] = None,
     minor_version_id: Optional[int] = None,
+    software_id: Optional[int] = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     sort_by: str = Query(default="created_at"),
@@ -64,6 +67,7 @@ def list_feedbacks_paged(
         assignee_id=assignee_id,
         major_version_id=major_version_id,
         minor_version_id=minor_version_id,
+        software_id=software_id,
         page=page,
         page_size=page_size,
         sort_by=sort_by,
@@ -211,11 +215,12 @@ def unlink_feedback_bug(feedback_id: int, bug_id: int, current_user: User = Depe
 @router.get("/feedbacks/bug-options")
 def search_bug_options(
     keyword: Optional[str] = None,
+    software_id: Optional[int] = None,
     limit: int = 20,
     _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return FeedbackService(db).search_existing_bugs(keyword=keyword, limit=limit)
+    return FeedbackService(db).search_existing_bugs(keyword=keyword, software_id=software_id, limit=limit)
 
 
 @router.get("/feedbacks/{feedback_id}")

@@ -73,10 +73,10 @@ def toggle_bug_retest_fail(bug_id: int, payload: BugRetestFailPayload, current_u
 
 
 @router.get("/bugs/search")
-def search_bug(bug_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def search_bug(bug_id: str, software_id: Optional[int] = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     ensure_admin(current_user)
     service = BugService(db)
-    return service.search_bug(bug_id)
+    return service.search_bug(bug_id, software_id=software_id)
 
 
 @router.post("/bugs/{bug_id}/dispatch")
@@ -97,10 +97,10 @@ def dispatched_to_me(major_version_id: int, current_user: User = Depends(get_cur
 
 
 @router.get("/bugs/dispatched-all")
-def get_all_dispatched_bugs(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_all_dispatched_bugs(software_id: Optional[int] = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     ensure_admin(current_user)
     service = BugService(db)
-    return service.dispatched_all()
+    return service.dispatched_all(software_id=software_id)
 
 
 @router.get("/bugs/{bug_id}/timeline")

@@ -5,8 +5,11 @@ import { withPrefix } from '../utils.js';
 export async function searchDispatchBug() {
   const bugId = withPrefix('b#', document.getElementById('dispatchBugNo')?.value || '');
   if (!bugId) return;
+  const softwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
   try {
-    const res = await (await api('/bugs/search?bug_id=' + encodeURIComponent(bugId))).json();
+    const params = new URLSearchParams({ bug_id: bugId });
+    if (softwareId) params.set('software_id', String(softwareId));
+    const res = await (await api('/bugs/search?' + params.toString())).json();
     state.currentDispatchBugId = res.id;
     document.getElementById('dispatchBugTitle').innerHTML = `找到缺陷：<b>${res.bug_id}</b> <span style="font-size:14px; color:#475569;">(归属：${res.req_title})</span>`;
     if (res.dispatched_to_id) document.getElementById('dispatchUserSelect').value = String(res.dispatched_to_id);
@@ -35,7 +38,10 @@ export async function confirmDispatchBug() {
 
 export async function loadDispatchedAll() {
   try {
-    const data = await (await api('/bugs/dispatched-all')).json();
+    const softwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+    const params = new URLSearchParams();
+    if (softwareId) params.set('software_id', String(softwareId));
+    const data = await (await api(`/bugs/dispatched-all${params.toString() ? `?${params.toString()}` : ''}`)).json();
     const hideClosed = document.getElementById('hideClosedDispatch')?.checked;
     const filteredData = hideClosed ? data.filter((b) => !b.closed) : data;
     const table = document.getElementById('dispatchAllTable');

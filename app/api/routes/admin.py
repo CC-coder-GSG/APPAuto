@@ -25,6 +25,7 @@ class PushActivitySummaryPayload(BaseModel):
     hours: int = Field(default=24, ge=1, le=168)
     target_types: list[str] = Field(default_factory=list)
     only_important: bool = True
+    software_id: Optional[int] = None
 
 
 def _summarize_change_log(change_log: str | None, limit: int = 200) -> tuple[str, int]:
@@ -177,6 +178,7 @@ def admin_activity_feed(
     action: Optional[str] = None,
     actor_id: Optional[int] = None,
     keyword: Optional[str] = None,
+    software_id: Optional[int] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     only_important: bool = False,
@@ -191,6 +193,7 @@ def admin_activity_feed(
         action=action,
         actor_id=actor_id,
         keyword=keyword,
+        software_id=software_id,
         date_from=date_from,
         date_to=date_to,
         only_important=only_important,
@@ -204,6 +207,7 @@ def admin_activity_summary(
     days: int = Query(default=1, ge=1, le=30),
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
+    software_id: Optional[int] = None,
     only_important: bool = False,
     target_types: list[str] = Query(default=[]),
     current_user=Depends(get_current_user),
@@ -215,6 +219,7 @@ def admin_activity_summary(
     return ActivityService(db).get_summary(
         date_from=start_at,
         date_to=end_at,
+        software_id=software_id,
         target_types=target_types or None,
         only_important=only_important,
     )
@@ -229,6 +234,7 @@ async def admin_push_activity_summary(
     ensure_admin(current_user)
     markdown = ActivityService(db).build_push_markdown(
         hours=payload.hours,
+        software_id=payload.software_id,
         target_types=payload.target_types or None,
         only_important=payload.only_important,
     )

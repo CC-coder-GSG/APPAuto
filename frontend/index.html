@@ -923,6 +923,7 @@ async function onSoftwareChange(){
     if(visible==='retest') await loadRetest();
     if(visible==='stage5') await loadStage5();
     if(visible==='report') await queryReport();
+    if(visible==='activity') await loadActivityBoard();
     if(visible==='field-test') await loadFieldTestBoard();
     if(visible==='data') await loadDataOverview();
     if(visible==='assign') await loadAssignBoard();

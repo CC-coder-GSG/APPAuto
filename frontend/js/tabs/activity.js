@@ -114,6 +114,10 @@ function getFeedFilters() {
   };
 }
 
+function getCurrentSoftwareId() {
+  return Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+}
+
 function fillActorOptions(savedActorId = '0') {
   const select = document.getElementById('activityActorSelect');
   if (!select || !window.currentUser || window.currentUser.role !== 'admin') return;
@@ -195,15 +199,18 @@ function renderFeed(feed) {
 
 async function fetchSummary() {
   const { days, onlyImportant, targetType } = getFeedFilters();
+  const softwareId = getCurrentSoftwareId();
   const params = new URLSearchParams();
   params.set('days', String(days));
   if (onlyImportant) params.set('only_important', 'true');
   if (targetType) params.append('target_types', targetType);
+  if (softwareId) params.set('software_id', String(softwareId));
   return (await (await api(`/admin/activity-summary?${params.toString()}`)).json()) || {};
 }
 
 async function fetchFeed() {
   const { targetType, actorId, keyword, onlyImportant, days } = getFeedFilters();
+  const softwareId = getCurrentSoftwareId();
   const now = new Date();
   const from = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
   const params = new URLSearchParams();
@@ -215,6 +222,7 @@ async function fetchFeed() {
   if (actorId) params.set('actor_id', String(actorId));
   if (keyword) params.set('keyword', keyword);
   if (onlyImportant) params.set('only_important', 'true');
+  if (softwareId) params.set('software_id', String(softwareId));
   return (await (await api(`/admin/activity-feed?${params.toString()}`)).json()) || { items: [], total: 0 };
 }
 
@@ -253,12 +261,14 @@ export async function prevActivityPage() {
 
 export async function pushActivitySummary() {
   const { targetType, onlyImportant, days } = getFeedFilters();
+  const softwareId = getCurrentSoftwareId();
   const hours = Math.max(1, days * 24);
   await api('/admin/push-activity-summary', {
     method: 'POST',
     headers: window.H,
     body: {
       hours,
+      software_id: softwareId || null,
       target_types: targetType ? [targetType] : [],
       only_important: onlyImportant,
     },

@@ -77,6 +77,7 @@ class FeedbackService:
         assignee_id: Optional[int] = None,
         major_version_id: Optional[int] = None,
         minor_version_id: Optional[int] = None,
+        software_id: Optional[int] = None,
     ) -> list[dict]:
         q = self.db.query(FeedbackRecord).options(
             joinedload(FeedbackRecord.creator),
@@ -93,6 +94,8 @@ class FeedbackService:
             q = q.filter(FeedbackRecord.assignee_id == assignee_id)
         if major_version_id:
             q = q.filter(FeedbackRecord.major_version_id == major_version_id)
+        elif software_id:
+            q = q.join(Version, FeedbackRecord.major_version_id == Version.id).filter(Version.software_id == software_id)
         if minor_version_id:
             q = q.filter(FeedbackRecord.minor_version_id == minor_version_id)
         rows = q.order_by(FeedbackRecord.id.desc()).all()
@@ -123,6 +126,7 @@ class FeedbackService:
         assignee_id: Optional[int] = None,
         major_version_id: Optional[int] = None,
         minor_version_id: Optional[int] = None,
+        software_id: Optional[int] = None,
         page: int = 1,
         page_size: int = 10,
         sort_by: str = "created_at",
@@ -143,6 +147,8 @@ class FeedbackService:
             q = q.filter(FeedbackRecord.assignee_id == assignee_id)
         if major_version_id:
             q = q.filter(FeedbackRecord.major_version_id == major_version_id)
+        elif software_id:
+            q = q.join(Version, FeedbackRecord.major_version_id == Version.id).filter(Version.software_id == software_id)
         if minor_version_id:
             q = q.filter(FeedbackRecord.minor_version_id == minor_version_id)
 
@@ -450,11 +456,13 @@ class FeedbackService:
         audit(self.db, action="feedback.unlink_bug", target_type="feedback", actor_id=actor.id, target_id=str(feedback_id), detail=f"bug={bug_id}")
         return {"message": "已解除 Bug 关联"}
 
-    def search_existing_bugs(self, keyword: Optional[str] = None, limit: int = 20) -> list[dict]:
+    def search_existing_bugs(self, keyword: Optional[str] = None, software_id: Optional[int] = None, limit: int = 20) -> list[dict]:
         q = self.db.query(BugTracking)
         if keyword:
             kw = f"%{keyword.strip()}%"
             q = q.filter(BugTracking.bug_id.like(kw))
+        if software_id:
+            q = q.join(Version, BugTracking.major_version_id == Version.id).filter(Version.software_id == software_id)
         rows = q.order_by(BugTracking.id.desc()).limit(max(1, min(limit, 100))).all()
         return [{"id": r.id, "bug_id": r.bug_id} for r in rows]
 
