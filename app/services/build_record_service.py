@@ -75,6 +75,37 @@ class BuildRecordService:
         row = self.db.query(BuildRecord).filter(BuildRecord.id == record_id).first()
         return self.serialize(row) if row else None
 
+    def get_major_log(self, job_name: str) -> dict:
+        job_name_text = (job_name or "").strip()
+        rows = (
+            self.db.query(BuildRecord)
+            .filter(BuildRecord.job_name == job_name_text)
+            .order_by(BuildRecord.created_at.asc(), BuildRecord.id.asc())
+            .all()
+        )
+
+        latest = rows[-1] if rows else None
+        sections: list[str] = []
+        for row in rows:
+            content = (row.change_log or "").strip()
+            if not content:
+                continue
+            if row.version_name:
+                title = row.version_name
+            elif row.build_number:
+                title = f"Build #{row.build_number}"
+            else:
+                title = "未知版本"
+            sections.append(f"## {title}\n{content}")
+
+        return {
+            "job_name": job_name_text,
+            "record_count": len(rows),
+            "latest_version_name": latest.version_name if latest else None,
+            "latest_build_number": latest.build_number if latest else None,
+            "major_log": "\n\n".join(sections),
+        }
+
     @staticmethod
     def serialize(row: BuildRecord | None) -> dict | None:
         if not row:

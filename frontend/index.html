@@ -67,6 +67,7 @@
     <button onclick="showTab('retest')">复测工作台</button>
     <button onclick="showTab('stage5')">整体测试</button>
     <button onclick="showTab('field-test')">外业测试</button>
+    <button onclick="showTab('build-records')">构建记录</button>
     <button onclick="showTab('report')">报表中心</button>
     <button id="tabActivityBtn" class="hidden" onclick="showTab('activity')">活动中心</button>
     <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
@@ -413,6 +414,34 @@
     </div>
   </section>
 
+  <section id="tab-build-records" class="hidden card">
+    <div class="row" style="justify-content:space-between; align-items:flex-start;">
+      <div>
+        <h2 style="margin-bottom:6px;">构建记录</h2>
+        <div class="muted">展示 Jenkins 上报到系统的构建记录，支持按大版本筛选，并查看小版本/大版本日志。</div>
+      </div>
+      <button class="secondary" onclick="loadBuildRecordsBoard()">刷新构建记录</button>
+    </div>
+
+    <div class="row" style="margin-top:14px; align-items:flex-end; flex-wrap:wrap;">
+      <div>
+        <label>大版本</label>
+        <select id="buildRecordsMajorFilter" onchange="onBuildRecordsMajorFilterChange()">
+          <option value="">全部大版本</option>
+        </select>
+      </div>
+      <button id="buildRecordsMajorLogBtn" onclick="openMajorBuildLogModal()" disabled>查看大版本修改日志</button>
+      <div id="buildRecordsMajorLogHint" class="muted" style="margin-bottom:8px;">当前筛选：全部大版本</div>
+    </div>
+
+    <div class="card" style="margin-top:16px; box-shadow:none; border:1px solid #e2e8f0;">
+      <div id="buildRecordsTableBody" style="display:flex; flex-direction:column; gap:12px;">
+        <div style="text-align:center; padding:24px; color:#64748b;">正在加载构建记录...</div>
+      </div>
+      <div id="buildRecordsEmpty" class="hidden muted" style="padding:24px; text-align:center;">暂无构建记录</div>
+    </div>
+  </section>
+
   <section id="tab-report" class="hidden card">
     <h2>报表中心</h2>
     <div class="row">
@@ -737,6 +766,16 @@
       <div id="auditTimelineBody"></div>
     </div>
   </div>
+
+  <div id="buildRecordLogModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
+    <div style="width:min(760px, 94vw); max-height:88vh; overflow:auto; background:#fff; border-radius:12px; box-shadow:0 12px 28px rgba(0,0,0,.18); padding:18px;">
+      <div class="row" style="justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin-bottom:12px;">
+        <h3 id="buildRecordLogTitle" style="margin:0; color:#0f172a;">构建日志</h3>
+        <button class="secondary" onclick="closeBuildRecordLogModal()">关闭</button>
+      </div>
+      <pre id="buildRecordLogBody" style="white-space:pre-wrap; word-break:break-word; margin:0; color:#334155; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;">暂无日志内容</pre>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -767,7 +806,7 @@ function sourceTypeZh(v){
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
 function showTab(name){
-  ['assign','mine','feedback','retest','stage5','field-test','report','activity','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
+  ['assign','mine','feedback','retest','stage5','field-test','build-records','report','activity','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
   document.getElementById('tab-'+name).classList.remove('hidden');
   if(name === 'dispatch') { loadDispatchedAll(); }
   if(name === 'data' && !dataOverviewCache) { loadDataOverview().catch(err=>showMessage(err.message||'加载数据管理台失败','error')); }
@@ -776,6 +815,7 @@ function showTab(name){
   if(name === 'retest') { loadRetest().catch(err=>showMessage(err.message||'加载复测工作台失败','error')); }
   if(name === 'stage5') { loadStage5().catch(err=>showMessage(err.message||'加载整体测试大盘失败','error')); }
   if(name === 'field-test') { loadFieldTestBoard().catch(err=>showMessage(err.message||'加载外业测试失败','error')); }
+  if(name === 'build-records') { loadBuildRecordsBoard().catch(err=>showMessage(err.message||'加载构建记录失败','error')); }
   if(name === 'activity') { loadActivityBoard().catch(err=>showMessage(err.message||'加载活动中心失败','error')); }
   if(name==='report'){loadReportOnDemand()}
 }
@@ -916,7 +956,7 @@ async function onSoftwareChange(){
   dataOverviewCache = null;
   await loadVersions();
   // 切换软件后，刷新当前页内容，确保旧软件数据不残留
-  const visible = ['assign','mine','feedback','retest','stage5','field-test','report','activity','data','dispatch'].find(x=>!document.getElementById('tab-'+x).classList.contains('hidden'));
+  const visible = ['assign','mine','feedback','retest','stage5','field-test','build-records','report','activity','data','dispatch'].find(x=>!document.getElementById('tab-'+x).classList.contains('hidden'));
   if(visible){
     if(visible==='mine') await loadMyWorkbench();
     if(visible==='feedback') await loadFeedbackBoard();
@@ -925,6 +965,7 @@ async function onSoftwareChange(){
     if(visible==='report') await queryReport();
     if(visible==='activity') await loadActivityBoard();
     if(visible==='field-test') await loadFieldTestBoard();
+    if(visible==='build-records') await loadBuildRecordsBoard();
     if(visible==='data') await loadDataOverview();
     if(visible==='assign') await loadAssignBoard();
     if(visible==='dispatch') await loadDispatchedAll();
@@ -1330,6 +1371,26 @@ function closeFieldTestDetail(){
 
 async function loadActivityBoard(){
   return window.OmniQAActivityTab.loadActivityBoard();
+}
+
+async function loadBuildRecordsBoard(){
+  return window.OmniQABuildRecordsTab.loadBuildRecordsBoard();
+}
+
+function onBuildRecordsMajorFilterChange(){
+  return window.OmniQABuildRecordsTab.onBuildRecordsMajorFilterChange();
+}
+
+function openBuildRecordLogModal(recordId){
+  return window.OmniQABuildRecordsTab.openBuildRecordLogModal(recordId);
+}
+
+function openMajorBuildLogModal(){
+  return window.OmniQABuildRecordsTab.openMajorBuildLogModal();
+}
+
+function closeBuildRecordLogModal(){
+  return window.OmniQABuildRecordsTab.closeBuildRecordLogModal();
 }
 
 function setActivityRange(days){

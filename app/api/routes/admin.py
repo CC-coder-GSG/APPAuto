@@ -323,10 +323,9 @@ def admin_build_records(
     offset: int = Query(default=0, ge=0),
     job_name: Optional[str] = None,
     build_status: Optional[str] = None,
-    current_user=Depends(get_current_user),
+    _=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    ensure_admin(current_user)
     return BuildRecordService(db).list_records(
         limit=limit,
         offset=offset,
@@ -335,14 +334,37 @@ def admin_build_records(
     )
 
 
+@router.get("/admin/build-records/major-log")
+@router.get("/api/admin/build-records/major-log")
+def admin_build_records_major_log(
+    job_name: str = Query(...),
+    _=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    job_name_text = (job_name or "").strip()
+    if not job_name_text:
+        raise HTTPException(status_code=400, detail="job_name 不能为空")
+
+    data = BuildRecordService(db).get_major_log(job_name_text)
+    logger.info(
+        "Generated build major log | job=%s record_count=%s",
+        data["job_name"],
+        data["record_count"],
+    )
+    return {
+        "success": True,
+        "message": "major log generated" if data["record_count"] > 0 else "no build records found",
+        "data": data,
+    }
+
+
 @router.get("/admin/build-records/{record_id}")
 @router.get("/api/admin/build-records/{record_id}")
 def admin_build_record_detail(
     record_id: int,
-    current_user=Depends(get_current_user),
+    _=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    ensure_admin(current_user)
     row = BuildRecordService(db).get_record(record_id)
     if not row:
         raise HTTPException(status_code=404, detail="构建记录不存在")

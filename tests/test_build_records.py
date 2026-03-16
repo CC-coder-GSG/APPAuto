@@ -86,3 +86,37 @@ def test_build_report_payload_accepts_optional_version_name():
     assert payload.version_name == "4.0.3.11.260316_alpha.3(40311003)"
     assert payload.branch is None
     assert payload.build_url == "http://jenkins/job/s40311/6/"
+
+
+def test_get_major_log_aggregates_change_logs_in_created_order(db_session):
+    service = BuildRecordService(db_session)
+    service.upsert_report(
+        job_name="s40311",
+        build_number="5",
+        build_status="SUCCESS",
+        version_name="4.0.3.11.260316_alpha.1(40311001)",
+        change_log="修复 A",
+    )
+    service.upsert_report(
+        job_name="s40311",
+        build_number="6",
+        build_status="SUCCESS",
+        version_name="4.0.3.11.260316_alpha.2(40311002)",
+        change_log="修复 B",
+    )
+    service.upsert_report(
+        job_name="s40311",
+        build_number="7",
+        build_status="SUCCESS",
+        version_name="4.0.3.11.260316_alpha.3(40311003)",
+        change_log="",
+    )
+
+    result = service.get_major_log("s40311")
+
+    assert result["job_name"] == "s40311"
+    assert result["record_count"] == 3
+    assert result["latest_build_number"] == "7"
+    assert "## 4.0.3.11.260316_alpha.1(40311001)\n修复 A" in result["major_log"]
+    assert "## 4.0.3.11.260316_alpha.2(40311002)\n修复 B" in result["major_log"]
+    assert "alpha.3" not in result["major_log"]
