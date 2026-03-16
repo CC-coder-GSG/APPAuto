@@ -9,6 +9,7 @@ class JenkinsBuildReportPayload(BaseModel):
     job_name: str = Field(..., description="Jenkins Job ??")
     build_number: str | int = Field(..., description="???")
     build_status: str = Field(..., description="??????? SUCCESS / FAILURE")
+    version_name: str | None = Field(default=None, description="软件版本字符串")
     branch: str | None = Field(default=None, description="Git ???")
     build_url: str | None = Field(default=None, description="Jenkins ????")
     change_log: str | None = Field(default=None, description="????")
@@ -37,7 +38,7 @@ class JenkinsBuildReportPayload(BaseModel):
             raise ValueError("build_status ????")
         return text
 
-    @field_validator("branch", "build_url", "change_log", mode="before")
+    @field_validator("version_name", "branch", "build_url", "change_log", mode="before")
     @classmethod
     def normalize_optional_text(cls, value: Any) -> str | None:
         text = str(value or "").strip()

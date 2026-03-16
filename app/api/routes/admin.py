@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
@@ -14,6 +14,7 @@ from app.api.deps import get_current_user, get_db
 from app.models import AuditLog, BugTracking, Requirement, User, Version
 from app.schemas.admin import JenkinsBuildReportPayload
 from app.services.activity_service import ActivityService
+from app.services.build_record_service import BuildRecordService
 from app.services.permission_service import ensure_admin
 from app.services.push_service import PushService
 
@@ -243,12 +244,13 @@ async def admin_push_activity_summary(
 
 
 # Jenkins build-report receiver.
-# Current version only validates payload, writes server logs and returns a debug response.
+# Current version validates payload, performs token check, upserts build records and returns a debug-friendly response.
 @router.post("/admin/build-report")
 @router.post("/api/admin/build-report")
 def admin_build_report(
     payload: JenkinsBuildReportPayload,
     x_build_token: str | None = Header(default=None, alias="X-Build-Token"),
+    db: Session = Depends(get_db),
 ):
     expected_token = _resolve_build_report_token()
     if not x_build_token or x_build_token.strip() != expected_token:
@@ -263,11 +265,22 @@ def admin_build_report(
     change_log_preview, change_log_length = _summarize_change_log(payload.change_log)
 
     try:
+        record, action = BuildRecordService(db).upsert_report(
+            job_name=payload.job_name,
+            build_number=payload.build_number,
+            build_status=payload.build_status,
+            version_name=payload.version_name,
+            branch=payload.branch,
+            build_url=payload.build_url,
+            change_log=payload.change_log,
+        )
         logger.info(
-            "Received Jenkins build report | job=%s build=%s status=%s branch=%s url=%s change_log_len=%s change_log_preview=%s",
+            "Received Jenkins build report | job=%s build=%s status=%s version=%s action=%s branch=%s url=%s change_log_len=%s change_log_preview=%s",
             payload.job_name,
             payload.build_number,
             payload.build_status,
+            payload.version_name or "-",
+            action,
             payload.branch or "-",
             payload.build_url or "-",
             change_log_length,
@@ -277,9 +290,12 @@ def admin_build_report(
             "success": True,
             "message": "build report received",
             "data": {
+                "record_id": record.id,
+                "action": action,
                 "job_name": payload.job_name,
                 "build_number": str(payload.build_number),
                 "build_status": payload.build_status,
+                "version_name": payload.version_name,
                 "branch": payload.branch,
                 "build_url": payload.build_url,
             },
@@ -298,3 +314,36 @@ def admin_build_report(
                 "message": "build report process failed",
             },
         )
+
+
+@router.get("/admin/build-records")
+@router.get("/api/admin/build-records")
+def admin_build_records(
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    job_name: Optional[str] = None,
+    build_status: Optional[str] = None,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_admin(current_user)
+    return BuildRecordService(db).list_records(
+        limit=limit,
+        offset=offset,
+        job_name=job_name,
+        build_status=build_status,
+    )
+
+
+@router.get("/admin/build-records/{record_id}")
+@router.get("/api/admin/build-records/{record_id}")
+def admin_build_record_detail(
+    record_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_admin(current_user)
+    row = BuildRecordService(db).get_record(record_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="构建记录不存在")
+    return row

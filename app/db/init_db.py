@@ -11,6 +11,7 @@ from app.db.seed import (
 from app.db.session import SessionLocal, engine
 from app.models import (
     AuditLog,
+    BuildRecord,
     BugStage5Record,
     BugTracking,
     FieldTestBugLink,
