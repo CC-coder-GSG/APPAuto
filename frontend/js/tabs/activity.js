@@ -1,4 +1,5 @@
-﻿import { api } from '../api.js';
+import { api } from '../api.js';
+import { closeModal, openModal } from '../components/modal.js';
 
 const STORAGE_KEY = 'activityBoardState';
 
@@ -330,7 +331,7 @@ function renderTimelineModal(title, items, targetType = '', targetId = 0) {
   titleEl.innerText = title;
   actionBar.innerHTML = buildTimelineActionBar();
   renderTimelineItems();
-  modal.classList.remove('hidden');
+  openModal(modal);
 }
 
 export function toggleAuditTimelineImportantOnly(checked) {
@@ -341,8 +342,7 @@ export function toggleAuditTimelineImportantOnly(checked) {
 }
 
 export function closeAuditTimelineModal() {
-  const modal = document.getElementById('auditTimelineModal');
-  if (modal) modal.classList.add('hidden');
+  closeModal('auditTimelineModal');
 }
 
 export async function openAuditTimelineModal(targetType, targetId, customTitle = '') {
