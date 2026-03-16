@@ -1,13 +1,25 @@
 ﻿from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from datetime import datetime, timedelta
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user, get_db
 from app.models import AuditLog, BugTracking, Requirement, User, Version
+from app.services.activity_service import ActivityService
 from app.services.permission_service import ensure_admin
+from app.services.push_service import PushService
 
 router = APIRouter()
+
+
+class PushActivitySummaryPayload(BaseModel):
+    hours: int = Field(default=24, ge=1, le=168)
+    target_types: list[str] = Field(default_factory=list)
+    only_important: bool = True
 
 
 def _build_requirement_link_logs(db: Session, limit: int = 300) -> list[dict]:
@@ -135,3 +147,68 @@ def admin_data_overview(current_user=Depends(get_current_user), db: Session = De
 def admin_requirement_link_logs(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     ensure_admin(current_user)
     return _build_requirement_link_logs(db, limit=300)
+
+
+@router.get("/admin/activity-feed")
+def admin_activity_feed(
+    target_type: Optional[str] = None,
+    action: Optional[str] = None,
+    actor_id: Optional[int] = None,
+    keyword: Optional[str] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    only_important: bool = False,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_admin(current_user)
+    return ActivityService(db).list_feed(
+        target_type=target_type,
+        action=action,
+        actor_id=actor_id,
+        keyword=keyword,
+        date_from=date_from,
+        date_to=date_to,
+        only_important=only_important,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/admin/activity-summary")
+def admin_activity_summary(
+    days: int = Query(default=1, ge=1, le=30),
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    only_important: bool = False,
+    target_types: list[str] = Query(default=[]),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_admin(current_user)
+    end_at = date_to or datetime.utcnow()
+    start_at = date_from or (end_at - timedelta(days=days))
+    return ActivityService(db).get_summary(
+        date_from=start_at,
+        date_to=end_at,
+        target_types=target_types or None,
+        only_important=only_important,
+    )
+
+
+@router.post("/admin/push-activity-summary")
+async def admin_push_activity_summary(
+    payload: PushActivitySummaryPayload,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_admin(current_user)
+    markdown = ActivityService(db).build_push_markdown(
+        hours=payload.hours,
+        target_types=payload.target_types or None,
+        only_important=payload.only_important,
+    )
+    await PushService(db).send_markdown(markdown)
+    return {"message": "最近动态摘要已推送", "hours": payload.hours}

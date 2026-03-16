@@ -427,6 +427,7 @@ class FeedbackService:
         self.db.flush()
         self.db.add(FeedbackBugLink(feedback_id=feedback_id, bug_id=bug.id, created_by_id=actor.id))
         self.db.commit()
+        audit(self.db, action="bug.create", target_type="bug", actor_id=actor.id, target_id=str(bug.id), detail=bug.bug_id)
         audit(self.db, action="feedback.create_bug_link", target_type="feedback", actor_id=actor.id, target_id=str(feedback_id), detail=bug_no)
         return {"bug_id": bug.id, "message": "已新建 Bug 并关联"}
 

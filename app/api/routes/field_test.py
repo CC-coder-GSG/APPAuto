@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.models import FieldTestPurposeType, FieldTestResultStatus, User
+from app.services.activity_service import ActivityService
 from app.services.field_test_service import FieldTestService
 
 router = APIRouter()
@@ -95,6 +96,11 @@ def list_field_tests_paged(
 @router.get("/field-tests/{record_id}")
 def get_field_test_detail(record_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return FieldTestService(db).get_detail(record_id, current_user)
+
+
+@router.get("/field-tests/{record_id}/timeline")
+def get_field_test_timeline(record_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return ActivityService(db).field_test_timeline(record_id)
 
 
 @router.post("/field-tests")

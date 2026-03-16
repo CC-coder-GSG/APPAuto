@@ -19,6 +19,7 @@ from app.schemas.feedback import (
     FeedbackStatusPayload,
 )
 from app.services.feedback_service import FeedbackService
+from app.services.activity_service import ActivityService
 from app.services.permission_service import ensure_admin
 from app.services.push_service import PushService
 
@@ -224,4 +225,4 @@ def get_feedback_detail(feedback_id: int, _: User = Depends(get_current_user), d
 
 @router.get("/feedbacks/{feedback_id}/timeline")
 def feedback_timeline(feedback_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return FeedbackService(db).timeline(feedback_id)
+    return ActivityService(db).feedback_timeline(feedback_id)

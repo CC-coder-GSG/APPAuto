@@ -325,16 +325,17 @@ export function renderDataOverview() {
         : '';
       const casesListHtml = (req.case_ids || []).map((cId) => {
         const relatedBugs = caseBugs.filter((b) => b.source_ref === cId);
-        let bHtml = relatedBugs.map((b) => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 关联 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button></div>`).join('');
+        let bHtml = relatedBugs.map((b) => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 关联 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="openAuditTimelineModal('bug', ${b.id}, 'Bug 时间线')">🕓</button><button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button></div>`).join('');
         if (!bHtml) bHtml = '<div style="margin-left:24px; color:#10b981; font-size:13px; margin-top:4px;">↳ ✓ 完美通过，无关联Bug</div>';
         return `<div style="margin-top:12px;">🧪 <b>用例 [${cId}]</b> ${bHtml}</div>`;
       }).join('');
-      const freeBugsHtml = freeBugs.map((b) => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 自由 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button></div>`).join('');
+      const freeBugsHtml = freeBugs.map((b) => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 自由 Bug: <b>${b.bug_id}</b> <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="openAuditTimelineModal('bug', ${b.id}, 'Bug 时间线')">🕓</button><button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button></div>`).join('');
       return `
       <div style="border:1px solid #e2e8f0; border-radius:6px; margin-bottom:12px; background:#fff;">
         <div style="padding:10px 12px; cursor:pointer; background:#f8fafc; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;" onclick="document.getElementById('req_body_${req.id}').classList.toggle('hidden')">
           <span style="font-size:14px;">📄 <b>${req.zentao_req_id}</b> ${req.title}</span>
           <span>
+            <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); openAuditTimelineModal('requirement', ${req.id}, '需求时间线')">时间线</button>
             <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); editReq(${req.id},'${req.zentao_req_id}','${req.title}',${major.id})">编辑</button>
             <button class="danger" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); removeReq(${req.id})">删除</button>
           </span>

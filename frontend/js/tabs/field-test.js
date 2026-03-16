@@ -301,6 +301,7 @@ export async function openFieldTestDetail(recordId) {
             <button class="secondary" onclick="addFieldTestDetailBug(${row.id})">新增并关联 Bug</button>
           </div>` : ''}
           <div class="row" style="margin-top:12px;">
+            <button class="secondary" onclick="openAuditTimelineModal('field_test', ${row.id}, '外业测试时间线')">时间线</button>
             ${canEdit ? `<button class="secondary" onclick="editFieldTestRecord(${row.id}); closeFieldTestDetail();">编辑记录</button>` : ''}
           </div>
         </div>

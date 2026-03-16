@@ -10,6 +10,7 @@ const REQUIRED_NAMESPACES = {
   OmniQAStage5Tab: ['loadStage5', 'renderS5', 'submitS5Bug'],
   OmniQAFieldTestTab: ['loadFieldTestBoard', 'submitFieldTestRecord', 'editFieldTestRecord', 'openFieldTestDetail', 'addFieldTestDetailBug', 'searchFieldTestBugOptions', 'linkFieldTestDetailBug'],
   OmniQAReportTab: ['queryReport', 'exportReportPdf'],
+  OmniQAActivityTab: ['loadActivityBoard', 'pushActivitySummary', 'openAuditTimelineModal'],
   OmniQADataTab: ['loadDataOverview', 'createUser', 'createVersion'],
   OmniQADispatchTab: ['loadDispatchedAll', 'searchDispatchBug', 'confirmDispatchBug'],
 };
@@ -25,6 +26,7 @@ const REQUIRED_DOM_IDS = [
   'fieldTestMinorSelect',
   'fieldTestTable',
   'tab-report',
+  'tab-activity',
   'tab-data',
   'tab-dispatch',
   'assignMajorSelect',

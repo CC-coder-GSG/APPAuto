@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.api.deps import get_current_user, get_db
 from app.models import BugSourceType, BugTracking, Requirement, User, Version, VersionType
 from app.integrations.wecom import send_markdown
+from app.services.activity_service import ActivityService
 from app.services.permission_service import ensure_admin
 from app.services.requirement_service import RequirementService
 
@@ -480,6 +481,15 @@ def update_requirement_test_notes(
 ):
     service = RequirementService(db)
     return service.update_test_notes(requirement_id, payload.test_notes, current_user)
+
+
+@router.get("/requirements/{requirement_id}/timeline")
+def requirement_timeline(
+    requirement_id: int,
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return ActivityService(db).requirement_timeline(requirement_id)
 
 
 @router.put("/requirements/{requirement_id}/cases")

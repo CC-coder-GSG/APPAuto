@@ -283,7 +283,10 @@ export async function openFeedbackDetail(feedbackId) {
           <h3 style="margin:0; color:#0f172a; font-size:22px; line-height:1.35;">反馈详情 ${detail.feedback_no || '未编号'}</h3>
           <div style="margin-top:6px; color:#64748b; font-size:13px;">创建于 ${detail.created_at ? new Date(detail.created_at).toLocaleString() : '-'}</div>
         </div>
-        ${buildStatusBadge(detail.status)}
+        <div class="row" style="gap:8px; margin:0;">
+          <button class="secondary" onclick="openAuditTimelineModal('feedback', ${detail.id}, '反馈时间线')">时间线</button>
+          ${buildStatusBadge(detail.status)}
+        </div>
       </div>
       <div class="row" style="margin-top:12px; margin-bottom:4px; gap:8px;">${renderStatusOps(detail.id, detail.status)}</div>
 

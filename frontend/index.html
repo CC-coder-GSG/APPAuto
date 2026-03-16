@@ -68,6 +68,7 @@
     <button onclick="showTab('stage5')">整体测试</button>
     <button onclick="showTab('field-test')">外业测试</button>
     <button onclick="showTab('report')">报表中心</button>
+    <button id="tabActivityBtn" class="hidden" onclick="showTab('activity')">活动中心</button>
     <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
     <button id="tabDispatchBtn" class="hidden" onclick="showTab('dispatch')">BUG特派</button>
   </div>
@@ -547,6 +548,74 @@
     </div>
   </section>
 
+  <section id="tab-activity" class="hidden card">
+    <div class="row" style="justify-content:space-between; align-items:center;">
+      <div>
+        <h2 style="margin-bottom:6px;">活动中心</h2>
+        <div class="muted">管理员可查看团队最近动态、对象时间线，并手动推送摘要通知。</div>
+      </div>
+      <div class="row" style="gap:8px;">
+        <button class="secondary" onclick="loadActivityBoard()">刷新动态</button>
+        <button onclick="pushActivitySummary()">推送最近动态</button>
+      </div>
+    </div>
+
+    <div class="row activity-toolbar" style="margin-top:14px; align-items:flex-end; flex-wrap:wrap;">
+      <div>
+        <label>时间范围</label>
+        <select id="activityRangeDays" onchange="loadActivityBoard()">
+          <option value="1">最近1天</option>
+          <option value="3">最近3天</option>
+          <option value="7">最近7天</option>
+        </select>
+      </div>
+      <div>
+        <label>模块</label>
+        <select id="activityTargetType" onchange="loadActivityBoard()">
+          <option value="">全部模块</option>
+          <option value="bug">Bug</option>
+          <option value="requirement">需求</option>
+          <option value="feedback">反馈</option>
+          <option value="field_test">外业测试</option>
+          <option value="retest">复测</option>
+        </select>
+      </div>
+      <div>
+        <label>操作人</label>
+        <select id="activityActorSelect" onchange="loadActivityBoard()">
+          <option value="0">全部人员</option>
+        </select>
+      </div>
+      <div style="flex:1; min-width:220px;">
+        <label>关键词</label>
+        <div class="prefix-input"><span>🔍</span><input id="activityKeyword" placeholder="搜索编号、标题、人员、摘要" onkeydown="if(event.key==='Enter'){loadActivityBoard()}"></div>
+      </div>
+      <label style="cursor:pointer; margin-bottom:8px;">
+        <input type="checkbox" id="activityOnlyImportant" onchange="loadActivityBoard()"> 仅看关键动态
+      </label>
+    </div>
+
+    <div id="activitySummaryCards" class="metrics-grid" style="margin-top:14px; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));"></div>
+
+    <div class="card" style="margin-top:16px; box-shadow:none; border:1px solid #e2e8f0;">
+      <div style="font-weight:700; color:#0f172a; margin-bottom:10px;">关键动态摘要</div>
+      <div id="activityHighlights"></div>
+    </div>
+
+    <div class="card" style="margin-top:16px; box-shadow:none; border:1px solid #e2e8f0;">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <div style="font-weight:700; color:#0f172a;">动态列表</div>
+        <div id="activityFeedMeta" class="muted"></div>
+      </div>
+      <div id="activityFeedList" style="margin-top:12px;"></div>
+      <div class="row" style="justify-content:flex-end; align-items:center; gap:8px; margin-top:10px;">
+        <span id="activityPaginationText" class="muted">第 1 / 1 页，共 0 条</span>
+        <button id="activityPrevBtn" class="secondary" onclick="prevActivityPage()">上一页</button>
+        <button id="activityNextBtn" class="secondary" onclick="nextActivityPage()">下一页</button>
+      </div>
+    </div>
+  </section>
+
   <section id="tab-data" class="hidden card">
     <h2>数据管理台（仅管理员）</h2>
     <div class="card">
@@ -655,6 +724,19 @@
     </div>
     <div id="dataTreeArea"></div>
   </section>
+
+  <div id="auditTimelineModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
+    <div style="width:min(760px, 94vw); max-height:88vh; overflow:auto; background:#fff; border-radius:12px; box-shadow:0 12px 28px rgba(0,0,0,.18); padding:18px;">
+      <div class="row" style="justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin-bottom:12px;">
+        <h3 id="auditTimelineTitle" style="margin:0; color:#0f172a;">时间线</h3>
+        <div class="row" style="gap:8px; margin:0;">
+          <div id="auditTimelineActionBar"></div>
+          <button class="secondary" onclick="closeAuditTimelineModal()">关闭</button>
+        </div>
+      </div>
+      <div id="auditTimelineBody"></div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -685,7 +767,7 @@ function sourceTypeZh(v){
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
 function showTab(name){
-  ['assign','mine','feedback','retest','stage5','field-test','report','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
+  ['assign','mine','feedback','retest','stage5','field-test','report','activity','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
   document.getElementById('tab-'+name).classList.remove('hidden');
   if(name === 'dispatch') { loadDispatchedAll(); }
   if(name === 'data' && !dataOverviewCache) { loadDataOverview().catch(err=>showMessage(err.message||'加载数据管理台失败','error')); }
@@ -694,6 +776,7 @@ function showTab(name){
   if(name === 'retest') { loadRetest().catch(err=>showMessage(err.message||'加载复测工作台失败','error')); }
   if(name === 'stage5') { loadStage5().catch(err=>showMessage(err.message||'加载整体测试大盘失败','error')); }
   if(name === 'field-test') { loadFieldTestBoard().catch(err=>showMessage(err.message||'加载外业测试失败','error')); }
+  if(name === 'activity') { loadActivityBoard().catch(err=>showMessage(err.message||'加载活动中心失败','error')); }
   if(name==='report'){loadReportOnDemand()}
 }
 function isAllUsersReport(){return currentUser && currentUser.role==='admin' && reportUserSelect && reportUserSelect.value==='0'}
@@ -776,6 +859,7 @@ async function init(){
   if(currentUser.role==='admin'){
     await loadUsers();
     document.getElementById('tabAssignBtn').classList.remove('hidden');
+    document.getElementById('tabActivityBtn').classList.remove('hidden');
     document.getElementById('tabDataBtn').classList.remove('hidden');
     document.getElementById('tabDispatchBtn').classList.remove('hidden');
     document.getElementById('reportUserWrap').classList.remove('hidden');
@@ -783,6 +867,7 @@ async function init(){
     showTab('assign');
   }else{
     document.getElementById('tabAssignBtn').classList.add('hidden');
+    document.getElementById('tabActivityBtn').classList.add('hidden');
     document.getElementById('tabDataBtn').classList.add('hidden');
     showTab('mine');
   }
@@ -831,7 +916,7 @@ async function onSoftwareChange(){
   dataOverviewCache = null;
   await loadVersions();
   // 切换软件后，刷新当前页内容，确保旧软件数据不残留
-  const visible = ['assign','mine','feedback','retest','stage5','field-test','report','data','dispatch'].find(x=>!document.getElementById('tab-'+x).classList.contains('hidden'));
+  const visible = ['assign','mine','feedback','retest','stage5','field-test','report','activity','data','dispatch'].find(x=>!document.getElementById('tab-'+x).classList.contains('hidden'));
   if(visible){
     if(visible==='mine') await loadMyWorkbench();
     if(visible==='feedback') await loadFeedbackBoard();
@@ -1240,6 +1325,38 @@ async function openFieldTestDetail(id){
 
 function closeFieldTestDetail(){
   return window.OmniQAFieldTestTab.closeFieldTestDetail();
+}
+
+async function loadActivityBoard(){
+  return window.OmniQAActivityTab.loadActivityBoard();
+}
+
+function setActivityRange(days){
+  return window.OmniQAActivityTab.setActivityRange(days);
+}
+
+async function nextActivityPage(){
+  return window.OmniQAActivityTab.nextActivityPage();
+}
+
+async function prevActivityPage(){
+  return window.OmniQAActivityTab.prevActivityPage();
+}
+
+async function pushActivitySummary(){
+  return window.OmniQAActivityTab.pushActivitySummary();
+}
+
+async function openAuditTimelineModal(targetType, targetId, title){
+  return window.OmniQAActivityTab.openAuditTimelineModal(targetType, targetId, title);
+}
+
+function closeAuditTimelineModal(){
+  return window.OmniQAActivityTab.closeAuditTimelineModal();
+}
+
+async function openActivityItem(id, module, targetId){
+  return window.OmniQAActivityTab.openActivityItem(id, module, targetId);
 }
 
 async function unlinkFieldTestBug(recordId, bugId){

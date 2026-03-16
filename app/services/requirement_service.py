@@ -312,6 +312,7 @@ class RequirementService:
         if current_user.role != UserRole.ADMIN and req.owner_id != current_user.id:
             raise HTTPException(status_code=403, detail="无权限修改该需求的测试要点")
 
+        old_len = len((req.test_notes or "").strip())
         req.test_notes = (test_notes or "").strip() or None
         req.test_notes_updated_at = datetime.utcnow()
         req.test_notes_updated_by_id = current_user.id
@@ -320,11 +321,11 @@ class RequirementService:
 
         audit(
             self.db,
-            action="requirement.update_test_notes",
+            action="requirement.test_notes.update",
             target_type="requirement",
             actor_id=current_user.id,
             target_id=str(req.id),
-            detail=f"has_notes={bool(req.test_notes)}",
+            detail=f"before_len={old_len},after_len={len((req.test_notes or '').strip())}",
         )
 
         return {

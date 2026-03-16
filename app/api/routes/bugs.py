@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.models import BugSourceType, User
+from app.services.activity_service import ActivityService
 from app.services.bug_service import BugService
 from app.services.permission_service import ensure_admin
 from app.services.push_service import PushService
@@ -100,3 +101,8 @@ def get_all_dispatched_bugs(current_user: User = Depends(get_current_user), db: 
     ensure_admin(current_user)
     service = BugService(db)
     return service.dispatched_all()
+
+
+@router.get("/bugs/{bug_id}/timeline")
+def bug_timeline(bug_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return ActivityService(db).bug_timeline(bug_id)

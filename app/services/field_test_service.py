@@ -196,6 +196,10 @@ class FieldTestService:
         created_bug_ids = self._attach_bugs(row, normalized_bug_ids, actor)
         self.db.commit()
         self.db.refresh(row)
+        if created_bug_ids:
+            created_rows = self.db.query(BugTracking).filter(BugTracking.bug_id.in_(created_bug_ids)).all()
+            for bug in created_rows:
+                audit(self.db, action="bug.create", target_type="bug", actor_id=actor.id, target_id=str(bug.id), detail=bug.bug_id)
 
         audit(
             self.db,
@@ -275,6 +279,10 @@ class FieldTestService:
                 raise HTTPException(status_code=400, detail="测试未通过时至少需要录入 1 个 Bug")
 
         self.db.commit()
+        if created_bug_ids:
+            created_rows = self.db.query(BugTracking).filter(BugTracking.bug_id.in_(created_bug_ids)).all()
+            for bug in created_rows:
+                audit(self.db, action="bug.create", target_type="bug", actor_id=actor.id, target_id=str(bug.id), detail=bug.bug_id)
 
         audit(
             self.db,
@@ -495,6 +503,8 @@ class FieldTestService:
         if not link:
             self.db.add(FieldTestBugLink(field_test_record_id=row.id, bug_tracking_id=bug.id))
             self.db.commit()
+            if created:
+                audit(self.db, action="bug.create", target_type="bug", actor_id=current_user.id, target_id=str(bug.id), detail=bug.bug_id)
             audit(
                 self.db,
                 action="field_test.add_bug",
