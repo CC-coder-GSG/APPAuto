@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
@@ -33,6 +34,14 @@ def _summarize_change_log(change_log: str | None, limit: int = 200) -> tuple[str
     if len(text) <= limit:
         return text, len(text)
     return f"{text[:limit]}...", len(text)
+
+
+def _resolve_build_report_token() -> str:
+    return (
+        os.getenv("BUILD_REPORT_TOKEN")
+        or os.getenv("JENKINS_REPORT_TOKEN")
+        or "abc123456"
+    )
 
 
 def _build_requirement_link_logs(db: Session, limit: int = 300) -> list[dict]:
@@ -233,10 +242,18 @@ async def admin_push_activity_summary(
 @router.post("/api/admin/build-report")
 def admin_build_report(
     payload: JenkinsBuildReportPayload,
-    current_user=Depends(get_current_user),
-    db: Session = Depends(get_db),
+    x_build_token: str | None = Header(default=None, alias="X-Build-Token"),
 ):
-    ensure_admin(current_user)
+    expected_token = _resolve_build_report_token()
+    if not x_build_token or x_build_token.strip() != expected_token:
+        return JSONResponse(
+            status_code=401,
+            content={
+                "success": False,
+                "message": "invalid build token",
+            },
+        )
+
     change_log_preview, change_log_length = _summarize_change_log(payload.change_log)
 
     try:
