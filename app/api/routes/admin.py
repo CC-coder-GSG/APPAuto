@@ -1,25 +1,38 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user, get_db
 from app.models import AuditLog, BugTracking, Requirement, User, Version
+from app.schemas.admin import JenkinsBuildReportPayload
 from app.services.activity_service import ActivityService
 from app.services.permission_service import ensure_admin
 from app.services.push_service import PushService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class PushActivitySummaryPayload(BaseModel):
     hours: int = Field(default=24, ge=1, le=168)
     target_types: list[str] = Field(default_factory=list)
     only_important: bool = True
+
+
+def _summarize_change_log(change_log: str | None, limit: int = 200) -> tuple[str, int]:
+    text = (change_log or "").strip()
+    if not text:
+        return "", 0
+    if len(text) <= limit:
+        return text, len(text)
+    return f"{text[:limit]}...", len(text)
 
 
 def _build_requirement_link_logs(db: Session, limit: int = 300) -> list[dict]:
@@ -212,3 +225,53 @@ async def admin_push_activity_summary(
     )
     await PushService(db).send_markdown(markdown)
     return {"message": "最近动态摘要已推送", "hours": payload.hours}
+
+
+# Jenkins build-report receiver.
+# Current version only validates payload, writes server logs and returns a debug response.
+@router.post("/admin/build-report")
+@router.post("/api/admin/build-report")
+def admin_build_report(
+    payload: JenkinsBuildReportPayload,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_admin(current_user)
+    change_log_preview, change_log_length = _summarize_change_log(payload.change_log)
+
+    try:
+        logger.info(
+            "Received Jenkins build report | job=%s build=%s status=%s branch=%s url=%s change_log_len=%s change_log_preview=%s",
+            payload.job_name,
+            payload.build_number,
+            payload.build_status,
+            payload.branch or "-",
+            payload.build_url or "-",
+            change_log_length,
+            change_log_preview or "-",
+        )
+        return {
+            "success": True,
+            "message": "build report received",
+            "data": {
+                "job_name": payload.job_name,
+                "build_number": str(payload.build_number),
+                "build_status": payload.build_status,
+                "branch": payload.branch,
+                "build_url": payload.build_url,
+            },
+        }
+    except Exception:
+        logger.exception(
+            "Failed to process Jenkins build report | job=%s build=%s status=%s",
+            payload.job_name,
+            payload.build_number,
+            payload.build_status,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": "build report process failed",
+            },
+        )

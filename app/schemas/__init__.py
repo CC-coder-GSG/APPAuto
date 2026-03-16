@@ -1,1 +1,5 @@
-"""Stage 1 schema package placeholder."""
+"""Schema exports."""
+
+from app.schemas.admin import JenkinsBuildReportPayload
+
+__all__ = ["JenkinsBuildReportPayload"]
