@@ -24,7 +24,7 @@ const REQUIRED_DOM_IDS = [
   'tab-stage5',
   'tab-field-test',
   'tab-build-records',
-  'buildRecordsTableBody',
+  'buildRecordsCardList',
   'fieldTestMajorSelect',
   'fieldTestMinorSelect',
   'fieldTestTable',

@@ -67,7 +67,7 @@
     <button onclick="showTab('retest')">复测工作台</button>
     <button onclick="showTab('stage5')">整体测试</button>
     <button onclick="showTab('field-test')">外业测试</button>
-    <button onclick="showTab('build-records')">构建记录</button>
+    <button id="tabBuildRecordsBtn" class="hidden" onclick="showTab('build-records')">构建记录</button>
     <button onclick="showTab('report')">报表中心</button>
     <button id="tabActivityBtn" class="hidden" onclick="showTab('activity')">活动中心</button>
     <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
@@ -431,11 +431,11 @@
         </select>
       </div>
       <button id="buildRecordsMajorLogBtn" onclick="openMajorBuildLogModal()" disabled>查看大版本修改日志</button>
-      <div id="buildRecordsMajorLogHint" class="muted" style="margin-bottom:8px;">当前筛选：全部大版本</div>
+      <button class="secondary" onclick="loadBuildRecordsBoard()">刷新</button>
     </div>
 
     <div class="card" style="margin-top:16px; box-shadow:none; border:1px solid #e2e8f0;">
-      <div id="buildRecordsTableBody" style="display:flex; flex-direction:column; gap:12px;">
+      <div id="buildRecordsCardList" style="display:flex; flex-direction:column; gap:12px;">
         <div style="text-align:center; padding:24px; color:#64748b;">正在加载构建记录...</div>
       </div>
       <div id="buildRecordsEmpty" class="hidden muted" style="padding:24px; text-align:center;">暂无构建记录</div>
@@ -899,6 +899,7 @@ async function init(){
   if(currentUser.role==='admin'){
     await loadUsers();
     document.getElementById('tabAssignBtn').classList.remove('hidden');
+    document.getElementById('tabBuildRecordsBtn').classList.remove('hidden');
     document.getElementById('tabActivityBtn').classList.remove('hidden');
     document.getElementById('tabDataBtn').classList.remove('hidden');
     document.getElementById('tabDispatchBtn').classList.remove('hidden');
@@ -907,6 +908,7 @@ async function init(){
     showTab('assign');
   }else{
     document.getElementById('tabAssignBtn').classList.add('hidden');
+    document.getElementById('tabBuildRecordsBtn').classList.add('hidden');
     document.getElementById('tabActivityBtn').classList.add('hidden');
     document.getElementById('tabDataBtn').classList.add('hidden');
     showTab('mine');
