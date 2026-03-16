@@ -1,8 +1,19 @@
 import { api } from '../api.js';
 import { closeModal, openModal } from '../components/modal.js';
 
+const INITIAL_VISIBLE_COUNT = 12;
+const LOAD_MORE_STEP = 12;
+
 const state = {
   records: [],
+  visibleCount: INITIAL_VISIBLE_COUNT,
+};
+
+const STATUS_META = {
+  SUCCESS: { text: '成功', bg: '#dcfce7', color: '#166534' },
+  FAILURE: { text: '失败', bg: '#fee2e2', color: '#b91c1c' },
+  ABORTED: { text: '中止', bg: '#e2e8f0', color: '#334155' },
+  UNSTABLE: { text: '不稳定', bg: '#fef3c7', color: '#92400e' },
 };
 
 function escapeHtml(value) {
@@ -24,6 +35,28 @@ function formatDateTime(value) {
   });
 }
 
+function toDateInputValue(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const shanghai = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
+  const year = shanghai.getFullYear();
+  const month = String(shanghai.getMonth() + 1).padStart(2, '0');
+  const day = String(shanghai.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getStatusText(status) {
+  const value = String(status || '').toUpperCase();
+  return STATUS_META[value]?.text || value || '-';
+}
+
+function buildStatusBadge(status) {
+  const value = String(status || '').toUpperCase();
+  const meta = STATUS_META[value] || { text: value || '-', bg: '#e2e8f0', color: '#334155' };
+  return `<span class="badge" style="border-radius:999px; background:${meta.bg}; color:${meta.color}; border:none; padding:4px 10px;">${meta.text}</span>`;
+}
+
 export function jobNameToMajorLabel(jobName) {
   const text = String(jobName || '').trim();
   const match = text.match(/^s(\d{3,})$/i);
@@ -36,34 +69,35 @@ export function jobNameToMajorLabel(jobName) {
   return rest ? `V${a}.${b}.${c}.${rest}` : `V${a}.${b}.${c}`;
 }
 
-function buildStatusBadge(status) {
-  const value = String(status || '').toUpperCase();
-  const conf = {
-    SUCCESS: { bg: '#dcfce7', color: '#166534', text: 'SUCCESS' },
-    FAILURE: { bg: '#fee2e2', color: '#b91c1c', text: 'FAILURE' },
-    ABORTED: { bg: '#e2e8f0', color: '#334155', text: 'ABORTED' },
-    UNSTABLE: { bg: '#fef3c7', color: '#92400e', text: 'UNSTABLE' },
-  };
-  const item = conf[value] || { bg: '#e2e8f0', color: '#334155', text: value || '-' };
-  return `<span class="badge" style="border-radius:999px; background:${item.bg}; color:${item.color}; border:none; padding:4px 10px;">${item.text}</span>`;
-}
-
 function getSelectedJobName() {
   return document.getElementById('buildRecordsMajorFilter')?.value || '';
+}
+
+function getSelectedStatus() {
+  return document.getElementById('buildRecordsStatusFilter')?.value || '';
+}
+
+function getDateRange() {
+  return {
+    from: document.getElementById('buildRecordsDateFrom')?.value || '',
+    to: document.getElementById('buildRecordsDateTo')?.value || '',
+  };
 }
 
 function setLoading(message = '正在加载构建记录...') {
   const wrap = document.getElementById('buildRecordsCardList');
   const empty = document.getElementById('buildRecordsEmpty');
+  const moreWrap = document.getElementById('buildRecordsMoreWrap');
   if (wrap) wrap.innerHTML = `<div style="text-align:center; padding:24px; color:#64748b;">${escapeHtml(message)}</div>`;
   if (empty) empty.classList.add('hidden');
+  if (moreWrap) moreWrap.classList.add('hidden');
 }
 
 function fillMajorFilterOptions() {
   const select = document.getElementById('buildRecordsMajorFilter');
   if (!select) return;
-  const jobNames = [];
   const seen = new Set();
+  const jobNames = [];
   for (const row of state.records) {
     if (!row.job_name || seen.has(row.job_name)) continue;
     seen.add(row.job_name);
@@ -74,38 +108,63 @@ function fillMajorFilterOptions() {
     .join('');
 }
 
+function recordInDateRange(row, from, to) {
+  const raw = row.created_at || row.updated_at;
+  if (!raw) return true;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return true;
+  const day = toDateInputValue(date.toISOString());
+  if (from && day < from) return false;
+  if (to && day > to) return false;
+  return true;
+}
+
 function getFilteredRecords() {
-  const selected = getSelectedJobName();
-  const rows = selected ? state.records.filter((row) => row.job_name === selected) : state.records.slice();
-  return rows.sort((a, b) => {
-    const ta = new Date(a.created_at || 0).getTime();
-    const tb = new Date(b.created_at || 0).getTime();
-    return tb - ta;
-  });
+  const selectedJob = getSelectedJobName();
+  const selectedStatus = getSelectedStatus();
+  const { from, to } = getDateRange();
+  return state.records
+    .filter((row) => !selectedJob || row.job_name === selectedJob)
+    .filter((row) => !selectedStatus || String(row.build_status || '').toUpperCase() === selectedStatus)
+    .filter((row) => recordInDateRange(row, from, to))
+    .sort((a, b) => {
+      const ta = new Date(a.created_at || 0).getTime();
+      const tb = new Date(b.created_at || 0).getTime();
+      return tb - ta;
+    });
 }
 
 function renderCards() {
   const wrap = document.getElementById('buildRecordsCardList');
   const empty = document.getElementById('buildRecordsEmpty');
   const majorBtn = document.getElementById('buildRecordsMajorLogBtn');
-  const selected = getSelectedJobName();
+  const moreWrap = document.getElementById('buildRecordsMoreWrap');
+  const moreBtn = document.getElementById('buildRecordsLoadMoreBtn');
+  const moreMeta = document.getElementById('buildRecordsLoadMoreMeta');
+  if (!wrap || !empty || !majorBtn || !moreWrap || !moreBtn || !moreMeta) return;
+
+  const selectedJob = getSelectedJobName();
   const rows = getFilteredRecords();
+  const visibleRows = rows.slice(0, state.visibleCount);
 
-  if (!wrap || !empty || !majorBtn) return;
-
-  majorBtn.disabled = !selected;
+  majorBtn.disabled = !selectedJob;
 
   if (!rows.length) {
     wrap.innerHTML = '';
     empty.classList.remove('hidden');
-    empty.innerText = selected ? '当前大版本暂无构建记录' : '暂无构建记录';
+    empty.innerText = selectedJob ? '当前大版本暂无构建记录' : '暂无构建记录';
+    moreWrap.classList.add('hidden');
     return;
   }
 
   empty.classList.add('hidden');
-  wrap.innerHTML = rows.map((row) => {
+  wrap.innerHTML = visibleRows.map((row) => {
     const summary = (row.change_log || '').trim();
-    const summaryText = summary ? `${summary.slice(0, 120)}${summary.length > 120 ? '...' : ''}` : '暂无日志内容';
+    const summaryText = summary ? `${summary.slice(0, 140)}${summary.length > 140 ? '...' : ''}` : '暂无日志内容';
+    const linkHtml = row.build_url
+      ? `<a href="${escapeHtml(row.build_url)}" target="_blank" rel="noopener noreferrer" style="word-break:break-all;">${escapeHtml(row.build_url)}</a>`
+      : '<span class="muted">暂无 Jenkins 链接</span>';
+
     return `
       <div class="card" style="margin-bottom:0; border:1px solid #e2e8f0; box-shadow:none;">
         <div class="row" style="justify-content:space-between; align-items:flex-start; gap:14px; margin:0;">
@@ -121,11 +180,15 @@ function renderCards() {
             <div class="muted" style="font-size:12px;">Jenkins 构建号</div>
             <div style="margin-top:4px; color:#0f172a; font-weight:700;">#${escapeHtml(row.build_number)}</div>
           </div>
-          <div style="min-width:200px;">
+          <div style="min-width:180px;">
+            <div class="muted" style="font-size:12px;">构建状态</div>
+            <div style="margin-top:4px; color:#334155;">${escapeHtml(getStatusText(row.build_status))}</div>
+          </div>
+          <div style="min-width:220px;">
             <div class="muted" style="font-size:12px;">构建时间</div>
             <div style="margin-top:4px; color:#334155;">${escapeHtml(formatDateTime(row.created_at))}</div>
           </div>
-          <div style="min-width:200px;">
+          <div style="min-width:220px;">
             <div class="muted" style="font-size:12px;">更新时间</div>
             <div style="margin-top:4px; color:#334155;">${escapeHtml(formatDateTime(row.updated_at))}</div>
           </div>
@@ -138,7 +201,7 @@ function renderCards() {
           </div>
           <div style="min-width:280px; flex:2;">
             <div class="muted" style="font-size:12px;">Jenkins 链接</div>
-            <div style="margin-top:4px;">${row.build_url ? `<a href="${escapeHtml(row.build_url)}" target="_blank" rel="noopener noreferrer">打开 Jenkins 构建</a>` : '<span class="muted">暂无 Jenkins 链接</span>'}</div>
+            <div style="margin-top:4px;">${linkHtml}</div>
           </div>
         </div>
 
@@ -153,6 +216,16 @@ function renderCards() {
       </div>
     `;
   }).join('');
+
+  if (rows.length > visibleRows.length) {
+    moreWrap.classList.remove('hidden');
+    moreMeta.innerText = `已显示 ${visibleRows.length} / ${rows.length} 条`;
+    moreBtn.disabled = false;
+  } else {
+    moreWrap.classList.add('hidden');
+    moreMeta.innerText = `已显示 ${visibleRows.length} / ${rows.length} 条`;
+    moreBtn.disabled = true;
+  }
 }
 
 function openLogModal(title, content) {
@@ -165,6 +238,7 @@ function openLogModal(title, content) {
 }
 
 export async function loadBuildRecordsBoard() {
+  state.visibleCount = INITIAL_VISIBLE_COUNT;
   setLoading();
   try {
     const data = await (await api('/api/admin/build-records?limit=100&offset=0')).json();
@@ -178,6 +252,17 @@ export async function loadBuildRecordsBoard() {
 }
 
 export function onBuildRecordsMajorFilterChange() {
+  state.visibleCount = INITIAL_VISIBLE_COUNT;
+  renderCards();
+}
+
+export function onBuildRecordsFilterChange() {
+  state.visibleCount = INITIAL_VISIBLE_COUNT;
+  renderCards();
+}
+
+export function loadMoreBuildRecords() {
+  state.visibleCount += LOAD_MORE_STEP;
   renderCards();
 }
 
@@ -216,6 +301,8 @@ export function closeBuildRecordLogModal() {
 window.OmniQABuildRecordsTab = {
   loadBuildRecordsBoard,
   onBuildRecordsMajorFilterChange,
+  onBuildRecordsFilterChange,
+  loadMoreBuildRecords,
   openBuildRecordLogModal,
   openMajorBuildLogModal,
   closeBuildRecordLogModal,

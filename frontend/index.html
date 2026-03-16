@@ -420,7 +420,6 @@
         <h2 style="margin-bottom:6px;">构建记录</h2>
         <div class="muted">展示 Jenkins 上报到系统的构建记录，支持按大版本筛选，并查看小版本/大版本日志。</div>
       </div>
-      <button class="secondary" onclick="loadBuildRecordsBoard()">刷新构建记录</button>
     </div>
 
     <div class="row" style="margin-top:14px; align-items:flex-end; flex-wrap:wrap;">
@@ -429,6 +428,24 @@
         <select id="buildRecordsMajorFilter" onchange="onBuildRecordsMajorFilterChange()">
           <option value="">全部大版本</option>
         </select>
+      </div>
+      <div>
+        <label>构建状态</label>
+        <select id="buildRecordsStatusFilter" onchange="onBuildRecordsFilterChange()">
+          <option value="">全部状态</option>
+          <option value="SUCCESS">成功</option>
+          <option value="FAILURE">失败</option>
+          <option value="ABORTED">中止</option>
+          <option value="UNSTABLE">不稳定</option>
+        </select>
+      </div>
+      <div>
+        <label>开始日期</label>
+        <input type="date" id="buildRecordsDateFrom" onchange="onBuildRecordsFilterChange()">
+      </div>
+      <div>
+        <label>结束日期</label>
+        <input type="date" id="buildRecordsDateTo" onchange="onBuildRecordsFilterChange()">
       </div>
       <button id="buildRecordsMajorLogBtn" onclick="openMajorBuildLogModal()" disabled>查看大版本修改日志</button>
       <button class="secondary" onclick="loadBuildRecordsBoard()">刷新</button>
@@ -439,6 +456,10 @@
         <div style="text-align:center; padding:24px; color:#64748b;">正在加载构建记录...</div>
       </div>
       <div id="buildRecordsEmpty" class="hidden muted" style="padding:24px; text-align:center;">暂无构建记录</div>
+      <div id="buildRecordsMoreWrap" class="hidden" style="margin-top:14px; text-align:center;">
+        <div id="buildRecordsLoadMoreMeta" class="muted" style="margin-bottom:8px;"></div>
+        <button id="buildRecordsLoadMoreBtn" class="secondary" onclick="loadMoreBuildRecords()">加载更多</button>
+      </div>
     </div>
   </section>
 
@@ -1381,6 +1402,14 @@ async function loadBuildRecordsBoard(){
 
 function onBuildRecordsMajorFilterChange(){
   return window.OmniQABuildRecordsTab.onBuildRecordsMajorFilterChange();
+}
+
+function onBuildRecordsFilterChange(){
+  return window.OmniQABuildRecordsTab.onBuildRecordsFilterChange();
+}
+
+function loadMoreBuildRecords(){
+  return window.OmniQABuildRecordsTab.loadMoreBuildRecords();
 }
 
 function openBuildRecordLogModal(recordId){
