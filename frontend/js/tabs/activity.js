@@ -51,6 +51,18 @@ function levelStyle(level) {
   return map[level] || map.info;
 }
 
+function formatShanghaiTime(value) {
+  if (!value) return '-';
+  const text = String(value).trim();
+  const normalized = /Z$|[+-]\d{2}:\d{2}$/.test(text) ? text : `${text}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return text;
+  return date.toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    hour12: false,
+  });
+}
+
 function saveLocalState() {
   const payload = {
     page: state.page,
@@ -165,7 +177,7 @@ function renderFeed(feed) {
             <div class="row" style="gap:8px; align-items:center; margin:0 0 6px 0; flex-wrap:wrap;">
               <span class="badge" style="border-radius:999px; background:${module.bg}; color:${module.color}; border:1px solid ${module.border};">${moduleZh(item.module)}</span>
               <span class="badge" style="border-radius:999px; background:${level.bg}; color:${level.color}; border:none;">${item.action_text || item.action || '-'}</span>
-              <span class="muted" style="font-size:12px;">${item.created_at ? new Date(item.created_at).toLocaleString() : '-'}</span>
+              <span class="muted" style="font-size:12px;">${formatShanghaiTime(item.created_at)}</span>
               <span class="muted" style="font-size:12px;">${item.actor_name || '系统'}</span>
             </div>
             <div style="font-weight:700; color:#0f172a; line-height:1.55;">${item.summary || '-'}</div>
@@ -296,7 +308,7 @@ function renderTimelineItems() {
             <div style="font-weight:700; color:#0f172a;">${item.action_text || item.action || '-'}</div>
             <span class="badge" style="border-radius:999px; background:${level.bg}; color:${level.color}; border:none;">${item.level === 'critical' ? '关键' : item.level === 'important' ? '重要' : '普通'}</span>
           </div>
-          <div class="muted" style="font-size:12px; margin-top:4px;">${item.actor_name || '系统'} / ${item.created_at ? new Date(item.created_at).toLocaleString() : '-'}</div>
+          <div class="muted" style="font-size:12px; margin-top:4px;">${item.actor_name || '系统'} / ${formatShanghaiTime(item.created_at)}</div>
           <div style="margin-top:6px; line-height:1.6; color:#334155;">${item.summary || ''}</div>
           ${item.detail ? `<div class="muted" style="margin-top:4px; line-height:1.6;">${item.detail}</div>` : ''}
         </div>
@@ -356,16 +368,24 @@ export async function openAuditTimelineModal(targetType, targetId, customTitle =
     window.showMessage && window.showMessage('当前对象暂不支持时间线查看', 'error');
     return;
   }
-  const items = await (await api(url)).json();
-  renderTimelineModal(title, items || [], targetType, targetId);
+  try {
+    const items = await (await api(url)).json();
+    renderTimelineModal(title, items || [], targetType, targetId);
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '加载时间线失败', 'error');
+  }
 }
 
 export async function openActivityItem(_id, module, targetId) {
-  if (!targetId) return;
+  if (!targetId) {
+    window.showMessage && window.showMessage('这条动态没有可查看的对象时间线', 'error');
+    return;
+  }
   if (module === 'bug') return openAuditTimelineModal('bug', targetId, 'Bug 时间线');
   if (module === 'requirement' || module === 'retest') return openAuditTimelineModal('requirement', targetId, '需求时间线');
   if (module === 'feedback') return openAuditTimelineModal('feedback', targetId, '反馈时间线');
   if (module === 'field_test') return openAuditTimelineModal('field_test', targetId, '外业测试时间线');
+  window.showMessage && window.showMessage('当前动态暂不支持打开时间线', 'error');
 }
 
 window.OmniQAActivityTab = {
