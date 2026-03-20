@@ -68,6 +68,8 @@ class RetestService:
                 {
                     "id": bug.id,
                     "bug_id": bug.bug_id,
+                    "zentao_bug_url": bug.zentao_bug_url,
+                    "zentao_bug_title": bug.zentao_bug_title,
                     "found_minor_version_no": minors.get(bug.found_minor_version_id, "未知"),
                     "is_retest_failed": bug.is_retest_failed,
                 }
@@ -79,6 +81,8 @@ class RetestService:
                 {
                     "id": bug.id,
                     "bug_id": bug.bug_id,
+                    "zentao_bug_url": bug.zentao_bug_url,
+                    "zentao_bug_title": bug.zentao_bug_title,
                     "found_minor_version_no": minors.get(bug.found_minor_version_id, "未知"),
                     "is_retest_failed": bug.is_retest_failed,
                 }
@@ -90,6 +94,8 @@ class RetestService:
                 {
                     "id": bug.id,
                     "bug_id": bug.bug_id,
+                    "zentao_bug_url": bug.zentao_bug_url,
+                    "zentao_bug_title": bug.zentao_bug_title,
                     "found_minor_version_no": minors.get(bug.found_minor_version_id, "未知"),
                     "is_retest_failed": bug.is_retest_failed,
                     "closed": bool(bug.closed),
@@ -108,7 +114,7 @@ class RetestService:
                 "retest_passed": r.retest_passed,
                 "retest_minor_version_id": r.retest_minor_version_id,
                 "retested_by": r.retester.shown_name if r.retester else None,
-                "test_cases": [{"id": c.id, "zentao_case_id": c.zentao_case_id, "bugs": case_bug_map.get(str(c.id), [])} for c in r.test_cases],
+                "test_cases": [{"id": c.id, "zentao_case_id": c.zentao_case_id, "zentao_case_url": c.zentao_case_url, "bugs": case_bug_map.get(str(c.id), [])} for c in r.test_cases],
                 "free_bugs": free_bug_map.get(r.id, []),
                 "retest_bugs": retest_bug_map.get(r.id, []),
             }

@@ -1,6 +1,7 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
 import { closeModal, openModal } from '../components/modal.js';
+import { renderBugLink, renderCaseLink } from '../utils.js';
 
 const RESULT_OPTIONS = [
   { value: 'passed', label: '通过' },
@@ -58,7 +59,7 @@ function renderBugChip(req, bug) {
     : `<span style="color:#94a3b8; font-size:11px; margin-left:4px;">(发现于: 🏷️${bug.found_minor_version_no || '未知'})</span>`;
 
   return `<span class="badge" style="background:#f1f5f9; border:1px solid #cbd5e1; padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
-      ${bug.bug_id} ${verText} ${dBadge}
+      ${renderBugLink(bug)} ${verText} ${dBadge}
       <a href="javascript:void(0)" title="编辑" onclick="${req.test_completed ? 'return false;' : `editWorkbenchBug(${bug.id}, '${bug.bug_id}')`}" style="color:${req.test_completed ? '#94a3b8' : '#3b82f6'}; margin-left:4px; text-decoration:none;">✎</a>
       <a href="javascript:void(0)" title="删除" onclick="${req.test_completed ? 'return false;' : `removeWorkbenchBug(${bug.id})`}" style="color:${req.test_completed ? '#94a3b8' : '#ef4444'}; margin-left:2px; text-decoration:none;">×</a>
   </span>`;
@@ -334,7 +335,7 @@ export async function loadMyWorkbench() {
           <tbody>
             ${ddata.map((b) => `
               <tr style="${b.test_done ? 'background:#f8fafc; color:#94a3b8; text-decoration:line-through;' : ''}">
-                <td><b>${b.bug_id}</b> <span style="font-size:12px;color:#64748b;">(${b.req_title})</span></td>
+                <td>${renderBugLink(b)} <span style="font-size:12px;color:#64748b;">(${b.req_title})</span></td>
                 <td>
                   <input type="hidden" id="dnb_hidden_${b.id}" value="${b.newly_found_bug_id || ''}">
                   <div style="margin-bottom:6px;">
@@ -399,7 +400,7 @@ export function renderMineCards() {
     const caseHtml = (req.test_cases || []).map((c) => `
       <div class="case-item">
         <div class="row">
-          <b>${c.zentao_case_id}</b>
+          ${renderCaseLink(c)}
           <button class="secondary" style="padding:2px 8px; font-size:12px; margin-left:8px;" ${caseDisabled} onclick="editWorkbenchCase(${c.id}, '${c.zentao_case_id}')">编辑编号</button>
           <button ${testDisabled} onclick="promptCaseBug(${req.id},${c.id})">添加关联Bug</button>
           <button class="danger" ${caseDisabled} onclick="deleteCase(${c.id})">删除用例</button>

@@ -88,6 +88,8 @@ class BugService:
         return {
             "id": bug.id,
             "bug_id": bug.bug_id,
+            "zentao_bug_url": bug.zentao_bug_url,
+            "zentao_bug_title": bug.zentao_bug_title,
             "req_title": bug.requirement.title if bug.requirement else "无关联需求 / 自由Bug",
             "dispatched_to_id": bug.dispatched_to_id,
         }
@@ -141,6 +143,8 @@ class BugService:
             {
                 "id": b.id,
                 "bug_id": b.bug_id,
+                "zentao_bug_url": b.zentao_bug_url,
+                "zentao_bug_title": b.zentao_bug_title,
                 "dispatched_to_name": b.dispatched_to.shown_name if b.dispatched_to else "未知",
                 "closed": b.closed,
                 "resolution": b.resolution,

@@ -1,7 +1,7 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
 import { renderGovernanceCharts, renderReportCharts } from '../components/charts.js';
-import { sourceTypeZh } from '../utils.js';
+import { renderBugLink, sourceTypeZh } from '../utils.js';
 
 let governanceCache = null;
 
@@ -87,7 +87,7 @@ function renderGovernanceBoard(data) {
 
   renderSimpleTable('gStaleBugTopTable', data.bugs?.top_stale || [], (r) => `
     <tr>
-      <td>${r.bug_id}</td>
+      <td>${renderBugLink(r)}</td>
       <td>${r.major_version_no || '-'}</td>
       <td>${r.dispatched_to_name || '未指派'}</td>
       <td><b>${r.stale_days || 0}</b></td>
@@ -144,25 +144,25 @@ export function openGovernanceDetail(type) {
     hint = '口径：未关闭且未指派';
     headers = ['Bug编号', '版本', '状态', '创建时间', '持续天数'];
     rows = (governanceCache.bugs?.unassigned_list || []).map((r) => `<tr>
-      <td>${r.bug_id}</td><td>${r.major_version_no || '-'}</td><td>${r.status || '-'}</td><td>${r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td><td><b>${r.age_days || 0}</b></td></tr>`);
+      <td>${renderBugLink(r)}</td><td>${r.major_version_no || '-'}</td><td>${r.status || '-'}</td><td>${r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td><td><b>${r.age_days || 0}</b></td></tr>`);
   } else if (type === 'overdue_bugs') {
     title = '超时未关闭 Bug 明细';
     hint = `超时阈值：${governanceCache.meta?.bug_overdue_days || 7} 天`;
     headers = ['Bug编号', '版本', '指派给', '创建时间', '持续天数'];
     rows = (governanceCache.bugs?.overdue_list || []).map((r) => `<tr>
-      <td>${r.bug_id}</td><td>${r.major_version_no || '-'}</td><td>${r.dispatched_to_name || '未指派'}</td><td>${r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td><td><b>${r.age_days || 0}</b></td></tr>`);
+      <td>${renderBugLink(r)}</td><td>${r.major_version_no || '-'}</td><td>${r.dispatched_to_name || '未指派'}</td><td>${r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td><td><b>${r.age_days || 0}</b></td></tr>`);
   } else if (type === 'stale_bugs') {
     title = '长期未更新 Bug 明细';
     hint = `未更新阈值：${governanceCache.meta?.stale_bug_days || 14} 天`;
     headers = ['Bug编号', '版本', '指派给', '最后更新时间', '未更新天数'];
     rows = (governanceCache.bugs?.stale_list || []).map((r) => `<tr>
-      <td>${r.bug_id}</td><td>${r.major_version_no || '-'}</td><td>${r.dispatched_to_name || '未指派'}</td><td>${r.updated_at ? new Date(r.updated_at).toLocaleString() : '-'}</td><td><b>${r.stale_days || 0}</b></td></tr>`);
+      <td>${renderBugLink(r)}</td><td>${r.major_version_no || '-'}</td><td>${r.dispatched_to_name || '未指派'}</td><td>${r.updated_at ? new Date(r.updated_at).toLocaleString() : '-'}</td><td><b>${r.stale_days || 0}</b></td></tr>`);
   } else if (type === 'assigned_no_progress_bugs') {
     title = '已指派但未处理 Bug 明细';
     hint = `口径：已指派 + 未关闭 + 连续${governanceCache.meta?.bug_overdue_days || 7}天无更新`;
     headers = ['Bug编号', '版本', '指派给', '最后更新时间', '未更新天数'];
     rows = (governanceCache.bugs?.assigned_no_progress_list || []).map((r) => `<tr>
-      <td>${r.bug_id}</td><td>${r.major_version_no || '-'}</td><td>${r.dispatched_to_name || '未指派'}</td><td>${r.updated_at ? new Date(r.updated_at).toLocaleString() : '-'}</td><td><b>${r.stale_days || 0}</b></td></tr>`);
+      <td>${renderBugLink(r)}</td><td>${r.major_version_no || '-'}</td><td>${r.dispatched_to_name || '未指派'}</td><td>${r.updated_at ? new Date(r.updated_at).toLocaleString() : '-'}</td><td><b>${r.stale_days || 0}</b></td></tr>`);
   }
 
   titleEl.innerText = title;

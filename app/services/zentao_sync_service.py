@@ -26,6 +26,13 @@ from app.schemas.zentao_sync import ZentaoBrowserSyncPayload
 from app.services.audit_service import audit
 from app.services.bug_service import BugService
 from app.services.requirement_service import RequirementService
+from app.services.zentao_matcher import (
+    extract_requirement_numeric_id,
+    normalize_execution_name,
+    normalize_requirement_title,
+    parse_affected_version,
+    pick_best_title_match,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +79,7 @@ class ZentaoSyncService:
             received_at=datetime.utcnow(),
             top_href=payload.topHref,
             page_url=payload.pageUrl,
+            page_type=payload.pageType,
             script_version=payload.scriptVersion,
             draft_json=json.dumps(payload.draft.model_dump(mode="json"), ensure_ascii=False),
             result_json=json.dumps(payload.result.model_dump(mode="json"), ensure_ascii=False),
@@ -81,9 +89,21 @@ class ZentaoSyncService:
             operator_name=payload.operatorName,
             zentao_bug_id=zentao_bug_id,
             zentao_case_id=zentao_case_id,
-            zentao_req_id=self._normalize_prefixed_id("r#", payload.draft.requirementId) if payload.draft.requirementId else None,
+            zentao_req_id=self._normalize_requirement_id(payload.draft.requirementId),
+            zentao_requirement_name=payload.draft.requirementName,
             zentao_product_id=payload.draft.productId,
+            zentao_product_name=payload.draft.productName,
             zentao_project_id=payload.draft.projectId,
+            zentao_project_name=payload.draft.projectName,
+            zentao_execution_name=payload.draft.executionName or payload.draft.executionId,
+            zentao_affected_version=payload.draft.affectedVersion,
+            zentao_case_title=payload.draft.caseTitle,
+            zentao_bug_title=payload.draft.bugTitle,
+            source_type=(payload.draft.sourceType or "").strip().lower() or None,
+            linked_case_id=(payload.draft.linkedCaseId or "").strip() or None,
+            linked_case_label=(payload.draft.linkedCaseLabel or "").strip() or None,
+            linked_case_href=(payload.draft.linkedCaseHref or "").strip() or None,
+            display_bucket="requirement" if payload.draft.requirementId else "overall",
             status=initial_status,
             failure_reason=failure_reason,
         )
@@ -123,20 +143,24 @@ class ZentaoSyncService:
     def list_events(
         self,
         *,
-        entity_type: str | None,
-        status: str | None,
-        keyword: str | None,
-        date_from: str | None,
-        date_to: str | None,
-        only_unapplied: bool,
-        page: int,
-        page_size: int,
+        entity_type: str | None = None,
+        status: str | None = None,
+        display_bucket: str | None = None,
+        source_type: str | None = None,
+        keyword: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        only_unapplied: bool = False,
+        page: int = 1,
+        page_size: int = 20,
     ) -> dict[str, Any]:
         date_from_dt = self._parse_date(date_from, end_of_day=False)
         date_to_dt = self._parse_date(date_to, end_of_day=True)
         result = self.repo.list_events(
             entity_type=entity_type,
             status=status,
+            display_bucket=display_bucket,
+            source_type=source_type,
             keyword=keyword,
             date_from=date_from_dt,
             date_to=date_to_dt,
@@ -168,6 +192,8 @@ class ZentaoSyncService:
         source_ref: str | None,
         note: str | None,
         actor_id: int | None,
+        display_bucket: str | None = None,
+        linked_case_id: str | None = None,
     ) -> dict[str, Any]:
         row = self.repo.get_event(event_id)
         if not row:
@@ -200,6 +226,14 @@ class ZentaoSyncService:
 
         if source_ref is not None:
             row.mapped_source_ref = source_ref.strip() or None
+        if linked_case_id is not None:
+            row.linked_case_id = linked_case_id.strip() or None
+            row.mapped_test_case_id = self._find_test_case_id(row.linked_case_id)
+        if display_bucket is not None:
+            bucket = display_bucket.strip().lower()
+            if bucket not in {"requirement", "overall"}:
+                raise HTTPException(status_code=400, detail="display_bucket 仅支持 requirement/overall")
+            row.display_bucket = bucket
 
         if note:
             row.push_message = self._append_message(row.push_message, f"note={note.strip()}")
@@ -328,23 +362,45 @@ class ZentaoSyncService:
             row.failure_reason = "未匹配到需求，请人工映射"
 
     def _auto_map_bug(self, row: BrowserSyncEvent) -> None:
+        payload = self._event_payload(row)
+        draft = payload.get("draft", {})
         requirement_candidates = self._recommend_requirements(row)
         if len(requirement_candidates) == 1:
             req = requirement_candidates[0]
             row.mapped_requirement_id = req.id
             row.mapped_major_version_id = req.major_version_id
-            if row.mapped_minor_version_id:
-                row.status = "ready_to_apply"
-                row.failure_reason = None
-            else:
-                row.status = "pending_mapping"
-                row.failure_reason = "缺少小版本，请人工映射"
+            row.display_bucket = "requirement"
         elif len(requirement_candidates) > 1:
             row.status = "pending_mapping"
             row.failure_reason = "自动匹配到多个需求，请人工确认"
+            return
         else:
-            row.status = "pending_mapping"
-            row.failure_reason = "未匹配到需求，请人工映射"
+            row.display_bucket = "overall"
+
+        if row.linked_case_id and not row.mapped_test_case_id:
+            row.mapped_test_case_id = self._find_test_case_id(row.linked_case_id)
+
+        if not row.mapped_major_version_id:
+            execution = normalize_execution_name(
+                self._clean_text(draft.get("executionName") or draft.get("executionId") or row.zentao_execution_name)
+            )
+            major = self._match_major_by_execution(
+                execution_id=execution,
+                product_name=self._clean_text(draft.get("productName") or row.zentao_product_name),
+                project_name=self._clean_text(draft.get("projectName") or row.zentao_project_name),
+            )
+            if major:
+                row.mapped_major_version_id = major.id
+
+        if row.mapped_major_version_id and not row.mapped_minor_version_id:
+            minor = self._match_minor_by_affected_version(
+                major_id=row.mapped_major_version_id,
+                affected_version=self._clean_text(draft.get("affectedVersion") or row.zentao_affected_version),
+            )
+            if minor:
+                row.mapped_minor_version_id = minor.id
+
+        self._mark_mapped_status(row)
 
     def _recommend_requirements(self, row: BrowserSyncEvent) -> list[Requirement]:
         payload = self._event_payload(row)
@@ -423,10 +479,12 @@ class ZentaoSyncService:
         row.applied_case_id = new_case.id
 
     def _apply_bug(self, row: BrowserSyncEvent, actor_id: int | None) -> None:
-        if not row.mapped_requirement_id:
-            raise HTTPException(status_code=400, detail="Bug 事件尚未映射 requirement_id")
         if not row.mapped_minor_version_id:
             raise HTTPException(status_code=400, detail="Bug 事件尚未映射 minor_version_id")
+        if row.display_bucket != "overall" and not row.mapped_requirement_id:
+            raise HTTPException(status_code=400, detail="Bug 事件尚未映射 requirement_id")
+        if row.display_bucket == "overall" and not row.mapped_major_version_id:
+            raise HTTPException(status_code=400, detail="overall Bug 事件尚未映射 major_version_id")
 
         payload = self._event_payload(row)
         bug_id_raw = payload.get("result", {}).get("zentaoBugId") or row.zentao_bug_id
@@ -443,18 +501,40 @@ class ZentaoSyncService:
         draft = payload.get("draft", {})
         source_type = self._parse_bug_source_type(row.mapped_source_type or draft.get("sourceType"))
 
-        created = self.bug_service.create_execution_bug(
-            bug_id=bug_no,
-            minor_version_id=row.mapped_minor_version_id,
-            requirement_id=row.mapped_requirement_id,
-            source_type=source_type,
-            source_ref=row.mapped_source_ref or draft.get("sourceRef"),
-            actor=actor,
-        )
+        if row.display_bucket == "overall" and not row.mapped_requirement_id:
+            bug_row = BugTracking(
+                major_version_id=row.mapped_major_version_id,  # type: ignore[arg-type]
+                requirement_id=None,
+                source_type=source_type,
+                source_ref=row.mapped_source_ref or draft.get("sourceRef"),
+                bug_id=bug_no,
+                found_minor_version_id=row.mapped_minor_version_id,
+                created_by_id=actor.id,
+            )
+            self.db.add(bug_row)
+            self.db.commit()
+            self.db.refresh(bug_row)
+            audit(
+                self.db,
+                action="bug.create",
+                target_type="bug",
+                actor_id=actor.id,
+                target_id=str(bug_row.id),
+                detail=f"{bug_row.bug_id}(overall)",
+            )
+        else:
+            created = self.bug_service.create_execution_bug(
+                bug_id=bug_no,
+                minor_version_id=row.mapped_minor_version_id,
+                requirement_id=row.mapped_requirement_id,  # type: ignore[arg-type]
+                source_type=source_type,
+                source_ref=row.mapped_source_ref or draft.get("sourceRef"),
+                actor=actor,
+            )
 
-        bug_row = self.db.query(BugTracking).filter(BugTracking.id == created["id"]).first()
-        if not bug_row:
-            raise HTTPException(status_code=500, detail="Bug 创建后读取失败")
+            bug_row = self.db.query(BugTracking).filter(BugTracking.id == created["id"]).first()
+            if not bug_row:
+                raise HTTPException(status_code=500, detail="Bug 创建后读取失败")
 
         bug_row.zentao_bug_id = row.zentao_bug_id
         bug_row.zentao_bug_url = payload.get("result", {}).get("zentaoBugUrl")
@@ -469,6 +549,11 @@ class ZentaoSyncService:
         bug_row.zentao_opened_build_ids = json.dumps(draft.get("openedBuildIds") or [], ensure_ascii=False)
         bug_row.zentao_affected_version = draft.get("affectedVersion")
         bug_row.zentao_bug_title = draft.get("bugTitle")
+        bug_row.zentao_source_type = (draft.get("sourceType") or row.source_type or "").strip().lower() or None
+        bug_row.zentao_linked_case_id = draft.get("linkedCaseId") or row.linked_case_id
+        bug_row.zentao_linked_case_label = draft.get("linkedCaseLabel") or row.linked_case_label
+        bug_row.zentao_linked_case_href = draft.get("linkedCaseHref") or row.linked_case_href
+        bug_row.zentao_display_bucket = row.display_bucket
         bug_row.zentao_execution_id = draft.get("executionId")
         bug_row.zentao_execution_name = draft.get("executionName")
         bug_row.zentao_requirement_id = draft.get("requirementId")
@@ -537,6 +622,23 @@ class ZentaoSyncService:
                     break
         return matched
 
+    def _match_minor_by_affected_version(self, major_id: int, affected_version: str | None) -> Version | None:
+        parsed = parse_affected_version(affected_version)
+        query = self.db.query(Version).filter(
+            Version.version_type == VersionType.MINOR,
+            Version.parent_id == major_id,
+        )
+        if parsed.build_no:
+            token = f"({parsed.build_no})"
+            by_build = query.filter(Version.version_no.like(f"%{token}%")).order_by(Version.id.desc()).first()
+            if by_build:
+                return by_build
+        if parsed.version_prefix:
+            by_prefix = query.filter(Version.version_no.like(f"{parsed.version_prefix}%")).order_by(Version.id.desc()).first()
+            if by_prefix:
+                return by_prefix
+        return None
+
     def _mark_mapped_status(self, row: BrowserSyncEvent) -> None:
         if row.entity_type == "testcase":
             if row.mapped_requirement_id:
@@ -548,6 +650,14 @@ class ZentaoSyncService:
             return
 
         if row.entity_type == "bug":
+            if row.display_bucket == "overall":
+                if row.mapped_major_version_id and row.mapped_minor_version_id:
+                    row.status = "ready_to_apply"
+                    row.failure_reason = None
+                else:
+                    row.status = "pending_mapping"
+                    row.failure_reason = "需要 major/minor 版本映射"
+                return
             if row.mapped_requirement_id and row.mapped_minor_version_id:
                 row.status = "ready_to_apply"
                 row.failure_reason = None
@@ -589,6 +699,25 @@ class ZentaoSyncService:
             suffix = text[len(prefix) :].strip()
             return f"{prefix}{suffix}"
         return f"{prefix}{text}"
+
+    @staticmethod
+    def _normalize_requirement_id(raw_value: Any) -> str | None:
+        number = extract_requirement_numeric_id(str(raw_value or ""))
+        if not number:
+            return None
+        return f"r#{number}"
+
+    def _find_test_case_id(self, linked_case_id: str | None) -> int | None:
+        if not linked_case_id:
+            return None
+        case_no = self._normalize_prefixed_id("u#", linked_case_id)
+        row = (
+            self.db.query(TestCase)
+            .filter(TestCase.zentao_case_id == case_no)
+            .order_by(TestCase.id.desc())
+            .first()
+        )
+        return row.id if row else None
 
     @staticmethod
     def _append_message(origin: str | None, patch: str) -> str:

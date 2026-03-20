@@ -478,11 +478,28 @@
         <option value="">全部</option>
         <option value="received">received</option>
         <option value="duplicate">duplicate</option>
+        <option value="auto_matched">auto_matched</option>
         <option value="pending_mapping">pending_mapping</option>
         <option value="ready_to_apply">ready_to_apply</option>
         <option value="applied">applied</option>
         <option value="ignored">ignored</option>
         <option value="failed">failed</option>
+      </select>
+      <label>归类桶</label>
+      <select id="zentaoSyncDisplayBucket" onchange="loadZentaoSyncBoard(1)">
+        <option value="">全部</option>
+        <option value="requirement">requirement</option>
+        <option value="overall">overall</option>
+      </select>
+      <label>来源类型</label>
+      <select id="zentaoSyncSourceType" onchange="loadZentaoSyncBoard(1)">
+        <option value="">全部</option>
+        <option value="requirement">requirement</option>
+        <option value="case">case</option>
+        <option value="manual">manual</option>
+        <option value="legacy_bug">legacy_bug</option>
+        <option value="retest">retest</option>
+        <option value="field_test">field_test</option>
       </select>
       <label>开始日期</label><input type="date" id="zentaoSyncDateFrom" onchange="loadZentaoSyncBoard(1)">
       <label>结束日期</label><input type="date" id="zentaoSyncDateTo" onchange="loadZentaoSyncBoard(1)">
@@ -492,18 +509,76 @@
       <button class="secondary" onclick="applyZentaoSyncBatch()">批量应用 ready_to_apply</button>
     </div>
 
-    <table>
-      <thead>
-        <tr>
-          <th>时间</th><th>类型</th><th>禅道编号</th><th>标题</th><th>创建者</th><th>需求</th><th>状态</th><th>映射</th><th>应用结果</th><th>操作</th>
-        </tr>
-      </thead>
-      <tbody id="zentaoSyncTableBody"></tbody>
-    </table>
-    <div class="row" style="justify-content:flex-end; align-items:center; gap:8px; margin-top:8px;">
-      <span id="zentaoSyncPageText" class="muted">第 1 / 1 页，共 0 条</span>
-      <button class="secondary" onclick="prevZentaoSyncPage()">上一页</button>
-      <button class="secondary" onclick="nextZentaoSyncPage()">下一页</button>
+    <div class="zentao-sync-shell">
+      <div class="zentao-sync-left">
+        <table>
+          <thead>
+            <tr>
+              <th>时间</th><th>类型</th><th>禅道编号</th><th>标题</th><th>创建者</th><th>状态</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="zentaoSyncTableBody"></tbody>
+        </table>
+        <div class="row" style="justify-content:flex-end; align-items:center; gap:8px; margin-top:8px;">
+          <span id="zentaoSyncPageText" class="muted">第 1 / 1 页，共 0 条</span>
+          <button class="secondary" onclick="prevZentaoSyncPage()">上一页</button>
+          <button class="secondary" onclick="nextZentaoSyncPage()">下一页</button>
+        </div>
+      </div>
+      <div class="zentao-sync-right">
+        <h3 id="zentaoSyncDetailTitle" style="margin:0; color:#0f172a;">请选择左侧事件查看详情</h3>
+        <div id="zentaoSyncDetailMeta" class="muted" style="margin-top:4px;"></div>
+
+        <div class="card" style="margin-top:10px; box-shadow:none; border:1px solid #e2e8f0;">
+          <h4 style="margin-top:0;">禅道原始信息</h4>
+          <div id="zentaoSyncOriginInfo" class="muted">-</div>
+        </div>
+
+        <div class="card" style="margin-top:10px; box-shadow:none; border:1px solid #e2e8f0;">
+          <h4 style="margin-top:0;">系统推荐结果</h4>
+          <div id="zentaoSyncRecommendInfo" class="muted">-</div>
+        </div>
+
+        <div class="card" style="margin-top:10px; box-shadow:none; border:1px solid #e2e8f0;">
+          <h4 style="margin-top:0;">人工确认</h4>
+          <div class="row" style="align-items:flex-end;">
+            <label>需求</label><select id="zentaoMapRequirementSelect"></select>
+            <label>小版本</label><select id="zentaoMapMinorSelect"></select>
+          </div>
+          <div class="row" style="align-items:flex-end; margin-top:8px;">
+            <label>来源类型</label>
+            <select id="zentaoMapSourceType">
+              <option value="manual">manual</option>
+              <option value="case">case</option>
+              <option value="requirement">requirement</option>
+              <option value="legacy_bug">legacy_bug</option>
+              <option value="retest">retest</option>
+              <option value="field_test">field_test</option>
+            </select>
+            <label>归类桶</label>
+            <select id="zentaoMapDisplayBucket">
+              <option value="">不修改</option>
+              <option value="requirement">requirement</option>
+              <option value="overall">overall</option>
+            </select>
+          </div>
+          <div class="row" style="margin-top:8px; align-items:flex-end;">
+            <div class="prefix-input"><span>case</span><input id="zentaoMapLinkedCaseId" placeholder="linked_case_id 可选"></div>
+            <div class="prefix-input"><span>ref</span><input id="zentaoMapSourceRef" placeholder="source_ref 可选"></div>
+          </div>
+          <textarea id="zentaoMapNote" rows="2" placeholder="备注（可选）" style="margin-top:8px;"></textarea>
+          <div class="row" style="justify-content:flex-end; margin-top:8px;">
+            <button class="secondary" onclick="saveZentaoSyncMapping()">保存映射</button>
+            <button onclick="applyZentaoSyncEvent()">应用到业务</button>
+          </div>
+          <div class="muted" style="margin-top:6px;" id="zentaoSyncFailureReason">-</div>
+        </div>
+
+        <details class="card" style="margin-top:10px; box-shadow:none; border:1px solid #e2e8f0;">
+          <summary style="cursor:pointer;">原始 JSON</summary>
+          <pre id="zentaoSyncDetailRaw" style="white-space:pre-wrap; word-break:break-word; margin-top:10px; max-height:260px; overflow:auto;"></pre>
+        </details>
+      </div>
     </div>
   </section>
 
@@ -842,61 +917,6 @@
     </div>
   </div>
 
-  <div id="zentaoSyncDetailModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
-    <div style="width:min(1080px, 96vw); max-height:92vh; overflow:auto; background:#fff; border-radius:12px; box-shadow:0 12px 28px rgba(0,0,0,.18); padding:18px;">
-      <div class="row" style="justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin-bottom:12px;">
-        <div>
-          <h3 id="zentaoSyncDetailTitle" style="margin:0; color:#0f172a;">同步事件详情</h3>
-          <div id="zentaoSyncDetailMeta" class="muted" style="margin-top:4px;"></div>
-        </div>
-        <button class="secondary" onclick="closeZentaoSyncDetail()">关闭</button>
-      </div>
-
-      <div class="row" style="align-items:flex-start; gap:14px;">
-        <div class="card" style="flex:1; min-width:0; box-shadow:none; border:1px solid #e2e8f0;">
-          <h4 style="margin:0 0 8px 0;">Draft</h4>
-          <pre id="zentaoSyncDetailDraft" style="white-space:pre-wrap; word-break:break-word; margin:0; max-height:220px; overflow:auto;"></pre>
-        </div>
-        <div class="card" style="flex:1; min-width:0; box-shadow:none; border:1px solid #e2e8f0;">
-          <h4 style="margin:0 0 8px 0;">Result</h4>
-          <pre id="zentaoSyncDetailResult" style="white-space:pre-wrap; word-break:break-word; margin:0; max-height:220px; overflow:auto;"></pre>
-        </div>
-      </div>
-
-      <div class="card" style="box-shadow:none; border:1px solid #e2e8f0; margin-top:12px;">
-        <h4 style="margin:0 0 8px 0;">Raw Payload</h4>
-        <pre id="zentaoSyncDetailRaw" style="white-space:pre-wrap; word-break:break-word; margin:0; max-height:260px; overflow:auto;"></pre>
-      </div>
-
-      <div class="card" style="box-shadow:none; border:1px solid #e2e8f0; margin-top:12px;">
-        <h4 style="margin:0 0 8px 0;">失败原因</h4>
-        <div id="zentaoSyncFailureReason" class="muted">-</div>
-      </div>
-
-      <div class="card" style="box-shadow:none; border:1px solid #e2e8f0; margin-top:12px;">
-        <h4 style="margin:0 0 8px 0;">人工映射与应用</h4>
-        <div class="row" style="flex-wrap:wrap;">
-          <label>需求</label><select id="zentaoMapRequirementSelect"></select>
-          <label>小版本</label><select id="zentaoMapMinorSelect"></select>
-          <label>source_type</label>
-          <select id="zentaoMapSourceType">
-            <option value="manual">manual</option>
-            <option value="case">case</option>
-            <option value="requirement">requirement</option>
-            <option value="retest">retest</option>
-            <option value="legacy_bug">legacy_bug</option>
-            <option value="field_test">field_test</option>
-          </select>
-          <div class="prefix-input"><span>ref</span><input id="zentaoMapSourceRef" placeholder="source_ref 可选"></div>
-        </div>
-        <textarea id="zentaoMapNote" rows="2" placeholder="备注（可选）" style="margin-top:8px;"></textarea>
-        <div class="row" style="justify-content:flex-end; margin-top:8px;">
-          <button class="secondary" onclick="saveZentaoSyncMapping()">保存映射</button>
-          <button onclick="applyZentaoSyncEvent()">应用到业务</button>
-        </div>
-      </div>
-    </div>
-  </div>
 </div>
 
 <script>

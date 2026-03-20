@@ -253,7 +253,7 @@ class FeedbackService:
                 }
                 for a in row.attachments
             ],
-            "bugs": [{"id": l.bug.id, "bug_id": l.bug.bug_id} for l in row.bug_links if l.bug],
+            "bugs": [{"id": l.bug.id, "bug_id": l.bug.bug_id, "zentao_bug_url": l.bug.zentao_bug_url, "zentao_bug_title": l.bug.zentao_bug_title} for l in row.bug_links if l.bug],
         }
 
     def assign_feedback(self, *, feedback_id: int, assignee_id: int, status: Optional[FeedbackStatus], actor: User) -> tuple[dict, FeedbackRecord, User]:
@@ -445,7 +445,7 @@ class FeedbackService:
             .order_by(FeedbackBugLink.id.desc())
             .all()
         )
-        return [{"id": l.bug.id, "bug_id": l.bug.bug_id} for l in rows if l.bug]
+        return [{"id": l.bug.id, "bug_id": l.bug.bug_id, "zentao_bug_url": l.bug.zentao_bug_url, "zentao_bug_title": l.bug.zentao_bug_title} for l in rows if l.bug]
 
     def unlink_bug(self, feedback_id: int, bug_id: int, actor: User) -> dict:
         link = self.db.query(FeedbackBugLink).filter(FeedbackBugLink.feedback_id == feedback_id, FeedbackBugLink.bug_id == bug_id).first()
@@ -464,7 +464,7 @@ class FeedbackService:
         if software_id:
             q = q.join(Version, BugTracking.major_version_id == Version.id).filter(Version.software_id == software_id)
         rows = q.order_by(BugTracking.id.desc()).limit(max(1, min(limit, 100))).all()
-        return [{"id": r.id, "bug_id": r.bug_id} for r in rows]
+        return [{"id": r.id, "bug_id": r.bug_id, "zentao_bug_url": r.zentao_bug_url, "zentao_bug_title": r.zentao_bug_title} for r in rows]
 
     def list_my_todo(self, current_user: User, major_version_id: Optional[int] = None) -> list[dict]:
         q = self.db.query(FeedbackRecord).options(joinedload(FeedbackRecord.major_version), joinedload(FeedbackRecord.minor_version)).filter(

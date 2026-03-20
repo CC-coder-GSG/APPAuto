@@ -201,6 +201,11 @@ def ensure_bug_schema_compat(db: Session) -> None:
         "zentao_opened_build_ids": "TEXT",
         "zentao_affected_version": "VARCHAR(255)",
         "zentao_bug_title": "TEXT",
+        "zentao_source_type": "VARCHAR(30)",
+        "zentao_linked_case_id": "VARCHAR(40)",
+        "zentao_linked_case_label": "VARCHAR(120)",
+        "zentao_linked_case_href": "TEXT",
+        "zentao_display_bucket": "VARCHAR(20)",
         "zentao_execution_id": "VARCHAR(80)",
         "zentao_execution_name": "VARCHAR(255)",
         "zentao_requirement_id": "VARCHAR(40)",
@@ -257,9 +262,27 @@ def ensure_browser_sync_schema_compat(db: Session) -> None:
     cols = {r[1] for r in rows}
     if not cols:
         return
-    if "mapped_source_type" not in cols:
-        db.execute(text("ALTER TABLE browser_sync_events ADD COLUMN mapped_source_type VARCHAR(30)"))
-        db.commit()
-    if "mapped_source_ref" not in cols:
-        db.execute(text("ALTER TABLE browser_sync_events ADD COLUMN mapped_source_ref VARCHAR(80)"))
-        db.commit()
+    column_defs = {
+        "page_type": "VARCHAR(60)",
+        "zentao_requirement_name": "TEXT",
+        "zentao_product_name": "VARCHAR(255)",
+        "zentao_project_name": "VARCHAR(255)",
+        "zentao_execution_name": "VARCHAR(255)",
+        "zentao_affected_version": "VARCHAR(255)",
+        "zentao_case_title": "TEXT",
+        "zentao_bug_title": "TEXT",
+        "source_type": "VARCHAR(30)",
+        "linked_case_id": "VARCHAR(40)",
+        "linked_case_label": "VARCHAR(120)",
+        "linked_case_href": "TEXT",
+        "display_bucket": "VARCHAR(20) DEFAULT 'overall'",
+        "mapped_source_type": "VARCHAR(30)",
+        "mapped_source_ref": "VARCHAR(80)",
+        "mapped_test_case_id": "INTEGER",
+    }
+    for col, sql_type in column_defs.items():
+        if col not in cols:
+            db.execute(text(f"ALTER TABLE browser_sync_events ADD COLUMN {col} {sql_type}"))
+            db.commit()
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_browser_sync_events_display_bucket ON browser_sync_events (display_bucket)"))
+    db.commit()

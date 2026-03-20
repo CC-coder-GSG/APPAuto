@@ -356,6 +356,8 @@ def my_workbench(
             {
                 "id": b.id,
                 "bug_id": b.bug_id,
+                "zentao_bug_url": b.zentao_bug_url,
+                "zentao_bug_title": b.zentao_bug_title,
                 "found_minor_version_no": minors.get(b.found_minor_version_id, "未知") if b.found_minor_version_id else "未知",
                 "fixed_minor_version_no": minors.get(b.fixed_minor_version_id, "未知") if b.fixed_minor_version_id else None,
                 "dispatched_to_name": b.dispatched_to.shown_name if b.dispatched_to else None,
@@ -368,6 +370,8 @@ def my_workbench(
             {
                 "id": b.id,
                 "bug_id": b.bug_id,
+                "zentao_bug_url": b.zentao_bug_url,
+                "zentao_bug_title": b.zentao_bug_title,
                 "found_minor_version_no": minors.get(b.found_minor_version_id, "未知") if b.found_minor_version_id else "未知",
                 "fixed_minor_version_no": minors.get(b.fixed_minor_version_id, "未知") if b.fixed_minor_version_id else None,
                 "dispatched_to_name": b.dispatched_to.shown_name if b.dispatched_to else None,
@@ -386,7 +390,7 @@ def my_workbench(
             "test_notes": r.test_notes,
             "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
             "test_notes_updated_by_name": r.test_notes_updated_by.shown_name if r.test_notes_updated_by else None,
-            "test_cases": [{"id": c.id, "zentao_case_id": c.zentao_case_id, "bugs": case_bug_map.get(str(c.id), [])} for c in r.test_cases],
+            "test_cases": [{"id": c.id, "zentao_case_id": c.zentao_case_id, "zentao_case_url": c.zentao_case_url, "bugs": case_bug_map.get(str(c.id), [])} for c in r.test_cases],
             "free_bugs": free_bug_map.get(r.id, []),
         }
         for r in reqs

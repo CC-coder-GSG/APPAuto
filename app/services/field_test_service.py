@@ -111,7 +111,12 @@ class FieldTestService:
             "created_at": row.created_at.isoformat(),
             "updated_at": row.updated_at.isoformat(),
             "bugs": [
-                {"id": link.bug.id, "bug_id": link.bug.bug_id}
+                {
+                    "id": link.bug.id,
+                    "bug_id": link.bug.bug_id,
+                    "zentao_bug_url": link.bug.zentao_bug_url,
+                    "zentao_bug_title": link.bug.zentao_bug_title,
+                }
                 for link in (row.bug_links or [])
                 if link.bug
             ],

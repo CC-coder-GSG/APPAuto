@@ -1,5 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
+import { renderBugLink } from '../utils.js';
 
 let currentPage = 1;
 let currentPageSize = 10;
@@ -255,7 +256,7 @@ export async function openFeedbackDetail(feedbackId) {
     </div>`;
   }).join('') || '<span class="muted">暂无附件</span>';
 
-  const bugsHtml = (detail.bugs || []).map((b) => `<span class="badge" style="display:inline-flex; align-items:center; margin-right:8px; margin-bottom:8px; border-radius:99px; padding:6px 10px; background:#f8fafc; color:#334155;">${b.bug_id} <a href="javascript:void(0)" style="color:#ef4444; margin-left:6px; text-decoration:none;" onclick="unlinkFeedbackBug(${detail.id}, ${b.id})">×</a></span>`).join('') || '<span class="muted">暂无关联 Bug</span>';
+  const bugsHtml = (detail.bugs || []).map((b) => `<span class="badge" style="display:inline-flex; align-items:center; margin-right:8px; margin-bottom:8px; border-radius:99px; padding:6px 10px; background:#f8fafc; color:#334155;">${renderBugLink(b)} <a href="javascript:void(0)" style="color:#ef4444; margin-left:6px; text-decoration:none;" onclick="unlinkFeedbackBug(${detail.id}, ${b.id})">×</a></span>`).join('') || '<span class="muted">暂无关联 Bug</span>';
   const users = window.users || [];
   const isAdmin = window.currentUser && window.currentUser.role === 'admin';
   const assigneeOpts = users.map((u) => `<option value="${u.id}" ${Number(detail.assignee_id) === Number(u.id) ? 'selected' : ''}>${u.display_name || u.username}</option>`).join('');

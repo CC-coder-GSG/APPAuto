@@ -52,6 +52,8 @@ class Stage5Service:
                 {
                     "id": bug.id,
                     "bug_id": bug.bug_id,
+                    "zentao_bug_url": bug.zentao_bug_url,
+                    "zentao_bug_title": bug.zentao_bug_title,
                     "source_type": bug.source_type.value,
                     "source_ref": bug.source_ref,
                     "requirement_id": bug.requirement_id,
@@ -87,7 +89,7 @@ class Stage5Service:
         legacy_bugs = self.db.query(BugTracking).filter(BugTracking.major_version_id == major_version_id).all()
         return {
             "reqs": [{"id": r.id, "label": f"{r.zentao_req_id} {r.title}"} for r in reqs],
-            "cases": [{"id": c.id, "req_id": c.requirement_id, "label": c.zentao_case_id} for c in cases],
+            "cases": [{"id": c.id, "req_id": c.requirement_id, "label": c.zentao_case_id, "zentao_case_url": c.zentao_case_url} for c in cases],
             "bugs": [{"id": b.id, "req_id": b.requirement_id, "label": b.bug_id} for b in legacy_bugs],
         }
 

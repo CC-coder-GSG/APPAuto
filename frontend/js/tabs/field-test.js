@@ -1,5 +1,5 @@
 ﻿import { api } from '../api.js';
-import { withPrefix } from '../utils.js';
+import { withPrefix, renderBugLink } from '../utils.js';
 
 const PURPOSE_ZH = { requirement: '需求测试', feature: '功能测试' };
 const RESULT_ZH = { passed: '测试通过', failed: '测试未通过' };
@@ -265,7 +265,7 @@ export async function openFieldTestDetail(recordId) {
     const canEdit = canEditRow(row);
     const bugHtml = (row.bugs || []).map((b) => `
       <span class="badge" style="margin-right:6px; margin-bottom:6px; display:inline-flex; align-items:center;">
-        ${b.bug_id}
+        ${renderBugLink(b)}
         ${canEdit ? `<a href="javascript:void(0)" onclick="unlinkFieldTestBug(${row.id}, ${b.id})" style="margin-left:6px; color:#dc2626; text-decoration:none;">×</a>` : ''}
       </span>
     `).join('') || '<span class="muted">暂无关联 Bug</span>';

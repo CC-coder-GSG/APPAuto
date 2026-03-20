@@ -44,6 +44,8 @@ class BrowserSyncRepository:
         *,
         entity_type: str | None = None,
         status: str | None = None,
+        display_bucket: str | None = None,
+        source_type: str | None = None,
         keyword: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
@@ -57,6 +59,10 @@ class BrowserSyncRepository:
             query = query.filter(BrowserSyncEvent.entity_type == entity_type)
         if status:
             query = query.filter(BrowserSyncEvent.status == status)
+        if display_bucket:
+            query = query.filter(BrowserSyncEvent.display_bucket == display_bucket)
+        if source_type:
+            query = query.filter(BrowserSyncEvent.source_type == source_type)
         if date_from:
             query = query.filter(BrowserSyncEvent.created_at >= date_from)
         if date_to:
@@ -72,6 +78,11 @@ class BrowserSyncRepository:
                     BrowserSyncEvent.zentao_bug_id.like(kw),
                     BrowserSyncEvent.zentao_case_id.like(kw),
                     BrowserSyncEvent.zentao_req_id.like(kw),
+                    BrowserSyncEvent.zentao_requirement_name.like(kw),
+                    BrowserSyncEvent.zentao_bug_title.like(kw),
+                    BrowserSyncEvent.zentao_case_title.like(kw),
+                    BrowserSyncEvent.linked_case_id.like(kw),
+                    BrowserSyncEvent.linked_case_label.like(kw),
                     BrowserSyncEvent.push_message.like(kw),
                 )
             )

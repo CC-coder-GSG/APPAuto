@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { withPrefix } from '../utils.js';
+import { withPrefix, renderBugLink } from '../utils.js';
 
 export async function searchDispatchBug() {
   const bugId = withPrefix('b#', document.getElementById('dispatchBugNo')?.value || '');
@@ -11,7 +11,7 @@ export async function searchDispatchBug() {
     if (softwareId) params.set('software_id', String(softwareId));
     const res = await (await api('/bugs/search?' + params.toString())).json();
     state.currentDispatchBugId = res.id;
-    document.getElementById('dispatchBugTitle').innerHTML = `找到缺陷：<b>${res.bug_id}</b> <span style="font-size:14px; color:#475569;">(归属：${res.req_title})</span>`;
+    document.getElementById('dispatchBugTitle').innerHTML = `找到缺陷：${renderBugLink(res)} <span style="font-size:14px; color:#475569;">(归属：${res.req_title})</span>`;
     if (res.dispatched_to_id) document.getElementById('dispatchUserSelect').value = String(res.dispatched_to_id);
     document.getElementById('dispatchBugInfo').classList.remove('hidden');
   } catch (err) {
@@ -54,7 +54,7 @@ export async function loadDispatchedAll() {
     table.innerHTML = filteredData.map((b) => {
       const statusHtml = b.closed ? `<span style="color:#16a34a;font-weight:bold;">已闭环 (${resZh[b.resolution] || '修复'})</span>` : '<span style="color:#dc2626;">处理中</span>';
       return `<tr>
-        <td><b>${b.bug_id}</b></td>
+        <td>${renderBugLink(b)}</td>
         <td><span class="badge" style="background:#ffedd5;color:#ea580c; border:1px solid #fdba74;">特派给 ${b.dispatched_to_name}</span></td>
         <td>${statusHtml}</td>
       </tr>`;

@@ -22,6 +22,7 @@ class BrowserSyncEvent(Base):
 
     top_href: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     page_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    page_type: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
     script_version: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
 
     draft_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -35,8 +36,20 @@ class BrowserSyncEvent(Base):
     zentao_bug_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
     zentao_case_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
     zentao_req_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
+    zentao_requirement_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     zentao_product_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    zentao_product_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     zentao_project_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    zentao_project_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    zentao_execution_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    zentao_affected_version: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    zentao_case_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    zentao_bug_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    linked_case_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    linked_case_label: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    linked_case_href: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    display_bucket: Mapped[str] = mapped_column(String(20), nullable=False, default="overall", index=True)
 
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="received", index=True)
     failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -46,6 +59,7 @@ class BrowserSyncEvent(Base):
     mapped_minor_version_id: Mapped[Optional[int]] = mapped_column(ForeignKey("versions.id"), nullable=True)
     mapped_source_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     mapped_source_ref: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    mapped_test_case_id: Mapped[Optional[int]] = mapped_column(ForeignKey("test_cases.id"), nullable=True)
 
     applied_case_id: Mapped[Optional[int]] = mapped_column(ForeignKey("test_cases.id"), nullable=True)
     applied_bug_tracking_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bug_tracking.id"), nullable=True)

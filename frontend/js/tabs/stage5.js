@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { withPrefix, sourceTypeZh } from '../utils.js';
+import { withPrefix, sourceTypeZh, renderBugLink } from '../utils.js';
 
 export async function loadStage5() {
   const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
@@ -46,7 +46,7 @@ export function renderS5() {
     const dispatchBadge = b.dispatched_to_name ? `<span class="badge" style="background:#ffedd5; color:#ea580c; border:1px solid #fdba74; margin-left:4px;">🪂特派:${b.dispatched_to_name}</span>` : '';
     return `<tr style="${rowStyle}">
       <td>
-        <b>${b.bug_id}</b> <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span> ${failBadge} ${dispatchBadge}
+        ${renderBugLink(b)} <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span> ${failBadge} ${dispatchBadge}
         <a href="javascript:void(0)" onclick="editS5Bug(${b.id}, '${b.bug_id}')" style="margin-left:8px; font-size:12px; color:#3b82f6; text-decoration:none;">编辑</a>
         <a href="javascript:void(0)" onclick="removeS5Bug(${b.id})" style="margin-left:4px; font-size:12px; color:#ef4444; text-decoration:none;">删除</a>
         ${othersHtml}

@@ -26,6 +26,10 @@ class ZentaoSyncDraftPayload(BaseModel):
     requirementName: str | None = None
     creatorName: str | None = None
     caseTitle: str | None = None
+    sourceType: str | None = None
+    linkedCaseId: str | None = None
+    linkedCaseLabel: str | None = None
+    linkedCaseHref: str | None = None
 
     @field_validator(
         'productId',
@@ -40,6 +44,10 @@ class ZentaoSyncDraftPayload(BaseModel):
         'requirementName',
         'creatorName',
         'caseTitle',
+        'sourceType',
+        'linkedCaseId',
+        'linkedCaseLabel',
+        'linkedCaseHref',
         mode='before',
     )
     @classmethod
@@ -81,6 +89,7 @@ class ZentaoBrowserSyncPayload(BaseModel):
     capturedAt: int | str | None = None
     topHref: str | None = None
     pageUrl: str | None = None
+    pageType: str | None = None
     scriptVersion: str | None = None
     pushMessage: str | None = None
     operatorName: str | None = None
@@ -95,7 +104,7 @@ class ZentaoBrowserSyncPayload(BaseModel):
             raise ValueError('action 不能为空')
         return text
 
-    @field_validator('source', 'clientRecordId', 'topHref', 'pageUrl', 'scriptVersion', 'pushMessage', 'operatorName', mode='before')
+    @field_validator('source', 'clientRecordId', 'topHref', 'pageUrl', 'pageType', 'scriptVersion', 'pushMessage', 'operatorName', mode='before')
     @classmethod
     def normalize_optional_text(cls, value: Any) -> str | None:
         return _clean_optional_text(value)

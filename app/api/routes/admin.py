@@ -146,6 +146,7 @@ def admin_data_overview(current_user=Depends(get_current_user), db: Session = De
                 "title": r.title,
                 "major_version_id": r.major_version_id,
                 "case_ids": [c.zentao_case_id for c in r.test_cases],
+                "test_cases": [{"id": c.id, "zentao_case_id": c.zentao_case_id, "zentao_case_url": c.zentao_case_url} for c in r.test_cases],
                 "test_notes": r.test_notes,
                 "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
                 "test_notes_updated_by_name": r.test_notes_updated_by.shown_name if r.test_notes_updated_by else None,
@@ -161,6 +162,8 @@ def admin_data_overview(current_user=Depends(get_current_user), db: Session = De
                 "source_type": b.source_type.value,
                 "source_ref": b.source_ref,
                 "found_minor_version_id": b.found_minor_version_id,
+                "zentao_bug_url": b.zentao_bug_url,
+                "zentao_bug_title": b.zentao_bug_title,
             }
             for b in db.query(BugTracking).order_by(BugTracking.id.desc()).all()
         ],

@@ -24,6 +24,8 @@ class BrowserSyncMapPayload(BaseModel):
     minor_version_id: Optional[int] = None
     source_type: Optional[str] = None
     source_ref: Optional[str] = None
+    display_bucket: Optional[str] = None
+    linked_case_id: Optional[str] = None
     note: Optional[str] = None
 
 
@@ -90,6 +92,8 @@ def legacy_browser_sync(
 def list_browser_events(
     entity_type: Optional[str] = None,
     status: Optional[str] = None,
+    display_bucket: Optional[str] = None,
+    source_type: Optional[str] = None,
     keyword: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
@@ -102,6 +106,8 @@ def list_browser_events(
     return ZentaoSyncService(db).list_events(
         entity_type=entity_type,
         status=status,
+        display_bucket=display_bucket,
+        source_type=source_type,
         keyword=keyword,
         date_from=date_from,
         date_to=date_to,
@@ -129,6 +135,8 @@ def map_browser_event(
         minor_version_id=payload.minor_version_id,
         source_type=payload.source_type,
         source_ref=payload.source_ref,
+        display_bucket=payload.display_bucket,
+        linked_case_id=payload.linked_case_id,
         note=payload.note,
         actor_id=current_user.id,
     )

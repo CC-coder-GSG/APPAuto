@@ -183,3 +183,45 @@
   padding-left: 12px;
   padding-bottom: 8px;
 }
+
+.qa-ext-link {
+  color: #2563eb;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.qa-ext-link:hover {
+  text-decoration: underline;
+}
+
+.qa-title-tip {
+  margin-left: 4px;
+  color: #64748b;
+  font-size: 12px;
+  cursor: help;
+}
+
+.zentao-sync-shell {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 14px;
+}
+
+.zentao-sync-left,
+.zentao-sync-right {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  padding: 12px;
+}
+
+.zentao-sync-left table td,
+.zentao-sync-left table th {
+  white-space: nowrap;
+}
+
+@media (max-width: 1200px) {
+  .zentao-sync-shell {
+    grid-template-columns: 1fr;
+  }
+}

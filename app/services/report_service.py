@@ -714,6 +714,8 @@ class ReportService:
             b_item = {
                 "id": b.id,
                 "bug_id": b.bug_id,
+                "zentao_bug_url": b.zentao_bug_url,
+                "zentao_bug_title": b.zentao_bug_title,
                 "major_version_no": majors.get(b.major_version_id, "未知"),
                 "status": "closed" if b.closed else "open",
                 "dispatched_to_name": users.get(b.dispatched_to_id, "未指派"),

@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { withPrefix } from '../utils.js';
+import { withPrefix, renderBugLink, renderCaseLink } from '../utils.js';
 
 function getRetestMode() {
   return document.getElementById('retestDisplayMode')?.value || 'version';
@@ -66,12 +66,12 @@ export async function loadRetest() {
       const bugs = (c.bugs || []).map((b) => {
         if (b.is_retest_failed) evidenceCount++;
         return `<div style="margin-top:4px;">
-          <span class="badge" style="background:#fef2f2; color:#dc2626; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>
+          <span class="badge" style="background:#fef2f2; color:#dc2626; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>
           <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
         </div>`;
       }).join('');
       return `<div style="margin-bottom: 10px; padding-left: 12px; border-left: 3px solid #cbd5e1;">
-        <div style="font-weight: bold; color: #475569;">🧪 用例 [${c.zentao_case_id}]</div>
+        <div style="font-weight: bold; color: #475569;">🧪 用例 [${renderCaseLink(c)}]</div>
         <div style="margin-top: 4px;">${bugs || '<span class="muted" style="font-size:12px;">✓ 完美通过，无关联Bug</span>'}</div>
       </div>`;
     }).join('');
@@ -79,7 +79,7 @@ export async function loadRetest() {
     const freeBugHtml = (req.free_bugs || []).map((b) => {
       if (b.is_retest_failed) evidenceCount++;
       return `<div style="margin-bottom:6px;">
-      <span class="badge" style="background:#fff7ed; color:#ea580c; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>
+      <span class="badge" style="background:#fff7ed; color:#ea580c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>
       <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
     </div>`;
     }).join('');
@@ -90,7 +90,7 @@ export async function loadRetest() {
         ? '<span class="badge" style="background:#dcfce7; color:#166534; margin-left:6px; padding:1px 6px;">✅已闭环</span>'
         : '<span class="badge" style="background:#fee2e2; color:#b91c1c; margin-left:6px; padding:1px 6px;">⏳未闭环</span>';
       return `<div style="margin-bottom:6px;">
-      <span class="badge" style="background:#fee2e2; color:#b91c1c; margin-right:4px; padding: 2px 6px;">🐛 ${b.bug_id} <span style="color:#94a3b8;font-size:11px;">(复测新增)</span></span>${closedTag}
+      <span class="badge" style="background:#fee2e2; color:#b91c1c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)} <span style="color:#94a3b8;font-size:11px;">(复测新增)</span></span>${closedTag}
     </div>`;
     }).join('');
 
