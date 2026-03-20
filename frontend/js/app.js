@@ -12,6 +12,7 @@ import './tabs/retest.js';
 import './tabs/stage5.js';
 import './tabs/field-test.js';
 import './tabs/build-records.js';
+import './tabs/zentao-sync.js';
 import './tabs/activity.js';
 import './tabs/assign.js';
 import './tabs/dispatch.js';

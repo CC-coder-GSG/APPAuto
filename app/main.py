@@ -5,10 +5,12 @@ from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
+from app.core.config import settings
 from app.db.session import SessionLocal
 from app.db.init_db import init_db
 from app.services.push_service import PushService
@@ -17,6 +19,13 @@ app = FastAPI(title="APPAuto", version="0.3.0")
 scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 

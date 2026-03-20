@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -10,6 +12,7 @@ from app.models import SoftwareProduct, User, UserRole, Version, VersionType
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "admin"
 DEFAULT_SOFTWARE_NAME = "Survey Master"
+logger = logging.getLogger(__name__)
 
 
 def ensure_default_admin(db: Session) -> None:
@@ -178,4 +181,85 @@ def ensure_requirement_schema_compat(db: Session) -> None:
         db.commit()
     finally:
         db.execute(text("PRAGMA foreign_keys=ON"))
+        db.commit()
+
+
+def ensure_bug_schema_compat(db: Session) -> None:
+    rows = db.execute(text("PRAGMA table_info(bug_tracking)")).fetchall()
+    cols = {r[1] for r in rows}
+    column_defs = {
+        "zentao_bug_id": "VARCHAR(40)",
+        "zentao_bug_url": "TEXT",
+        "zentao_client_record_id": "VARCHAR(120)",
+        "zentao_source": "VARCHAR(40)",
+        "zentao_captured_at": "INTEGER",
+        "zentao_top_href": "TEXT",
+        "zentao_product_id": "VARCHAR(40)",
+        "zentao_product_name": "VARCHAR(255)",
+        "zentao_project_id": "VARCHAR(40)",
+        "zentao_project_name": "VARCHAR(255)",
+        "zentao_opened_build_ids": "TEXT",
+        "zentao_affected_version": "VARCHAR(255)",
+        "zentao_bug_title": "TEXT",
+        "zentao_execution_id": "VARCHAR(80)",
+        "zentao_execution_name": "VARCHAR(255)",
+        "zentao_requirement_id": "VARCHAR(40)",
+        "zentao_requirement_name": "TEXT",
+        "zentao_creator_name": "VARCHAR(100)",
+        "zentao_sync_status": "VARCHAR(40)",
+        "zentao_sync_message": "TEXT",
+        "zentao_raw_payload": "TEXT",
+    }
+    for col, sql_type in column_defs.items():
+        if col not in cols:
+            db.execute(text(f"ALTER TABLE bug_tracking ADD COLUMN {col} {sql_type}"))
+            db.commit()
+    try:
+        db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_bug_tracking_zentao_bug_id ON bug_tracking (zentao_bug_id)"))
+        db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_bug_tracking_zentao_client_record_id ON bug_tracking (zentao_client_record_id)"))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.warning("bug_tracking 禅道唯一索引创建失败，已跳过。请检查历史重复数据。", exc_info=True)
+
+
+def ensure_testcase_schema_compat(db: Session) -> None:
+    rows = db.execute(text("PRAGMA table_info(test_cases)")).fetchall()
+    cols = {r[1] for r in rows}
+    column_defs = {
+        "zentao_case_url": "TEXT",
+        "zentao_client_record_id": "VARCHAR(120)",
+        "zentao_source": "VARCHAR(40)",
+        "zentao_captured_at": "INTEGER",
+        "zentao_top_href": "TEXT",
+        "zentao_product_id": "VARCHAR(40)",
+        "zentao_product_name": "VARCHAR(255)",
+        "zentao_case_title": "TEXT",
+        "zentao_requirement_id": "VARCHAR(40)",
+        "zentao_requirement_name": "TEXT",
+        "zentao_creator_name": "VARCHAR(100)",
+        "zentao_sync_status": "VARCHAR(40)",
+        "zentao_sync_message": "TEXT",
+        "zentao_raw_payload": "TEXT",
+    }
+    for col, sql_type in column_defs.items():
+        if col not in cols:
+            db.execute(text(f"ALTER TABLE test_cases ADD COLUMN {col} {sql_type}"))
+            db.commit()
+    try:
+        db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_test_cases_zentao_client_record_id ON test_cases (zentao_client_record_id)"))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.warning("test_cases 禅道唯一索引创建失败，已跳过。请检查历史重复数据。", exc_info=True)
+def ensure_browser_sync_schema_compat(db: Session) -> None:
+    rows = db.execute(text("PRAGMA table_info(browser_sync_events)")).fetchall()
+    cols = {r[1] for r in rows}
+    if not cols:
+        return
+    if "mapped_source_type" not in cols:
+        db.execute(text("ALTER TABLE browser_sync_events ADD COLUMN mapped_source_type VARCHAR(30)"))
+        db.commit()
+    if "mapped_source_ref" not in cols:
+        db.execute(text("ALTER TABLE browser_sync_events ADD COLUMN mapped_source_ref VARCHAR(80)"))
         db.commit()

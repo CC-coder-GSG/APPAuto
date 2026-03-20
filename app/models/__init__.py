@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.models.audit import AuditLog
+from app.models.browser_sync_event import BrowserSyncEvent
 from app.models.build_record import BuildRecord
 from app.models.bug import BugTracking
 from app.models.enums import BugSourceType, FeedbackStatus, RequirementStatus, TestResultStatus, UserRole, VersionType
@@ -17,6 +18,7 @@ from app.models.version import Version
 
 __all__ = [
     "AuditLog",
+    "BrowserSyncEvent",
     "BuildRecord",
     "BugSourceType",
     "BugStage5Record",
