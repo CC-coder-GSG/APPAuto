@@ -57,6 +57,17 @@ function zhBucket(v) {
   return BUCKET_ZH[String(v || '').toLowerCase()] || String(v || '-');
 }
 
+function localizeFreeText(text) {
+  const raw = String(text || '');
+  if (!raw) return '-';
+  return raw
+    .replace(/major\/minor/gi, '主版本/小版本')
+    .replace(/\bmajor\b/gi, '主版本')
+    .replace(/\bminor\b/gi, '小版本')
+    .replace(/linked_case_id/gi, '关联用例ID')
+    .replace(/source_ref/gi, '来源引用');
+}
+
 function fmt(v) {
   if (!v) return '-';
   const d = new Date(v);
@@ -203,7 +214,7 @@ function renderDetail(detail) {
   ];
   setText('zentaoSyncRecommendInfo', recLines.join('\n'));
 
-  setText('zentaoSyncFailureReason', detail.failure_reason || '-');
+  setText('zentaoSyncFailureReason', localizeFreeText(detail.failure_reason));
   setText('zentaoSyncDetailRaw', JSON.stringify(detail.raw_payload || {}, null, 2));
   renderMapSelectors(detail);
 }

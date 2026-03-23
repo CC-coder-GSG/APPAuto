@@ -130,6 +130,7 @@
 .qa-panel-soft {
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
   background: #f8fafc;
+  padding: 14px 16px;
 }
 
 .qa-filter-grid {
@@ -191,6 +192,7 @@
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+  margin-top: 4px;
 }
 
 .badge--status {
@@ -507,6 +509,7 @@
 
 #tab-zentao-sync .zentao-sync-right .row {
   min-width: 0;
+  gap: 10px;
 }
 
 #tab-zentao-sync .zentao-sync-right .prefix-input,
@@ -518,6 +521,24 @@
 
 #tab-zentao-sync .zentao-sync-right .prefix-input {
   flex: 1 1 220px;
+}
+
+#tab-zentao-sync .qa-filter-grid-zentao {
+  padding: 6px 4px 2px;
+}
+
+#tab-zentao-sync .zentao-info-card {
+  padding: 14px 14px 12px;
+}
+
+#tab-zentao-sync .zentao-info-card label {
+  color: #334155;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+#tab-zentao-sync .zentao-info-card textarea {
+  width: 100%;
 }
 
 @media (max-width: 1200px) {
