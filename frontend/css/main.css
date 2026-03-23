@@ -204,6 +204,13 @@
   max-width: 100%;
 }
 
+.qa-table-scroll {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 .cell-ellipsis {
   display: inline-block;
   max-width: 100%;
@@ -244,6 +251,38 @@
 #tab-field-test .qa-table .col-text,
 #tab-zentao-sync .qa-table .col-text {
   text-align: left;
+}
+
+#tab-field-test,
+#tab-zentao-sync,
+#tab-field-test .qa-panel,
+#tab-zentao-sync .qa-panel,
+.zentao-sync-shell-modern,
+.zentao-sync-left,
+.zentao-sync-right {
+  min-width: 0;
+}
+
+#tab-field-test {
+  overflow-x: hidden;
+}
+
+#tab-field-test .qa-table-field-test {
+  width: 100%;
+  min-width: 1080px;
+  table-layout: fixed;
+}
+
+#tab-field-test .qa-table-field-test th,
+#tab-field-test .qa-table-field-test td {
+  word-break: break-word;
+}
+
+#tab-field-test .qa-table-field-test td:nth-child(2) {
+  max-width: 240px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #tab-feedback .qa-table-feedback td.col-summary {
@@ -436,6 +475,7 @@
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+  overflow-x: hidden;
 }
 
 .zentao-info-card {
@@ -450,6 +490,30 @@
 #zentaoSyncRecommendInfo {
   white-space: pre-line;
   line-height: 1.65;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+#zentaoSyncFailureReason,
+#zentaoSyncDetailMeta,
+#zentaoSyncDetailRaw {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+#tab-zentao-sync .zentao-sync-right .row {
+  min-width: 0;
+}
+
+#tab-zentao-sync .zentao-sync-right .prefix-input,
+#tab-zentao-sync .zentao-sync-right select,
+#tab-zentao-sync .zentao-sync-right input,
+#tab-zentao-sync .zentao-sync-right textarea {
+  min-width: 0;
+}
+
+#tab-zentao-sync .zentao-sync-right .prefix-input {
+  flex: 1 1 220px;
 }
 
 @media (max-width: 1200px) {
