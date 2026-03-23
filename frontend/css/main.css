@@ -312,10 +312,28 @@
 }
 
 #tab-field-test .ft-filter-actions {
-  grid-column: span 2;
+  grid-column: span 3;
   margin-top: 0;
   align-self: end;
   justify-content: flex-end;
+  min-width: 300px;
+}
+
+#tab-field-test .ft-filter-actions .qa-filter-actions-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+  width: 100%;
+}
+
+#tab-field-test .ft-filter-actions .qa-filter-actions-row button {
+  width: auto;
+  display: inline-flex;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 #tab-feedback .qa-table-feedback td.col-summary {
@@ -639,6 +657,13 @@
   #tab-field-test .ft-filter-keyword,
   #tab-zentao-sync .zt-filter-keyword {
     grid-column: span 4;
+  }
+  #tab-field-test .ft-filter-actions {
+    min-width: 0;
+  }
+  #tab-field-test .ft-filter-actions .qa-filter-actions-row {
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 }
 
