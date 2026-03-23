@@ -39,6 +39,8 @@ const syncState = {
   total: 0,
   items: [],
   currentEvent: null,
+  formBound: false,
+  mapRequirements: [],
 };
 
 function zhStatus(v) {
@@ -55,6 +57,18 @@ function zhSourceType(v) {
 
 function zhBucket(v) {
   return BUCKET_ZH[String(v || '').toLowerCase()] || String(v || '-');
+}
+
+function getCurrentSoftwareId() {
+  return Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+}
+
+function getVersions() {
+  return Array.isArray(window.versions) ? window.versions : [];
+}
+
+function getRequirements() {
+  return Array.isArray(window.dataOverviewCache?.requirements) ? window.dataOverviewCache.requirements : [];
 }
 
 function localizeFreeText(text) {
@@ -123,6 +137,152 @@ function setText(id, text) {
   el.textContent = text ?? '';
 }
 
+function setMapFormEnabled(enabled) {
+  const ids = [
+    'zentaoMapRequirementSelect',
+    'zentaoMapMinorSelect',
+    'zentaoMapSourceType',
+    'zentaoMapDisplayBucket',
+    'zentaoMapLinkedCaseId',
+    'zentaoMapSourceRef',
+    'zentaoMapNote',
+  ];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !enabled;
+  });
+
+  const saveBtn = document.querySelector("#tab-zentao-sync button[onclick='saveZentaoSyncMapping()']");
+  const applyBtn = document.querySelector("#tab-zentao-sync button[onclick='applyZentaoSyncEvent()']");
+  if (saveBtn) saveBtn.disabled = !enabled;
+  if (applyBtn) applyBtn.disabled = !enabled;
+}
+
+function versionByIdMap() {
+  const m = new Map();
+  getVersions().forEach((v) => m.set(Number(v.id), v));
+  return m;
+}
+
+function getSoftwareMajorIds() {
+  const currentSoftwareId = getCurrentSoftwareId();
+  return new Set(
+    getVersions()
+      .filter((v) => v.version_type === 'major' && (!currentSoftwareId || Number(v.software_id || 0) === currentSoftwareId))
+      .map((v) => Number(v.id))
+  );
+}
+
+function resolveEventMajorHint(detail) {
+  return Number(
+    detail?.mapped_major_version_id ||
+    detail?.recommended_major_version_id ||
+    0
+  ) || null;
+}
+
+function getFilteredRequirements(detail) {
+  const reqs = getRequirements();
+  const majorIds = getSoftwareMajorIds();
+  const majorHint = resolveEventMajorHint(detail);
+  const result = reqs.filter((r) => {
+    const majorId = Number(r.major_version_id || 0);
+    if (!majorId) return false;
+    if (majorIds.size > 0 && !majorIds.has(majorId)) return false;
+    if (majorHint && majorId !== majorHint) return false;
+    return true;
+  });
+  result.sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+  return result;
+}
+
+function getRequirementById(requirements, requirementId) {
+  return requirements.find((r) => Number(r.id) === Number(requirementId)) || null;
+}
+
+function getMinorOptionsForContext(detail, selectedRequirementId) {
+  const allMinors = getVersions().filter((v) => v.version_type === 'minor');
+  const currentSoftwareId = getCurrentSoftwareId();
+  const vMap = versionByIdMap();
+  const majorIds = getSoftwareMajorIds();
+
+  let targetMajorId = null;
+  if (selectedRequirementId) {
+    const req = getRequirementById(syncState.mapRequirements, selectedRequirementId);
+    targetMajorId = req ? Number(req.major_version_id || 0) : null;
+  }
+  if (!targetMajorId) {
+    targetMajorId = resolveEventMajorHint(detail);
+  }
+
+  const filtered = allMinors.filter((m) => {
+    const parent = Number(m.parent_id || 0);
+    if (!parent) return false;
+    if (targetMajorId && parent !== targetMajorId) return false;
+    if (!targetMajorId) {
+      if (majorIds.size > 0 && !majorIds.has(parent)) return false;
+      if (currentSoftwareId) {
+        const major = vMap.get(parent);
+        if (!major || Number(major.software_id || 0) !== currentSoftwareId) return false;
+      }
+    }
+    return true;
+  });
+
+  filtered.sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+  return filtered;
+}
+
+function renderMinorOptions(detail, selectedMinorId = null) {
+  const minorSelect = document.getElementById('zentaoMapMinorSelect');
+  const reqSelect = document.getElementById('zentaoMapRequirementSelect');
+  if (!minorSelect || !reqSelect) return;
+
+  const reqId = Number(reqSelect.value || 0);
+  const minors = getMinorOptionsForContext(detail, reqId || null);
+  const opts = ["<option value=''>请选择小版本</option>"];
+  minors.forEach((v) => opts.push(`<option value='${v.id}'>${escapeHtml(v.version_no || '')}</option>`));
+  minorSelect.innerHTML = opts.join('');
+
+  const expectId = Number(selectedMinorId || 0);
+  if (expectId && minors.some((v) => Number(v.id) === expectId)) {
+    minorSelect.value = String(expectId);
+  }
+}
+
+function updateBucketHint() {
+  const displayBucket = document.getElementById('zentaoMapDisplayBucket')?.value || '';
+  const hint = document.getElementById('zentaoMapBucketHint');
+  const reqSelect = document.getElementById('zentaoMapRequirementSelect');
+  if (!hint) return;
+
+  if (displayBucket === 'overall') {
+    hint.innerText = '总览池：仅归属到版本整体，不挂具体需求；建议同时选择小版本。';
+    if (reqSelect) reqSelect.required = false;
+  } else if (displayBucket === 'requirement') {
+    hint.innerText = '需求池：挂到具体需求下，参与需求维度统计；该模式下需求为必选。';
+    if (reqSelect) reqSelect.required = true;
+  } else {
+    hint.innerText = '请选择归属范围：需求池（挂需求）或总览池（仅挂版本总览）。';
+    if (reqSelect) reqSelect.required = false;
+  }
+}
+
+function updateRuleHint(detail) {
+  const el = document.getElementById('zentaoMapRuleHint');
+  if (!el) return;
+  if (!detail) {
+    el.innerText = '当前映射要求：请先从左侧选择一个同步事件。';
+    return;
+  }
+  const bucket = document.getElementById('zentaoMapDisplayBucket')?.value || detail.display_bucket || detail.recommended_display_bucket || '';
+  if (bucket === 'overall') {
+    el.innerText = '当前映射要求：总览池模式可不选需求，但需选择小版本，用于版本总览归档。';
+  } else {
+    el.innerText = '当前映射要求：需求池模式必须选择需求；建议选择该需求所属的小版本。';
+  }
+}
+
 function renderMapSelectors(detail) {
   const reqSelect = document.getElementById('zentaoMapRequirementSelect');
   const minorSelect = document.getElementById('zentaoMapMinorSelect');
@@ -130,24 +290,111 @@ function renderMapSelectors(detail) {
   const sourceRef = document.getElementById('zentaoMapSourceRef');
   const linkedCaseId = document.getElementById('zentaoMapLinkedCaseId');
   const displayBucket = document.getElementById('zentaoMapDisplayBucket');
-  if (!reqSelect || !minorSelect || !sourceType) return;
+  if (!reqSelect || !minorSelect || !sourceType || !displayBucket) return;
 
-  const reqs = (window.dataOverviewCache?.requirements || []).slice(0, 3000);
-  reqSelect.innerHTML = "<option value=''>请选择需求</option>" + reqs
-    .map((r) => `<option value='${r.id}'>${escapeHtml(r.zentao_req_id || '')} ${escapeHtml(r.title || '')}</option>`)
-    .join('');
+  syncState.mapRequirements = getFilteredRequirements(detail);
 
-  const minors = (window.versions || []).filter((v) => v.version_type === 'minor');
-  minorSelect.innerHTML = "<option value=''>请选择小版本</option>" + minors
-    .map((v) => `<option value='${v.id}'>${escapeHtml(v.version_no || '')}</option>`)
-    .join('');
+  const reqOptions = ["<option value=''>请选择需求</option>"];
+  syncState.mapRequirements.forEach((r) => {
+    const label = `${r.zentao_req_id || '-'} ${r.title || ''}`.trim();
+    reqOptions.push(`<option value='${r.id}'>${escapeHtml(label)}</option>`);
+  });
+  reqSelect.innerHTML = reqOptions.join('');
+  minorSelect.innerHTML = "<option value=''>请选择小版本</option>";
 
-  reqSelect.value = detail?.mapped_requirement_id ? String(detail.mapped_requirement_id) : '';
-  minorSelect.value = detail?.mapped_minor_version_id ? String(detail.mapped_minor_version_id) : '';
-  sourceType.value = detail?.mapped_source_type || detail?.recommended_source_type || 'manual';
-  if (sourceRef) sourceRef.value = detail?.mapped_source_ref || '';
-  if (linkedCaseId) linkedCaseId.value = detail?.linked_case_id || '';
-  if (displayBucket) displayBucket.value = detail?.display_bucket || '';
+  const enabled = !!detail;
+  setMapFormEnabled(enabled);
+
+  if (!enabled) {
+    reqSelect.value = '';
+    minorSelect.value = '';
+    sourceType.value = 'manual';
+    displayBucket.value = '';
+    if (sourceRef) sourceRef.value = '';
+    if (linkedCaseId) linkedCaseId.value = '';
+    const note = document.getElementById('zentaoMapNote');
+    if (note) note.value = '';
+    updateBucketHint();
+    updateRuleHint(null);
+    return;
+  }
+
+  const mappedReq = Number(detail.mapped_requirement_id || 0);
+  const recommendedReq = Number(detail.recommended_requirement_id || 0);
+  const selectedReq = mappedReq || recommendedReq || 0;
+  if (selectedReq && syncState.mapRequirements.some((r) => Number(r.id) === selectedReq)) {
+    reqSelect.value = String(selectedReq);
+  }
+
+  renderMinorOptions(detail, Number(detail.mapped_minor_version_id || detail.recommended_minor_version_id || 0));
+
+  sourceType.value = detail.mapped_source_type || detail.recommended_source_type || 'manual';
+  const bucketValue = detail.display_bucket || detail.recommended_display_bucket || (selectedReq ? 'requirement' : 'overall');
+  displayBucket.value = bucketValue;
+  if (sourceRef) sourceRef.value = detail.mapped_source_ref || '';
+  if (linkedCaseId) linkedCaseId.value = detail.linked_case_id || '';
+
+  updateBucketHint();
+  updateRuleHint(detail);
+}
+
+function bindMapInteractions() {
+  if (syncState.formBound) return;
+
+  const reqSelect = document.getElementById('zentaoMapRequirementSelect');
+  const bucketSelect = document.getElementById('zentaoMapDisplayBucket');
+
+  if (reqSelect) {
+    reqSelect.addEventListener('change', () => {
+      renderMinorOptions(syncState.currentEvent, null);
+      updateRuleHint(syncState.currentEvent);
+    });
+  }
+
+  if (bucketSelect) {
+    bucketSelect.addEventListener('change', () => {
+      updateBucketHint();
+      updateRuleHint(syncState.currentEvent);
+    });
+  }
+
+  syncState.formBound = true;
+}
+
+export async function ensureZentaoMapDataReady() {
+  try {
+    if (!Array.isArray(window.versions) || window.versions.length === 0) {
+      if (typeof window.loadVersions === 'function') {
+        await window.loadVersions();
+      }
+    }
+
+    const overviewReady = !!(window.dataOverviewCache && Array.isArray(window.dataOverviewCache.requirements));
+    if (!overviewReady) {
+      if (typeof window.loadDataOverview === 'function') {
+        await window.loadDataOverview();
+      } else {
+        const data = await (await api('/admin/data-overview')).json();
+        window.dataOverviewCache = data;
+      }
+    }
+  } catch (err) {
+    window.showMessage?.(err.message || '禅道同步初始化数据加载失败', 'error');
+    return false;
+  }
+  return true;
+}
+
+export async function initZentaoMapForm() {
+  await ensureZentaoMapDataReady();
+  bindMapInteractions();
+  renderMapSelectors(null);
+}
+
+export async function resetZentaoMapForm() {
+  syncState.currentEvent = null;
+  renderDetail(null);
+  await initZentaoMapForm();
 }
 
 function renderList() {
@@ -186,6 +433,7 @@ function renderDetail(detail) {
     setText('zentaoSyncRecommendInfo', '-');
     setText('zentaoSyncFailureReason', '-');
     setText('zentaoSyncDetailRaw', '');
+    renderMapSelectors(null);
     return;
   }
 
@@ -207,9 +455,10 @@ function renderDetail(detail) {
 
   const recLines = [
     `推荐需求：${detail.recommended_requirement_id || '-'}`,
+    `推荐主版本：${detail.recommended_major_version_id || detail.mapped_major_version_id || '-'}`,
     `推荐小版本：${detail.recommended_minor_version_id || '-'}`,
     `推荐来源类型：${zhSourceType(detail.recommended_source_type)}`,
-    `推荐归类桶：${zhBucket(detail.recommended_display_bucket || detail.display_bucket)}`,
+    `推荐归属范围：${zhBucket(detail.recommended_display_bucket || detail.display_bucket)}`,
     `推荐来源用例关联：${detail.recommended_test_case_id || '-'}`,
   ];
   setText('zentaoSyncRecommendInfo', recLines.join('\n'));
@@ -221,8 +470,11 @@ function renderDetail(detail) {
 
 export async function loadZentaoSyncBoard(page = 1) {
   ensureAdmin();
-  syncState.page = page;
+  await ensureZentaoMapDataReady();
+  bindMapInteractions();
+  if (!syncState.currentEvent) renderMapSelectors(null);
 
+  syncState.page = page;
   const q = currentQuery();
   const params = new URLSearchParams({ page: String(syncState.page), page_size: String(PAGE_SIZE) });
   if (q.entityType) params.set('entity_type', q.entityType);
@@ -248,6 +500,13 @@ export async function loadZentaoSyncBoard(page = 1) {
   }
 }
 
+export async function initZentaoSyncBoard() {
+  ensureAdmin();
+  await ensureZentaoMapDataReady();
+  await resetZentaoMapForm();
+  await loadZentaoSyncBoard(1);
+}
+
 export async function nextZentaoSyncPage() {
   const maxPage = Math.max(1, Math.ceil((syncState.total || 0) / PAGE_SIZE));
   if (syncState.page >= maxPage) return;
@@ -260,6 +519,7 @@ export async function prevZentaoSyncPage() {
 }
 
 export async function openZentaoSyncEventDetail(eventId) {
+  await ensureZentaoMapDataReady();
   const detail = await (await api(`/api/integrations/zentao/browser-events/${eventId}`)).json();
   syncState.currentEvent = detail;
   renderList();
@@ -267,7 +527,11 @@ export async function openZentaoSyncEventDetail(eventId) {
 }
 
 export async function saveZentaoSyncMapping() {
-  if (!syncState.currentEvent) return;
+  if (!syncState.currentEvent) {
+    window.showMessage?.('请先选择左侧同步事件', 'error');
+    return;
+  }
+
   const requirementId = Number(document.getElementById('zentaoMapRequirementSelect')?.value || 0);
   const minorVersionId = Number(document.getElementById('zentaoMapMinorSelect')?.value || 0);
   const sourceType = document.getElementById('zentaoMapSourceType')?.value || '';
@@ -275,6 +539,21 @@ export async function saveZentaoSyncMapping() {
   const linkedCaseId = (document.getElementById('zentaoMapLinkedCaseId')?.value || '').trim();
   const displayBucket = document.getElementById('zentaoMapDisplayBucket')?.value || '';
   const note = (document.getElementById('zentaoMapNote')?.value || '').trim();
+
+  if (!displayBucket) {
+    window.showMessage?.('请选择归属范围（需求池/总览池）', 'error');
+    return;
+  }
+
+  if (displayBucket === 'requirement' && !requirementId) {
+    window.showMessage?.('归属范围为需求池时，需求为必选项', 'error');
+    return;
+  }
+
+  if (displayBucket === 'overall' && !minorVersionId) {
+    window.showMessage?.('归属范围为总览池时，请至少选择小版本', 'error');
+    return;
+  }
 
   await api(`/api/integrations/zentao/browser-events/${syncState.currentEvent.id}/map`, {
     method: 'POST',
@@ -296,7 +575,10 @@ export async function saveZentaoSyncMapping() {
 }
 
 export async function applyZentaoSyncEvent() {
-  if (!syncState.currentEvent) return;
+  if (!syncState.currentEvent) {
+    window.showMessage?.('请先选择左侧同步事件', 'error');
+    return;
+  }
   const data = await (await api(`/api/integrations/zentao/browser-events/${syncState.currentEvent.id}/apply`, {
     method: 'POST',
     headers: window.H,
@@ -320,6 +602,10 @@ export async function applyZentaoSyncBatch() {
 export function closeZentaoSyncDetail() {}
 
 window.OmniQAZentaoSyncTab = {
+  ensureZentaoMapDataReady,
+  initZentaoMapForm,
+  resetZentaoMapForm,
+  initZentaoSyncBoard,
   loadZentaoSyncBoard,
   nextZentaoSyncPage,
   prevZentaoSyncPage,

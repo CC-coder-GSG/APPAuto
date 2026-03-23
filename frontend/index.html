@@ -513,7 +513,7 @@
           </select>
         </div>
         <div class="qa-filter-item">
-          <label>归类桶</label>
+          <label>归属范围</label>
           <select id="zentaoSyncDisplayBucket" onchange="loadZentaoSyncBoard(1)">
             <option value="">全部</option>
             <option value="requirement">需求池</option>
@@ -589,8 +589,14 @@
         <div class="card zentao-info-card" style="margin-top:10px;">
           <h4 style="margin-top:0;">人工确认</h4>
           <div class="row" style="align-items:flex-end;">
-            <label>需求</label><select id="zentaoMapRequirementSelect"></select>
-            <label>小版本</label><select id="zentaoMapMinorSelect"></select>
+            <label>需求</label>
+            <select id="zentaoMapRequirementSelect">
+              <option value="">请选择需求</option>
+            </select>
+            <label>小版本</label>
+            <select id="zentaoMapMinorSelect">
+              <option value="">请选择小版本</option>
+            </select>
           </div>
           <div class="row" style="align-items:flex-end; margin-top:8px;">
             <label>来源类型</label>
@@ -602,13 +608,14 @@
               <option value="retest">复测来源</option>
               <option value="field_test">外业测试</option>
             </select>
-            <label>归类桶</label>
+            <label>归属范围</label>
             <select id="zentaoMapDisplayBucket">
               <option value="">不修改</option>
               <option value="requirement">需求池</option>
               <option value="overall">总览池</option>
             </select>
           </div>
+          <div id="zentaoMapBucketHint" class="muted" style="margin-top:6px;">需求池：挂到具体需求下，参与需求维度统计；总览池：仅归属到版本整体，不挂具体需求。</div>
           <div class="row" style="margin-top:8px; align-items:flex-end;">
             <div class="prefix-input"><span>关联用例</span><input id="zentaoMapLinkedCaseId" placeholder="请输入关联用例ID（可选）"></div>
             <div class="prefix-input"><span>来源引用</span><input id="zentaoMapSourceRef" placeholder="请输入来源引用（可选）"></div>
@@ -618,6 +625,7 @@
             <button class="secondary" onclick="saveZentaoSyncMapping()">保存映射</button>
             <button onclick="applyZentaoSyncEvent()">应用到业务</button>
           </div>
+          <div id="zentaoMapRuleHint" class="muted" style="margin-top:6px;">当前映射要求：请先从左侧选择一个同步事件。</div>
           <div class="muted" style="margin-top:6px;" id="zentaoSyncFailureReason">-</div>
         </div>
 
@@ -1004,7 +1012,7 @@ function showTab(name){
   if(name === 'stage5') { loadStage5().catch(err=>showMessage(err.message||'加载整体测试大盘失败','error')); }
   if(name === 'field-test') { loadFieldTestBoard().catch(err=>showMessage(err.message||'加载外业测试失败','error')); }
   if(name === 'build-records') { loadBuildRecordsBoard().catch(err=>showMessage(err.message||'加载构建记录失败','error')); }
-  if(name === 'zentao-sync') { loadZentaoSyncBoard().catch(err=>showMessage(err.message||'加载禅道同步中心失败','error')); }
+  if(name === 'zentao-sync') { initZentaoSyncBoard().catch(err=>showMessage(err.message||'加载禅道同步中心失败','error')); }
   if(name === 'activity') { loadActivityBoard().catch(err=>showMessage(err.message||'加载活动中心失败','error')); }
   if(name==='report'){loadReportOnDemand()}
 }
@@ -1597,6 +1605,13 @@ function closeBuildRecordLogModal(){
 
 async function loadZentaoSyncBoard(page){
   return window.OmniQAZentaoSyncTab.loadZentaoSyncBoard(page);
+}
+
+async function initZentaoSyncBoard(){
+  if(window.OmniQAZentaoSyncTab && typeof window.OmniQAZentaoSyncTab.initZentaoSyncBoard === 'function'){
+    return window.OmniQAZentaoSyncTab.initZentaoSyncBoard();
+  }
+  return loadZentaoSyncBoard(1);
 }
 
 async function nextZentaoSyncPage(){

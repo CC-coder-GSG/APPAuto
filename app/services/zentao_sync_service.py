@@ -807,8 +807,15 @@ class ZentaoSyncService:
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
             "recommended_requirement_id": row.mapped_requirement_id,
+            "recommended_major_version_id": row.mapped_major_version_id,
             "recommended_minor_version_id": row.mapped_minor_version_id,
             "recommended_source_type": row.mapped_source_type or ("manual" if row.entity_type == "bug" else None),
+            "recommended_display_bucket": row.display_bucket,
+            "recommended_hint": (
+                "需求池：挂到具体需求下；总览池：仅归属版本整体"
+                if row.entity_type == "bug"
+                else "用例事件建议映射到具体需求"
+            ),
         }
 
     @staticmethod
