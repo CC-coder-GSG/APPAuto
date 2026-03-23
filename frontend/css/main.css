@@ -269,26 +269,126 @@
 
 #tab-field-test .qa-table-field-test {
   width: 100%;
-  min-width: 1320px;
-  table-layout: auto;
+  min-width: 1120px;
+  table-layout: fixed;
   overflow: visible;
+  border-radius: 10px;
+  background: #fff;
 }
 
-#tab-field-test .qa-table-field-test td:nth-child(2) {
-  max-width: 240px;
+#tab-field-test .qa-table-field-test th {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 500;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+#tab-field-test .qa-table-field-test td {
+  color: #334155;
+  vertical-align: middle;
+}
+
+#tab-field-test .qa-table-field-test tbody tr:hover {
+  background: #f8fafc;
+}
+
+#tab-field-test .qa-table-field-test th:nth-child(1),
+#tab-field-test .qa-table-field-test td:nth-child(1) {
+  width: 110px;
+}
+
+#tab-field-test .qa-table-field-test th:nth-child(2),
+#tab-field-test .qa-table-field-test td:nth-child(2) {
+  width: 190px;
+}
+
+#tab-field-test .qa-table-field-test th:nth-child(3),
+#tab-field-test .qa-table-field-test td:nth-child(3) {
+  width: 96px;
+}
+
+#tab-field-test .qa-table-field-test th:nth-child(5),
+#tab-field-test .qa-table-field-test td:nth-child(5) {
+  width: 230px;
+}
+
+#tab-field-test .qa-table-field-test th:nth-child(6),
+#tab-field-test .qa-table-field-test td:nth-child(6) {
+  width: 110px;
+}
+
+#tab-field-test .qa-table-field-test th:nth-child(7),
+#tab-field-test .qa-table-field-test td:nth-child(7) {
+  width: 72px;
+  text-align: center;
+}
+
+#tab-field-test .qa-table-field-test th:nth-child(8),
+#tab-field-test .qa-table-field-test td:nth-child(8) {
+  width: 96px;
 }
 
 #tab-field-test .qa-table-field-test th:nth-child(10),
 #tab-field-test .qa-table-field-test td:nth-child(10) {
-  min-width: 180px;
+  width: 150px;
+  white-space: nowrap;
+}
+
+#tab-field-test .field-test-col-tester,
+#tab-field-test .field-test-col-date {
   white-space: nowrap;
 }
 
 #tab-field-test .qa-table-field-test .col-actions button {
   white-space: nowrap;
+}
+
+#tab-field-test .field-test-cell-main {
+  color: #0f172a;
+  line-height: 1.45;
+}
+
+#tab-field-test .field-test-cell-sub {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.35;
+  margin-top: 2px;
+}
+
+#tab-field-test .field-test-text-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+#tab-field-test .field-test-col-content,
+#tab-field-test .field-test-col-notes {
+  line-height: 1.45;
+}
+
+#tab-field-test .field-test-empty {
+  text-align: center;
+  color: #94a3b8;
+  padding: 20px;
+}
+
+#tab-field-test .field-test-table-wrap {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+#tab-field-test .field-test-table-wrap::-webkit-scrollbar {
+  height: 8px;
+}
+
+#tab-field-test .field-test-table-wrap::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+#tab-field-test .field-test-table-wrap::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 #tab-field-test .qa-filter-grid-field-test {

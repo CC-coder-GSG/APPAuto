@@ -154,6 +154,20 @@ function closeFormModal() {
 function purposeText(row) { return row.purpose_type === 'requirement' ? (row.requirement_label || '未选择需求') : (row.test_content || '-'); }
 function canEditRow(row) { const me = currentUser(); return !!me && (me.role === 'admin' || Number(row.tester_id) === Number(me.id)); }
 
+function formatDateOnly(v) {
+  if (!v) return '-';
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return '-';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatDateTime(v) {
+  if (!v) return '-';
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return '-';
+  return `${formatDateOnly(v)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 function fillFormFromRecord(row) {
   document.getElementById('fieldTestMajorSelect').value = String(row.major_version_id || '');
   fillMinorByMajor('fieldTestMajorSelect', 'fieldTestMinorSelect', false);
@@ -388,23 +402,30 @@ function renderList(rows) {
   const tbody = document.getElementById('fieldTestTable');
   if (!tbody) return;
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:#94a3b8; padding:18px;">暂无外业测试记录</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="field-test-empty">暂无外业测试记录</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map((r) => `
     <tr>
-      <td>${(r.start_time || '').slice(0, 10)}</td>
-      <td>${r.major_version_no || '-'} / ${r.minor_version_no || '-'}</td>
+      <td class="field-test-col-date">${formatDateOnly(r.start_time)}</td>
+      <td class="field-test-col-version">
+        <div class="field-test-cell-main">${r.major_version_no || '-'}</div>
+        <div class="field-test-cell-sub" title="${(r.minor_version_no || '-').replace(/"/g, '&quot;')}">${r.minor_version_no || '-'}</div>
+      </td>
       <td class="col-status">${purposeBadge(r.purpose_type)}</td>
-      <td class="ft-ellipsis-cell" title="${purposeText(r).replace(/"/g, '&quot;')}">${purposeText(r)}</td>
-      <td>
-        <div>${r.start_time ? new Date(r.start_time).toLocaleString() : '-'}</div>
-        <div class="muted" style="font-size:12px;">${r.end_time ? new Date(r.end_time).toLocaleString() : '-'} · ${r.duration_minutes || 0} 分钟</div>
+      <td class="field-test-col-content" title="${purposeText(r).replace(/"/g, '&quot;')}">
+        <div class="field-test-cell-main field-test-text-clamp-2">${purposeText(r)}</div>
+      </td>
+      <td class="field-test-col-time">
+        <div class="field-test-cell-main">${formatDateTime(r.start_time)} ~ ${formatDateTime(r.end_time)}</div>
+        <div class="field-test-cell-sub">${r.duration_minutes || 0} 分钟</div>
       </td>
       <td class="col-status">${resultBadge(r.result_status)}</td>
-      <td>${r.bug_count || 0}</td>
-      <td>${r.tester_name || '-'}</td>
-      <td class="ft-ellipsis-cell" title="${(r.notes || '').replace(/"/g, '&quot;')}">${r.notes || '-'}</td>
+      <td class="field-test-col-bug">${r.bug_count || 0}</td>
+      <td class="field-test-col-tester">${r.tester_name || '-'}</td>
+      <td class="field-test-col-notes" title="${(r.notes || '').replace(/"/g, '&quot;')}">
+        <div class="field-test-text-clamp-2">${r.notes || '-'}</div>
+      </td>
       <td class="col-actions">
         <button class="secondary" onclick="openFieldTestDetail(${r.id})">详情</button>
         ${canEditRow(r) ? `<button class="secondary" onclick="editFieldTestRecord(${r.id})" style="margin-left:6px;">编辑</button>` : ''}
