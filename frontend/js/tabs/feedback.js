@@ -18,7 +18,7 @@ function buildStatusBadge(status) {
     closed: { bg: '#e2e8f0', color: '#334155' },
   };
   const c = conf[status] || conf.pending;
-  return `<span class="badge" style="display:inline-flex; align-items:center; border-radius:99px; padding:4px 10px; background:${c.bg}; color:${c.color}; font-weight:600; font-size:12px; line-height:1;">${feedbackStatusZh(status)}</span>`;
+  return `<span class="badge badge--status" style="background:${c.bg}; color:${c.color};">${feedbackStatusZh(status)}</span>`;
 }
 
 function selectedMajorId() {
@@ -120,13 +120,13 @@ function renderFeedbackList(rows) {
   tbody.innerHTML = rows.map((r) => `
     <tr>
       <td>${r.feedback_no || '-'}</td>
-      <td title="${(r.summary || '').replace(/"/g, '&quot;')}">${(r.summary || '').slice(0, 50)}${(r.summary || '').length > 50 ? '...' : ''}</td>
+      <td class="col-text col-summary" title="${(r.summary || '').replace(/"/g, '&quot;')}"><span class="cell-ellipsis">${(r.summary || '').slice(0, 50)}${(r.summary || '').length > 50 ? '...' : ''}</span></td>
       <td>${r.major_version_no || '-'} / ${r.minor_version_no || '-'}</td>
-      <td>${buildStatusBadge(r.status)}</td>
+      <td class="col-status">${buildStatusBadge(r.status)}</td>
       <td>${r.assignee_name || '<span class="muted">未指派</span>'}</td>
       <td>${r.creator_name || '-'}</td>
       <td>${r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td>
-      <td><button class="secondary" onclick="openFeedbackDetail(${r.id})">查看详情</button></td>
+      <td class="col-actions"><button class="secondary" onclick="openFeedbackDetail(${r.id})">查看详情</button></td>
     </tr>
   `).join('');
 }

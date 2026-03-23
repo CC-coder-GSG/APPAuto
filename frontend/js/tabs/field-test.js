@@ -135,12 +135,12 @@ function collectPayload() {
 
 function resultBadge(status) {
   const passed = status === 'passed';
-  return `<span class="badge" style="background:${passed ? '#dcfce7' : '#fee2e2'}; color:${passed ? '#166534' : '#991b1b'};">${RESULT_ZH[status] || status}</span>`;
+  return `<span class="badge badge--status" style="background:${passed ? '#dcfce7' : '#fee2e2'}; color:${passed ? '#166534' : '#991b1b'};">${RESULT_ZH[status] || status}</span>`;
 }
 
 function purposeBadge(status) {
   const isReq = status === 'requirement';
-  return `<span class="badge" style="background:${isReq ? '#dbeafe' : '#fef3c7'}; color:${isReq ? '#1d4ed8' : '#92400e'};">${PURPOSE_ZH[status] || status}</span>`;
+  return `<span class="badge badge--status" style="background:${isReq ? '#dbeafe' : '#fef3c7'}; color:${isReq ? '#1d4ed8' : '#92400e'};">${PURPOSE_ZH[status] || status}</span>`;
 }
 
 function openFormModal() {
@@ -395,17 +395,17 @@ function renderList(rows) {
     <tr>
       <td>${(r.start_time || '').slice(0, 10)}</td>
       <td>${r.major_version_no || '-'} / ${r.minor_version_no || '-'}</td>
-      <td>${purposeBadge(r.purpose_type)}</td>
+      <td class="col-status">${purposeBadge(r.purpose_type)}</td>
       <td class="ft-ellipsis-cell" title="${purposeText(r).replace(/"/g, '&quot;')}">${purposeText(r)}</td>
       <td>
         <div>${r.start_time ? new Date(r.start_time).toLocaleString() : '-'}</div>
         <div class="muted" style="font-size:12px;">${r.end_time ? new Date(r.end_time).toLocaleString() : '-'} · ${r.duration_minutes || 0} 分钟</div>
       </td>
-      <td>${resultBadge(r.result_status)}</td>
+      <td class="col-status">${resultBadge(r.result_status)}</td>
       <td>${r.bug_count || 0}</td>
       <td>${r.tester_name || '-'}</td>
       <td class="ft-ellipsis-cell" title="${(r.notes || '').replace(/"/g, '&quot;')}">${r.notes || '-'}</td>
-      <td>
+      <td class="col-actions">
         <button class="secondary" onclick="openFieldTestDetail(${r.id})">详情</button>
         ${canEditRow(r) ? `<button class="secondary" onclick="editFieldTestRecord(${r.id})" style="margin-left:6px;">编辑</button>` : ''}
       </td>

@@ -234,8 +234,8 @@
       </div>
     </div>
 
-    <table style="margin-top:12px;">
-      <thead><tr><th>反馈编号</th><th>反馈概览</th><th>反馈版本</th><th>状态</th><th>指派给</th><th>创建人</th><th>创建时间</th><th>操作</th></tr></thead>
+    <table class="qa-table qa-table-feedback" style="margin-top:12px;">
+      <thead><tr><th>反馈编号</th><th class="col-text">反馈概览</th><th>反馈版本</th><th class="col-status">状态</th><th>指派给</th><th>创建人</th><th>创建时间</th><th class="col-actions">操作</th></tr></thead>
       <tbody id="feedbackTable"></tbody>
     </table>
     <div class="row" style="justify-content:flex-end; align-items:center; gap:8px; margin-top:8px;">
@@ -352,8 +352,8 @@
         <button class="ft-primary-btn" onclick="openFieldTestCreate()">➕ 新增测试记录</button>
         <button onclick="loadFieldTestBoard()">刷新列表</button>
       </div>
-      <table style="margin-top:10px;">
-        <thead><tr><th>日期</th><th>版本(大/小)</th><th>测试目的</th><th>关联需求/测试内容</th><th>测试时段 & 时长</th><th>测试结果</th><th>Bug 数量</th><th>测试人</th><th>备注</th><th>操作</th></tr></thead>
+      <table class="qa-table qa-table-field-test" style="margin-top:10px;">
+        <thead><tr><th>日期</th><th>版本(大/小)</th><th class="col-status">测试目的</th><th class="col-text">关联需求/测试内容</th><th>测试时段 & 时长</th><th class="col-status">测试结果</th><th>Bug 数量</th><th>测试人</th><th class="col-text">备注</th><th class="col-actions">操作</th></tr></thead>
         <tbody id="fieldTestTable"></tbody>
       </table>
       <div class="row" style="justify-content:flex-end; align-items:center; gap:8px; margin-top:8px;">
@@ -511,14 +511,16 @@
 
     <div class="zentao-sync-shell">
       <div class="zentao-sync-left">
-        <table>
+        <div class="zentao-sync-table-wrap">
+        <table class="qa-table qa-table-zentao-sync">
           <thead>
             <tr>
-              <th>时间</th><th>类型</th><th>禅道编号</th><th>标题</th><th>创建者</th><th>状态</th><th>操作</th>
+              <th>时间</th><th>类型</th><th>禅道编号</th><th class="col-text col-title">标题</th><th>创建者</th><th class="col-status">状态</th><th class="col-actions">操作</th>
             </tr>
           </thead>
           <tbody id="zentaoSyncTableBody"></tbody>
         </table>
+        </div>
         <div class="row" style="justify-content:flex-end; align-items:center; gap:8px; margin-top:8px;">
           <span id="zentaoSyncPageText" class="muted">第 1 / 1 页，共 0 条</span>
           <button class="secondary" onclick="prevZentaoSyncPage()">上一页</button>

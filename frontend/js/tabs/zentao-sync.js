@@ -57,7 +57,7 @@ function statusBadge(status) {
     color = '#7c3aed';
     bg = '#ede9fe';
   }
-  return `<span class='badge' style='background:${bg}; color:${color};'>${escapeHtml(status || '-')}</span>`;
+  return `<span class='badge badge--status' style='background:${bg}; color:${color};'>${escapeHtml(status || '-')}</span>`;
 }
 
 function setText(id, text) {
@@ -109,10 +109,10 @@ function renderList() {
         <td>${fmt(it.created_at)}</td>
         <td>${it.entity_type === 'bug' ? 'Bug' : '用例'}</td>
         <td>${escapeHtml(no)}</td>
-        <td title='${escapeHtml(title)}'>${escapeHtml(title)}</td>
+        <td class='col-text col-title' title='${escapeHtml(title)}'><span class='cell-ellipsis'>${escapeHtml(title)}</span></td>
         <td>${escapeHtml(it.creator_name || '-')}</td>
-        <td>${statusBadge(it.status)}</td>
-        <td><button class='secondary' onclick='openZentaoSyncEventDetail(${it.id})'>查看</button></td>
+        <td class='col-status'>${statusBadge(it.status)}</td>
+        <td class='col-actions'><button class='secondary' onclick='openZentaoSyncEventDetail(${it.id})'>查看</button></td>
       </tr>`;
     }).join('');
   }
@@ -272,4 +272,3 @@ window.OmniQAZentaoSyncTab = {
   applyZentaoSyncBatch,
   closeZentaoSyncDetail,
 };
-
