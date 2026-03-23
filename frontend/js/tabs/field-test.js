@@ -168,6 +168,23 @@ function formatDateTime(v) {
   return `${formatDateOnly(v)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+function formatTimeHM(v) {
+  if (!v) return '-';
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return '-';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function formatTimeRange(startTime, endTime) {
+  if (!startTime && !endTime) return '-';
+  if (!startTime) return `- ~ ${formatDateTime(endTime)}`;
+  if (!endTime) return `${formatDateTime(startTime)} ~ -`;
+  const startDate = formatDateOnly(startTime);
+  const endDate = formatDateOnly(endTime);
+  if (startDate === endDate) return `${startDate} ${formatTimeHM(startTime)} ~ ${formatTimeHM(endTime)}`;
+  return `${formatDateTime(startTime)} ~ ${formatDateTime(endTime)}`;
+}
+
 function fillFormFromRecord(row) {
   document.getElementById('fieldTestMajorSelect').value = String(row.major_version_id || '');
   fillMinorByMajor('fieldTestMajorSelect', 'fieldTestMinorSelect', false);
@@ -417,7 +434,7 @@ function renderList(rows) {
         <div class="field-test-cell-main field-test-text-clamp-2">${purposeText(r)}</div>
       </td>
       <td class="field-test-col-time">
-        <div class="field-test-cell-main">${formatDateTime(r.start_time)} ~ ${formatDateTime(r.end_time)}</div>
+        <div class="field-test-cell-main field-test-time-range">${formatTimeRange(r.start_time, r.end_time)}</div>
         <div class="field-test-cell-sub">${r.duration_minutes || 0} 分钟</div>
       </td>
       <td class="col-status">${resultBadge(r.result_status)}</td>

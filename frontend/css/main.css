@@ -276,6 +276,17 @@
   background: #fff;
 }
 
+#tab-field-test .field-test-table-cols .ft-col-date { width: 110px; }
+#tab-field-test .field-test-table-cols .ft-col-version { width: 190px; }
+#tab-field-test .field-test-table-cols .ft-col-purpose { width: 96px; }
+#tab-field-test .field-test-table-cols .ft-col-content { width: 24%; }
+#tab-field-test .field-test-table-cols .ft-col-time { width: 230px; }
+#tab-field-test .field-test-table-cols .ft-col-result { width: 110px; }
+#tab-field-test .field-test-table-cols .ft-col-bug { width: 72px; }
+#tab-field-test .field-test-table-cols .ft-col-tester { width: 96px; }
+#tab-field-test .field-test-table-cols .ft-col-notes { width: 16%; }
+#tab-field-test .field-test-table-cols .ft-col-actions { width: 150px; }
+
 #tab-field-test .qa-table-field-test th {
   color: #475569;
   font-size: 13px;
@@ -286,52 +297,12 @@
 #tab-field-test .qa-table-field-test td {
   color: #334155;
   vertical-align: middle;
+  min-width: 0;
+  overflow: hidden;
 }
 
 #tab-field-test .qa-table-field-test tbody tr:hover {
   background: #f8fafc;
-}
-
-#tab-field-test .qa-table-field-test th:nth-child(1),
-#tab-field-test .qa-table-field-test td:nth-child(1) {
-  width: 110px;
-}
-
-#tab-field-test .qa-table-field-test th:nth-child(2),
-#tab-field-test .qa-table-field-test td:nth-child(2) {
-  width: 190px;
-}
-
-#tab-field-test .qa-table-field-test th:nth-child(3),
-#tab-field-test .qa-table-field-test td:nth-child(3) {
-  width: 96px;
-}
-
-#tab-field-test .qa-table-field-test th:nth-child(5),
-#tab-field-test .qa-table-field-test td:nth-child(5) {
-  width: 230px;
-}
-
-#tab-field-test .qa-table-field-test th:nth-child(6),
-#tab-field-test .qa-table-field-test td:nth-child(6) {
-  width: 110px;
-}
-
-#tab-field-test .qa-table-field-test th:nth-child(7),
-#tab-field-test .qa-table-field-test td:nth-child(7) {
-  width: 72px;
-  text-align: center;
-}
-
-#tab-field-test .qa-table-field-test th:nth-child(8),
-#tab-field-test .qa-table-field-test td:nth-child(8) {
-  width: 96px;
-}
-
-#tab-field-test .qa-table-field-test th:nth-child(10),
-#tab-field-test .qa-table-field-test td:nth-child(10) {
-  width: 150px;
-  white-space: nowrap;
 }
 
 #tab-field-test .field-test-col-tester,
@@ -346,6 +317,8 @@
 #tab-field-test .field-test-cell-main {
   color: #0f172a;
   line-height: 1.45;
+  min-width: 0;
+  max-width: 100%;
 }
 
 #tab-field-test .field-test-cell-sub {
@@ -353,6 +326,11 @@
   font-size: 12px;
   line-height: 1.35;
   margin-top: 2px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #tab-field-test .field-test-text-clamp-2 {
@@ -360,11 +338,28 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 #tab-field-test .field-test-col-content,
 #tab-field-test .field-test-col-notes {
   line-height: 1.45;
+  min-width: 0;
+}
+
+#tab-field-test .field-test-col-time {
+  min-width: 0;
+}
+
+#tab-field-test .field-test-time-range {
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #tab-field-test .field-test-empty {
