@@ -502,34 +502,34 @@
           <label>状态</label>
           <select id="zentaoSyncStatus" onchange="loadZentaoSyncBoard(1)">
             <option value="">全部</option>
-            <option value="received">received</option>
-            <option value="duplicate">duplicate</option>
-            <option value="auto_matched">auto_matched</option>
-            <option value="pending_mapping">pending_mapping</option>
-            <option value="ready_to_apply">ready_to_apply</option>
-            <option value="applied">applied</option>
-            <option value="ignored">ignored</option>
-            <option value="failed">failed</option>
+            <option value="received">已接收</option>
+            <option value="duplicate">重复事件</option>
+            <option value="auto_matched">自动匹配</option>
+            <option value="pending_mapping">待人工映射</option>
+            <option value="ready_to_apply">待应用</option>
+            <option value="applied">已应用</option>
+            <option value="ignored">已忽略</option>
+            <option value="failed">应用失败</option>
           </select>
         </div>
         <div class="qa-filter-item">
           <label>归类桶</label>
           <select id="zentaoSyncDisplayBucket" onchange="loadZentaoSyncBoard(1)">
             <option value="">全部</option>
-            <option value="requirement">requirement</option>
-            <option value="overall">overall</option>
+            <option value="requirement">需求池</option>
+            <option value="overall">总览池</option>
           </select>
         </div>
         <div class="qa-filter-item">
           <label>来源类型</label>
           <select id="zentaoSyncSourceType" onchange="loadZentaoSyncBoard(1)">
             <option value="">全部</option>
-            <option value="requirement">requirement</option>
-            <option value="case">case</option>
-            <option value="manual">manual</option>
-            <option value="legacy_bug">legacy_bug</option>
-            <option value="retest">retest</option>
-            <option value="field_test">field_test</option>
+            <option value="requirement">需求来源</option>
+            <option value="case">用例来源</option>
+            <option value="manual">人工录入</option>
+            <option value="legacy_bug">历史缺陷</option>
+            <option value="retest">复测来源</option>
+            <option value="field_test">外业测试</option>
           </select>
         </div>
         <div class="qa-filter-item">
@@ -549,7 +549,7 @@
         </div>
         <div class="qa-filter-actions">
           <button onclick="loadZentaoSyncBoard(1)">刷新</button>
-          <button class="secondary" onclick="applyZentaoSyncBatch()">批量应用 ready_to_apply</button>
+          <button class="secondary" onclick="applyZentaoSyncBatch()">批量应用待应用事件</button>
         </div>
       </div>
     </div>
@@ -595,18 +595,18 @@
           <div class="row" style="align-items:flex-end; margin-top:8px;">
             <label>来源类型</label>
             <select id="zentaoMapSourceType">
-              <option value="manual">manual</option>
-              <option value="case">case</option>
-              <option value="requirement">requirement</option>
-              <option value="legacy_bug">legacy_bug</option>
-              <option value="retest">retest</option>
-              <option value="field_test">field_test</option>
+              <option value="manual">人工录入</option>
+              <option value="case">用例来源</option>
+              <option value="requirement">需求来源</option>
+              <option value="legacy_bug">历史缺陷</option>
+              <option value="retest">复测来源</option>
+              <option value="field_test">外业测试</option>
             </select>
             <label>归类桶</label>
             <select id="zentaoMapDisplayBucket">
               <option value="">不修改</option>
-              <option value="requirement">requirement</option>
-              <option value="overall">overall</option>
+              <option value="requirement">需求池</option>
+              <option value="overall">总览池</option>
             </select>
           </div>
           <div class="row" style="margin-top:8px; align-items:flex-end;">

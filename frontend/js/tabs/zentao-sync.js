@@ -1,8 +1,38 @@
-import { api } from '../api.js';
+﻿import { api } from '../api.js';
 import { state } from '../state.js';
 import { escapeHtml } from '../utils.js';
 
 const PAGE_SIZE = 20;
+
+const STATUS_ZH = {
+  received: '已接收',
+  duplicate: '重复事件',
+  auto_matched: '自动匹配',
+  pending_mapping: '待人工映射',
+  ready_to_apply: '待应用',
+  applied: '已应用',
+  ignored: '已忽略',
+  failed: '应用失败',
+};
+
+const ENTITY_ZH = {
+  bug: '缺陷',
+  testcase: '用例',
+};
+
+const SOURCE_TYPE_ZH = {
+  requirement: '需求来源',
+  case: '用例来源',
+  manual: '人工录入',
+  legacy_bug: '历史缺陷',
+  retest: '复测来源',
+  field_test: '外业测试',
+};
+
+const BUCKET_ZH = {
+  requirement: '需求池',
+  overall: '总览池',
+};
 
 const syncState = {
   page: 1,
@@ -10,6 +40,22 @@ const syncState = {
   items: [],
   currentEvent: null,
 };
+
+function zhStatus(v) {
+  return STATUS_ZH[String(v || '').toLowerCase()] || String(v || '-');
+}
+
+function zhEntity(v) {
+  return ENTITY_ZH[String(v || '').toLowerCase()] || String(v || '-');
+}
+
+function zhSourceType(v) {
+  return SOURCE_TYPE_ZH[String(v || '').toLowerCase()] || String(v || '-');
+}
+
+function zhBucket(v) {
+  return BUCKET_ZH[String(v || '').toLowerCase()] || String(v || '-');
+}
 
 function fmt(v) {
   if (!v) return '-';
@@ -39,7 +85,7 @@ function currentQuery() {
 
 function statusBadge(status) {
   const s = String(status || '').toLowerCase();
-  let color = '#64748b';
+  let color = '#475569';
   let bg = '#f1f5f9';
   if (s === 'applied') {
     color = '#166534';
@@ -52,12 +98,12 @@ function statusBadge(status) {
     bg = '#ffedd5';
   } else if (s === 'ready_to_apply') {
     color = '#1d4ed8';
-    bg = '#dbeafe';
+    bg = '#eff6ff';
   } else if (s === 'duplicate') {
     color = '#7c3aed';
     bg = '#ede9fe';
   }
-  return `<span class='badge badge--status' style='background:${bg}; color:${color};'>${escapeHtml(status || '-')}</span>`;
+  return `<span class="badge badge--status" style="background:${bg}; color:${color};">${escapeHtml(zhStatus(status))}</span>`;
 }
 
 function setText(id, text) {
@@ -107,7 +153,7 @@ function renderList() {
       const selected = syncState.currentEvent?.id === it.id;
       return `<tr style="${selected ? 'background:#eff6ff;' : ''}">
         <td>${fmt(it.created_at)}</td>
-        <td>${it.entity_type === 'bug' ? 'Bug' : '用例'}</td>
+        <td>${escapeHtml(zhEntity(it.entity_type))}</td>
         <td>${escapeHtml(no)}</td>
         <td class='col-text col-title' title='${escapeHtml(title)}'><span class='cell-ellipsis'>${escapeHtml(title)}</span></td>
         <td>${escapeHtml(it.creator_name || '-')}</td>
@@ -133,7 +179,7 @@ function renderDetail(detail) {
   }
 
   setText('zentaoSyncDetailTitle', `同步事件 #${detail.id}`);
-  setText('zentaoSyncDetailMeta', `状态：${detail.status} | 类型：${detail.entity_type} | 创建时间：${fmt(detail.created_at)}`);
+  setText('zentaoSyncDetailMeta', `状态：${zhStatus(detail.status)} | 类型：${zhEntity(detail.entity_type)} | 创建时间：${fmt(detail.created_at)}`);
 
   const originLines = [
     `禅道 Bug：${detail.zentao_bug_id || '-'}`,
@@ -143,7 +189,7 @@ function renderDetail(detail) {
     `创建者：${detail.creator_name || '-'}`,
     `执行版本：${detail.zentao_execution_name || '-'}`,
     `影响版本：${detail.zentao_affected_version || '-'}`,
-    `来源用例：${detail.linked_case_id || '-'} ${detail.linked_case_label || ''}`.trim(),
+    `来源用例：${`${detail.linked_case_id || '-'} ${detail.linked_case_label || ''}`.trim()}`,
     `原始页面：${detail.top_href || '-'}`,
   ];
   setText('zentaoSyncOriginInfo', originLines.join('\n'));
@@ -151,8 +197,8 @@ function renderDetail(detail) {
   const recLines = [
     `推荐需求：${detail.recommended_requirement_id || '-'}`,
     `推荐小版本：${detail.recommended_minor_version_id || '-'}`,
-    `推荐来源类型：${detail.recommended_source_type || '-'}`,
-    `推荐归类桶：${detail.recommended_display_bucket || detail.display_bucket || '-'}`,
+    `推荐来源类型：${zhSourceType(detail.recommended_source_type)}`,
+    `推荐归类桶：${zhBucket(detail.recommended_display_bucket || detail.display_bucket)}`,
     `推荐来源用例关联：${detail.recommended_test_case_id || '-'}`,
   ];
   setText('zentaoSyncRecommendInfo', recLines.join('\n'));

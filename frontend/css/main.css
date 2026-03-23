@@ -209,6 +209,8 @@
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
+  scrollbar-gutter: stable both-edges;
+  padding-bottom: 4px;
 }
 
 .cell-ellipsis {
@@ -263,19 +265,11 @@
   min-width: 0;
 }
 
-#tab-field-test {
-  overflow-x: hidden;
-}
-
 #tab-field-test .qa-table-field-test {
   width: 100%;
-  min-width: 1080px;
-  table-layout: fixed;
-}
-
-#tab-field-test .qa-table-field-test th,
-#tab-field-test .qa-table-field-test td {
-  word-break: break-word;
+  min-width: 1320px;
+  table-layout: auto;
+  overflow: visible;
 }
 
 #tab-field-test .qa-table-field-test td:nth-child(2) {
@@ -283,6 +277,16 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+#tab-field-test .qa-table-field-test th:nth-child(10),
+#tab-field-test .qa-table-field-test td:nth-child(10) {
+  min-width: 180px;
+  white-space: nowrap;
+}
+
+#tab-field-test .qa-table-field-test .col-actions button {
+  white-space: nowrap;
 }
 
 #tab-feedback .qa-table-feedback td.col-summary {
