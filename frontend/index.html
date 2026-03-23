@@ -341,16 +341,36 @@
 
   <section id="tab-field-test" class="hidden card">
     <h2>外业测试</h2>
-    <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;">
-      <div class="row ft-filter-row">
-        <div><label>大版本</label><select id="fieldTestFilterMajor" onchange="onFieldTestFilterMajorChange()"></select></div>
-        <div><label>小版本</label><select id="fieldTestFilterMinor"></select></div>
-        <div><label>测试目的</label><select id="fieldTestFilterPurpose"><option value="">全部</option><option value="requirement">需求测试</option><option value="feature">功能测试</option></select></div>
-        <div id="fieldTestFilterTesterWrap" class="hidden"><label>测试人</label><select id="fieldTestFilterTester"><option value="">全部</option></select></div>
-        <div class="prefix-input"><span>🔍</span><input id="fieldTestFilterKeyword" placeholder="模糊搜索：需求/内容/备注/Bug/测试人"></div>
-        <div><label>每页</label><select id="fieldTestPageSize"><option value="10">10</option><option value="20" selected>20</option><option value="50">50</option></select></div>
-        <button class="ft-primary-btn" onclick="openFieldTestCreate()">➕ 新增测试记录</button>
-        <button onclick="loadFieldTestBoard()">刷新列表</button>
+    <div class="card qa-panel qa-panel-soft">
+      <div class="qa-filter-grid qa-filter-grid-field-test">
+        <div class="qa-filter-item">
+          <label>大版本</label>
+          <select id="fieldTestFilterMajor" onchange="onFieldTestFilterMajorChange()"></select>
+        </div>
+        <div class="qa-filter-item">
+          <label>小版本</label>
+          <select id="fieldTestFilterMinor"></select>
+        </div>
+        <div class="qa-filter-item">
+          <label>测试目的</label>
+          <select id="fieldTestFilterPurpose"><option value="">全部</option><option value="requirement">需求测试</option><option value="feature">功能测试</option></select>
+        </div>
+        <div id="fieldTestFilterTesterWrap" class="qa-filter-item hidden">
+          <label>测试人</label>
+          <select id="fieldTestFilterTester"><option value="">全部</option></select>
+        </div>
+        <div class="qa-filter-item qa-filter-item-search">
+          <label>关键字</label>
+          <div class="prefix-input"><span>🔍</span><input id="fieldTestFilterKeyword" placeholder="模糊搜索：需求/内容/备注/Bug/测试人"></div>
+        </div>
+        <div class="qa-filter-item">
+          <label>每页</label>
+          <select id="fieldTestPageSize"><option value="10">10</option><option value="20" selected>20</option><option value="50">50</option></select>
+        </div>
+        <div class="qa-filter-actions">
+          <button class="ft-primary-btn" onclick="openFieldTestCreate()">➕ 新增测试记录</button>
+          <button onclick="loadFieldTestBoard()">刷新列表</button>
+        </div>
       </div>
       <table class="qa-table qa-table-field-test" style="margin-top:10px;">
         <thead><tr><th>日期</th><th>版本(大/小)</th><th class="col-status">测试目的</th><th class="col-text">关联需求/测试内容</th><th>测试时段 & 时长</th><th class="col-status">测试结果</th><th>Bug 数量</th><th>测试人</th><th class="col-text">备注</th><th class="col-actions">操作</th></tr></thead>
@@ -466,50 +486,73 @@
 
   <section id="tab-zentao-sync" class="hidden card">
     <h2>禅道同步中心（仅管理员）</h2>
-    <div class="row" style="margin-bottom: 12px; flex-wrap: wrap;">
-      <label>类型</label>
-      <select id="zentaoSyncEntityType" onchange="loadZentaoSyncBoard(1)">
-        <option value="">全部</option>
-        <option value="bug">Bug</option>
-        <option value="testcase">用例</option>
-      </select>
-      <label>状态</label>
-      <select id="zentaoSyncStatus" onchange="loadZentaoSyncBoard(1)">
-        <option value="">全部</option>
-        <option value="received">received</option>
-        <option value="duplicate">duplicate</option>
-        <option value="auto_matched">auto_matched</option>
-        <option value="pending_mapping">pending_mapping</option>
-        <option value="ready_to_apply">ready_to_apply</option>
-        <option value="applied">applied</option>
-        <option value="ignored">ignored</option>
-        <option value="failed">failed</option>
-      </select>
-      <label>归类桶</label>
-      <select id="zentaoSyncDisplayBucket" onchange="loadZentaoSyncBoard(1)">
-        <option value="">全部</option>
-        <option value="requirement">requirement</option>
-        <option value="overall">overall</option>
-      </select>
-      <label>来源类型</label>
-      <select id="zentaoSyncSourceType" onchange="loadZentaoSyncBoard(1)">
-        <option value="">全部</option>
-        <option value="requirement">requirement</option>
-        <option value="case">case</option>
-        <option value="manual">manual</option>
-        <option value="legacy_bug">legacy_bug</option>
-        <option value="retest">retest</option>
-        <option value="field_test">field_test</option>
-      </select>
-      <label>开始日期</label><input type="date" id="zentaoSyncDateFrom" onchange="loadZentaoSyncBoard(1)">
-      <label>结束日期</label><input type="date" id="zentaoSyncDateTo" onchange="loadZentaoSyncBoard(1)">
-      <label><input type="checkbox" id="zentaoSyncOnlyUnapplied" onchange="loadZentaoSyncBoard(1)"> 仅看未应用</label>
-      <div class="prefix-input"><span>🔍</span><input id="zentaoSyncKeyword" placeholder="标题/创建者/禅道编号关键字"></div>
-      <button onclick="loadZentaoSyncBoard(1)">刷新</button>
-      <button class="secondary" onclick="applyZentaoSyncBatch()">批量应用 ready_to_apply</button>
+    <div class="qa-panel qa-panel-soft" style="margin-bottom:12px;">
+      <div class="qa-filter-grid qa-filter-grid-zentao">
+        <div class="qa-filter-item">
+          <label>类型</label>
+          <select id="zentaoSyncEntityType" onchange="loadZentaoSyncBoard(1)">
+            <option value="">全部</option>
+            <option value="bug">Bug</option>
+            <option value="testcase">用例</option>
+          </select>
+        </div>
+        <div class="qa-filter-item">
+          <label>状态</label>
+          <select id="zentaoSyncStatus" onchange="loadZentaoSyncBoard(1)">
+            <option value="">全部</option>
+            <option value="received">received</option>
+            <option value="duplicate">duplicate</option>
+            <option value="auto_matched">auto_matched</option>
+            <option value="pending_mapping">pending_mapping</option>
+            <option value="ready_to_apply">ready_to_apply</option>
+            <option value="applied">applied</option>
+            <option value="ignored">ignored</option>
+            <option value="failed">failed</option>
+          </select>
+        </div>
+        <div class="qa-filter-item">
+          <label>归类桶</label>
+          <select id="zentaoSyncDisplayBucket" onchange="loadZentaoSyncBoard(1)">
+            <option value="">全部</option>
+            <option value="requirement">requirement</option>
+            <option value="overall">overall</option>
+          </select>
+        </div>
+        <div class="qa-filter-item">
+          <label>来源类型</label>
+          <select id="zentaoSyncSourceType" onchange="loadZentaoSyncBoard(1)">
+            <option value="">全部</option>
+            <option value="requirement">requirement</option>
+            <option value="case">case</option>
+            <option value="manual">manual</option>
+            <option value="legacy_bug">legacy_bug</option>
+            <option value="retest">retest</option>
+            <option value="field_test">field_test</option>
+          </select>
+        </div>
+        <div class="qa-filter-item">
+          <label>开始日期</label>
+          <input type="date" id="zentaoSyncDateFrom" onchange="loadZentaoSyncBoard(1)">
+        </div>
+        <div class="qa-filter-item">
+          <label>结束日期</label>
+          <input type="date" id="zentaoSyncDateTo" onchange="loadZentaoSyncBoard(1)">
+        </div>
+        <div class="qa-filter-item qa-filter-item-check">
+          <label><input type="checkbox" id="zentaoSyncOnlyUnapplied" onchange="loadZentaoSyncBoard(1)"> 仅看未应用</label>
+        </div>
+        <div class="qa-filter-item qa-filter-item-search">
+          <label>关键字</label>
+          <div class="prefix-input"><span>🔍</span><input id="zentaoSyncKeyword" placeholder="标题/创建者/禅道编号关键字"></div>
+        </div>
+        <div class="qa-filter-actions">
+          <button onclick="loadZentaoSyncBoard(1)">刷新</button>
+          <button class="secondary" onclick="applyZentaoSyncBatch()">批量应用 ready_to_apply</button>
+        </div>
+      </div>
     </div>
 
-    <div class="zentao-sync-shell">
+    <div class="zentao-sync-shell zentao-sync-shell-modern">
       <div class="zentao-sync-left">
         <div class="zentao-sync-table-wrap">
         <table class="qa-table qa-table-zentao-sync">
@@ -527,21 +570,21 @@
           <button class="secondary" onclick="nextZentaoSyncPage()">下一页</button>
         </div>
       </div>
-      <div class="zentao-sync-right">
+      <div class="zentao-sync-right zentao-sync-sticky-panel">
         <h3 id="zentaoSyncDetailTitle" style="margin:0; color:#0f172a;">请选择左侧事件查看详情</h3>
         <div id="zentaoSyncDetailMeta" class="muted" style="margin-top:4px;"></div>
 
-        <div class="card" style="margin-top:10px; box-shadow:none; border:1px solid #e2e8f0;">
+        <div class="card zentao-info-card" style="margin-top:10px;">
           <h4 style="margin-top:0;">禅道原始信息</h4>
           <div id="zentaoSyncOriginInfo" class="muted">-</div>
         </div>
 
-        <div class="card" style="margin-top:10px; box-shadow:none; border:1px solid #e2e8f0;">
+        <div class="card zentao-info-card" style="margin-top:10px;">
           <h4 style="margin-top:0;">系统推荐结果</h4>
           <div id="zentaoSyncRecommendInfo" class="muted">-</div>
         </div>
 
-        <div class="card" style="margin-top:10px; box-shadow:none; border:1px solid #e2e8f0;">
+        <div class="card zentao-info-card" style="margin-top:10px;">
           <h4 style="margin-top:0;">人工确认</h4>
           <div class="row" style="align-items:flex-end;">
             <label>需求</label><select id="zentaoMapRequirementSelect"></select>
