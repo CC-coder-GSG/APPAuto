@@ -192,7 +192,7 @@
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .badge--status {
@@ -289,6 +289,33 @@
 
 #tab-field-test .qa-table-field-test .col-actions button {
   white-space: nowrap;
+}
+
+#tab-field-test .qa-filter-grid-field-test {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+#tab-field-test .ft-filter-major,
+#tab-field-test .ft-filter-minor,
+#tab-field-test .ft-filter-purpose,
+#tab-field-test .ft-filter-tester {
+  grid-column: span 2;
+}
+
+#tab-field-test .ft-filter-keyword {
+  grid-column: span 3;
+}
+
+#tab-field-test .ft-filter-page-size {
+  grid-column: span 1;
+}
+
+#tab-field-test .ft-filter-actions {
+  grid-column: span 2;
+  margin-top: 0;
+  align-self: end;
+  justify-content: flex-end;
 }
 
 #tab-feedback .qa-table-feedback td.col-summary {
@@ -524,7 +551,34 @@
 }
 
 #tab-zentao-sync .qa-filter-grid-zentao {
-  padding: 6px 4px 2px;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 8px 10px;
+  padding: 4px 4px 2px;
+}
+
+#tab-zentao-sync .zt-filter-entity,
+#tab-zentao-sync .zt-filter-status,
+#tab-zentao-sync .zt-filter-bucket,
+#tab-zentao-sync .zt-filter-source,
+#tab-zentao-sync .zt-filter-from,
+#tab-zentao-sync .zt-filter-to {
+  grid-column: span 2;
+}
+
+#tab-zentao-sync .zt-filter-check {
+  grid-column: span 2;
+  align-self: center;
+}
+
+#tab-zentao-sync .zt-filter-keyword {
+  grid-column: span 6;
+}
+
+#tab-zentao-sync .zt-filter-actions {
+  grid-column: span 4;
+  margin-top: 0;
+  align-self: end;
+  justify-content: flex-end;
 }
 
 #tab-zentao-sync .zentao-info-card {
@@ -541,6 +595,13 @@
   width: 100%;
 }
 
+#tab-zentao-sync .zentao-major-context {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
 @media (max-width: 1200px) {
   .zentao-sync-shell {
     grid-template-columns: 1fr;
@@ -554,5 +615,46 @@
   .zentao-sync-sticky-panel {
     position: static;
     max-height: none;
+  }
+  #tab-field-test .qa-filter-grid-field-test,
+  #tab-zentao-sync .qa-filter-grid-zentao {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  #tab-field-test .ft-filter-major,
+  #tab-field-test .ft-filter-minor,
+  #tab-field-test .ft-filter-purpose,
+  #tab-field-test .ft-filter-tester,
+  #tab-field-test .ft-filter-page-size,
+  #tab-field-test .ft-filter-actions,
+  #tab-zentao-sync .zt-filter-entity,
+  #tab-zentao-sync .zt-filter-status,
+  #tab-zentao-sync .zt-filter-bucket,
+  #tab-zentao-sync .zt-filter-source,
+  #tab-zentao-sync .zt-filter-from,
+  #tab-zentao-sync .zt-filter-to,
+  #tab-zentao-sync .zt-filter-check,
+  #tab-zentao-sync .zt-filter-actions {
+    grid-column: span 2;
+  }
+  #tab-field-test .ft-filter-keyword,
+  #tab-zentao-sync .zt-filter-keyword {
+    grid-column: span 4;
+  }
+}
+
+@media (max-width: 900px) {
+  #tab-field-test .qa-filter-grid-field-test,
+  #tab-zentao-sync .qa-filter-grid-zentao {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #tab-field-test .qa-filter-grid-field-test > .qa-filter-item,
+  #tab-field-test .qa-filter-grid-field-test > .qa-filter-actions,
+  #tab-zentao-sync .qa-filter-grid-zentao > .qa-filter-item,
+  #tab-zentao-sync .qa-filter-grid-zentao > .qa-filter-actions {
+    grid-column: span 2 !important;
+  }
+  #tab-field-test .ft-filter-actions,
+  #tab-zentao-sync .zt-filter-actions {
+    justify-content: flex-start;
   }
 }

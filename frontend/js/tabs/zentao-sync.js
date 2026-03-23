@@ -41,6 +41,11 @@ const syncState = {
   currentEvent: null,
   formBound: false,
   mapRequirements: [],
+  resolvedMajorVersionId: null,
+  resolvedMajorVersionNo: '',
+  resolvedMajorSource: '未识别',
+  manualMajorVersionId: null,
+  useManualMajor: false,
 };
 
 function zhStatus(v) {
@@ -143,6 +148,7 @@ function setMapFormEnabled(enabled) {
     'zentaoMapMinorSelect',
     'zentaoMapSourceType',
     'zentaoMapDisplayBucket',
+    'zentaoMapManualMajorSelect',
     'zentaoMapLinkedCaseId',
     'zentaoMapSourceRef',
     'zentaoMapNote',
@@ -154,14 +160,24 @@ function setMapFormEnabled(enabled) {
 
   const saveBtn = document.querySelector("#tab-zentao-sync button[onclick='saveZentaoSyncMapping()']");
   const applyBtn = document.querySelector("#tab-zentao-sync button[onclick='applyZentaoSyncEvent()']");
+  const toggleManualBtn = document.querySelector("#tab-zentao-sync button[onclick='toggleManualMajorSelector()']");
+  const resetManualBtn = document.querySelector("#tab-zentao-sync button[onclick='resetZentaoManualMajor()']");
   if (saveBtn) saveBtn.disabled = !enabled;
   if (applyBtn) applyBtn.disabled = !enabled;
+  if (toggleManualBtn) toggleManualBtn.disabled = !enabled;
+  if (resetManualBtn) resetManualBtn.disabled = !enabled;
 }
 
 function versionByIdMap() {
   const m = new Map();
   getVersions().forEach((v) => m.set(Number(v.id), v));
   return m;
+}
+
+function majorVersionNoById(id) {
+  if (!id) return '';
+  const row = getVersions().find((v) => Number(v.id) === Number(id));
+  return row?.version_no || '';
 }
 
 function getSoftwareMajorIds() {
@@ -173,12 +189,73 @@ function getSoftwareMajorIds() {
   );
 }
 
-function resolveEventMajorHint(detail) {
-  return Number(
-    detail?.mapped_major_version_id ||
+function resolveCurrentMajorContext(detail) {
+  const majorId = Number(
     detail?.recommended_major_version_id ||
+    detail?.mapped_major_version_id ||
     0
   ) || null;
+
+  const majorNo = detail?.recommended_major_version_no || majorVersionNoById(majorId) || '';
+  let source = detail?.recommended_major_source || '';
+  if (!source) {
+    if (majorId && detail?.mapped_requirement_id) source = '需求反推';
+    else if (majorId) source = '自动识别';
+    else source = '未识别';
+  }
+
+  syncState.resolvedMajorVersionId = majorId;
+  syncState.resolvedMajorVersionNo = majorNo || '未识别';
+  syncState.resolvedMajorSource = source;
+}
+
+function getEffectiveMajorVersionId() {
+  if (syncState.useManualMajor && syncState.manualMajorVersionId) {
+    return Number(syncState.manualMajorVersionId);
+  }
+  return Number(syncState.resolvedMajorVersionId || 0) || null;
+}
+
+function getEffectiveMajorSource() {
+  if (syncState.useManualMajor && syncState.manualMajorVersionId) return '手动指定';
+  return syncState.resolvedMajorSource || '未识别';
+}
+
+function renderMajorContext(detail) {
+  const majorText = document.getElementById('zentaoMapCurrentMajorText');
+  const sourceText = document.getElementById('zentaoMapCurrentMajorSource');
+  const hint = document.getElementById('zentaoMapMajorHint');
+  const manualWrap = document.getElementById('zentaoMapManualMajorWrap');
+  const manualSelect = document.getElementById('zentaoMapManualMajorSelect');
+  if (!majorText || !sourceText || !hint || !manualWrap || !manualSelect) return;
+
+  const majors = getVersions().filter((v) => v.version_type === 'major' && (!getCurrentSoftwareId() || Number(v.software_id || 0) === getCurrentSoftwareId()));
+  manualSelect.innerHTML = "<option value=''>请选择大版本</option>" + majors.map((v) => `<option value='${v.id}'>${escapeHtml(v.version_no || '')}</option>`).join('');
+  if (syncState.manualMajorVersionId) manualSelect.value = String(syncState.manualMajorVersionId);
+
+  const effMajorId = getEffectiveMajorVersionId();
+  const effMajorNo = syncState.useManualMajor
+    ? majorVersionNoById(effMajorId) || '未识别'
+    : (syncState.resolvedMajorVersionNo || '未识别');
+  majorText.textContent = effMajorNo;
+  sourceText.textContent = getEffectiveMajorSource();
+
+  if (!detail) {
+    hint.textContent = '当前大版本：未识别。请先从左侧选择事件，或使用手动指定大版本。';
+    manualWrap.classList.add('hidden');
+    return;
+  }
+  if (!effMajorId) {
+    hint.textContent = '当前大版本：未识别。你可以手动指定大版本后再选择需求与小版本。';
+  } else if (syncState.useManualMajor) {
+    hint.textContent = '当前使用手动指定大版本作为筛选上下文。';
+  } else {
+    hint.textContent = '当前使用自动识别大版本作为筛选上下文。';
+  }
+}
+
+function resolveEventMajorHint(detail) {
+  return getEffectiveMajorVersionId() || Number(detail?.recommended_major_version_id || detail?.mapped_major_version_id || 0) || null;
 }
 
 function getFilteredRequirements(detail) {
@@ -283,6 +360,52 @@ function updateRuleHint(detail) {
   }
 }
 
+function refillRequirementAndMinorOptions(preserveSelections = true) {
+  const reqSelect = document.getElementById('zentaoMapRequirementSelect');
+  const minorSelect = document.getElementById('zentaoMapMinorSelect');
+  if (!reqSelect || !minorSelect) return;
+  const prevReq = preserveSelections ? Number(reqSelect.value || 0) : 0;
+  const prevMinor = preserveSelections ? Number(minorSelect.value || 0) : 0;
+  renderMapSelectors(syncState.currentEvent);
+  if (prevReq) {
+    const ok = Array.from(reqSelect.options).some((opt) => Number(opt.value || 0) === prevReq);
+    if (ok) reqSelect.value = String(prevReq);
+  }
+  renderMinorOptions(syncState.currentEvent, prevMinor || null);
+}
+
+export function toggleManualMajorSelector() {
+  const wrap = document.getElementById('zentaoMapManualMajorWrap');
+  if (!wrap) return;
+  wrap.classList.toggle('hidden');
+}
+
+export function onZentaoManualMajorChange() {
+  const select = document.getElementById('zentaoMapManualMajorSelect');
+  if (!select) return;
+  const majorId = Number(select.value || 0);
+  if (majorId) {
+    syncState.manualMajorVersionId = majorId;
+    syncState.useManualMajor = true;
+  } else {
+    syncState.manualMajorVersionId = null;
+    syncState.useManualMajor = false;
+  }
+  renderMajorContext(syncState.currentEvent);
+  refillRequirementAndMinorOptions(false);
+}
+
+export function resetZentaoManualMajor() {
+  syncState.manualMajorVersionId = null;
+  syncState.useManualMajor = false;
+  const select = document.getElementById('zentaoMapManualMajorSelect');
+  if (select) select.value = '';
+  const wrap = document.getElementById('zentaoMapManualMajorWrap');
+  if (wrap) wrap.classList.add('hidden');
+  renderMajorContext(syncState.currentEvent);
+  refillRequirementAndMinorOptions(false);
+}
+
 function renderMapSelectors(detail) {
   const reqSelect = document.getElementById('zentaoMapRequirementSelect');
   const minorSelect = document.getElementById('zentaoMapMinorSelect');
@@ -314,6 +437,7 @@ function renderMapSelectors(detail) {
     if (linkedCaseId) linkedCaseId.value = '';
     const note = document.getElementById('zentaoMapNote');
     if (note) note.value = '';
+    renderMajorContext(null);
     updateBucketHint();
     updateRuleHint(null);
     return;
@@ -334,6 +458,7 @@ function renderMapSelectors(detail) {
   if (sourceRef) sourceRef.value = detail.mapped_source_ref || '';
   if (linkedCaseId) linkedCaseId.value = detail.linked_case_id || '';
 
+  renderMajorContext(detail);
   updateBucketHint();
   updateRuleHint(detail);
 }
@@ -388,6 +513,11 @@ export async function ensureZentaoMapDataReady() {
 export async function initZentaoMapForm() {
   await ensureZentaoMapDataReady();
   bindMapInteractions();
+  syncState.manualMajorVersionId = null;
+  syncState.useManualMajor = false;
+  syncState.resolvedMajorVersionId = null;
+  syncState.resolvedMajorVersionNo = '未识别';
+  syncState.resolvedMajorSource = '未识别';
   renderMapSelectors(null);
 }
 
@@ -436,6 +566,8 @@ function renderDetail(detail) {
     renderMapSelectors(null);
     return;
   }
+
+  resolveCurrentMajorContext(detail);
 
   setText('zentaoSyncDetailTitle', `同步事件 #${detail.id}`);
   setText('zentaoSyncDetailMeta', `状态：${zhStatus(detail.status)} | 类型：${zhEntity(detail.entity_type)} | 创建时间：${fmt(detail.created_at)}`);
@@ -606,6 +738,9 @@ window.OmniQAZentaoSyncTab = {
   initZentaoMapForm,
   resetZentaoMapForm,
   initZentaoSyncBoard,
+  toggleManualMajorSelector,
+  onZentaoManualMajorChange,
+  resetZentaoManualMajor,
   loadZentaoSyncBoard,
   nextZentaoSyncPage,
   prevZentaoSyncPage,

@@ -343,31 +343,31 @@
     <h2>外业测试</h2>
     <div class="card qa-panel qa-panel-soft">
       <div class="qa-filter-grid qa-filter-grid-field-test">
-        <div class="qa-filter-item">
+        <div class="qa-filter-item ft-filter-major">
           <label>大版本</label>
           <select id="fieldTestFilterMajor" onchange="onFieldTestFilterMajorChange()"></select>
         </div>
-        <div class="qa-filter-item">
+        <div class="qa-filter-item ft-filter-minor">
           <label>小版本</label>
           <select id="fieldTestFilterMinor"></select>
         </div>
-        <div class="qa-filter-item">
+        <div class="qa-filter-item ft-filter-purpose">
           <label>测试目的</label>
           <select id="fieldTestFilterPurpose"><option value="">全部</option><option value="requirement">需求测试</option><option value="feature">功能测试</option></select>
         </div>
-        <div id="fieldTestFilterTesterWrap" class="qa-filter-item hidden">
+        <div id="fieldTestFilterTesterWrap" class="qa-filter-item ft-filter-tester hidden">
           <label>测试人</label>
           <select id="fieldTestFilterTester"><option value="">全部</option></select>
         </div>
-        <div class="qa-filter-item qa-filter-item-search">
+        <div class="qa-filter-item qa-filter-item-search ft-filter-keyword">
           <label>关键字</label>
           <div class="prefix-input"><span>🔍</span><input id="fieldTestFilterKeyword" placeholder="模糊搜索：需求/内容/备注/Bug/测试人"></div>
         </div>
-        <div class="qa-filter-item">
+        <div class="qa-filter-item ft-filter-page-size">
           <label>每页</label>
           <select id="fieldTestPageSize"><option value="10">10</option><option value="20" selected>20</option><option value="50">50</option></select>
         </div>
-        <div class="qa-filter-actions">
+        <div class="qa-filter-actions ft-filter-actions">
           <button class="ft-primary-btn" onclick="openFieldTestCreate()">➕ 新增测试记录</button>
           <button onclick="loadFieldTestBoard()">刷新列表</button>
         </div>
@@ -490,7 +490,7 @@
     <h2>禅道同步中心（仅管理员）</h2>
     <div class="qa-panel qa-panel-soft" style="margin-bottom:12px;">
       <div class="qa-filter-grid qa-filter-grid-zentao">
-        <div class="qa-filter-item">
+        <div class="qa-filter-item zt-filter-entity">
           <label>类型</label>
           <select id="zentaoSyncEntityType" onchange="loadZentaoSyncBoard(1)">
             <option value="">全部</option>
@@ -498,7 +498,7 @@
             <option value="testcase">用例</option>
           </select>
         </div>
-        <div class="qa-filter-item">
+        <div class="qa-filter-item zt-filter-status">
           <label>状态</label>
           <select id="zentaoSyncStatus" onchange="loadZentaoSyncBoard(1)">
             <option value="">全部</option>
@@ -512,7 +512,7 @@
             <option value="failed">应用失败</option>
           </select>
         </div>
-        <div class="qa-filter-item">
+        <div class="qa-filter-item zt-filter-bucket">
           <label>归属范围</label>
           <select id="zentaoSyncDisplayBucket" onchange="loadZentaoSyncBoard(1)">
             <option value="">全部</option>
@@ -520,7 +520,7 @@
             <option value="overall">总览池</option>
           </select>
         </div>
-        <div class="qa-filter-item">
+        <div class="qa-filter-item zt-filter-source">
           <label>来源类型</label>
           <select id="zentaoSyncSourceType" onchange="loadZentaoSyncBoard(1)">
             <option value="">全部</option>
@@ -532,22 +532,22 @@
             <option value="field_test">外业测试</option>
           </select>
         </div>
-        <div class="qa-filter-item">
+        <div class="qa-filter-item zt-filter-from">
           <label>开始日期</label>
           <input type="date" id="zentaoSyncDateFrom" onchange="loadZentaoSyncBoard(1)">
         </div>
-        <div class="qa-filter-item">
+        <div class="qa-filter-item zt-filter-to">
           <label>结束日期</label>
           <input type="date" id="zentaoSyncDateTo" onchange="loadZentaoSyncBoard(1)">
         </div>
-        <div class="qa-filter-item qa-filter-item-check">
+        <div class="qa-filter-item qa-filter-item-check zt-filter-check">
           <label><input type="checkbox" id="zentaoSyncOnlyUnapplied" onchange="loadZentaoSyncBoard(1)"> 仅看未应用</label>
         </div>
-        <div class="qa-filter-item qa-filter-item-search">
+        <div class="qa-filter-item qa-filter-item-search zt-filter-keyword">
           <label>关键字</label>
           <div class="prefix-input"><span>🔍</span><input id="zentaoSyncKeyword" placeholder="标题/创建者/禅道编号关键字"></div>
         </div>
-        <div class="qa-filter-actions">
+        <div class="qa-filter-actions zt-filter-actions">
           <button onclick="loadZentaoSyncBoard(1)">刷新</button>
           <button class="secondary" onclick="applyZentaoSyncBatch()">批量应用待应用事件</button>
         </div>
@@ -588,6 +588,23 @@
 
         <div class="card zentao-info-card" style="margin-top:10px;">
           <h4 style="margin-top:0;">人工确认</h4>
+          <div class="card zentao-major-context" style="box-shadow:none; margin-bottom:8px;">
+            <div class="row" style="justify-content:space-between; align-items:center;">
+              <div class="muted" style="font-size:13px;">当前大版本：<b id="zentaoMapCurrentMajorText">未识别</b></div>
+              <div class="muted" style="font-size:13px;">识别来源：<span id="zentaoMapCurrentMajorSource">未识别</span></div>
+            </div>
+            <div class="row" style="justify-content:flex-end; margin-top:6px;">
+              <button class="secondary" onclick="toggleManualMajorSelector()">手动指定大版本</button>
+              <button class="secondary" onclick="resetZentaoManualMajor()">恢复自动</button>
+            </div>
+            <div id="zentaoMapManualMajorWrap" class="hidden row" style="margin-top:8px; align-items:flex-end;">
+              <label>手动大版本</label>
+              <select id="zentaoMapManualMajorSelect" onchange="onZentaoManualMajorChange()">
+                <option value="">请选择大版本</option>
+              </select>
+            </div>
+            <div id="zentaoMapMajorHint" class="muted" style="margin-top:6px;">请先从左侧选择事件；若自动识别不准确，可手动指定大版本作为筛选上下文。</div>
+          </div>
           <div class="row" style="align-items:flex-end;">
             <label>需求</label>
             <select id="zentaoMapRequirementSelect">
@@ -1612,6 +1629,18 @@ async function initZentaoSyncBoard(){
     return window.OmniQAZentaoSyncTab.initZentaoSyncBoard();
   }
   return loadZentaoSyncBoard(1);
+}
+
+function toggleManualMajorSelector(){
+  return window.OmniQAZentaoSyncTab.toggleManualMajorSelector();
+}
+
+function onZentaoManualMajorChange(){
+  return window.OmniQAZentaoSyncTab.onZentaoManualMajorChange();
+}
+
+function resetZentaoManualMajor(){
+  return window.OmniQAZentaoSyncTab.resetZentaoManualMajor();
 }
 
 async function nextZentaoSyncPage(){
