@@ -572,15 +572,24 @@ function renderDetail(detail) {
   setText('zentaoSyncDetailTitle', `同步事件 #${detail.id}`);
   setText('zentaoSyncDetailMeta', `状态：${zhStatus(detail.status)} | 类型：${zhEntity(detail.entity_type)} | 创建时间：${fmt(detail.created_at)}`);
 
+  const draft = detail.draft || detail.raw_payload?.draft || {};
+  const requirementId = detail.zentao_req_id || draft.requirementId || '-';
+  const requirementName = detail.zentao_requirement_name || draft.requirementName || '-';
+  const creatorName = detail.creator_name || draft.creatorName || '-';
+  const executionName = detail.zentao_execution_name || draft.executionName || '-';
+  const affectedVersion = detail.zentao_affected_version || draft.affectedVersion || '-';
+  const linkedCaseId = detail.linked_case_id || draft.linkedCaseId || '-';
+  const linkedCaseLabel = detail.linked_case_label || draft.linkedCaseLabel || '';
+
   const originLines = [
     `禅道 Bug：${detail.zentao_bug_id || '-'}`,
     `禅道用例：${detail.zentao_case_id || '-'}`,
-    `需求编号：${detail.zentao_req_id || '-'}`,
-    `需求名称：${detail.zentao_requirement_name || '-'}`,
-    `创建者：${detail.creator_name || '-'}`,
-    `执行版本：${detail.zentao_execution_name || '-'}`,
-    `影响版本：${detail.zentao_affected_version || '-'}`,
-    `来源用例：${`${detail.linked_case_id || '-'} ${detail.linked_case_label || ''}`.trim()}`,
+    `需求编号：${requirementId}`,
+    `需求名称：${requirementName}`,
+    `创建者：${creatorName}`,
+    `执行版本：${executionName}`,
+    `影响版本：${affectedVersion}`,
+    `来源用例：${`${linkedCaseId} ${linkedCaseLabel}`.trim()}`,
     `原始页面：${detail.top_href || '-'}`,
   ];
   setText('zentaoSyncOriginInfo', originLines.join('\n'));
