@@ -1,6 +1,7 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
 import { withPrefix, renderBugLink, renderCaseLink } from '../utils.js';
+let retestSseBound = false;
 
 function getRetestMode() {
   return document.getElementById('retestDisplayMode')?.value || 'version';
@@ -101,7 +102,7 @@ export async function loadRetest() {
       : '<span class="badge">未提交复测结论</span>';
 
     return `
-      <details class="card" ${isCompleted ? '' : 'open'} style="border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px; background: ${isCompleted ? '#f8fafc' : '#fff'}; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: all 0.3s;">
+      <details class="card retest-req-card" data-req-id="${req.id}" ${isCompleted ? '' : 'open'} style="border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px; background: ${isCompleted ? '#f8fafc' : '#fff'}; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; list-style:none; display: flex; justify-content: space-between; align-items: center; border-bottom: ${isCompleted ? 'none' : '1px dashed #cbd5e1'}; padding-bottom: ${isCompleted ? '0' : '12px'}; margin-bottom: ${isCompleted ? '0' : '12px'};">
           <div>
             <span style="font-size: 16px; font-weight: bold; color: ${isCompleted ? '#94a3b8; text-decoration:line-through;' : '#0f172a'};">📄 ${req.zentao_req_id} ${req.title}</span>
@@ -136,6 +137,11 @@ export async function loadRetest() {
         </div>
       </details>`;
   }).join('');
+  if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
+    document.querySelectorAll('.retest-req-card[data-req-id]').forEach((el) => {
+      window.OmniQASSE.mountAttention(el, { scope: 'retest_requirement', key: el.getAttribute('data-req-id'), tone: 'purple', hoverDelayMs: 420 });
+    });
+  }
 }
 
 export async function setRetest(id, passed, hasEvidence) {
@@ -199,3 +205,18 @@ export async function pushRetest() {
 }
 
 window.OmniQARetestTab = { loadRetest, toggleRetestMode, setRetest, toggleBugFail, addRetestBug, pushRetest };
+
+function bindRetestSSE() {
+  if (retestSseBound) return;
+  if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
+  window.OmniQASSE.subscribe('retest_requirement_status_changed', ({ payload }) => {
+    const reqId = Number(payload?.requirement_id || 0);
+    if (!reqId) return;
+    const el = document.querySelector(`.retest-req-card[data-req-id='${reqId}']`);
+    if (!el || typeof window.OmniQASSE.pulseBoundaryGlow !== 'function') return;
+    const tone = payload?.retest_passed === true ? 'green' : 'purple';
+    window.OmniQASSE.pulseBoundaryGlow(el, tone);
+  });
+  retestSseBound = true;
+}
+bindRetestSSE();

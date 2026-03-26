@@ -514,6 +514,31 @@ body {
   box-shadow: 0 10px 18px -8px rgba(15, 23, 42, 0.18);
 }
 
+.sse-inline-notice {
+  margin: 10px 0 8px;
+  padding: 8px 10px;
+  border: 1px dashed #93c5fd;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  cursor: pointer;
+}
+
+.build-record-card {
+  position: relative;
+  background: linear-gradient(180deg, rgba(248, 250, 252, .92), rgba(255, 255, 255, .98));
+  transition: box-shadow .2s ease, border-color .2s ease;
+}
+
+.build-record-card:hover {
+  border-color: #bfdbfe !important;
+  box-shadow: 0 8px 18px -12px rgba(30, 64, 175, .35) !important;
+}
+
+#tab-field-test .field-test-row-card {
+  transition: background-color .2s ease;
+}
+
 .activity-highlight-item {
   padding: 8px 0;
   border-bottom: 1px dashed #e2e8f0;
@@ -706,6 +731,30 @@ body {
 
 .qa-table-zentao-sync tr.sse-glow-purple td {
   box-shadow: inset 0 0 0 1px rgba(139, 92, 246, .42);
+}
+
+.field-test-row-card.sse-glow td {
+  position: relative;
+}
+
+.field-test-row-card.sse-glow-blue td {
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, .35);
+}
+
+.field-test-row-card.sse-glow-green td {
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .35);
+}
+
+.field-test-row-card.sse-glow-purple td {
+  box-shadow: inset 0 0 0 1px rgba(139, 92, 246, .35);
+}
+
+#tab-dispatch .dispatch-row-card.sse-glow td {
+  position: relative;
+}
+
+#tab-dispatch .dispatch-row-card.sse-glow-green td {
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .35);
 }
 
 .zentao-sync-sticky-panel {
@@ -999,6 +1048,60 @@ body {
   margin-left: 4px;
   background: #0ea5e9;
   font-size: 10px;
+}
+
+.sse-conn-badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.sse-conn-badge::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.sse-conn-badge.connected {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.sse-conn-badge.connected::before {
+  background: #22c55e;
+}
+
+.sse-conn-badge.reconnecting {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.sse-conn-badge.reconnecting::before {
+  background: #3b82f6;
+}
+
+.sse-conn-badge.disconnected {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.sse-conn-badge.disconnected::before {
+  background: #ef4444;
 }
 
 .sse-glow {

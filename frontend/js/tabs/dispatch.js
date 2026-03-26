@@ -1,6 +1,9 @@
-﻿import { api } from '../api.js';
+import { api } from '../api.js';
 import { state } from '../state.js';
 import { withPrefix, renderBugLink } from '../utils.js';
+
+let dispatchSseBound = false;
+let dispatchSseRefreshTimer = null;
 
 export async function searchDispatchBug() {
   const bugId = withPrefix('b#', document.getElementById('dispatchBugNo')?.value || '');
@@ -53,7 +56,7 @@ export async function loadDispatchedAll() {
     }
     table.innerHTML = filteredData.map((b) => {
       const statusHtml = b.closed ? `<span style="color:#16a34a;font-weight:bold;">已闭环 (${resZh[b.resolution] || '修复'})</span>` : '<span style="color:#dc2626;">处理中</span>';
-      return `<tr>
+      return `<tr class="dispatch-row-card" data-bug-id="${b.id}">
         <td>${renderBugLink(b)}</td>
         <td><span class="badge" style="background:#ffedd5;color:#ea580c; border:1px solid #fdba74;">特派给 ${b.dispatched_to_name}</span></td>
         <td>${statusHtml}</td>
@@ -63,7 +66,6 @@ export async function loadDispatchedAll() {
     console.error('加载特派列表失败', e);
   }
 }
-
 
 export async function saveDispatchedBug(id) {
   const done = document.getElementById('ddone_' + id).checked;
@@ -103,3 +105,28 @@ export async function removeDerivedBug(id, bugToRemove) {
 
 window.OmniQADispatchTab = { searchDispatchBug, confirmDispatchBug, loadDispatchedAll, saveDispatchedBug, addDerivedBug, removeDerivedBug };
 
+function bindDispatchSSE() {
+  if (dispatchSseBound) return;
+  if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
+  const onDispatchEvent = ({ payload }) => {
+    const tab = document.getElementById('tab-dispatch');
+    if (!tab || tab.classList.contains('hidden')) return;
+
+    const id = Number(payload?.id || 0);
+    if (id > 0 && typeof window.OmniQASSE.pulseBoundaryGlow === 'function') {
+      const existed = document.querySelector(`.dispatch-row-card[data-bug-id='${id}']`);
+      if (existed) window.OmniQASSE.pulseBoundaryGlow(existed, 'green');
+    }
+
+    if (dispatchSseRefreshTimer) clearTimeout(dispatchSseRefreshTimer);
+    dispatchSseRefreshTimer = setTimeout(() => {
+      loadDispatchedAll().catch(() => {});
+    }, 450);
+  };
+
+  window.OmniQASSE.subscribe('bug_dispatch_created', onDispatchEvent);
+  window.OmniQASSE.subscribe('bug_dispatch_updated', onDispatchEvent);
+  dispatchSseBound = true;
+}
+
+bindDispatchSSE();

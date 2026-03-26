@@ -6,9 +6,13 @@ let reconnectTimer = null;
 let reconnectAttempts = 0;
 let started = false;
 const refreshTimers = new Map();
+const unreadByScope = new Map();
+const attentionObserved = new WeakMap();
+let attentionObserver = null;
 
 const RUNTIME = {
   lastEventId: Number(localStorage.getItem('sse_last_event_id') || 0) || 0,
+  connectionState: 'disconnected',
   counters: {
     zentaoNew: 0,
     minePrimary: 0,
@@ -17,6 +21,39 @@ const RUNTIME = {
     retest: 0,
     overallBug: 0,
   },
+};
+
+function updateConnectionIndicator() {
+  const el = document.getElementById('sseConnectionState');
+  if (!el) return;
+  const stateTextMap = {
+    connected: '实时已连接',
+    reconnecting: '实时重连中',
+    connecting: '实时连接中',
+    disconnected: '实时未连接',
+  };
+  const cur = String(RUNTIME.connectionState || 'disconnected');
+  el.textContent = stateTextMap[cur] || stateTextMap.disconnected;
+  el.classList.remove('hidden', 'connected', 'reconnecting', 'disconnected');
+  if (cur === 'connected') el.classList.add('connected');
+  else if (cur === 'reconnecting' || cur === 'connecting') el.classList.add('reconnecting');
+  else el.classList.add('disconnected');
+}
+
+function setConnectionState(next) {
+  const stateValue = String(next || 'disconnected');
+  if (RUNTIME.connectionState === stateValue) return;
+  RUNTIME.connectionState = stateValue;
+  updateConnectionIndicator();
+}
+
+const SCOPE_COUNTER_MAP = {
+  zentao_sync: 'zentaoNew',
+  mine_requirement: 'minePrimary',
+  mine_bug_dispatch: 'mineSecondaryBugDispatch',
+  feedback_task: 'feedback',
+  retest_requirement: 'retest',
+  overall_bug: 'overallBug',
 };
 
 function emit(type, message) {
@@ -29,6 +66,58 @@ function emit(type, message) {
       console.error('SSE listener error', err);
     }
   });
+}
+
+function getUnreadSet(scope) {
+  if (!unreadByScope.has(scope)) unreadByScope.set(scope, new Set());
+  return unreadByScope.get(scope);
+}
+
+function adjustCounterByScope(scope, delta) {
+  const counterKey = SCOPE_COUNTER_MAP[scope];
+  if (!counterKey) return;
+  const next = Math.max(0, Number(RUNTIME.counters[counterKey] || 0) + delta);
+  RUNTIME.counters[counterKey] = next;
+}
+
+function markUnread(scope, key) {
+  if (!scope || !key) return;
+  const set = getUnreadSet(scope);
+  if (set.has(String(key))) return;
+  set.add(String(key));
+  adjustCounterByScope(scope, +1);
+}
+
+export function markRead(scope, key) {
+  if (!scope || !key) return;
+  const set = getUnreadSet(scope);
+  if (!set.has(String(key))) return;
+  set.delete(String(key));
+  adjustCounterByScope(scope, -1);
+  updateNavBadges();
+}
+
+export function clearScopeUnread(scope) {
+  if (!scope) return;
+  const set = getUnreadSet(scope);
+  if (!set.size) return;
+  const size = set.size;
+  set.clear();
+  adjustCounterByScope(scope, -size);
+  updateNavBadges();
+}
+
+function queueUnreadByEvent(message) {
+  const type = String(message?.type || '');
+  const payload = message?.payload || {};
+  const item = payload?.item || {};
+  if (type === 'zentao_sync_created' && item?.id) markUnread('zentao_sync', item.id);
+  if (type === 'workbench_requirement_created' && payload?.id) markUnread('mine_requirement', payload.id);
+  if (type === 'bug_dispatch_created' && payload?.id) markUnread('mine_bug_dispatch', payload.id);
+  if (type === 'feedback_task_created' && payload?.id) markUnread('feedback_task', payload.id);
+  if (type === 'retest_requirement_created' && payload?.id) markUnread('retest_requirement', payload.id);
+  if (type === 'overall_bug_created' && payload?.id) markUnread('overall_bug', payload.id);
+  if (type === 'zentao_sync_deleted' && payload?.id) markRead('zentao_sync', payload.id);
 }
 
 function visibleTabName() {
@@ -117,13 +206,9 @@ function bumpCounterByEvent(message) {
   const type = String(message?.type || '');
   const payload = message?.payload || {};
   if (payload?.assignee_id && Number(payload.assignee_id) !== Number(state.currentUser?.id || 0)) return;
-  if (type === 'zentao_sync_created') RUNTIME.counters.zentaoNew += 1;
-  if (type === 'workbench_requirement_created') RUNTIME.counters.minePrimary += 1;
-  if (type === 'bug_dispatch_created') RUNTIME.counters.mineSecondaryBugDispatch += 1;
-  if (type === 'feedback_task_created') RUNTIME.counters.feedback += 1;
-  if (type === 'retest_requirement_created') RUNTIME.counters.retest += 1;
-  if (type === 'overall_bug_created') RUNTIME.counters.overallBug += 1;
-  if (type === 'zentao_sync_deleted' && RUNTIME.counters.zentaoNew > 0) RUNTIME.counters.zentaoNew -= 1;
+  if (type === '__noop__') {
+    // no-op placeholder
+  }
   updateNavBadges();
 }
 
@@ -156,6 +241,7 @@ function parseSSEChunk(buffer, onMessage) {
 async function connect() {
   if (abortController) abortController.abort();
   abortController = new AbortController();
+  setConnectionState(reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
   const cursor = Number(RUNTIME.lastEventId || 0);
   const resp = await fetch(`/api/sse/stream?last_event_id=${cursor}`, {
     method: 'GET',
@@ -168,6 +254,7 @@ async function connect() {
   }
 
   reconnectAttempts = 0;
+  setConnectionState('connected');
   const decoder = new TextDecoder('utf-8');
   const reader = resp.body.getReader();
   let carry = '';
@@ -178,16 +265,19 @@ async function connect() {
     carry = parseSSEChunk(carry, (msg) => {
       if (msg.type === 'ping') return;
       if (msg.id) saveLastEventId(msg.id);
+      queueUnreadByEvent(msg);
       bumpCounterByEvent(msg);
       emit(msg.type, msg);
       handleVisibleRefreshByEvent(msg);
     });
   }
+  if (started) setConnectionState('reconnecting');
 }
 
 function scheduleReconnect() {
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectAttempts += 1;
+  setConnectionState('reconnecting');
   const ms = Math.min(15000, 1000 * 2 ** Math.min(5, reconnectAttempts));
   reconnectTimer = setTimeout(() => {
     connect().catch(() => scheduleReconnect());
@@ -199,6 +289,7 @@ export function startSSE() {
   started = true;
   // Always normalize badges on boot: no number => hidden.
   updateNavBadges();
+  setConnectionState('connecting');
   connect().catch(() => scheduleReconnect());
 }
 
@@ -208,6 +299,7 @@ export function stopSSE() {
   abortController = null;
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = null;
+  setConnectionState('disconnected');
 }
 
 export function subscribeSSE(type, callback) {
@@ -244,10 +336,56 @@ export function pulseBoundaryGlow(el, tone = 'blue') {
   setTimeout(() => el.classList.remove('sse-glow', 'sse-glow-enter', 'sse-glow-hold', 'sse-glow-exit', `sse-glow-${tone}`), 3450);
 }
 
+function ensureAttentionObserver() {
+  if (attentionObserver) return attentionObserver;
+  attentionObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      const el = entry.target;
+      const meta = attentionObserved.get(el);
+      if (!meta) return;
+      meta.inView = !!entry.isIntersecting;
+      if (meta.inView && getUnreadSet(meta.scope).has(meta.key)) {
+        pulseBoundaryGlow(el, meta.tone || 'blue');
+      }
+    });
+  }, { threshold: 0.25 });
+  return attentionObserver;
+}
+
+export function mountAttention(el, { scope, key, tone = 'blue', hoverDelayMs = 420 } = {}) {
+  if (!el || !scope || key == null) return;
+  const meta = { scope, key: String(key), tone, inView: false, read: false, hoverTimer: null };
+  attentionObserved.set(el, meta);
+  ensureAttentionObserver().observe(el);
+  if (getUnreadSet(scope).has(meta.key)) {
+    pulseBoundaryGlow(el, tone);
+  }
+
+  const clearTimer = () => {
+    if (meta.hoverTimer) {
+      clearTimeout(meta.hoverTimer);
+      meta.hoverTimer = null;
+    }
+  };
+  el.addEventListener('mouseenter', () => {
+    clearTimer();
+    meta.hoverTimer = setTimeout(() => {
+      if (meta.read) return;
+      meta.read = true;
+      markRead(scope, meta.key);
+      el.classList.remove('sse-glow', 'sse-glow-enter', 'sse-glow-hold', 'sse-glow-exit', 'sse-glow-blue', 'sse-glow-green', 'sse-glow-purple');
+    }, hoverDelayMs);
+  });
+  el.addEventListener('mouseleave', () => clearTimer());
+}
+
 window.OmniQASSE = {
   start: startSSE,
   stop: stopSSE,
   subscribe: subscribeSSE,
   pulseBoundaryGlow,
+  mountAttention,
+  markRead,
+  clearScopeUnread,
   runtime: RUNTIME,
 };

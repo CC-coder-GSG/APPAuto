@@ -7,9 +7,15 @@ const LOAD_MORE_STEP = 12;
 const state = {
   records: [],
   visibleCount: INITIAL_VISIBLE_COUNT,
+  unseenTopNewCount: 0,
 };
+
 let buildSseBound = false;
-let buildRefreshTimer = null;
+let buildRealtimeFlushTimer = null;
+const buildPending = {
+  created: [],
+  updated: new Map(),
+};
 
 const STATUS_META = {
   SUCCESS: { text: '成功', bg: '#dcfce7', color: '#166534' },
@@ -31,10 +37,7 @@ function formatDateTime(value) {
   if (!value) return '-';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    hour12: false,
-  });
+  return date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 }
 
 function toDateInputValue(value) {
@@ -98,6 +101,7 @@ function setLoading(message = '正在加载构建记录...') {
 function fillMajorFilterOptions() {
   const select = document.getElementById('buildRecordsMajorFilter');
   if (!select) return;
+  const selected = select.value || '';
   const seen = new Set();
   const jobNames = [];
   for (const row of state.records) {
@@ -108,6 +112,7 @@ function fillMajorFilterOptions() {
   select.innerHTML = ['<option value="">全部大版本</option>']
     .concat(jobNames.map((jobName) => `<option value="${escapeHtml(jobName)}">${escapeHtml(jobNameToMajorLabel(jobName))}</option>`))
     .join('');
+  if (selected && Array.from(select.options).some((o) => o.value === selected)) select.value = selected;
 }
 
 function recordInDateRange(row, from, to) {
@@ -121,6 +126,15 @@ function recordInDateRange(row, from, to) {
   return true;
 }
 
+function rowMatchesCurrentFilters(row) {
+  const selectedJob = getSelectedJobName();
+  const selectedStatus = getSelectedStatus();
+  const { from, to } = getDateRange();
+  if (selectedJob && row.job_name !== selectedJob) return false;
+  if (selectedStatus && String(row.build_status || '').toUpperCase() !== selectedStatus) return false;
+  return recordInDateRange(row, from, to);
+}
+
 function getFilteredRecords() {
   const selectedJob = getSelectedJobName();
   const selectedStatus = getSelectedStatus();
@@ -129,11 +143,66 @@ function getFilteredRecords() {
     .filter((row) => !selectedJob || row.job_name === selectedJob)
     .filter((row) => !selectedStatus || String(row.build_status || '').toUpperCase() === selectedStatus)
     .filter((row) => recordInDateRange(row, from, to))
-    .sort((a, b) => {
-      const ta = new Date(a.created_at || 0).getTime();
-      const tb = new Date(b.created_at || 0).getTime();
-      return tb - ta;
-    });
+    .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+}
+
+function buildCardHtml(row) {
+  const summary = (row.change_log || '').trim();
+  const summaryText = summary ? `${summary.slice(0, 140)}${summary.length > 140 ? '...' : ''}` : '暂无日志内容';
+  const linkHtml = row.build_url
+    ? `<a href="${escapeHtml(row.build_url)}" target="_blank" rel="noopener noreferrer" style="word-break:break-all;">${escapeHtml(row.build_url)}</a>`
+    : '<span class="muted">暂无 Jenkins 链接</span>';
+
+  return `
+    <div class="card build-record-card" data-build-record-id="${Number(row.id)}" style="margin-bottom:0; border:1px solid #e2e8f0; box-shadow:none;">
+      <div class="row" style="justify-content:space-between; align-items:flex-start; gap:14px; margin:0;">
+        <div style="min-width:0; flex:1;">
+          <div style="font-size:18px; font-weight:800; color:#0f172a;">${escapeHtml(jobNameToMajorLabel(row.job_name))}</div>
+          <div class="muted" style="margin-top:4px; font-size:14px;">${escapeHtml(row.version_name || '暂无小版本信息')}</div>
+        </div>
+        <div>${buildStatusBadge(row.build_status)}</div>
+      </div>
+
+      <div class="row" style="margin-top:14px; flex-wrap:wrap; gap:16px;">
+        <div style="min-width:160px;">
+          <div class="muted" style="font-size:12px;">Jenkins 构建号</div>
+          <div style="margin-top:4px; color:#0f172a; font-weight:700;">#${escapeHtml(row.build_number)}</div>
+        </div>
+        <div style="min-width:180px;">
+          <div class="muted" style="font-size:12px;">构建状态</div>
+          <div style="margin-top:4px; color:#334155;">${escapeHtml(getStatusText(row.build_status))}</div>
+        </div>
+        <div style="min-width:220px;">
+          <div class="muted" style="font-size:12px;">构建时间</div>
+          <div style="margin-top:4px; color:#334155;">${escapeHtml(formatDateTime(row.created_at))}</div>
+        </div>
+        <div style="min-width:220px;">
+          <div class="muted" style="font-size:12px;">更新时间</div>
+          <div style="margin-top:4px; color:#334155;">${escapeHtml(formatDateTime(row.updated_at))}</div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px; flex-wrap:wrap; gap:16px;">
+        <div style="min-width:180px; flex:1;">
+          <div class="muted" style="font-size:12px;">分支</div>
+          <div style="margin-top:4px; color:#334155;">${escapeHtml(row.branch || '-')}</div>
+        </div>
+        <div style="min-width:280px; flex:2;">
+          <div class="muted" style="font-size:12px;">Jenkins 链接</div>
+          <div style="margin-top:4px;">${linkHtml}</div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <div class="muted" style="font-size:12px;">小版本日志摘要</div>
+        <div title="${escapeHtml(summary || '暂无日志内容')}" style="margin-top:6px; color:#334155; line-height:1.65; background:#f8fafc; border-radius:10px; padding:10px 12px;">${escapeHtml(summaryText)}</div>
+      </div>
+
+      <div class="row" style="justify-content:flex-end; margin-top:12px;">
+        <button class="secondary" onclick="openBuildRecordLogModal(${row.id})">查看小版本日志</button>
+      </div>
+    </div>
+  `;
 }
 
 function renderCards() {
@@ -160,64 +229,7 @@ function renderCards() {
   }
 
   empty.classList.add('hidden');
-  wrap.innerHTML = visibleRows.map((row) => {
-    const summary = (row.change_log || '').trim();
-    const summaryText = summary ? `${summary.slice(0, 140)}${summary.length > 140 ? '...' : ''}` : '暂无日志内容';
-    const linkHtml = row.build_url
-      ? `<a href="${escapeHtml(row.build_url)}" target="_blank" rel="noopener noreferrer" style="word-break:break-all;">${escapeHtml(row.build_url)}</a>`
-      : '<span class="muted">暂无 Jenkins 链接</span>';
-
-    return `
-      <div class="card" style="margin-bottom:0; border:1px solid #e2e8f0; box-shadow:none;">
-        <div class="row" style="justify-content:space-between; align-items:flex-start; gap:14px; margin:0;">
-          <div style="min-width:0; flex:1;">
-            <div style="font-size:18px; font-weight:800; color:#0f172a;">${escapeHtml(jobNameToMajorLabel(row.job_name))}</div>
-            <div class="muted" style="margin-top:4px; font-size:14px;">${escapeHtml(row.version_name || '暂无小版本信息')}</div>
-          </div>
-          <div>${buildStatusBadge(row.build_status)}</div>
-        </div>
-
-        <div class="row" style="margin-top:14px; flex-wrap:wrap; gap:16px;">
-          <div style="min-width:160px;">
-            <div class="muted" style="font-size:12px;">Jenkins 构建号</div>
-            <div style="margin-top:4px; color:#0f172a; font-weight:700;">#${escapeHtml(row.build_number)}</div>
-          </div>
-          <div style="min-width:180px;">
-            <div class="muted" style="font-size:12px;">构建状态</div>
-            <div style="margin-top:4px; color:#334155;">${escapeHtml(getStatusText(row.build_status))}</div>
-          </div>
-          <div style="min-width:220px;">
-            <div class="muted" style="font-size:12px;">构建时间</div>
-            <div style="margin-top:4px; color:#334155;">${escapeHtml(formatDateTime(row.created_at))}</div>
-          </div>
-          <div style="min-width:220px;">
-            <div class="muted" style="font-size:12px;">更新时间</div>
-            <div style="margin-top:4px; color:#334155;">${escapeHtml(formatDateTime(row.updated_at))}</div>
-          </div>
-        </div>
-
-        <div class="row" style="margin-top:12px; flex-wrap:wrap; gap:16px;">
-          <div style="min-width:180px; flex:1;">
-            <div class="muted" style="font-size:12px;">分支</div>
-            <div style="margin-top:4px; color:#334155;">${escapeHtml(row.branch || '-')}</div>
-          </div>
-          <div style="min-width:280px; flex:2;">
-            <div class="muted" style="font-size:12px;">Jenkins 链接</div>
-            <div style="margin-top:4px;">${linkHtml}</div>
-          </div>
-        </div>
-
-        <div style="margin-top:12px;">
-          <div class="muted" style="font-size:12px;">小版本日志摘要</div>
-          <div title="${escapeHtml(summary || '暂无日志内容')}" style="margin-top:6px; color:#334155; line-height:1.65; background:#f8fafc; border-radius:10px; padding:10px 12px;">${escapeHtml(summaryText)}</div>
-        </div>
-
-        <div class="row" style="justify-content:flex-end; margin-top:12px;">
-          <button class="secondary" onclick="openBuildRecordLogModal(${row.id})">查看小版本日志</button>
-        </div>
-      </div>
-    `;
-  }).join('');
+  wrap.innerHTML = visibleRows.map((row) => buildCardHtml(row)).join('');
 
   if (rows.length > visibleRows.length) {
     moreWrap.classList.remove('hidden');
@@ -239,6 +251,81 @@ function openLogModal(title, content) {
   openModal('buildRecordLogModal');
 }
 
+function upsertRecordInState(item) {
+  const row = { ...item };
+  const idx = state.records.findIndex((r) => Number(r.id) === Number(row.id));
+  if (idx >= 0) state.records[idx] = { ...state.records[idx], ...row };
+  else state.records.unshift(row);
+}
+
+function isBuildListNearTop() {
+  const first = document.querySelector('#buildRecordsCardList .build-record-card[data-build-record-id]');
+  if (!first) return true;
+  const rect = first.getBoundingClientRect();
+  return rect.top >= 0 && rect.top <= Math.max(260, Math.round(window.innerHeight * 0.45));
+}
+
+function updateBuildTopNotice() {
+  const el = document.getElementById('buildRecordsTopNotice');
+  if (!el) return;
+  if (state.unseenTopNewCount > 0) {
+    el.innerText = `有 ${state.unseenTopNewCount} 条新构建记录`;
+    el.classList.remove('hidden');
+  } else {
+    el.innerText = '有 0 条新构建记录';
+    el.classList.add('hidden');
+  }
+}
+
+function clearBuildTopNotice() {
+  state.unseenTopNewCount = 0;
+  updateBuildTopNotice();
+}
+
+function pulseBuildCard(recordId, tone = 'blue') {
+  if (!window.OmniQASSE || typeof window.OmniQASSE.pulseBoundaryGlow !== 'function') return;
+  const el = document.querySelector(`.build-record-card[data-build-record-id='${Number(recordId)}']`);
+  if (!el) return;
+  window.OmniQASSE.pulseBoundaryGlow(el, tone);
+}
+
+function flushBuildRealtimeQueue() {
+  buildRealtimeFlushTimer = null;
+  const tab = document.getElementById('tab-build-records');
+  if (!tab || tab.classList.contains('hidden')) return;
+
+  const createdItems = buildPending.created.splice(0);
+  const updatedItems = Array.from(buildPending.updated.values());
+  buildPending.updated.clear();
+  if (!createdItems.length && !updatedItems.length) return;
+
+  createdItems.forEach((item) => upsertRecordInState(item));
+  updatedItems.forEach((item) => upsertRecordInState(item));
+
+  if (!isBuildListNearTop()) {
+    const unseenCreated = createdItems.filter((item) => rowMatchesCurrentFilters(item)).length;
+    if (unseenCreated > 0) {
+      state.unseenTopNewCount += unseenCreated;
+      updateBuildTopNotice();
+    }
+    return;
+  }
+
+  renderCards();
+  if (createdItems.length > 0) clearBuildTopNotice();
+  createdItems.forEach((item) => pulseBuildCard(item.id, 'purple'));
+  updatedItems.forEach((item) => pulseBuildCard(item.id, 'green'));
+}
+
+function enqueueBuildRealtime(kind, item) {
+  if (!item?.id) return;
+  if (kind === 'created') buildPending.created.push(item);
+  else buildPending.updated.set(Number(item.id), item);
+
+  if (buildRealtimeFlushTimer) clearTimeout(buildRealtimeFlushTimer);
+  buildRealtimeFlushTimer = setTimeout(flushBuildRealtimeQueue, 280);
+}
+
 export async function loadBuildRecordsBoard() {
   state.visibleCount = INITIAL_VISIBLE_COUNT;
   setLoading();
@@ -247,6 +334,7 @@ export async function loadBuildRecordsBoard() {
     state.records = data.items || [];
     fillMajorFilterOptions();
     renderCards();
+    clearBuildTopNotice();
   } catch (err) {
     setLoading(err.message || '加载构建记录失败');
     throw err;
@@ -300,6 +388,16 @@ export function closeBuildRecordLogModal() {
   closeModal('buildRecordLogModal');
 }
 
+export function revealBuildRealtimeNew() {
+  clearBuildTopNotice();
+  renderCards();
+  const first = document.querySelector('#buildRecordsCardList .build-record-card[data-build-record-id]');
+  if (first) {
+    first.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    pulseBuildCard(first.getAttribute('data-build-record-id'), 'purple');
+  }
+}
+
 window.OmniQABuildRecordsTab = {
   loadBuildRecordsBoard,
   onBuildRecordsMajorFilterChange,
@@ -308,22 +406,26 @@ window.OmniQABuildRecordsTab = {
   openBuildRecordLogModal,
   openMajorBuildLogModal,
   closeBuildRecordLogModal,
+  revealBuildRealtimeNew,
   jobNameToMajorLabel,
 };
 
 function bindBuildRecordSSE() {
   if (buildSseBound) return;
   if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
-  const handler = () => {
-    const tab = document.getElementById('tab-build-records');
-    if (!tab || tab.classList.contains('hidden')) return;
-    if (buildRefreshTimer) clearTimeout(buildRefreshTimer);
-    buildRefreshTimer = setTimeout(() => {
-      loadBuildRecordsBoard().catch(() => {});
-    }, 800);
-  };
-  window.OmniQASSE.subscribe('build_record_created', handler);
-  window.OmniQASSE.subscribe('build_record_updated', handler);
+
+  window.OmniQASSE.subscribe('build_record_created', ({ payload }) => {
+    const item = payload?.item;
+    if (!item?.id) return;
+    enqueueBuildRealtime('created', item);
+  });
+
+  window.OmniQASSE.subscribe('build_record_updated', ({ payload }) => {
+    const item = payload?.item;
+    if (!item?.id) return;
+    enqueueBuildRealtime('updated', item);
+  });
+
   buildSseBound = true;
 }
 

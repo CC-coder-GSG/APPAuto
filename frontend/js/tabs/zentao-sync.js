@@ -65,6 +65,11 @@ const syncState = {
   unseenNewCount: 0,
   sseBound: false,
 };
+let zentaoBatchTimer = null;
+const zentaoBatch = {
+  created: [],
+  updated: new Map(),
+};
 
 function zhStatus(v) {
   return STATUS_ZH[String(v || '').toLowerCase()] || String(v || '-');
@@ -592,6 +597,12 @@ function renderList() {
     }).join('');
   }
 
+  if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
+    document.querySelectorAll('tr.zentao-row-card[data-event-id]').forEach((el) => {
+      window.OmniQASSE.mountAttention(el, { scope: 'zentao_sync', key: el.getAttribute('data-event-id'), tone: 'purple', hoverDelayMs: 420 });
+    });
+  }
+
   const maxPage = Math.max(1, Math.ceil((syncState.total || 0) / PAGE_SIZE));
   pageText.innerText = `第 ${syncState.page} / ${maxPage} 页，共 ${syncState.total} 条`;
 }
@@ -657,28 +668,60 @@ function removeItemWithFade(eventId) {
 function bindSSE() {
   if (syncState.sseBound) return;
   if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
-  const onCreated = ({ payload }) => {
-    const item = payload?.item;
-    if (!item) return;
-    const inserted = upsertItemKeepingOrder(item);
-    renderList();
-    if (inserted) {
+
+  const flushZentaoBatch = () => {
+    zentaoBatchTimer = null;
+    const createdItems = zentaoBatch.created.splice(0);
+    const updatedItems = Array.from(zentaoBatch.updated.values());
+    zentaoBatch.updated.clear();
+    if (!createdItems.length && !updatedItems.length) return;
+
+    const insertedIds = [];
+    const updatedIds = [];
+    createdItems.forEach((item) => {
+      if (upsertItemKeepingOrder(item)) insertedIds.push(Number(item.id));
+    });
+    updatedItems.forEach((item) => {
+      const idx = syncState.items.findIndex((x) => Number(x.id) === Number(item.id));
+      if (idx < 0) return;
+      syncState.items[idx] = { ...syncState.items[idx], ...item };
+      updatedIds.push(Number(item.id));
+      if (syncState.currentEvent?.id === Number(item.id)) {
+        syncState.currentEvent = { ...syncState.currentEvent, ...item };
+      }
+    });
+
+    if (insertedIds.length || updatedIds.length) {
+      renderList();
+      if (syncState.currentEvent && updatedIds.includes(Number(syncState.currentEvent.id))) {
+        renderDetail(syncState.currentEvent);
+      }
+    }
+
+    if (insertedIds.length) {
       if (zentaoAtTop()) {
-        glowRowByEventId(item.id, 'purple');
+        insertedIds.forEach((id) => glowRowByEventId(id, 'purple'));
       } else {
-        syncState.unseenNewCount += 1;
+        syncState.unseenNewCount += insertedIds.length;
         updateTopNotice();
       }
     }
+    updatedIds.forEach((id) => glowRowByEventId(id, 'green'));
+  };
+
+  const enqueueZentaoBatch = (kind, item) => {
+    if (!item?.id) return;
+    if (kind === 'created') zentaoBatch.created.push(item);
+    else zentaoBatch.updated.set(Number(item.id), item);
+    if (zentaoBatchTimer) clearTimeout(zentaoBatchTimer);
+    zentaoBatchTimer = setTimeout(flushZentaoBatch, 260);
+  };
+
+  const onCreated = ({ payload }) => {
+    enqueueZentaoBatch('created', payload?.item);
   };
   const onUpdated = ({ payload }) => {
-    const item = payload?.item;
-    if (!item) return;
-    const idx = syncState.items.findIndex((x) => Number(x.id) === Number(item.id));
-    if (idx < 0) return;
-    syncState.items[idx] = { ...syncState.items[idx], ...item };
-    renderList();
-    glowRowByEventId(item.id, 'green');
+    enqueueZentaoBatch('updated', payload?.item);
   };
   const onDeleted = ({ payload }) => {
     const eventId = Number(payload?.id || 0);
@@ -804,13 +847,8 @@ export async function initZentaoSyncBoard() {
   ensureLoggedIn();
   bindSSE();
   bindTopScrollReset();
-  if (window.OmniQASSE?.runtime?.counters) {
-    window.OmniQASSE.runtime.counters.zentaoNew = 0;
-    const badge = document.getElementById('tabZentaoSyncBadge');
-    if (badge) {
-      badge.classList.add('hidden');
-      badge.textContent = '';
-    }
+  if (window.OmniQASSE && typeof window.OmniQASSE.clearScopeUnread === 'function') {
+    window.OmniQASSE.clearScopeUnread('zentao_sync');
   }
   await ensureZentaoMapDataReady();
   await resetZentaoMapForm();

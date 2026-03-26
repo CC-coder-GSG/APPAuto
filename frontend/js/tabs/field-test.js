@@ -10,7 +10,10 @@ const state = {
   inited: false,
   page: 1,
   pageSize: 20,
+  unseenTopNewCount: 0,
 };
+let fieldTestSseBound = false;
+let fieldTestSseRefreshTimer = null;
 
 function getVersions() { return window.versions || []; }
 function currentUser() { return window.currentUser || null; }
@@ -423,7 +426,7 @@ function renderList(rows) {
     return;
   }
   tbody.innerHTML = rows.map((r) => `
-    <tr>
+    <tr class="field-test-row-card" data-field-test-id="${r.id}">
       <td class="field-test-col-date">${formatDateOnly(r.start_time)}</td>
       <td class="field-test-col-version">
         <div class="field-test-cell-main">${r.major_version_no || '-'}</div>
@@ -449,6 +452,37 @@ function renderList(rows) {
       </td>
     </tr>
   `).join('');
+}
+
+function isFieldTestNearTop() {
+  const first = document.querySelector('#fieldTestTable .field-test-row-card[data-field-test-id]');
+  if (!first) return true;
+  const rect = first.getBoundingClientRect();
+  return rect.top >= 0 && rect.top <= Math.max(240, Math.round(window.innerHeight * 0.45));
+}
+
+function updateFieldTestTopNotice() {
+  const el = document.getElementById('fieldTestTopNotice');
+  if (!el) return;
+  if (state.unseenTopNewCount > 0) {
+    el.innerText = `有 ${state.unseenTopNewCount} 条新增外业测试记录`;
+    el.classList.remove('hidden');
+  } else {
+    el.innerText = '有 0 条新增外业测试记录';
+    el.classList.add('hidden');
+  }
+}
+
+function clearFieldTestTopNotice() {
+  state.unseenTopNewCount = 0;
+  updateFieldTestTopNotice();
+}
+
+function pulseFieldTestRow(id, tone = 'green') {
+  if (!window.OmniQASSE || typeof window.OmniQASSE.pulseBoundaryGlow !== 'function') return;
+  const el = document.querySelector(`.field-test-row-card[data-field-test-id='${Number(id)}']`);
+  if (!el) return;
+  window.OmniQASSE.pulseBoundaryGlow(el, tone);
 }
 
 function ensureInited() {
@@ -531,6 +565,7 @@ export async function loadFieldTestBoard(page = null) {
   const data = await (await api(`/field-tests/paged?${params.toString()}`)).json();
   renderList(data.items || []);
   updatePagination(data.total || 0, data.page || state.page, data.page_size || pageSize);
+  clearFieldTestTopNotice();
 }
 
 export async function nextFieldTestPage() {
@@ -564,4 +599,54 @@ window.OmniQAFieldTestTab = {
   nextFieldTestPage,
   prevFieldTestPage,
   openFieldTestCreate,
+  revealFieldTestRealtimeNew,
 };
+
+export async function revealFieldTestRealtimeNew() {
+  clearFieldTestTopNotice();
+  state.page = 1;
+  await loadFieldTestBoard(1);
+  const first = document.querySelector('#fieldTestTable .field-test-row-card[data-field-test-id]');
+  if (first && window.OmniQASSE && typeof window.OmniQASSE.pulseBoundaryGlow === 'function') {
+    window.OmniQASSE.pulseBoundaryGlow(first, 'purple');
+  }
+}
+
+function bindFieldTestSSE() {
+  if (fieldTestSseBound) return;
+  if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
+
+  const scheduleReload = (targetId, tone) => {
+    if (fieldTestSseRefreshTimer) clearTimeout(fieldTestSseRefreshTimer);
+    fieldTestSseRefreshTimer = setTimeout(() => {
+      loadFieldTestBoard().then(() => {
+        if (targetId > 0) pulseFieldTestRow(targetId, tone);
+      }).catch(() => {});
+    }, 380);
+  };
+
+  window.OmniQASSE.subscribe('activity_created', ({ payload }) => {
+    const action = String(payload?.action || '');
+    const targetType = String(payload?.target_type || '');
+    if (targetType !== 'field_test' && !action.startsWith('field_test.')) return;
+    const tab = document.getElementById('tab-field-test');
+    if (!tab || tab.classList.contains('hidden')) return;
+    const targetId = Number(payload?.target_id || 0);
+    if (targetId > 0) {
+      const existed = document.querySelector(`.field-test-row-card[data-field-test-id='${targetId}']`);
+      if (existed) {
+        pulseFieldTestRow(targetId, action === 'field_test.create' ? 'purple' : 'green');
+        if (action !== 'field_test.create') return;
+      }
+    }
+    if (!isFieldTestNearTop() && action === 'field_test.create') {
+      state.unseenTopNewCount += 1;
+      updateFieldTestTopNotice();
+      return;
+    }
+    scheduleReload(targetId, action === 'field_test.create' ? 'purple' : 'green');
+  });
+  fieldTestSseBound = true;
+}
+
+bindFieldTestSSE();

@@ -4,6 +4,7 @@ import { renderBugLink } from '../utils.js';
 
 let currentPage = 1;
 let currentPageSize = 10;
+let feedbackSseBound = false;
 
 function feedbackStatusZh(v) {
   const m = { pending: '待处理', processing: '处理中', resolved: '已处理', closed: '已关闭' };
@@ -118,7 +119,7 @@ function renderFeedbackList(rows) {
     return;
   }
   tbody.innerHTML = rows.map((r) => `
-    <tr>
+    <tr class="feedback-row-card" data-feedback-id="${r.id}">
       <td>${r.feedback_no || '-'}</td>
       <td class="col-text col-summary" title="${(r.summary || '').replace(/"/g, '&quot;')}"><span class="cell-ellipsis">${(r.summary || '').slice(0, 50)}${(r.summary || '').length > 50 ? '...' : ''}</span></td>
       <td>${r.major_version_no || '-'} / ${r.minor_version_no || '-'}</td>
@@ -129,6 +130,11 @@ function renderFeedbackList(rows) {
       <td class="col-actions"><button class="secondary" onclick="openFeedbackDetail(${r.id})">查看详情</button></td>
     </tr>
   `).join('');
+  if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
+    document.querySelectorAll('.feedback-row-card[data-feedback-id]').forEach((el) => {
+      window.OmniQASSE.mountAttention(el, { scope: 'feedback_task', key: el.getAttribute('data-feedback-id'), tone: 'blue', hoverDelayMs: 420 });
+    });
+  }
 }
 
 export async function loadFeedbackBoard(page = 1) {
@@ -507,3 +513,18 @@ window.OmniQAFeedbackTab = {
   searchFeedbackBugOptions,
   setFeedbackStatus,
 };
+
+function bindFeedbackSSE() {
+  if (feedbackSseBound) return;
+  if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
+  window.OmniQASSE.subscribe('feedback_task_updated', ({ payload }) => {
+    const id = Number(payload?.id || 0);
+    if (!id) return;
+    const el = document.querySelector(`.feedback-row-card[data-feedback-id='${id}']`);
+    if (el && typeof window.OmniQASSE.pulseBoundaryGlow === 'function') {
+      window.OmniQASSE.pulseBoundaryGlow(el, 'green');
+    }
+  });
+  feedbackSseBound = true;
+}
+bindFeedbackSSE();

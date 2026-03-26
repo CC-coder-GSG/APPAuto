@@ -19,6 +19,7 @@ const modalState = {
 const notesModalState = {
   reqId: null,
 };
+let mineSseBound = false;
 
 function getFoldStorageKey() {
   const uid = state.currentUser?.id || window.currentUser?.id || 'anonymous';
@@ -411,7 +412,7 @@ export function renderMineCards() {
     const freeBugHtml = (req.free_bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无自由Bug</span>';
 
     return `
-      <details class="mine-req-card" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; transition: all 0.3s;">
+      <details class="mine-req-card" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
           <div>${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${req.zentao_req_id} ${req.title}</span></div>
           ${isFullyCompleted ? '<span style="color:#16a34a; font-size:14px; background:#f0fdf4; padding:4px 8px; border-radius:4px; border:1px solid #bbf7d0;">✅ 测试已完成</span>' : '<span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开卡片)</span>'}
@@ -439,7 +440,27 @@ export function renderMineCards() {
 
   const mineCards = document.getElementById('mineCards');
   if (mineCards) mineCards.innerHTML = (state.currentFeedbackTodoHtml || '') + state.currentDispatchHtml + reqsHtml;
+  if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
+    document.querySelectorAll('.mine-req-card[data-req-id]').forEach((el) => {
+      window.OmniQASSE.mountAttention(el, { scope: 'mine_requirement', key: el.getAttribute('data-req-id'), tone: 'blue', hoverDelayMs: 420 });
+    });
+  }
 }
+
+function bindMineSSE() {
+  if (mineSseBound) return;
+  if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
+  window.OmniQASSE.subscribe('workbench_testcase_created', ({ payload }) => {
+    const reqId = Number(payload?.requirement_id || 0);
+    if (!reqId) return;
+    const el = document.querySelector(`.mine-req-card[data-req-id='${reqId}']`);
+    if (el && typeof window.OmniQASSE.pulseBoundaryGlow === 'function') {
+      window.OmniQASSE.pulseBoundaryGlow(el, 'green');
+    }
+  });
+  mineSseBound = true;
+}
+bindMineSSE();
 
 export function rememberMineReqFold(reqId, isOpen) {
   const map = getFoldStateMap();

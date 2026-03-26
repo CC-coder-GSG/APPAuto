@@ -73,6 +73,7 @@
     <button id="tabActivityBtn" class="hidden" onclick="showTab('activity')">活动中心</button>
     <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
     <button id="tabDispatchBtn" class="hidden" onclick="showTab('dispatch')">BUG特派</button>
+    <span id="sseConnectionState" class="sse-conn-badge hidden" aria-live="polite">实时连接中</span>
   </div>
 
   <section id="tab-assign" class="hidden card">
@@ -374,6 +375,7 @@
           </div>
         </div>
       </div>
+      <div id="fieldTestTopNotice" class="hidden muted sse-inline-notice" role="button" tabindex="0" onclick="revealFieldTestRealtimeNew()" onkeydown="onNoticeKeydown(event, revealFieldTestRealtimeNew)">有 0 条新增外业测试记录</div>
       <div class="qa-table-scroll field-test-table-wrap">
         <table class="qa-table qa-table-field-test field-test-table" style="margin-top:10px;">
           <colgroup class="field-test-table-cols">
@@ -489,6 +491,7 @@
     </div>
 
     <div class="card" style="margin-top:16px; box-shadow:none; border:1px solid #e2e8f0;">
+      <div id="buildRecordsTopNotice" class="hidden muted sse-inline-notice" role="button" tabindex="0" onclick="revealBuildRealtimeNew()" onkeydown="onNoticeKeydown(event, revealBuildRealtimeNew)">有 0 条新构建记录</div>
       <div id="buildRecordsCardList" style="display:flex; flex-direction:column; gap:12px;">
         <div style="text-align:center; padding:24px; color:#64748b;">正在加载构建记录...</div>
       </div>
@@ -570,7 +573,7 @@
 
     <div class="zentao-sync-shell zentao-sync-shell-modern">
       <div class="zentao-sync-left">
-        <div id="zentaoSyncTopNotice" class="hidden muted" style="margin-bottom:8px; padding:8px 10px; border:1px dashed #93c5fd; border-radius:8px; background:#eff6ff; color:#1d4ed8; cursor:pointer;" onclick="scrollZentaoSyncToTop()">有 0 条新同步记录</div>
+        <div id="zentaoSyncTopNotice" class="hidden muted sse-inline-notice" role="button" tabindex="0" style="margin-bottom:8px;" onclick="scrollZentaoSyncToTop()" onkeydown="onNoticeKeydown(event, scrollZentaoSyncToTop)">有 0 条新同步记录</div>
         <div class="zentao-sync-table-wrap">
         <table class="qa-table qa-table-zentao-sync">
           <thead>
@@ -879,6 +882,7 @@
         <div style="font-weight:700; color:#0f172a;">动态列表</div>
         <div id="activityFeedMeta" class="muted"></div>
       </div>
+      <div id="activityTopNotice" class="hidden muted sse-inline-notice" role="button" tabindex="0" onclick="revealActivityRealtimeNew()" onkeydown="onNoticeKeydown(event, revealActivityRealtimeNew)">有 0 条新活动</div>
       <div id="activityFeedList" style="margin-top:12px;"></div>
       <div class="row" style="justify-content:flex-end; align-items:center; gap:8px; margin-top:10px;">
         <span id="activityPaginationText" class="muted">第 1 / 1 页，共 0 条</span>
@@ -1034,6 +1038,13 @@ let dataViewState = { showUsers: true, showVersions: true };
 
 function showMessage(msg,type='success'){const w=document.getElementById('toastWrap');const d=document.createElement('div');d.className=`toast ${type}`;d.innerText=msg;w.appendChild(d);setTimeout(()=>{d.classList.add('hide');setTimeout(()=>d.remove(),220)},3000)}
 function digitsOnly(el){el.value=(el.value||'').replace(/\D/g,'')}
+function onNoticeKeydown(event, handler){
+  if(!event) return;
+  if(event.key === 'Enter' || event.key === ' '){
+    event.preventDefault();
+    if(typeof handler === 'function') handler();
+  }
+}
 function withPrefix(prefix,num){if(!num) return null; return `${prefix}${String(num).replace(/\D/g,'')}`}
 function versionTypeZh(v){return v==='major'?'大版本':'子版本'}
 function sourceTypeZh(v){
@@ -1053,25 +1064,12 @@ function showTab(name){
   ['assign','mine','feedback','retest','stage5','field-test','build-records','zentao-sync','report','activity','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
   document.getElementById('tab-'+name).classList.remove('hidden');
   if(window.OmniQASSE && window.OmniQASSE.runtime && window.OmniQASSE.runtime.counters){
-    const c = window.OmniQASSE.runtime.counters;
-    if(name === 'zentao-sync') c.zentaoNew = 0;
-    if(name === 'mine') c.minePrimary = 0;
-    if(name === 'feedback') c.feedback = 0;
-    if(name === 'retest') c.retest = 0;
-    if(name === 'stage5') c.overallBug = 0;
-    if(name === 'dispatch') c.mineSecondaryBugDispatch = 0;
-    const syncBadge = document.getElementById('tabZentaoSyncBadge');
-    if(syncBadge && c.zentaoNew <= 0){ syncBadge.classList.add('hidden'); syncBadge.textContent=''; }
-    const minePrimaryBadge = document.getElementById('tabMinePrimaryBadge');
-    if(minePrimaryBadge && c.minePrimary <= 0){ minePrimaryBadge.classList.add('hidden'); minePrimaryBadge.textContent=''; }
-    const mineSecondaryBadge = document.getElementById('tabMineSecondaryBadge');
-    if(mineSecondaryBadge && c.mineSecondaryBugDispatch <= 0){ mineSecondaryBadge.classList.add('hidden'); mineSecondaryBadge.textContent=''; }
-    const feedbackBadge = document.getElementById('tabFeedbackBadge');
-    if(feedbackBadge && c.feedback <= 0){ feedbackBadge.classList.add('hidden'); feedbackBadge.textContent=''; }
-    const retestBadge = document.getElementById('tabRetestBadge');
-    if(retestBadge && c.retest <= 0){ retestBadge.classList.add('hidden'); retestBadge.textContent=''; }
-    const stage5Badge = document.getElementById('tabStage5Badge');
-    if(stage5Badge && c.overallBug <= 0){ stage5Badge.classList.add('hidden'); stage5Badge.textContent=''; }
+    if(name === 'zentao-sync' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('zentao_sync');
+    if(name === 'mine' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('mine_requirement');
+    if(name === 'feedback' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('feedback_task');
+    if(name === 'retest' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('retest_requirement');
+    if(name === 'stage5' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('overall_bug');
+    if(name === 'dispatch' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('mine_bug_dispatch');
   }
   if(name === 'dispatch') { loadDispatchedAll(); }
   if(name === 'data' && !dataOverviewCache) { loadDataOverview().catch(err=>showMessage(err.message||'加载数据管理台失败','error')); }
@@ -1674,6 +1672,10 @@ function closeBuildRecordLogModal(){
   return window.OmniQABuildRecordsTab.closeBuildRecordLogModal();
 }
 
+async function revealBuildRealtimeNew(){
+  return window.OmniQABuildRecordsTab.revealBuildRealtimeNew();
+}
+
 async function loadZentaoSyncBoard(page){
   return window.OmniQAZentaoSyncTab.loadZentaoSyncBoard(page);
 }
@@ -1749,6 +1751,10 @@ async function pushActivitySummary(){
   return window.OmniQAActivityTab.pushActivitySummary();
 }
 
+async function revealActivityRealtimeNew(){
+  return window.OmniQAActivityTab.revealActivityRealtimeNew();
+}
+
 async function openAuditTimelineModal(targetType, targetId, title){
   return window.OmniQAActivityTab.openAuditTimelineModal(targetType, targetId, title);
 }
@@ -1759,6 +1765,10 @@ function closeAuditTimelineModal(){
 
 async function openActivityItem(id, module, targetId){
   return window.OmniQAActivityTab.openActivityItem(id, module, targetId);
+}
+
+async function revealFieldTestRealtimeNew(){
+  return window.OmniQAFieldTestTab.revealFieldTestRealtimeNew();
 }
 
 async function unlinkFieldTestBug(recordId, bugId){

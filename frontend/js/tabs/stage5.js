@@ -1,6 +1,7 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
 import { withPrefix, sourceTypeZh, renderBugLink } from '../utils.js';
+let stage5SseBound = false;
 
 export async function loadStage5() {
   const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
@@ -44,7 +45,7 @@ export function renderS5() {
     }
     const failBadge = b.is_retest_failed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; margin-left:4px;">🚨复测打回</span>' : '';
     const dispatchBadge = b.dispatched_to_name ? `<span class="badge" style="background:#ffedd5; color:#ea580c; border:1px solid #fdba74; margin-left:4px;">🪂特派:${b.dispatched_to_name}</span>` : '';
-    return `<tr style="${rowStyle}">
+    return `<tr class="stage5-row-card" data-bug-id="${b.id}" style="${rowStyle}">
       <td>
         ${renderBugLink(b)} <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span> ${failBadge} ${dispatchBadge}
         <a href="javascript:void(0)" onclick="editS5Bug(${b.id}, '${b.bug_id}')" style="margin-left:8px; font-size:12px; color:#3b82f6; text-decoration:none;">编辑</a>
@@ -62,6 +63,11 @@ export function renderS5() {
       </td>
     </tr>`;
   }).join('');
+  if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
+    document.querySelectorAll('.stage5-row-card[data-bug-id]').forEach((el) => {
+      window.OmniQASSE.mountAttention(el, { scope: 'overall_bug', key: el.getAttribute('data-bug-id'), tone: 'blue', hoverDelayMs: 420 });
+    });
+  }
 }
 
 export async function saveS5(id) {
@@ -196,3 +202,20 @@ export async function submitS5Bug() {
 window.OmniQAStage5Tab = { loadStage5, renderS5, saveS5, editS5Bug, removeS5Bug, pushStage5, toggleS5BugInputs, loadS5OptionsData, submitS5Bug };
 window.editS5Bug = editS5Bug;
 window.removeS5Bug = removeS5Bug;
+
+function bindStage5SSE() {
+  if (stage5SseBound) return;
+  if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
+  const pulse = (payload, tone) => {
+    const bugId = Number(payload?.id || payload?.bug_id || 0);
+    if (!bugId) return;
+    const el = document.querySelector(`.stage5-row-card[data-bug-id='${bugId}']`);
+    if (el && typeof window.OmniQASSE.pulseBoundaryGlow === 'function') {
+      window.OmniQASSE.pulseBoundaryGlow(el, tone);
+    }
+  };
+  window.OmniQASSE.subscribe('overall_bug_created', ({ payload }) => pulse(payload, 'blue'));
+  window.OmniQASSE.subscribe('overall_bug_closed', ({ payload }) => pulse(payload, 'green'));
+  stage5SseBound = true;
+}
+bindStage5SSE();
