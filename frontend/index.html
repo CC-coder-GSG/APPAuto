@@ -62,13 +62,13 @@
 
   <div class="card row" id="tabs">
     <button id="tabAssignBtn" onclick="showTab('assign')">任务分配台</button>
-    <button id="tabMineBtn" onclick="showTab('mine')">我的工作台</button>
-    <button onclick="showTab('feedback')">反馈记录与处理</button>
-    <button onclick="showTab('retest')">复测工作台</button>
-    <button onclick="showTab('stage5')">整体测试</button>
+    <button id="tabMineBtn" onclick="showTab('mine')">我的工作台<span id="tabMinePrimaryBadge" class="nav-badge hidden"></span><span id="tabMineSecondaryBadge" class="nav-badge nav-badge--sub hidden"></span></button>
+    <button id="tabFeedbackBtn" onclick="showTab('feedback')">反馈记录与处理<span id="tabFeedbackBadge" class="nav-badge hidden"></span></button>
+    <button id="tabRetestBtn" onclick="showTab('retest')">复测工作台<span id="tabRetestBadge" class="nav-badge hidden"></span></button>
+    <button id="tabStage5Btn" onclick="showTab('stage5')">整体测试<span id="tabStage5Badge" class="nav-badge hidden"></span></button>
     <button onclick="showTab('field-test')">外业测试</button>
     <button id="tabBuildRecordsBtn" class="hidden" onclick="showTab('build-records')">构建记录</button>
-    <button id="tabZentaoSyncBtn" class="hidden" onclick="showTab('zentao-sync')">禅道同步中心</button>
+    <button id="tabZentaoSyncBtn" class="hidden" onclick="showTab('zentao-sync')">禅道同步中心<span id="tabZentaoSyncBadge" class="nav-badge hidden"></span></button>
     <button onclick="showTab('report')">报表中心</button>
     <button id="tabActivityBtn" class="hidden" onclick="showTab('activity')">活动中心</button>
     <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
@@ -570,6 +570,7 @@
 
     <div class="zentao-sync-shell zentao-sync-shell-modern">
       <div class="zentao-sync-left">
+        <div id="zentaoSyncTopNotice" class="hidden muted" style="margin-bottom:8px; padding:8px 10px; border:1px dashed #93c5fd; border-radius:8px; background:#eff6ff; color:#1d4ed8; cursor:pointer;" onclick="scrollZentaoSyncToTop()">有 0 条新同步记录</div>
         <div class="zentao-sync-table-wrap">
         <table class="qa-table qa-table-zentao-sync">
           <thead>
@@ -1051,6 +1052,27 @@ function confirmPush(){return confirm('确定要向企微群发送吗？')}
 function showTab(name){
   ['assign','mine','feedback','retest','stage5','field-test','build-records','zentao-sync','report','activity','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
   document.getElementById('tab-'+name).classList.remove('hidden');
+  if(window.OmniQASSE && window.OmniQASSE.runtime && window.OmniQASSE.runtime.counters){
+    const c = window.OmniQASSE.runtime.counters;
+    if(name === 'zentao-sync') c.zentaoNew = 0;
+    if(name === 'mine') c.minePrimary = 0;
+    if(name === 'feedback') c.feedback = 0;
+    if(name === 'retest') c.retest = 0;
+    if(name === 'stage5') c.overallBug = 0;
+    if(name === 'dispatch') c.mineSecondaryBugDispatch = 0;
+    const syncBadge = document.getElementById('tabZentaoSyncBadge');
+    if(syncBadge && c.zentaoNew <= 0){ syncBadge.classList.add('hidden'); syncBadge.textContent=''; }
+    const minePrimaryBadge = document.getElementById('tabMinePrimaryBadge');
+    if(minePrimaryBadge && c.minePrimary <= 0){ minePrimaryBadge.classList.add('hidden'); minePrimaryBadge.textContent=''; }
+    const mineSecondaryBadge = document.getElementById('tabMineSecondaryBadge');
+    if(mineSecondaryBadge && c.mineSecondaryBugDispatch <= 0){ mineSecondaryBadge.classList.add('hidden'); mineSecondaryBadge.textContent=''; }
+    const feedbackBadge = document.getElementById('tabFeedbackBadge');
+    if(feedbackBadge && c.feedback <= 0){ feedbackBadge.classList.add('hidden'); feedbackBadge.textContent=''; }
+    const retestBadge = document.getElementById('tabRetestBadge');
+    if(retestBadge && c.retest <= 0){ retestBadge.classList.add('hidden'); retestBadge.textContent=''; }
+    const stage5Badge = document.getElementById('tabStage5Badge');
+    if(stage5Badge && c.overallBug <= 0){ stage5Badge.classList.add('hidden'); stage5Badge.textContent=''; }
+  }
   if(name === 'dispatch') { loadDispatchedAll(); }
   if(name === 'data' && !dataOverviewCache) { loadDataOverview().catch(err=>showMessage(err.message||'加载数据管理台失败','error')); }
   if(name === 'mine') { loadMyWorkbench().catch(err=>showMessage(err.message||'加载我的工作台失败','error')); }
@@ -1131,6 +1153,9 @@ async function init(){
     window.OmniQAStateActions.setCurrentUser(currentUser);
   }
   window.OmniQAState && (window.OmniQAState.currentUser = currentUser);
+  if(window.OmniQASSE && typeof window.OmniQASSE.start === 'function'){
+    window.OmniQASSE.start();
+  }
   const meName = currentUser.display_name || currentUser.username;
   document.getElementById('me').innerText=`${meName}(${currentUser.role})`;
   const today = new Date().toISOString().slice(0,10);
@@ -1702,6 +1727,10 @@ async function applyZentaoSyncBatch(){
 
 function closeZentaoSyncDetail(){
   return window.OmniQAZentaoSyncTab.closeZentaoSyncDetail();
+}
+
+function scrollZentaoSyncToTop(){
+  return window.OmniQAZentaoSyncTab.scrollZentaoSyncToTop();
 }
 
 function setActivityRange(days){

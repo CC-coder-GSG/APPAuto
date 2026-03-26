@@ -8,6 +8,8 @@ const state = {
   records: [],
   visibleCount: INITIAL_VISIBLE_COUNT,
 };
+let buildSseBound = false;
+let buildRefreshTimer = null;
 
 const STATUS_META = {
   SUCCESS: { text: '成功', bg: '#dcfce7', color: '#166534' },
@@ -308,3 +310,21 @@ window.OmniQABuildRecordsTab = {
   closeBuildRecordLogModal,
   jobNameToMajorLabel,
 };
+
+function bindBuildRecordSSE() {
+  if (buildSseBound) return;
+  if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
+  const handler = () => {
+    const tab = document.getElementById('tab-build-records');
+    if (!tab || tab.classList.contains('hidden')) return;
+    if (buildRefreshTimer) clearTimeout(buildRefreshTimer);
+    buildRefreshTimer = setTimeout(() => {
+      loadBuildRecordsBoard().catch(() => {});
+    }, 800);
+  };
+  window.OmniQASSE.subscribe('build_record_created', handler);
+  window.OmniQASSE.subscribe('build_record_updated', handler);
+  buildSseBound = true;
+}
+
+bindBuildRecordSSE();

@@ -29,6 +29,22 @@ const SOURCE_TYPE_ZH = {
   field_test: '外业测试',
 };
 
+const ROUTE_SOURCE_ZH = {
+  case: '用例来源',
+  requirement: '需求来源',
+  test: '测试来源',
+};
+
+const ROUTE_TARGET_ZH = {
+  overall: '整体测试落位',
+  requirement_free_bug: '需求自由 Bug',
+  requirement_case_bug: '需求用例 Bug',
+  retest_requirement_free_bug: '复测需求自由 Bug',
+  retest_requirement_case_bug: '复测需求用例 Bug',
+  pending_decision: '待决策',
+  pending_mapping: '待补全映射',
+};
+
 const BUCKET_ZH = {
   requirement: '需求池',
   overall: '总览池',
@@ -46,6 +62,8 @@ const syncState = {
   resolvedMajorSource: '未识别',
   manualMajorVersionId: null,
   useManualMajor: false,
+  unseenNewCount: 0,
+  sseBound: false,
 };
 
 function zhStatus(v) {
@@ -62,6 +80,14 @@ function zhSourceType(v) {
 
 function zhBucket(v) {
   return BUCKET_ZH[String(v || '').toLowerCase()] || String(v || '-');
+}
+
+function zhRouteSource(v) {
+  return ROUTE_SOURCE_ZH[String(v || '').toLowerCase()] || String(v || '-');
+}
+
+function zhRouteTarget(v) {
+  return ROUTE_TARGET_ZH[String(v || '').toLowerCase()] || String(v || '-');
 }
 
 function getCurrentSoftwareId() {
@@ -549,7 +575,7 @@ function renderList() {
       const deleteBtn = isAdminUser()
         ? `<button class='secondary' style='color:#b91c1c; border-color:#fecaca; background:#fef2f2;' onclick='deleteZentaoSyncEvent(${it.id})'>删除</button>`
         : '';
-      return `<tr style="${selected ? 'background:#eff6ff;' : ''}">
+      return `<tr class='zentao-row-card' data-event-id='${it.id}' style="${selected ? 'background:#eff6ff;' : ''}">
         <td>${fmt(it.created_at)}</td>
         <td>${escapeHtml(zhEntity(it.entity_type))}</td>
         <td>${escapeHtml(no)}</td>
@@ -568,6 +594,119 @@ function renderList() {
 
   const maxPage = Math.max(1, Math.ceil((syncState.total || 0) / PAGE_SIZE));
   pageText.innerText = `第 ${syncState.page} / ${maxPage} 页，共 ${syncState.total} 条`;
+}
+
+function zentaoAtTop() {
+  const wrap = document.querySelector('#tab-zentao-sync .zentao-sync-table-wrap');
+  if (!wrap) return true;
+  return wrap.scrollTop <= 12;
+}
+
+function updateTopNotice() {
+  const notice = document.getElementById('zentaoSyncTopNotice');
+  if (!notice) return;
+  if (syncState.unseenNewCount <= 0) {
+    notice.classList.add('hidden');
+    notice.textContent = '有 0 条新同步记录';
+    return;
+  }
+  notice.classList.remove('hidden');
+  notice.textContent = `有 ${syncState.unseenNewCount} 条新同步记录`;
+}
+
+function glowRowByEventId(eventId, tone = 'blue') {
+  const el = document.querySelector(`.zentao-row-card[data-event-id='${eventId}']`);
+  if (!el || !window.OmniQASSE || typeof window.OmniQASSE.pulseBoundaryGlow !== 'function') return;
+  window.OmniQASSE.pulseBoundaryGlow(el, tone);
+}
+
+function upsertItemKeepingOrder(item) {
+  if (!item || !item.id) return false;
+  const idx = syncState.items.findIndex((x) => Number(x.id) === Number(item.id));
+  if (idx >= 0) {
+    syncState.items[idx] = { ...syncState.items[idx], ...item };
+    return false;
+  }
+  syncState.items.unshift(item);
+  if (syncState.items.length > PAGE_SIZE) syncState.items = syncState.items.slice(0, PAGE_SIZE);
+  syncState.total = Number(syncState.total || 0) + 1;
+  return true;
+}
+
+function removeItemWithFade(eventId) {
+  const rowCard = document.querySelector(`.zentao-row-card[data-event-id='${eventId}']`);
+  if (rowCard) {
+    const tr = rowCard.closest('tr');
+    if (tr) {
+      tr.style.transition = 'opacity .22s ease, transform .22s ease';
+      tr.style.opacity = '0';
+      tr.style.transform = 'translateY(-3px)';
+      setTimeout(() => {
+        syncState.items = syncState.items.filter((x) => Number(x.id) !== Number(eventId));
+        syncState.total = Math.max(0, Number(syncState.total || 0) - 1);
+        renderList();
+      }, 220);
+      return;
+    }
+  }
+  syncState.items = syncState.items.filter((x) => Number(x.id) !== Number(eventId));
+  syncState.total = Math.max(0, Number(syncState.total || 0) - 1);
+  renderList();
+}
+
+function bindSSE() {
+  if (syncState.sseBound) return;
+  if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
+  const onCreated = ({ payload }) => {
+    const item = payload?.item;
+    if (!item) return;
+    const inserted = upsertItemKeepingOrder(item);
+    renderList();
+    if (inserted) {
+      if (zentaoAtTop()) {
+        glowRowByEventId(item.id, 'purple');
+      } else {
+        syncState.unseenNewCount += 1;
+        updateTopNotice();
+      }
+    }
+  };
+  const onUpdated = ({ payload }) => {
+    const item = payload?.item;
+    if (!item) return;
+    const idx = syncState.items.findIndex((x) => Number(x.id) === Number(item.id));
+    if (idx < 0) return;
+    syncState.items[idx] = { ...syncState.items[idx], ...item };
+    renderList();
+    glowRowByEventId(item.id, 'green');
+  };
+  const onDeleted = ({ payload }) => {
+    const eventId = Number(payload?.id || 0);
+    if (!eventId) return;
+    if (syncState.currentEvent?.id === eventId) {
+      syncState.currentEvent = null;
+      renderDetail(null);
+      window.showMessage?.('当前详情记录已删除', 'success');
+    }
+    removeItemWithFade(eventId);
+  };
+  window.OmniQASSE.subscribe('zentao_sync_created', onCreated);
+  window.OmniQASSE.subscribe('zentao_sync_updated', onUpdated);
+  window.OmniQASSE.subscribe('zentao_sync_auto_apply_failed', onUpdated);
+  window.OmniQASSE.subscribe('zentao_sync_deleted', onDeleted);
+  syncState.sseBound = true;
+}
+
+function bindTopScrollReset() {
+  const wrap = document.querySelector('#tab-zentao-sync .zentao-sync-table-wrap');
+  if (!wrap || wrap.dataset.sseBound === '1') return;
+  wrap.dataset.sseBound = '1';
+  wrap.addEventListener('scroll', () => {
+    if (zentaoAtTop() && syncState.unseenNewCount > 0) {
+      syncState.unseenNewCount = 0;
+      updateTopNotice();
+    }
+  });
 }
 
 function renderDetail(detail) {
@@ -618,6 +757,9 @@ function renderDetail(detail) {
     `推荐来源类型：${zhSourceType(detail.recommended_source_type)}`,
     `推荐归属范围：${zhBucket(detail.recommended_display_bucket || detail.display_bucket)}`,
     `推荐来源用例关联：${detail.recommended_test_case_id || '-'}`,
+    `自动路由来源：${zhRouteSource(detail.recommended_route_source)}`,
+    `自动路由目标：${zhRouteTarget(detail.recommended_route_target)}`,
+    `待确认原因：${localizeFreeText(detail.recommended_decision_reason)}`,
   ];
   setText('zentaoSyncRecommendInfo', recLines.join('\n'));
 
@@ -660,9 +802,26 @@ export async function loadZentaoSyncBoard(page = 1) {
 
 export async function initZentaoSyncBoard() {
   ensureLoggedIn();
+  bindSSE();
+  bindTopScrollReset();
+  if (window.OmniQASSE?.runtime?.counters) {
+    window.OmniQASSE.runtime.counters.zentaoNew = 0;
+    const badge = document.getElementById('tabZentaoSyncBadge');
+    if (badge) {
+      badge.classList.add('hidden');
+      badge.textContent = '';
+    }
+  }
   await ensureZentaoMapDataReady();
   await resetZentaoMapForm();
   await loadZentaoSyncBoard(1);
+}
+
+export function scrollZentaoSyncToTop() {
+  const wrap = document.querySelector('#tab-zentao-sync .zentao-sync-table-wrap');
+  if (wrap) wrap.scrollTop = 0;
+  syncState.unseenNewCount = 0;
+  updateTopNotice();
 }
 
 export async function nextZentaoSyncPage() {
@@ -737,13 +896,17 @@ export async function applyZentaoSyncEvent() {
     window.showMessage?.('请先选择左侧同步事件', 'error');
     return;
   }
-  const data = await (await api(`/api/integrations/zentao/browser-events/${syncState.currentEvent.id}/apply`, {
-    method: 'POST',
-    headers: window.H,
-  })).json();
-  window.showMessage?.(data.message || '应用完成', 'success');
-  await openZentaoSyncEventDetail(syncState.currentEvent.id);
-  await loadZentaoSyncBoard(syncState.page);
+  try {
+    const data = await (await api(`/api/integrations/zentao/browser-events/${syncState.currentEvent.id}/apply`, {
+      method: 'POST',
+      headers: window.H,
+    })).json();
+    window.showMessage?.(data.message || '应用完成', 'success');
+    await openZentaoSyncEventDetail(syncState.currentEvent.id);
+    await loadZentaoSyncBoard(syncState.page);
+  } catch (err) {
+    window.showMessage?.(err?.message || '应用失败', 'error');
+  }
 }
 
 export async function deleteZentaoSyncEvent(eventId = null) {
@@ -810,4 +973,5 @@ window.OmniQAZentaoSyncTab = {
   deleteZentaoSyncEvent,
   applyZentaoSyncBatch,
   closeZentaoSyncDetail,
+  scrollZentaoSyncToTop,
 };

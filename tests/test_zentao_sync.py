@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from app.api.deps import get_current_user, get_db
 from app.api.routes.zentao_sync import router as zentao_router
 from app.core.config import settings
-from app.models import BrowserSyncEvent, BugTracking, Requirement, SoftwareProduct, TestCase, User, UserRole, Version, VersionType
+from app.models import BrowserSyncEvent, BugTracking, Requirement, RequirementStatus, SoftwareProduct, TestCase, User, UserRole, Version, VersionType
 from app.schemas.zentao_sync import ZentaoBrowserSyncPayload
 from app.services.zentao_sync_service import ZentaoSyncService
 
@@ -693,3 +693,181 @@ def test_list_filters_status_entity_keyword(db_session):
     assert all_data["total"] >= 2
     assert all(item["entity_type"] == "testcase" for item in case_data["items"])
     assert any((item.get("zentao_bug_id") == "29332") for item in kw_data["items"])
+
+
+def test_bug_route_source_prefers_case_over_requirement(db_session):
+    software = SoftwareProduct(name="Survey Master")
+    db_session.add(software)
+    db_session.commit()
+    db_session.refresh(software)
+    major = _create_major(db_session, software.id, "V4.0.3.1")
+    req = _create_requirement(db_session, major.id, "r#2992", "req 2992")
+    case = TestCase(requirement_id=req.id, zentao_case_id="u#9001")
+    db_session.add(case)
+    db_session.commit()
+
+    service = ZentaoSyncService(db_session)
+    payload = _base_bug_payload("bug_route_case_first")
+    payload["draft"]["executionName"] = "s4031(V4.0.3.1)"
+    payload["draft"]["linkedCaseId"] = "9001"
+    payload["draft"]["requirementId"] = "2992"
+    rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
+    detail = service.get_event_detail(rec["event_id"])
+    assert detail["recommended_route_source"] == "case"
+    assert detail["recommended_test_case_id"] == case.id
+
+
+def test_bug_route_source_requirement_when_no_case(db_session):
+    software = SoftwareProduct(name="Survey Master")
+    db_session.add(software)
+    db_session.commit()
+    db_session.refresh(software)
+    major = _create_major(db_session, software.id, "V4.0.3.1")
+    _create_requirement(db_session, major.id, "r#2992", "req 2992")
+    service = ZentaoSyncService(db_session)
+    payload = _base_bug_payload("bug_route_req")
+    payload["draft"]["executionName"] = "s4031(V4.0.3.1)"
+    payload["draft"]["linkedCaseId"] = None
+    rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
+    detail = service.get_event_detail(rec["event_id"])
+    assert detail["recommended_route_source"] == "requirement"
+
+
+def test_bug_route_source_test_when_no_case_and_no_requirement(db_session):
+    software = SoftwareProduct(name="Survey Master")
+    db_session.add(software)
+    db_session.commit()
+    db_session.refresh(software)
+    _create_major(db_session, software.id, "V4.0.3.1")
+    service = ZentaoSyncService(db_session)
+    payload = _base_bug_payload("bug_route_test")
+    payload["draft"]["linkedCaseId"] = None
+    payload["draft"]["requirementId"] = None
+    payload["draft"]["requirementName"] = None
+    payload["draft"]["executionName"] = "s4031(V4.0.3.1)"
+    rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
+    detail = service.get_event_detail(rec["event_id"])
+    assert detail["recommended_route_source"] == "test"
+    assert detail["recommended_display_bucket"] == "overall"
+
+
+def test_bug_case_source_without_testcase_goes_pending_decision(db_session):
+    software = SoftwareProduct(name="Survey Master")
+    db_session.add(software)
+    db_session.commit()
+    db_session.refresh(software)
+    major = _create_major(db_session, software.id, "V4.0.3.1")
+    _create_minor(db_session, major.id, "4.0.3.1.260324(40301008)")
+    _create_requirement(db_session, major.id, "r#2992", "req 2992")
+    service = ZentaoSyncService(db_session)
+    payload = _base_bug_payload("bug_case_pending_decision")
+    payload["draft"]["linkedCaseId"] = "999999"
+    payload["draft"]["executionName"] = "s4031(V4.0.3.1)"
+    rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
+    row = db_session.query(BrowserSyncEvent).filter(BrowserSyncEvent.id == rec["event_id"]).first()
+    assert row.status == "pending_mapping"
+    assert "testcase" in str(row.failure_reason or "").lower()
+
+
+def test_bug_test_source_not_blocked_by_requirement_completion(db_session):
+    software = SoftwareProduct(name="Survey Master")
+    db_session.add(software)
+    db_session.commit()
+    db_session.refresh(software)
+    major = _create_major(db_session, software.id, "V4.0.3.1")
+    _create_minor(db_session, major.id, "4.0.3.1.260324(40301008)")
+    service = ZentaoSyncService(db_session)
+
+    payload = _base_bug_payload("bug_test_source_overall")
+    payload["draft"]["linkedCaseId"] = None
+    payload["draft"]["requirementId"] = None
+    payload["draft"]["requirementName"] = None
+    payload["draft"]["executionName"] = "s4031(V4.0.3.1)"
+    payload["draft"]["affectedVersion"] = "4.0.3.1.260324(40301008)"
+    rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
+    row = db_session.query(BrowserSyncEvent).filter(BrowserSyncEvent.id == rec["event_id"]).first()
+    assert row.display_bucket == "overall"
+    assert row.status in {"ready_to_apply", "applied"}
+
+
+def test_bug_closed_requirement_non_retester_turns_pending_decision(db_session):
+    software = SoftwareProduct(name="Survey Master")
+    db_session.add(software)
+    db_session.commit()
+    db_session.refresh(software)
+    major = _create_major(db_session, software.id, "V4.0.3.1")
+    req = _create_requirement(db_session, major.id, "r#2992", "req 2992")
+    req.test_completed = True
+    db_session.commit()
+    service = ZentaoSyncService(db_session)
+    payload = _base_bug_payload("bug_closed_req_not_retester")
+    payload["draft"]["executionName"] = "s4031(V4.0.3.1)"
+    rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
+    row = db_session.query(BrowserSyncEvent).filter(BrowserSyncEvent.id == rec["event_id"]).first()
+    assert row.status == "pending_mapping"
+    assert "封版" in str(row.failure_reason or "")
+
+
+def test_bug_closed_requirement_retester_can_continue(db_session):
+    software = SoftwareProduct(name="Survey Master")
+    db_session.add(software)
+    db_session.commit()
+    db_session.refresh(software)
+    major = _create_major(db_session, software.id, "V4.0.3.1")
+    retester = _create_user(db_session, "retester_sync", role=UserRole.USER, display_name="Retester")
+    req = _create_requirement(db_session, major.id, "r#2992", "req 2992")
+    req.test_completed = True
+    req.retested_by_id = retester.id
+    req.status = RequirementStatus.RETEST_PENDING
+    db_session.commit()
+    service = ZentaoSyncService(db_session)
+    payload = _base_bug_payload("bug_closed_req_retester")
+    payload["draft"]["creatorName"] = "Retester"
+    payload["draft"]["executionName"] = "s4031(V4.0.3.1)"
+    rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
+    row = db_session.query(BrowserSyncEvent).filter(BrowserSyncEvent.id == rec["event_id"]).first()
+    assert row.mapped_requirement_id == req.id
+    assert row.mapped_source_type == "retest"
+    assert row.status != "failed"
+
+
+def test_testcase_sync_ignores_case_completed_restriction(db_session):
+    software = SoftwareProduct(name="Survey Master")
+    db_session.add(software)
+    db_session.commit()
+    db_session.refresh(software)
+    major = _create_major(db_session, software.id, "V4.0.3.0")
+    req = _create_requirement(db_session, major.id, "r#535", "case blocked req")
+    req.case_completed = True
+    db_session.commit()
+    service = ZentaoSyncService(db_session)
+    rec = service.receive_event(ZentaoBrowserSyncPayload(**_base_case_payload("case_sync_closed_req")))
+    row = db_session.query(BrowserSyncEvent).filter(BrowserSyncEvent.id == rec["event_id"]).first()
+    row.mapped_requirement_id = req.id
+    row.status = "ready_to_apply"
+    db_session.commit()
+    out = service.apply_event(row.id, actor_id=None)
+    assert out["ok"] is True
+    assert db_session.query(TestCase).filter(TestCase.requirement_id == req.id, TestCase.zentao_case_id == "u#19617").count() == 1
+
+
+def test_apply_event_returns_clear_error_for_pending_decision(db_session):
+    software = SoftwareProduct(name="Survey Master")
+    db_session.add(software)
+    db_session.commit()
+    db_session.refresh(software)
+    major = _create_major(db_session, software.id, "V4.0.3.1")
+    _create_requirement(db_session, major.id, "r#2992", "req 2992")
+    admin = _create_user(db_session, "admin_apply_pending_decision", role=UserRole.ADMIN)
+    client = _make_client(db_session, admin)
+    try:
+        service = ZentaoSyncService(db_session)
+        payload = _base_bug_payload("bug_apply_pending_decision")
+        payload["draft"]["linkedCaseId"] = "999999"
+        payload["draft"]["executionName"] = "s4031(V4.0.3.1)"
+        rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
+        resp = client.post(f"/api/integrations/zentao/browser-events/{rec['event_id']}/apply")
+        assert resp.status_code == 400
+        assert "人工决策" in str(resp.json().get("detail", ""))
+    finally:
+        client.close()

@@ -4,6 +4,8 @@ import { renderGovernanceCharts, renderReportCharts } from '../components/charts
 import { renderBugLink, sourceTypeZh } from '../utils.js';
 
 let governanceCache = null;
+let reportSseBound = false;
+let reportRefreshTimer = null;
 
 function getCurrentUser() {
   return state.currentUser || window.currentUser || null;
@@ -285,6 +287,22 @@ export function exportReportPdf() {
     });
   });
 }
+
+function bindReportSSE() {
+  if (reportSseBound) return;
+  if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
+  window.OmniQASSE.subscribe('report_data_changed', () => {
+    const tab = document.getElementById('tab-report');
+    if (!tab || tab.classList.contains('hidden')) return;
+    if (reportRefreshTimer) clearTimeout(reportRefreshTimer);
+    reportRefreshTimer = setTimeout(() => {
+      queryReport().catch(() => {});
+    }, 900);
+  });
+  reportSseBound = true;
+}
+
+bindReportSSE();
 
 window.OmniQAReportTab = { queryReport, exportReportPdf };
 window.openGovernanceDetail = openGovernanceDetail;

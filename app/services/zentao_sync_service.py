@@ -3,6 +3,7 @@
 import json
 import logging
 from datetime import datetime
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
@@ -14,6 +15,7 @@ from app.models import (
     BugTracking,
     BrowserSyncEvent,
     Requirement,
+    RequirementStatus,
     SoftwareProduct,
     TestCase,
     User,
@@ -26,6 +28,7 @@ from app.schemas.zentao_sync import ZentaoBrowserSyncPayload
 from app.services.audit_service import audit
 from app.services.bug_service import BugService
 from app.services.requirement_service import RequirementService
+from app.services.sse_service import sse_publish
 from app.services.zentao_matcher import (
     convert_s_token_to_major_version,
     extract_requirement_numeric_id,
@@ -37,6 +40,21 @@ from app.services.zentao_matcher import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BugRouteDecision:
+    route_source: str
+    route_target: str
+    reason: str | None
+    mapped_source_type: str | None
+    display_bucket: str
+    requirement_id: int | None
+    test_case_id: int | None
+    major_version_id: int | None
+    minor_version_id: int | None
+    creator_user_id: int | None
+    auto_apply_allowed: bool
 
 
 class ZentaoSyncService:
@@ -133,6 +151,7 @@ class ZentaoSyncService:
             event.zentao_bug_id,
             event.zentao_case_id,
         )
+        self._emit_zentao_row_event("zentao_sync_created", event)
         return {
             "ok": True,
             "event_id": event.id,
@@ -242,6 +261,7 @@ class ZentaoSyncService:
 
         self._mark_mapped_status(row)
         self.repo.save(row)
+        self._emit_zentao_row_event("zentao_sync_updated", row)
         audit(
             self.db,
             action="zentao_sync.map",
@@ -280,17 +300,20 @@ class ZentaoSyncService:
                 target_id=str(row.id),
                 detail=f"entity={row.entity_type}",
             )
+            self._emit_zentao_row_event("zentao_sync_updated", row)
             return {"ok": True, "event_id": row.id, "status": row.status, "message": "应用成功"}
         except HTTPException as exc:
             row.status = "failed"
             row.failure_reason = str(exc.detail)
             self.repo.save(row)
+            self._emit_zentao_row_event("zentao_sync_auto_apply_failed", row)
             logger.warning("同步事件应用失败 | eventId=%s detail=%s", row.id, exc.detail)
             raise
         except Exception as exc:
             row.status = "failed"
             row.failure_reason = str(exc)
             self.repo.save(row)
+            self._emit_zentao_row_event("zentao_sync_auto_apply_failed", row)
             logger.exception("同步事件应用异常 | eventId=%s", row.id)
             raise HTTPException(status_code=500, detail="应用同步事件失败") from exc
 
@@ -324,6 +347,11 @@ class ZentaoSyncService:
         status = row.status
         self.db.delete(row)
         self.db.commit()
+        sse_publish(
+            "zentao_sync_deleted",
+            {"id": event_id, "entity_type": entity_type, "status": status},
+            channels=["global"],
+        )
         audit(
             self.db,
             action="zentao_sync.delete",
@@ -386,50 +414,24 @@ class ZentaoSyncService:
     def _auto_map_bug(self, row: BrowserSyncEvent) -> None:
         payload = self._event_payload(row)
         draft = payload.get("draft", {})
-        requirement_candidates = self._recommend_requirements(row)
-        if len(requirement_candidates) == 1:
-            req = requirement_candidates[0]
-            row.mapped_requirement_id = req.id
-            row.mapped_major_version_id = req.major_version_id
-            row.display_bucket = "requirement"
-        elif len(requirement_candidates) > 1:
+        row.linked_case_id = self._extract_linked_case_id(draft, row) or row.linked_case_id
+        decision = self._build_bug_route_decision(row, draft=draft)
+        row.mapped_source_type = decision.mapped_source_type
+        row.display_bucket = decision.display_bucket
+        row.mapped_requirement_id = decision.requirement_id
+        row.mapped_test_case_id = decision.test_case_id
+        row.mapped_major_version_id = decision.major_version_id
+        row.mapped_minor_version_id = decision.minor_version_id
+
+        if decision.route_target == "pending_decision":
             row.status = "pending_mapping"
-            row.failure_reason = "自动匹配到多个需求，请人工确认"
-            return
+            row.failure_reason = decision.reason or "待人工决策"
         else:
-            row.display_bucket = "overall"
+            self._mark_mapped_status(row)
+            if decision.reason and row.status != "ready_to_apply":
+                row.failure_reason = decision.reason
 
-        if row.linked_case_id and not row.mapped_test_case_id:
-            row.mapped_test_case_id = self._find_test_case_id(row.linked_case_id)
-
-        if not row.mapped_major_version_id:
-            execution = self._clean_text(draft.get("executionName") or draft.get("executionId") or row.zentao_execution_name)
-            major = self._match_major_by_execution(
-                execution_id=execution,
-                product_name=self._clean_text(draft.get("productName") or row.zentao_product_name),
-                project_name=self._clean_text(draft.get("projectName") or row.zentao_project_name),
-            )
-            if major:
-                row.mapped_major_version_id = major.id
-            else:
-                major = self._match_major_by_affected_version(
-                    affected_version=self._clean_text(draft.get("affectedVersion") or row.zentao_affected_version),
-                    product_name=self._clean_text(draft.get("productName") or row.zentao_product_name),
-                    project_name=self._clean_text(draft.get("projectName") or row.zentao_project_name),
-                )
-                if major:
-                    row.mapped_major_version_id = major.id
-
-        if row.mapped_major_version_id and not row.mapped_minor_version_id:
-            minor = self._match_minor_by_affected_version(
-                major_id=row.mapped_major_version_id,
-                affected_version=self._clean_text(draft.get("affectedVersion") or row.zentao_affected_version),
-            )
-            if minor:
-                row.mapped_minor_version_id = minor.id
-
-        self._mark_mapped_status(row)
-        self._maybe_auto_apply_bug(row, draft=draft)
+        self._maybe_auto_apply_bug(row, draft=draft, decision=decision)
 
     def _recommend_requirements(self, row: BrowserSyncEvent) -> list[Requirement]:
         payload = self._event_payload(row)
@@ -508,10 +510,12 @@ class ZentaoSyncService:
             row.applied_case_id = existing.id
             return
 
-        created = self.requirement_service.add_case_to_requirement(row.mapped_requirement_id, case_no, actor_id=actor_id)
-        new_case = self.db.query(TestCase).filter(TestCase.id == created["id"]).first()
-        if not new_case:
-            raise HTTPException(status_code=500, detail="用例创建后读取失败")
+        # Browser sync testcase should not be blocked by requirement assignment/case-completed guard.
+        actor = self._resolve_actor_for_apply(payload, actor_id)
+        new_case = TestCase(requirement_id=row.mapped_requirement_id, zentao_case_id=case_no, creator_id=actor.id)
+        self.db.add(new_case)
+        self.db.commit()
+        self.db.refresh(new_case)
 
         draft = payload.get("draft", {})
         new_case.zentao_case_url = payload.get("result", {}).get("zentaoCaseUrl")
@@ -539,6 +543,11 @@ class ZentaoSyncService:
             raise HTTPException(status_code=400, detail="overall Bug 事件尚未映射 major_version_id")
 
         payload = self._event_payload(row)
+        draft = payload.get("draft", {})
+        decision = self._build_bug_route_decision(row, draft=draft)
+        if decision.route_target == "pending_decision":
+            raise HTTPException(status_code=400, detail=decision.reason or "当前事件仍需人工决策，暂不可应用")
+
         bug_id_raw = payload.get("result", {}).get("zentaoBugId") or row.zentao_bug_id
         if not bug_id_raw:
             raise HTTPException(status_code=400, detail="缺少 zentaoBugId")
@@ -550,13 +559,14 @@ class ZentaoSyncService:
             return
 
         actor = self._resolve_actor_for_apply(payload, actor_id)
-        draft = payload.get("draft", {})
-        source_type = self._parse_bug_source_type(row.mapped_source_type or draft.get("sourceType"))
+        source_type = self._parse_bug_source_type(decision.mapped_source_type or row.mapped_source_type or draft.get("sourceType"))
+        if decision.route_target.startswith("retest_"):
+            source_type = BugSourceType.RETEST
 
-        use_overall_bucket = row.display_bucket == "overall" or not row.mapped_minor_version_id
+        use_overall_bucket = decision.display_bucket == "overall" or not row.mapped_minor_version_id
         if use_overall_bucket:
             bug_row = BugTracking(
-                major_version_id=row.mapped_major_version_id,  # type: ignore[arg-type]
+                major_version_id=decision.major_version_id or row.mapped_major_version_id,  # type: ignore[arg-type]
                 requirement_id=None,
                 source_type=source_type,
                 source_ref=row.mapped_source_ref or draft.get("sourceRef"),
@@ -579,7 +589,7 @@ class ZentaoSyncService:
             created = self.bug_service.create_execution_bug(
                 bug_id=bug_no,
                 minor_version_id=row.mapped_minor_version_id,
-                requirement_id=row.mapped_requirement_id,  # type: ignore[arg-type]
+                requirement_id=decision.requirement_id or row.mapped_requirement_id,  # type: ignore[arg-type]
                 source_type=source_type,
                 source_ref=row.mapped_source_ref or draft.get("sourceRef"),
                 actor=actor,
@@ -619,23 +629,24 @@ class ZentaoSyncService:
 
         row.applied_bug_tracking_id = bug_row.id
 
-    def _maybe_auto_apply_bug(self, row: BrowserSyncEvent, *, draft: dict[str, Any]) -> None:
+    def _maybe_auto_apply_bug(self, row: BrowserSyncEvent, *, draft: dict[str, Any], decision: BugRouteDecision) -> None:
         if row.entity_type != "bug":
             return
         if not self._auto_apply_bug_enabled():
             return
         if row.status == "applied" or row.applied_bug_tracking_id:
             return
+        if not decision.auto_apply_allowed:
+            return
         if not row.mapped_major_version_id:
             return
         bug_title = self._clean_text(row.zentao_bug_title or draft.get("bugTitle"))
         if not bug_title:
             return
-        # For auto apply we only require major + title; no minor is required.
+        if decision.route_target == "pending_decision":
+            return
         if not row.mapped_source_type:
-            row.mapped_source_type = BugSourceType.MANUAL.value
-        if row.display_bucket != "overall" and not row.mapped_minor_version_id:
-            row.display_bucket = "overall"
+            row.mapped_source_type = decision.mapped_source_type or BugSourceType.MANUAL.value
         try:
             self._apply_bug(row, actor_id=None)
             row.status = "applied"
@@ -803,8 +814,8 @@ class ZentaoSyncService:
             return
 
         if row.entity_type == "bug":
-            # Requirement is a stronger routing signal than the initial browser payload bucket.
-            row.display_bucket = "requirement" if row.mapped_requirement_id else "overall"
+            if row.display_bucket not in {"requirement", "overall"}:
+                row.display_bucket = "requirement" if row.mapped_requirement_id else "overall"
             if row.display_bucket == "overall":
                 if row.mapped_major_version_id and row.mapped_minor_version_id:
                     row.status = "ready_to_apply"
@@ -874,6 +885,296 @@ class ZentaoSyncService:
         )
         return row.id if row else None
 
+    def _build_bug_route_decision(self, row: BrowserSyncEvent, *, draft: dict[str, Any]) -> BugRouteDecision:
+        route_source = self._detect_bug_route_source(row, draft)
+        creator = self._resolve_creator_user(draft)
+
+        major_id = row.mapped_major_version_id
+        if not major_id:
+            execution = self._clean_text(draft.get("executionName") or draft.get("executionId") or row.zentao_execution_name)
+            major = self._match_major_by_execution(
+                execution_id=execution,
+                product_name=self._clean_text(draft.get("productName") or row.zentao_product_name),
+                project_name=self._clean_text(draft.get("projectName") or row.zentao_project_name),
+            )
+            if not major:
+                major = self._match_major_by_affected_version(
+                    affected_version=self._clean_text(draft.get("affectedVersion") or row.zentao_affected_version),
+                    product_name=self._clean_text(draft.get("productName") or row.zentao_product_name),
+                    project_name=self._clean_text(draft.get("projectName") or row.zentao_project_name),
+                )
+            major_id = major.id if major else None
+
+        minor_id = row.mapped_minor_version_id
+        if major_id and not minor_id:
+            minor = self._match_minor_by_affected_version(
+                major_id=major_id,
+                affected_version=self._clean_text(draft.get("affectedVersion") or row.zentao_affected_version),
+            )
+            if minor:
+                minor_id = minor.id
+
+        mapped_source_type = BugSourceType.MANUAL.value
+        display_bucket = "overall"
+        requirement_id: int | None = None
+        test_case_id: int | None = None
+        route_target = "overall"
+        reason: str | None = None
+        auto_apply_allowed = False
+
+        if route_source == "test":
+            mapped_source_type = BugSourceType.MANUAL.value
+            display_bucket = "overall"
+            route_target = "overall"
+            if not major_id:
+                reason = "测试来源缺少可识别大版本，请补充 execution/affectedVersion"
+            elif not minor_id:
+                reason = "测试来源已识别大版本，缺少小版本；可人工确认后再应用"
+            auto_apply_allowed = bool(major_id)
+            return BugRouteDecision(
+                route_source=route_source,
+                route_target=route_target,
+                reason=reason,
+                mapped_source_type=mapped_source_type,
+                display_bucket=display_bucket,
+                requirement_id=None,
+                test_case_id=None,
+                major_version_id=major_id,
+                minor_version_id=minor_id,
+                creator_user_id=creator.id if creator else None,
+                auto_apply_allowed=auto_apply_allowed,
+            )
+
+        requirement_candidates = self._recommend_requirements(row)
+        linked_case_id = self._extract_linked_case_id(draft, row)
+        test_case = self._find_test_case_by_zentao_id(linked_case_id, major_id=major_id) if route_source == "case" else None
+        if test_case:
+            test_case_id = test_case.id
+            requirement_id = test_case.requirement_id
+            req_row = self.db.query(Requirement).filter(Requirement.id == requirement_id).first()
+        else:
+            req_row = requirement_candidates[0] if len(requirement_candidates) == 1 else None
+            if req_row:
+                requirement_id = req_row.id
+                if not major_id:
+                    major_id = req_row.major_version_id
+
+        if route_source == "case":
+            mapped_source_type = BugSourceType.CASE.value
+            if len(requirement_candidates) > 1 and not req_row and not test_case:
+                return BugRouteDecision(
+                    route_source=route_source,
+                    route_target="pending_decision",
+                    reason="用例来源匹配到多个需求，需人工确认",
+                    mapped_source_type=mapped_source_type,
+                    display_bucket="requirement",
+                    requirement_id=None,
+                    test_case_id=None,
+                    major_version_id=major_id,
+                    minor_version_id=minor_id,
+                    creator_user_id=creator.id if creator else None,
+                    auto_apply_allowed=False,
+                )
+            if not req_row:
+                return BugRouteDecision(
+                    route_source=route_source,
+                    route_target="pending_mapping",
+                    reason="用例来源缺少可匹配需求，请人工补充 requirement",
+                    mapped_source_type=mapped_source_type,
+                    display_bucket="requirement",
+                    requirement_id=None,
+                    test_case_id=None,
+                    major_version_id=major_id,
+                    minor_version_id=minor_id,
+                    creator_user_id=creator.id if creator else None,
+                    auto_apply_allowed=False,
+                )
+            display_bucket = "requirement"
+            if req_row.test_completed:
+                if self._is_retest_context(row, draft, req_row, creator):
+                    route_target = "retest_requirement_case_bug" if test_case_id else "retest_requirement_free_bug"
+                    mapped_source_type = BugSourceType.RETEST.value
+                    reason = None if test_case_id else "需求已封版且处于复测阶段，但未找到 testcase，建议先创建 testcase 再挂载"
+                    return BugRouteDecision(
+                        route_source=route_source,
+                        route_target=route_target if test_case_id else "pending_decision",
+                        reason=reason if reason else None,
+                        mapped_source_type=mapped_source_type,
+                        display_bucket=display_bucket,
+                        requirement_id=requirement_id,
+                        test_case_id=test_case_id,
+                        major_version_id=major_id,
+                        minor_version_id=minor_id,
+                        creator_user_id=creator.id if creator else None,
+                        auto_apply_allowed=bool(test_case_id and major_id),
+                    )
+                return BugRouteDecision(
+                    route_source=route_source,
+                    route_target="pending_decision",
+                    reason="需求已测试完成/封版，且创建者非复测责任人；请确认转复测或转整体测试",
+                    mapped_source_type=mapped_source_type,
+                    display_bucket=display_bucket,
+                    requirement_id=requirement_id,
+                    test_case_id=test_case_id,
+                    major_version_id=major_id,
+                    minor_version_id=minor_id,
+                    creator_user_id=creator.id if creator else None,
+                    auto_apply_allowed=False,
+                )
+            if not test_case_id:
+                return BugRouteDecision(
+                    route_source=route_source,
+                    route_target="pending_decision",
+                    reason="用例来源未找到对应 testcase：可选择创建 testcase 后挂载，或暂缓处理",
+                    mapped_source_type=mapped_source_type,
+                    display_bucket=display_bucket,
+                    requirement_id=requirement_id,
+                    test_case_id=None,
+                    major_version_id=major_id,
+                    minor_version_id=minor_id,
+                    creator_user_id=creator.id if creator else None,
+                    auto_apply_allowed=False,
+                )
+            return BugRouteDecision(
+                route_source=route_source,
+                route_target="requirement_case_bug",
+                reason=None,
+                mapped_source_type=mapped_source_type,
+                display_bucket=display_bucket,
+                requirement_id=requirement_id,
+                test_case_id=test_case_id,
+                major_version_id=major_id,
+                minor_version_id=minor_id,
+                creator_user_id=creator.id if creator else None,
+                auto_apply_allowed=bool(major_id and minor_id),
+            )
+
+        # requirement source
+        mapped_source_type = BugSourceType.REQUIREMENT.value
+        display_bucket = "requirement"
+        if len(requirement_candidates) > 1 and not req_row:
+            return BugRouteDecision(
+                route_source=route_source,
+                route_target="pending_mapping",
+                reason="需求来源匹配到多个需求，请人工确认",
+                mapped_source_type=mapped_source_type,
+                display_bucket=display_bucket,
+                requirement_id=None,
+                test_case_id=None,
+                major_version_id=major_id,
+                minor_version_id=minor_id,
+                creator_user_id=creator.id if creator else None,
+                auto_apply_allowed=False,
+            )
+        if not req_row:
+            return BugRouteDecision(
+                route_source=route_source,
+                route_target="pending_mapping",
+                reason="需求来源未匹配到 requirement，请人工确认",
+                mapped_source_type=mapped_source_type,
+                display_bucket=display_bucket,
+                requirement_id=None,
+                test_case_id=None,
+                major_version_id=major_id,
+                minor_version_id=minor_id,
+                creator_user_id=creator.id if creator else None,
+                auto_apply_allowed=False,
+            )
+        if req_row.test_completed:
+            if self._is_retest_context(row, draft, req_row, creator):
+                return BugRouteDecision(
+                    route_source=route_source,
+                    route_target="retest_requirement_free_bug",
+                    reason=None,
+                    mapped_source_type=BugSourceType.RETEST.value,
+                    display_bucket=display_bucket,
+                    requirement_id=req_row.id,
+                    test_case_id=None,
+                    major_version_id=major_id,
+                    minor_version_id=minor_id,
+                    creator_user_id=creator.id if creator else None,
+                    auto_apply_allowed=bool(major_id and minor_id),
+                )
+            return BugRouteDecision(
+                route_source=route_source,
+                route_target="pending_decision",
+                reason="需求已测试完成/封版，请确认转整体测试或复测后再应用",
+                mapped_source_type=mapped_source_type,
+                display_bucket=display_bucket,
+                requirement_id=req_row.id,
+                test_case_id=None,
+                major_version_id=major_id,
+                minor_version_id=minor_id,
+                creator_user_id=creator.id if creator else None,
+                auto_apply_allowed=False,
+            )
+        return BugRouteDecision(
+            route_source=route_source,
+            route_target="requirement_free_bug",
+            reason=None,
+            mapped_source_type=mapped_source_type,
+            display_bucket=display_bucket,
+            requirement_id=req_row.id,
+            test_case_id=None,
+            major_version_id=major_id,
+            minor_version_id=minor_id,
+            creator_user_id=creator.id if creator else None,
+            auto_apply_allowed=bool(major_id and minor_id),
+        )
+
+    def _detect_bug_route_source(self, row: BrowserSyncEvent, draft: dict[str, Any]) -> str:
+        mapped = str(row.mapped_source_type or "").strip().lower()
+        if mapped == BugSourceType.CASE.value:
+            return "case"
+        if mapped in {BugSourceType.REQUIREMENT.value, BugSourceType.RETEST.value}:
+            return "requirement"
+        if mapped in {BugSourceType.MANUAL.value, BugSourceType.LEGACY_BUG.value, BugSourceType.FIELD_TEST.value}:
+            return "test"
+        linked_case = self._extract_linked_case_id(draft, row)
+        if linked_case:
+            return "case"
+        requirement_id = self._clean_text(draft.get("requirementId") or row.zentao_req_id)
+        requirement_name = self._clean_text(draft.get("requirementName") or row.zentao_requirement_name)
+        if requirement_id or requirement_name:
+            return "requirement"
+        return "test"
+
+    def _extract_linked_case_id(self, draft: dict[str, Any], row: BrowserSyncEvent) -> str | None:
+        for key in ("linkedCaseId", "sourceCaseId", "source_case_id", "caseId"):
+            value = self._clean_text(draft.get(key))
+            if value:
+                return value
+        return self._clean_text(row.linked_case_id)
+
+    def _find_test_case_by_zentao_id(self, linked_case_id: str | None, *, major_id: int | None) -> TestCase | None:
+        if not linked_case_id:
+            return None
+        case_no = self._normalize_prefixed_id("u#", linked_case_id)
+        query = self.db.query(TestCase).filter(TestCase.zentao_case_id == case_no)
+        if major_id:
+            query = query.join(Requirement, Requirement.id == TestCase.requirement_id).filter(Requirement.major_version_id == major_id)
+        return query.order_by(TestCase.id.desc()).first()
+
+    def _resolve_creator_user(self, draft: dict[str, Any]) -> User | None:
+        creator_name = self._clean_text(draft.get("creatorName"))
+        if not creator_name:
+            return None
+        return (
+            self.db.query(User)
+            .filter(or_(User.display_name == creator_name, User.username == creator_name))
+            .order_by(User.id.desc())
+            .first()
+        )
+
+    def _is_retest_context(self, row: BrowserSyncEvent, draft: dict[str, Any], requirement: Requirement, creator: User | None) -> bool:
+        source_type_text = str(row.mapped_source_type or draft.get("sourceType") or row.source_type or "").strip().lower()
+        if source_type_text == BugSourceType.RETEST.value:
+            return True
+        if creator and requirement.retested_by_id and creator.id == requirement.retested_by_id:
+            return True
+        status_value = requirement.status.value if hasattr(requirement.status, "value") else str(requirement.status)
+        return status_value in {RequirementStatus.RETEST_PENDING.value, RequirementStatus.RETEST_DONE.value}
+
     @staticmethod
     def _append_message(origin: str | None, patch: str) -> str:
         if not origin:
@@ -901,6 +1202,8 @@ class ZentaoSyncService:
     def _serialize_event_summary(row: BrowserSyncEvent) -> dict[str, Any]:
         payload = ZentaoSyncService._event_payload(row)
         draft = payload.get("draft", {})
+        route_source = ZentaoSyncService._infer_route_source(row, draft)
+        route_target = ZentaoSyncService._infer_route_target(row)
         return {
             "id": row.id,
             "client_record_id": row.client_record_id,
@@ -920,6 +1223,8 @@ class ZentaoSyncService:
             "mapped_source_ref": row.mapped_source_ref,
             "applied_case_id": row.applied_case_id,
             "applied_bug_tracking_id": row.applied_bug_tracking_id,
+            "route_source": route_source,
+            "route_target": route_target,
             "failure_reason": row.failure_reason,
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
@@ -928,6 +1233,9 @@ class ZentaoSyncService:
     @staticmethod
     def _serialize_event_detail(row: BrowserSyncEvent) -> dict[str, Any]:
         payload = ZentaoSyncService._event_payload(row)
+        draft = payload.get("draft", {})
+        route_source = ZentaoSyncService._infer_route_source(row, draft)
+        route_target = ZentaoSyncService._infer_route_target(row)
         return {
             "id": row.id,
             "client_record_id": row.client_record_id,
@@ -964,10 +1272,11 @@ class ZentaoSyncService:
             "mapped_minor_version_id": row.mapped_minor_version_id,
             "mapped_source_type": row.mapped_source_type,
             "mapped_source_ref": row.mapped_source_ref,
+            "mapped_test_case_id": row.mapped_test_case_id,
             "applied_case_id": row.applied_case_id,
             "applied_bug_tracking_id": row.applied_bug_tracking_id,
             "title": row.zentao_bug_title or row.zentao_case_title,
-            "draft": payload.get("draft"),
+            "draft": draft,
             "result": payload.get("result"),
             "raw_payload": payload,
             "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -977,12 +1286,56 @@ class ZentaoSyncService:
             "recommended_minor_version_id": row.mapped_minor_version_id,
             "recommended_source_type": row.mapped_source_type or ("manual" if row.entity_type == "bug" else None),
             "recommended_display_bucket": row.display_bucket,
+            "recommended_test_case_id": row.mapped_test_case_id,
+            "recommended_route_source": route_source,
+            "recommended_route_target": route_target,
+            "recommended_decision_reason": row.failure_reason,
             "recommended_hint": (
                 "需求池：挂到具体需求下；总览池：仅归属版本整体"
                 if row.entity_type == "bug"
                 else "用例事件建议映射到具体需求"
             ),
         }
+
+    @staticmethod
+    def _infer_route_source(row: BrowserSyncEvent, draft: dict[str, Any]) -> str:
+        mapped = str(row.mapped_source_type or "").strip().lower()
+        if mapped == BugSourceType.CASE.value:
+            return "case"
+        if mapped in {BugSourceType.REQUIREMENT.value, BugSourceType.RETEST.value}:
+            return "requirement"
+        linked_case = (
+            str(row.linked_case_id or "").strip()
+            or str(draft.get("linkedCaseId") or "").strip()
+            or str(draft.get("sourceCaseId") or "").strip()
+        )
+        if linked_case:
+            return "case"
+        requirement_marker = (
+            str(row.zentao_req_id or "").strip()
+            or str(row.zentao_requirement_name or "").strip()
+            or str(draft.get("requirementId") or "").strip()
+            or str(draft.get("requirementName") or "").strip()
+        )
+        if requirement_marker:
+            return "requirement"
+        return "test"
+
+    @staticmethod
+    def _infer_route_target(row: BrowserSyncEvent) -> str:
+        if row.status == "pending_mapping" and row.failure_reason:
+            text = str(row.failure_reason)
+            if any(token in text for token in ("待人工", "待决策", "请确认", "可选择")):
+                return "pending_decision"
+        if row.display_bucket == "overall":
+            return "overall"
+        if row.mapped_source_type == BugSourceType.RETEST.value and row.mapped_test_case_id:
+            return "retest_requirement_case_bug"
+        if row.mapped_source_type == BugSourceType.RETEST.value:
+            return "retest_requirement_free_bug"
+        if row.mapped_test_case_id:
+            return "requirement_case_bug"
+        return "requirement_free_bug"
 
     @staticmethod
     def _auto_apply_testcase_enabled() -> bool:
@@ -995,3 +1348,9 @@ class ZentaoSyncService:
         from app.core.config import settings
 
         return bool(settings.zentao_sync_auto_apply_bug)
+
+    def _emit_zentao_row_event(self, event_type: str, row: BrowserSyncEvent) -> None:
+        try:
+            sse_publish(event_type, {"item": self._serialize_event_summary(row)}, channels=["global"])
+        except Exception:
+            logger.debug("emit zentao sse failed | event_type=%s id=%s", event_type, row.id)

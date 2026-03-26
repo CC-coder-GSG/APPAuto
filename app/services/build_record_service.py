@@ -5,6 +5,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.models import BuildRecord
+from app.services.sse_service import sse_publish
 
 
 class BuildRecordService:
@@ -41,6 +42,11 @@ class BuildRecordService:
 
         self.db.commit()
         self.db.refresh(record)
+        sse_publish(
+            "build_record_created" if action == "created" else "build_record_updated",
+            {"item": self.serialize(record), "action": action},
+            channels=["global"],
+        )
         return record, action
 
     def list_records(

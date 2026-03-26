@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models import BugSourceType, BugTracking, Requirement, User, Version, VersionType
 from app.services.audit_service import audit
+from app.services.sse_service import sse_publish
 
 
 class RetestService:
@@ -162,6 +163,16 @@ class RetestService:
         req.retested_at = datetime.utcnow() if retest_completed else None
         self.db.commit()
         audit(self.db, action="retest.submit", target_type="requirement", actor_id=current_user.id, target_id=str(req.id), detail=f"passed={req.retest_passed},minor={req.retest_minor_version_id}")
+        sse_publish(
+            "retest_requirement_status_changed",
+            {
+                "requirement_id": req.id,
+                "retest_completed": req.retest_completed,
+                "retest_passed": req.retest_passed,
+                "retested_by_id": req.retested_by_id,
+            },
+            channels=["global"],
+        )
         return {"message": "Retest status updated"}
 
     def build_retest_push_message(self, major_version_id: int, current_user: User) -> tuple[str, int]:

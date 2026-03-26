@@ -10,6 +10,8 @@ const state = {
 };
 
 let restoredOnce = false;
+let activitySseBound = false;
+let activityRefreshTimer = null;
 
 const timelineState = {
   title: '',
@@ -409,3 +411,19 @@ window.OmniQAActivityTab = {
   openActivityItem,
   toggleAuditTimelineImportantOnly,
 };
+
+function bindActivitySSE() {
+  if (activitySseBound) return;
+  if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
+  window.OmniQASSE.subscribe('activity_created', () => {
+    const tab = document.getElementById('tab-activity');
+    if (!tab || tab.classList.contains('hidden')) return;
+    if (activityRefreshTimer) clearTimeout(activityRefreshTimer);
+    activityRefreshTimer = setTimeout(() => {
+      loadActivityBoard().catch(() => {});
+    }, 700);
+  });
+  activitySseBound = true;
+}
+
+bindActivitySSE();

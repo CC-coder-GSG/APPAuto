@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models import Requirement, RequirementStatus, RequirementStatusHistory, TestCase, TestExecution, TestResultStatus, User, UserRole, Version, VersionType
 from app.services.audit_service import audit
+from app.services.sse_service import sse_publish
 from app.utils.state_machine import ensure_requirement_transition
 from app.utils.validators import validate_req_id
 
@@ -50,6 +51,17 @@ class RequirementService:
             actor_id=actor_id,
             target_id=str(requirement.id),
             detail=requirement.zentao_req_id,
+        )
+        sse_publish(
+            "workbench_requirement_created",
+            {
+                "id": requirement.id,
+                "zentao_req_id": requirement.zentao_req_id,
+                "title": requirement.title,
+                "major_version_id": requirement.major_version_id,
+                "owner_id": requirement.owner_id,
+            },
+            channels=["global", f"user:{requirement.owner_id}"] if requirement.owner_id else ["global"],
         )
         return {
             "id": requirement.id,
@@ -470,6 +482,16 @@ class RequirementService:
             target_id=str(requirement.id),
             detail=f"test_completed={test_completed}",
         )
+        sse_publish(
+            "retest_requirement_status_changed",
+            {
+                "requirement_id": requirement.id,
+                "test_completed": requirement.test_completed,
+                "status": requirement.status.value if hasattr(requirement.status, "value") else str(requirement.status),
+                "owner_id": requirement.owner_id,
+            },
+            channels=["global", f"user:{requirement.owner_id}"] if requirement.owner_id else ["global"],
+        )
         return requirement
 
     def add_case_to_requirement(self, req_id: int, zentao_case_id: str, actor_id: int | None = None) -> dict:
@@ -484,6 +506,16 @@ class RequirementService:
         self.db.commit()
         self.db.refresh(case)
         audit(self.db, action="requirement.add_case", target_type="requirement", actor_id=actor_id, target_id=str(req_id), detail=zentao_case_id)
+        sse_publish(
+            "workbench_testcase_created",
+            {
+                "requirement_id": req_id,
+                "test_case_id": case.id,
+                "zentao_case_id": case.zentao_case_id,
+                "owner_id": req.owner_id,
+            },
+            channels=["global", f"user:{req.owner_id}"] if req.owner_id else ["global"],
+        )
         return {"id": case.id, "zentao_case_id": case.zentao_case_id}
 
     def update_case_identifier(self, case_id: int, zentao_case_id: str, actor_id: int | None = None) -> dict:

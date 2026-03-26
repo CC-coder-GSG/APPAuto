@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models import BugSourceType, BugStage5Record, BugTracking, Requirement, User, Version
 from app.services.audit_service import audit
+from app.services.sse_service import sse_publish
 
 
 class BugService:
@@ -43,6 +44,18 @@ class BugService:
         self.db.commit()
         self.db.refresh(bug)
         audit(self.db, action="bug.create", target_type="bug", actor_id=actor.id, target_id=str(bug.id), detail=bug.bug_id)
+        sse_publish(
+            "overall_bug_created" if source_type == BugSourceType.MANUAL and requirement_id is None else "bug_created",
+            {
+                "id": bug.id,
+                "bug_id": bug.bug_id,
+                "source_type": source_type.value if hasattr(source_type, "value") else str(source_type),
+                "requirement_id": requirement_id,
+                "major_version_id": req.major_version_id,
+                "minor_version_id": minor_version_id,
+            },
+            channels=["global"],
+        )
         return {"id": bug.id, "message": "Bug recorded"}
 
     def update_bug(self, bug_id: int, new_bug_id: str, actor_id: int | None = None) -> dict:
@@ -102,6 +115,11 @@ class BugService:
         self.db.commit()
         user = self.db.query(User).filter(User.id == user_id).first()
         audit(self.db, action="bug.dispatch", target_type="bug", actor_id=actor_id, target_id=str(bug.id), detail=f"dispatch_to={user_id}")
+        sse_publish(
+            "bug_dispatch_created",
+            {"id": bug.id, "bug_id": bug.bug_id, "dispatched_to_id": user_id},
+            channels=["global", f"user:{user_id}"],
+        )
         return {"message": "特派成功"}, user, bug
 
     def dispatched_to_me(self, major_version_id: int, current_user: User) -> list[dict]:

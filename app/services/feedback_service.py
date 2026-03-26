@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models import AuditLog, BugSourceType, BugTracking, FeedbackAttachment, FeedbackBugLink, FeedbackRecord, FeedbackStatus, User, Version
 from app.services.audit_service import audit
+from app.services.sse_service import sse_publish
 
 F_PATTERN = re.compile(r"^\d+$")
 B_PATTERN = re.compile(r"^b#\d+$")
@@ -200,6 +201,17 @@ class FeedbackService:
         self.db.commit()
         self.db.refresh(row)
         audit(self.db, action="feedback.create", target_type="feedback", actor_id=creator.id, target_id=str(row.id), detail=row.feedback_no or "-")
+        sse_publish(
+            "feedback_task_created",
+            {
+                "id": row.id,
+                "status": row.status.value,
+                "summary": row.summary,
+                "assignee_id": row.assignee_id,
+                "creator_id": row.creator_id,
+            },
+            channels=["global"],
+        )
         return {"id": row.id, "message": "反馈已创建"}
 
     def get_feedback_detail(self, feedback_id: int) -> dict:
@@ -269,6 +281,11 @@ class FeedbackService:
         row.status = target_status
         self.db.commit()
         audit(self.db, action="feedback.assign", target_type="feedback", actor_id=actor.id, target_id=str(row.id), detail=f"assignee={assignee_id}")
+        sse_publish(
+            "feedback_task_updated",
+            {"id": row.id, "status": row.status.value, "assignee_id": row.assignee_id},
+            channels=["global", f"user:{assignee_id}"],
+        )
         return {"message": "反馈已指派"}, row, user
 
     def handle_feedback(
@@ -296,6 +313,11 @@ class FeedbackService:
         row.status = status
         self.db.commit()
         audit(self.db, action="feedback.handle", target_type="feedback", actor_id=actor.id, target_id=str(row.id), detail=f"status={status.value}")
+        sse_publish(
+            "feedback_task_updated",
+            {"id": row.id, "status": row.status.value, "assignee_id": row.assignee_id},
+            channels=["global", f"user:{row.assignee_id}"] if row.assignee_id else ["global"],
+        )
         return {"message": "处理结果已保存"}
 
     def update_status(self, *, feedback_id: int, status: FeedbackStatus, actor: User) -> dict:
@@ -308,6 +330,11 @@ class FeedbackService:
         row.status = status
         self.db.commit()
         audit(self.db, action="feedback.status", target_type="feedback", actor_id=actor.id, target_id=str(row.id), detail=status.value)
+        sse_publish(
+            "feedback_task_updated",
+            {"id": row.id, "status": row.status.value, "assignee_id": row.assignee_id},
+            channels=["global", f"user:{row.assignee_id}"] if row.assignee_id else ["global"],
+        )
         return {"message": "状态已更新"}
 
     def save_attachment(self, *, feedback_id: int, upload_file: UploadFile, actor: User) -> dict:

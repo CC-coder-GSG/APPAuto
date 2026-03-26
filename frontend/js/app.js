@@ -17,6 +17,7 @@ import './tabs/activity.js';
 import './tabs/assign.js';
 import './tabs/dispatch.js';
 import './tabs/data.js';
+import './realtime/sse.js';
 import { runGuardrails } from './guardrails.js';
 
 window.addEventListener('resize', () => {
