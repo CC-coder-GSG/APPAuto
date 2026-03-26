@@ -549,8 +549,10 @@ function renderList() {
         <td>${escapeHtml(it.creator_name || '-')}</td>
         <td class='col-status'>${statusBadge(it.status)}</td>
         <td class='col-actions'>
-          <button class='secondary' onclick='openZentaoSyncEventDetail(${it.id})'>查看</button>
-          <button class='secondary' style='margin-left:6px; color:#b91c1c; border-color:#fecaca; background:#fef2f2;' onclick='deleteZentaoSyncEvent(${it.id})'>删除</button>
+          <div class='zentao-row-actions'>
+            <button class='secondary' onclick='openZentaoSyncEventDetail(${it.id})'>查看</button>
+            <button class='secondary' style='color:#b91c1c; border-color:#fecaca; background:#fef2f2;' onclick='deleteZentaoSyncEvent(${it.id})'>删除</button>
+          </div>
         </td>
       </tr>`;
     }).join('');

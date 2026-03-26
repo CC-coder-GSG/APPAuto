@@ -616,7 +616,7 @@
 
 .qa-table-zentao-sync th:nth-child(7),
 .qa-table-zentao-sync td:nth-child(7) {
-  width: 92px;
+  width: 176px;
 }
 
 .qa-table-zentao-sync .col-title {
@@ -626,6 +626,18 @@
 .qa-table-zentao-sync td.col-title .cell-ellipsis {
   display: block;
   width: 100%;
+}
+
+.qa-table-zentao-sync td.col-actions {
+  overflow: visible;
+}
+
+.qa-table-zentao-sync .zentao-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 
 .zentao-sync-sticky-panel {
