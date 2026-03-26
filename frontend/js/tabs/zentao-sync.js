@@ -160,10 +160,12 @@ function setMapFormEnabled(enabled) {
 
   const saveBtn = document.querySelector("#tab-zentao-sync button[onclick='saveZentaoSyncMapping()']");
   const applyBtn = document.querySelector("#tab-zentao-sync button[onclick='applyZentaoSyncEvent()']");
+  const deleteBtn = document.querySelector("#tab-zentao-sync button[onclick='deleteZentaoSyncEvent()']");
   const toggleManualBtn = document.querySelector("#tab-zentao-sync button[onclick='toggleManualMajorSelector()']");
   const resetManualBtn = document.querySelector("#tab-zentao-sync button[onclick='resetZentaoManualMajor()']");
   if (saveBtn) saveBtn.disabled = !enabled;
   if (applyBtn) applyBtn.disabled = !enabled;
+  if (deleteBtn) deleteBtn.disabled = !enabled;
   if (toggleManualBtn) toggleManualBtn.disabled = !enabled;
   if (resetManualBtn) resetManualBtn.disabled = !enabled;
 }
@@ -546,7 +548,10 @@ function renderList() {
         <td class='col-text col-title' title='${escapeHtml(title)}'><span class='cell-ellipsis'>${escapeHtml(title)}</span></td>
         <td>${escapeHtml(it.creator_name || '-')}</td>
         <td class='col-status'>${statusBadge(it.status)}</td>
-        <td class='col-actions'><button class='secondary' onclick='openZentaoSyncEventDetail(${it.id})'>查看</button></td>
+        <td class='col-actions'>
+          <button class='secondary' onclick='openZentaoSyncEventDetail(${it.id})'>查看</button>
+          <button class='secondary' style='margin-left:6px; color:#b91c1c; border-color:#fecaca; background:#fef2f2;' onclick='deleteZentaoSyncEvent(${it.id})'>删除</button>
+        </td>
       </tr>`;
     }).join('');
   }
@@ -729,6 +734,40 @@ export async function applyZentaoSyncEvent() {
   await loadZentaoSyncBoard(syncState.page);
 }
 
+export async function deleteZentaoSyncEvent(eventId = null) {
+  const targetId = Number(eventId || syncState.currentEvent?.id || 0);
+  if (!targetId) {
+    window.showMessage?.('请先选择要删除的同步记录', 'error');
+    return;
+  }
+  const ok = window.confirm('确认删除这条禅道同步记录吗？删除后无法恢复。');
+  if (!ok) return;
+
+  try {
+    const resp = await api(`/api/integrations/zentao/browser-events/${targetId}`, {
+      method: 'DELETE',
+      headers: window.H,
+    });
+    const data = await resp.json();
+    window.showMessage?.(data.message || '删除成功', 'success');
+  } catch (err) {
+    const msg = err?.message || '删除失败';
+    window.showMessage?.(
+      msg.includes('404') ? '记录不存在或已被删除' : msg,
+      'error'
+    );
+    return;
+  }
+
+  if (syncState.currentEvent?.id === targetId) {
+    syncState.currentEvent = null;
+    renderDetail(null);
+  }
+
+  const targetPage = (syncState.items.length <= 1 && syncState.page > 1) ? syncState.page - 1 : syncState.page;
+  await loadZentaoSyncBoard(targetPage);
+}
+
 export async function applyZentaoSyncBatch() {
   const data = await (await api('/api/integrations/zentao/browser-events/apply-batch', {
     method: 'POST',
@@ -756,6 +795,7 @@ window.OmniQAZentaoSyncTab = {
   openZentaoSyncEventDetail,
   saveZentaoSyncMapping,
   applyZentaoSyncEvent,
+  deleteZentaoSyncEvent,
   applyZentaoSyncBatch,
   closeZentaoSyncDetail,
 };

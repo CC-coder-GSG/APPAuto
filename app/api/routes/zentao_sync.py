@@ -147,6 +147,11 @@ def apply_browser_event(event_id: int, current_user: User = Depends(_admin_guard
     return ZentaoSyncService(db).apply_event(event_id, actor_id=current_user.id)
 
 
+@router.delete("/api/integrations/zentao/browser-events/{event_id}")
+def delete_browser_event(event_id: int, current_user: User = Depends(_admin_guard), db: Session = Depends(get_db)):
+    return ZentaoSyncService(db).delete_event(event_id, actor_id=current_user.id)
+
+
 @router.post("/api/integrations/zentao/browser-events/apply-batch")
 def apply_browser_events_batch(
     payload: BrowserSyncBatchApplyPayload,

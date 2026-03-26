@@ -27,7 +27,9 @@ from app.services.audit_service import audit
 from app.services.bug_service import BugService
 from app.services.requirement_service import RequirementService
 from app.services.zentao_matcher import (
+    convert_s_token_to_major_version,
     extract_requirement_numeric_id,
+    extract_major_version_token,
     normalize_execution_name,
     normalize_requirement_title,
     parse_affected_version,
@@ -313,6 +315,26 @@ class ZentaoSyncService:
                 failed_items.append({"event_id": row.id, "reason": str(exc.detail)})
         return {"ok": True, "total": total, "success": success, "failed": failed, "failed_items": failed_items}
 
+    def delete_event(self, event_id: int, *, actor_id: int | None) -> dict[str, Any]:
+        row = self.repo.get_event(event_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="同步事件不存在或已被删除")
+
+        entity_type = row.entity_type
+        status = row.status
+        self.db.delete(row)
+        self.db.commit()
+        audit(
+            self.db,
+            action="zentao_sync.delete",
+            target_type="browser_sync_event",
+            actor_id=actor_id,
+            target_id=str(event_id),
+            detail=f"entity={entity_type},status={status}",
+        )
+        logger.info("删除禅道同步事件成功 | eventId=%s entity=%s status=%s", event_id, entity_type, status)
+        return {"ok": True, "event_id": event_id, "message": "删除成功"}
+
     # -------- legacy compatibility --------
     def legacy_sync(self, payload: ZentaoBrowserSyncPayload) -> dict[str, Any]:
         result = self.receive_event(payload)
@@ -381,9 +403,7 @@ class ZentaoSyncService:
             row.mapped_test_case_id = self._find_test_case_id(row.linked_case_id)
 
         if not row.mapped_major_version_id:
-            execution = normalize_execution_name(
-                self._clean_text(draft.get("executionName") or draft.get("executionId") or row.zentao_execution_name)
-            )
+            execution = self._clean_text(draft.get("executionName") or draft.get("executionId") or row.zentao_execution_name)
             major = self._match_major_by_execution(
                 execution_id=execution,
                 product_name=self._clean_text(draft.get("productName") or row.zentao_product_name),
@@ -391,6 +411,14 @@ class ZentaoSyncService:
             )
             if major:
                 row.mapped_major_version_id = major.id
+            else:
+                major = self._match_major_by_affected_version(
+                    affected_version=self._clean_text(draft.get("affectedVersion") or row.zentao_affected_version),
+                    product_name=self._clean_text(draft.get("productName") or row.zentao_product_name),
+                    project_name=self._clean_text(draft.get("projectName") or row.zentao_project_name),
+                )
+                if major:
+                    row.mapped_major_version_id = major.id
 
         if row.mapped_major_version_id and not row.mapped_minor_version_id:
             minor = self._match_minor_by_affected_version(
@@ -405,34 +433,59 @@ class ZentaoSyncService:
     def _recommend_requirements(self, row: BrowserSyncEvent) -> list[Requirement]:
         payload = self._event_payload(row)
         draft = payload.get("draft", {})
-        req_id = self._normalize_prefixed_id("r#", draft.get("requirementId")) if draft.get("requirementId") else row.zentao_req_id
+        req_number = extract_requirement_numeric_id(str(draft.get("requirementId") or row.zentao_req_id or ""))
+        req_id = f"r#{req_number}" if req_number else None
         req_name = self._clean_text(draft.get("requirementName"))
         product_name = self._clean_text(draft.get("productName"))
         project_name = self._clean_text(draft.get("projectName"))
-        execution_id = self._clean_text(draft.get("executionId"))
+        execution_raw = self._clean_text(draft.get("executionName") or draft.get("executionId") or row.zentao_execution_name)
+        affected_version = self._clean_text(draft.get("affectedVersion") or row.zentao_affected_version)
 
-        query = self.db.query(Requirement)
+        major = self._match_major_by_execution(execution_raw, product_name, project_name) or self._match_major_by_affected_version(
+            affected_version=affected_version,
+            product_name=product_name,
+            project_name=project_name,
+        )
+
+        # Priority 1: requirementId exact lookup (normalize to r#<digits> first).
         if req_id:
-            query = query.filter(Requirement.zentao_req_id == req_id)
-            rows = query.order_by(Requirement.id.desc()).all()
-            if rows:
-                if execution_id:
-                    major = self._match_major_by_execution(execution_id, product_name, project_name)
-                    if major:
-                        exact = [r for r in rows if r.major_version_id == major.id]
-                        if exact:
-                            return exact
-                return rows
+            req_query = self.db.query(Requirement).filter(Requirement.zentao_req_id == req_id)
+            req_rows = req_query.order_by(Requirement.id.desc()).all()
+            if req_rows:
+                if major:
+                    major_rows = [r for r in req_rows if r.major_version_id == major.id]
+                    if len(major_rows) == 1:
+                        return major_rows
+                    if len(major_rows) > 1 and req_name:
+                        narrowed = self._pick_requirements_by_title(req_name, major_rows)
+                        if narrowed:
+                            return narrowed
+                    if major_rows:
+                        return major_rows
+                if len(req_rows) == 1:
+                    return req_rows
+                if req_name:
+                    narrowed = self._pick_requirements_by_title(req_name, req_rows)
+                    if narrowed:
+                        return narrowed
+                return req_rows
 
+        # Priority 2: requirementName normalized fuzzy lookup.
         if req_name:
-            query = self.db.query(Requirement).filter(Requirement.title == req_name)
-            major = self._match_major_by_execution(execution_id, product_name, project_name)
+            base_query = self.db.query(Requirement)
             if major:
-                query = query.filter(Requirement.major_version_id == major.id)
-            rows = query.order_by(Requirement.id.desc()).all()
-            if rows:
-                return rows
+                base_query = base_query.filter(Requirement.major_version_id == major.id)
+            title_rows = base_query.order_by(Requirement.id.desc()).all()
+            title_matches = self._pick_requirements_by_title(req_name, title_rows)
+            if title_matches:
+                return title_matches
 
+            # Priority 3 fallback: id extracted but id exact miss => same-major fuzzy title pick.
+            if req_id and not major:
+                all_rows = self.db.query(Requirement).order_by(Requirement.id.desc()).all()
+                title_matches = self._pick_requirements_by_title(req_name, all_rows)
+                if title_matches:
+                    return title_matches
         return []
 
     def _apply_testcase(self, row: BrowserSyncEvent, actor_id: int | None) -> None:
@@ -594,19 +647,61 @@ class ZentaoSyncService:
         raise HTTPException(status_code=400, detail="系统中不存在可用于应用事件的用户")
 
     def _match_major_by_execution(self, execution_id: str | None, product_name: str | None, project_name: str | None) -> Version | None:
-        if not execution_id:
+        raw = self._clean_text(execution_id)
+        if not raw:
             return None
 
-        query = self.db.query(Version).filter(
-            Version.version_type == VersionType.MAJOR,
-            Version.version_no == execution_id,
-        )
-
+        normalized_exec = normalize_execution_name(raw)
+        mapped_major = convert_s_token_to_major_version(raw)
+        embedded_major = extract_major_version_token(raw)
         software_ids = self._guess_software_ids(product_name, project_name)
-        if software_ids:
-            query = query.filter(Version.software_id.in_(software_ids))
 
-        return query.order_by(Version.id.desc()).first()
+        def _apply_soft_filter(query):
+            if software_ids:
+                return query.filter(or_(Version.software_id.in_(software_ids), Version.software_id.is_(None)))
+            return query
+
+        exact_candidates: list[Version] = []
+        exact_keys = [k for k in [normalized_exec, mapped_major, embedded_major] if k]
+        for key in exact_keys:
+            rows = _apply_soft_filter(
+                self.db.query(Version).filter(Version.version_type == VersionType.MAJOR, Version.version_no == key)
+            ).all()
+            if rows:
+                exact_candidates.extend(rows)
+
+        if exact_candidates:
+            return sorted(exact_candidates, key=self._version_order_key, reverse=True)[0]
+
+        like_keys = [k for k in [mapped_major, embedded_major] if k]
+        for key in like_keys:
+            rows = _apply_soft_filter(
+                self.db.query(Version).filter(Version.version_type == VersionType.MAJOR, Version.version_no.like(f"{key}%"))
+            ).all()
+            if rows:
+                return sorted(rows, key=self._version_order_key, reverse=True)[0]
+        return None
+
+    def _match_major_by_affected_version(
+        self,
+        *,
+        affected_version: str | None,
+        product_name: str | None,
+        project_name: str | None,
+    ) -> Version | None:
+        parsed = parse_affected_version(affected_version)
+        if not parsed.version_prefix:
+            return None
+        guessed = f"V{parsed.version_prefix}"
+        software_ids = self._guess_software_ids(product_name, project_name)
+        query = self.db.query(Version).filter(Version.version_type == VersionType.MAJOR)
+        if software_ids:
+            query = query.filter(or_(Version.software_id.in_(software_ids), Version.software_id.is_(None)))
+
+        exact = query.filter(Version.version_no == guessed).order_by(Version.id.desc()).first()
+        if exact:
+            return exact
+        return query.filter(Version.version_no.like(f"{guessed}%")).order_by(Version.id.desc()).first()
 
     def _guess_software_ids(self, product_name: str | None, project_name: str | None) -> list[int]:
         tokens = [token for token in [product_name, project_name] if token]
@@ -621,6 +716,27 @@ class ZentaoSyncService:
                     matched.append(row.id)
                     break
         return matched
+
+    @staticmethod
+    def _version_order_key(row: Version) -> tuple[int, int]:
+        exact_rank = 1 if row.software_id is not None else 0
+        return (exact_rank, row.id)
+
+    def _pick_requirements_by_title(self, req_name: str, candidates: list[Requirement]) -> list[Requirement]:
+        """
+        requirementName matching strategy:
+        1) normalize titles to absorb SR/id prefixes and punctuation variants.
+        2) only auto-pick when there is exactly one best-scored candidate.
+        """
+        normalized = normalize_requirement_title(req_name)
+        if not normalized or not candidates:
+            return []
+        by_id = {r.id: r for r in candidates}
+        hits = pick_best_title_match(
+            target=normalized,
+            candidates=[(r.id, r.title) for r in candidates],
+        )
+        return [by_id[i] for i in hits if i in by_id]
 
     def _match_minor_by_affected_version(self, major_id: int, affected_version: str | None) -> Version | None:
         parsed = parse_affected_version(affected_version)
@@ -650,6 +766,8 @@ class ZentaoSyncService:
             return
 
         if row.entity_type == "bug":
+            # Requirement is a stronger routing signal than the initial browser payload bucket.
+            row.display_bucket = "requirement" if row.mapped_requirement_id else "overall"
             if row.display_bucket == "overall":
                 if row.mapped_major_version_id and row.mapped_minor_version_id:
                     row.status = "ready_to_apply"

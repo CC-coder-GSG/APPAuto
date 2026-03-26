@@ -655,6 +655,7 @@
           <div class="row" style="justify-content:flex-end; margin-top:8px;">
             <button class="secondary" onclick="saveZentaoSyncMapping()">保存映射</button>
             <button onclick="applyZentaoSyncEvent()">应用到业务</button>
+            <button class="secondary" style="color:#b91c1c; border-color:#fecaca; background:#fef2f2;" onclick="deleteZentaoSyncEvent()">删除</button>
           </div>
           <div id="zentaoMapRuleHint" class="muted" style="margin-top:6px;">当前映射要求：请先从左侧选择一个同步事件。</div>
           <div class="muted" style="margin-top:6px;" id="zentaoSyncFailureReason">-</div>
@@ -1675,6 +1676,10 @@ async function saveZentaoSyncMapping(){
 
 async function applyZentaoSyncEvent(){
   return window.OmniQAZentaoSyncTab.applyZentaoSyncEvent();
+}
+
+async function deleteZentaoSyncEvent(eventId){
+  return window.OmniQAZentaoSyncTab.deleteZentaoSyncEvent(eventId);
 }
 
 async function applyZentaoSyncBatch(){
