@@ -600,65 +600,80 @@
           <div id="zentaoSyncRecommendInfo" class="muted">-</div>
         </div>
 
-        <div class="card zentao-info-card" style="margin-top:10px;">
+        <div class="card zentao-info-card zentao-map-card" style="margin-top:10px;">
           <h4 style="margin-top:0;">人工确认</h4>
-          <div class="card zentao-major-context" style="box-shadow:none; margin-bottom:8px;">
-            <div class="row" style="justify-content:space-between; align-items:center;">
-              <div class="muted" style="font-size:13px;">当前大版本：<b id="zentaoMapCurrentMajorText">未识别</b></div>
-              <div class="muted" style="font-size:13px;">识别来源：<span id="zentaoMapCurrentMajorSource">未识别</span></div>
+          <div class="card zentao-major-context zentao-map-head" style="box-shadow:none; margin-bottom:8px;">
+            <div class="zentao-map-head-top">
+              <div class="muted zentao-map-head-item">当前大版本：<b id="zentaoMapCurrentMajorText">未识别</b></div>
+              <div class="muted zentao-map-head-item">识别来源：<span id="zentaoMapCurrentMajorSource">未识别</span></div>
             </div>
-            <div class="row" style="justify-content:flex-end; margin-top:6px;">
+            <div class="zentao-map-head-actions">
               <button class="secondary" onclick="toggleManualMajorSelector()">手动指定大版本</button>
               <button class="secondary" onclick="resetZentaoManualMajor()">恢复自动</button>
             </div>
-            <div id="zentaoMapManualMajorWrap" class="hidden row" style="margin-top:8px; align-items:flex-end;">
+            <div id="zentaoMapManualMajorWrap" class="hidden zentao-map-manual-row">
               <label>手动大版本</label>
               <select id="zentaoMapManualMajorSelect" onchange="onZentaoManualMajorChange()">
                 <option value="">请选择大版本</option>
               </select>
             </div>
-            <div id="zentaoMapMajorHint" class="muted" style="margin-top:6px;">请先从左侧选择事件；若自动识别不准确，可手动指定大版本作为筛选上下文。</div>
+            <div id="zentaoMapMajorHint" class="muted zentao-map-head-hint">请先从左侧选择事件；若自动识别不准确，可手动指定大版本作为筛选上下文。</div>
           </div>
-          <div class="row" style="align-items:flex-end;">
-            <label>需求</label>
-            <select id="zentaoMapRequirementSelect">
-              <option value="">请选择需求</option>
-            </select>
-            <label>小版本</label>
-            <select id="zentaoMapMinorSelect">
-              <option value="">请选择小版本</option>
-            </select>
+          <div class="zentao-map-form">
+            <div class="zentao-map-field">
+              <label>需求</label>
+              <select id="zentaoMapRequirementSelect">
+                <option value="">请选择需求</option>
+              </select>
+            </div>
+            <div class="zentao-map-field">
+              <label>小版本</label>
+              <select id="zentaoMapMinorSelect">
+                <option value="">请选择小版本</option>
+              </select>
+            </div>
+            <div class="zentao-map-grid-two">
+              <div class="zentao-map-field">
+                <label>来源类型</label>
+                <select id="zentaoMapSourceType">
+                  <option value="manual">人工录入</option>
+                  <option value="case">用例来源</option>
+                  <option value="requirement">需求来源</option>
+                  <option value="legacy_bug">历史缺陷</option>
+                  <option value="retest">复测来源</option>
+                  <option value="field_test">外业测试</option>
+                </select>
+              </div>
+              <div class="zentao-map-field">
+                <label>归属范围</label>
+                <select id="zentaoMapDisplayBucket">
+                  <option value="">不修改</option>
+                  <option value="requirement">需求池</option>
+                  <option value="overall">总览池</option>
+                </select>
+              </div>
+            </div>
+            <div id="zentaoMapBucketHint" class="muted zentao-map-inline-hint">需求池：挂到具体需求下，参与需求维度统计；总览池：仅归属到版本整体，不挂具体需求。</div>
+            <div class="zentao-map-field">
+              <label>关联用例</label>
+              <div class="prefix-input"><span>关联用例</span><input id="zentaoMapLinkedCaseId" placeholder="请输入关联用例ID（可选）"></div>
+            </div>
+            <div class="zentao-map-field">
+              <label>来源引用</label>
+              <div class="prefix-input"><span>来源引用</span><input id="zentaoMapSourceRef" placeholder="请输入来源引用（可选）"></div>
+            </div>
+            <div class="zentao-map-field">
+              <label>备注</label>
+              <textarea id="zentaoMapNote" rows="2" placeholder="备注（可选）"></textarea>
+            </div>
+            <div class="zentao-map-actions">
+              <button class="secondary" onclick="saveZentaoSyncMapping()">保存映射</button>
+              <button onclick="applyZentaoSyncEvent()">应用到业务</button>
+              <button class="secondary" style="color:#b91c1c; border-color:#fecaca; background:#fef2f2;" onclick="deleteZentaoSyncEvent()">删除</button>
+            </div>
+            <div id="zentaoMapRuleHint" class="muted zentao-map-inline-hint">当前映射要求：请先从左侧选择一个同步事件。</div>
+            <div class="muted zentao-map-inline-hint" id="zentaoSyncFailureReason">-</div>
           </div>
-          <div class="row" style="align-items:flex-end; margin-top:8px;">
-            <label>来源类型</label>
-            <select id="zentaoMapSourceType">
-              <option value="manual">人工录入</option>
-              <option value="case">用例来源</option>
-              <option value="requirement">需求来源</option>
-              <option value="legacy_bug">历史缺陷</option>
-              <option value="retest">复测来源</option>
-              <option value="field_test">外业测试</option>
-            </select>
-            <label>归属范围</label>
-            <select id="zentaoMapDisplayBucket">
-              <option value="">不修改</option>
-              <option value="requirement">需求池</option>
-              <option value="overall">总览池</option>
-            </select>
-          </div>
-          <div id="zentaoMapBucketHint" class="muted" style="margin-top:6px;">需求池：挂到具体需求下，参与需求维度统计；总览池：仅归属到版本整体，不挂具体需求。</div>
-          <div class="row" style="margin-top:8px; align-items:flex-end;">
-            <div class="prefix-input"><span>关联用例</span><input id="zentaoMapLinkedCaseId" placeholder="请输入关联用例ID（可选）"></div>
-            <div class="prefix-input"><span>来源引用</span><input id="zentaoMapSourceRef" placeholder="请输入来源引用（可选）"></div>
-          </div>
-          <textarea id="zentaoMapNote" rows="2" placeholder="备注（可选）" style="margin-top:8px;"></textarea>
-          <div class="row" style="justify-content:flex-end; margin-top:8px;">
-            <button class="secondary" onclick="saveZentaoSyncMapping()">保存映射</button>
-            <button onclick="applyZentaoSyncEvent()">应用到业务</button>
-            <button class="secondary" style="color:#b91c1c; border-color:#fecaca; background:#fef2f2;" onclick="deleteZentaoSyncEvent()">删除</button>
-          </div>
-          <div id="zentaoMapRuleHint" class="muted" style="margin-top:6px;">当前映射要求：请先从左侧选择一个同步事件。</div>
-          <div class="muted" style="margin-top:6px;" id="zentaoSyncFailureReason">-</div>
         </div>
 
         <details class="card" style="margin-top:10px; box-shadow:none; border:1px solid #e2e8f0;">

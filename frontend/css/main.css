@@ -587,6 +587,12 @@
 .qa-table-zentao-sync {
   width: 100%;
   table-layout: fixed;
+  min-width: 980px;
+}
+
+.qa-table-zentao-sync th {
+  white-space: nowrap;
+  line-height: 1.25;
 }
 
 .qa-table-zentao-sync th:nth-child(1),
@@ -604,9 +610,14 @@
   width: 122px;
 }
 
+.qa-table-zentao-sync th:nth-child(4),
+.qa-table-zentao-sync td:nth-child(4) {
+  width: 260px;
+}
+
 .qa-table-zentao-sync th:nth-child(5),
 .qa-table-zentao-sync td:nth-child(5) {
-  width: 104px;
+  width: 112px;
 }
 
 .qa-table-zentao-sync th:nth-child(6),
@@ -620,7 +631,7 @@
 }
 
 .qa-table-zentao-sync .col-title {
-  width: auto;
+  width: 260px;
 }
 
 .qa-table-zentao-sync td.col-title .cell-ellipsis {
@@ -744,6 +755,78 @@
   padding: 10px 12px;
 }
 
+#tab-zentao-sync .zentao-map-card {
+  padding: 14px 14px 14px;
+}
+
+#tab-zentao-sync .zentao-map-head {
+  padding: 12px 14px;
+}
+
+#tab-zentao-sync .zentao-map-head-top {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+#tab-zentao-sync .zentao-map-head-item {
+  font-size: 13px;
+}
+
+#tab-zentao-sync .zentao-map-head-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#tab-zentao-sync .zentao-map-manual-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+#tab-zentao-sync .zentao-map-manual-row label {
+  min-width: 68px;
+}
+
+#tab-zentao-sync .zentao-map-head-hint {
+  margin-top: 10px;
+}
+
+#tab-zentao-sync .zentao-map-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#tab-zentao-sync .zentao-map-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#tab-zentao-sync .zentao-map-grid-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+#tab-zentao-sync .zentao-map-inline-hint {
+  margin-top: 2px;
+}
+
+#tab-zentao-sync .zentao-map-actions {
+  margin-top: 4px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 1200px) {
   .zentao-sync-shell {
     grid-template-columns: 1fr;
@@ -804,6 +887,14 @@
   }
   #tab-field-test .ft-filter-actions,
   #tab-zentao-sync .zt-filter-actions {
+    justify-content: flex-start;
+  }
+  #tab-zentao-sync .zentao-map-head-top,
+  #tab-zentao-sync .zentao-map-grid-two {
+    grid-template-columns: 1fr;
+  }
+  #tab-zentao-sync .zentao-map-head-actions,
+  #tab-zentao-sync .zentao-map-actions {
     justify-content: flex-start;
   }
 }

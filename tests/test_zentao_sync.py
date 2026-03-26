@@ -585,11 +585,14 @@ def test_non_admin_can_access_zentao_sync_list(db_session):
 
 def test_non_admin_can_access_zentao_sync_detail(db_session):
     normal_user = _create_user(db_session, "normal_sync_detail", role=UserRole.USER)
-    rec = ZentaoSyncService(db_session).receive_event(ZentaoBrowserSyncPayload(**_base_bug_payload("bug_non_admin_detail")))
+    payload = _base_bug_payload("bug_non_admin_detail")
+    payload["draft"]["bugTitle"] = "普通用户可见详情标题"
+    rec = ZentaoSyncService(db_session).receive_event(ZentaoBrowserSyncPayload(**payload))
     client = _make_client(db_session, normal_user)
     try:
         resp = client.get(f"/api/integrations/zentao/browser-events/{rec['event_id']}")
         assert resp.status_code == 200
+        assert resp.json().get("zentao_bug_title") == "普通用户可见详情标题"
     finally:
         client.close()
 
