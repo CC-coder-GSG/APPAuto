@@ -94,10 +94,14 @@ function fmt(v) {
   return d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 }
 
-function ensureAdmin() {
-  if (!state.currentUser || state.currentUser.role !== 'admin') {
-    throw new Error('仅管理员可访问禅道同步中心');
+function ensureLoggedIn() {
+  if (!state.currentUser) {
+    throw new Error('请先登录后访问禅道同步中心');
   }
+}
+
+function isAdminUser() {
+  return !!state.currentUser && state.currentUser.role === 'admin';
 }
 
 function currentQuery() {
@@ -158,16 +162,17 @@ function setMapFormEnabled(enabled) {
     if (el) el.disabled = !enabled;
   });
 
+  const canWrite = enabled && isAdminUser();
   const saveBtn = document.querySelector("#tab-zentao-sync button[onclick='saveZentaoSyncMapping()']");
   const applyBtn = document.querySelector("#tab-zentao-sync button[onclick='applyZentaoSyncEvent()']");
   const deleteBtn = document.querySelector("#tab-zentao-sync button[onclick='deleteZentaoSyncEvent()']");
   const toggleManualBtn = document.querySelector("#tab-zentao-sync button[onclick='toggleManualMajorSelector()']");
   const resetManualBtn = document.querySelector("#tab-zentao-sync button[onclick='resetZentaoManualMajor()']");
-  if (saveBtn) saveBtn.disabled = !enabled;
-  if (applyBtn) applyBtn.disabled = !enabled;
-  if (deleteBtn) deleteBtn.disabled = !enabled;
-  if (toggleManualBtn) toggleManualBtn.disabled = !enabled;
-  if (resetManualBtn) resetManualBtn.disabled = !enabled;
+  if (saveBtn) saveBtn.disabled = !canWrite;
+  if (applyBtn) applyBtn.disabled = !canWrite;
+  if (deleteBtn) deleteBtn.disabled = !canWrite;
+  if (toggleManualBtn) toggleManualBtn.disabled = !canWrite;
+  if (resetManualBtn) resetManualBtn.disabled = !canWrite;
 }
 
 function versionByIdMap() {
@@ -541,6 +546,9 @@ function renderList() {
       const no = it.entity_type === 'bug' ? it.zentao_bug_id || '-' : it.zentao_case_id || '-';
       const title = it.title || '-';
       const selected = syncState.currentEvent?.id === it.id;
+      const deleteBtn = isAdminUser()
+        ? `<button class='secondary' style='color:#b91c1c; border-color:#fecaca; background:#fef2f2;' onclick='deleteZentaoSyncEvent(${it.id})'>删除</button>`
+        : '';
       return `<tr style="${selected ? 'background:#eff6ff;' : ''}">
         <td>${fmt(it.created_at)}</td>
         <td>${escapeHtml(zhEntity(it.entity_type))}</td>
@@ -551,7 +559,7 @@ function renderList() {
         <td class='col-actions'>
           <div class='zentao-row-actions'>
             <button class='secondary' onclick='openZentaoSyncEventDetail(${it.id})'>查看</button>
-            <button class='secondary' style='color:#b91c1c; border-color:#fecaca; background:#fef2f2;' onclick='deleteZentaoSyncEvent(${it.id})'>删除</button>
+            ${deleteBtn}
           </div>
         </td>
       </tr>`;
@@ -583,6 +591,7 @@ function renderDetail(detail) {
   const requirementId = detail.zentao_req_id || draft.requirementId || '-';
   const requirementName = detail.zentao_requirement_name || draft.requirementName || '-';
   const creatorName = detail.creator_name || draft.creatorName || '-';
+  const bugTitle = detail.zentao_bug_title || detail.title || draft.bugTitle || '-';
   const executionName = detail.zentao_execution_name || draft.executionName || '-';
   const affectedVersion = detail.zentao_affected_version || draft.affectedVersion || '-';
   const linkedCaseId = detail.linked_case_id || draft.linkedCaseId || '-';
@@ -591,6 +600,7 @@ function renderDetail(detail) {
   const originLines = [
     `禅道 Bug：${detail.zentao_bug_id || '-'}`,
     `禅道用例：${detail.zentao_case_id || '-'}`,
+    `标题：${bugTitle}`,
     `需求编号：${requirementId}`,
     `需求名称：${requirementName}`,
     `创建者：${creatorName}`,
@@ -617,7 +627,7 @@ function renderDetail(detail) {
 }
 
 export async function loadZentaoSyncBoard(page = 1) {
-  ensureAdmin();
+  ensureLoggedIn();
   await ensureZentaoMapDataReady();
   bindMapInteractions();
   if (!syncState.currentEvent) renderMapSelectors(null);
@@ -649,7 +659,7 @@ export async function loadZentaoSyncBoard(page = 1) {
 }
 
 export async function initZentaoSyncBoard() {
-  ensureAdmin();
+  ensureLoggedIn();
   await ensureZentaoMapDataReady();
   await resetZentaoMapForm();
   await loadZentaoSyncBoard(1);

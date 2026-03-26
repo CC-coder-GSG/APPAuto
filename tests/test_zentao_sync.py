@@ -464,7 +464,134 @@ def test_bug_all_recommendations_success_status_ready_to_apply(db_session):
     assert row.mapped_major_version_id == major.id
     assert row.mapped_minor_version_id == minor.id
     assert row.display_bucket == "requirement"
-    assert row.status == "ready_to_apply"
+    assert row.status in {"ready_to_apply", "applied"}
+
+
+def test_detail_includes_bug_title_field(db_session):
+    service = ZentaoSyncService(db_session)
+    payload = _base_bug_payload("bug_detail_title")
+    payload["draft"]["bugTitle"] = "支付流程校验失败"
+    rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
+    detail = service.get_event_detail(rec["event_id"])
+    assert detail["zentao_bug_title"] == "支付流程校验失败"
+    assert detail["title"] == "支付流程校验失败"
+
+
+def test_detail_handles_empty_bug_title(db_session):
+    service = ZentaoSyncService(db_session)
+    payload = _base_bug_payload("bug_detail_empty_title")
+    payload["draft"]["bugTitle"] = ""
+    rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
+    detail = service.get_event_detail(rec["event_id"])
+    assert detail["zentao_bug_title"] in {"", None}
+    assert detail["id"] == rec["event_id"]
+
+
+def test_bug_auto_apply_when_major_and_title_present(db_session):
+    software = SoftwareProduct(name="Survey Master")
+    db_session.add(software)
+    db_session.commit()
+    db_session.refresh(software)
+    major = _create_major(db_session, software.id, "V4.0.3.0")
+    service = ZentaoSyncService(db_session)
+
+    payload = _mapped_bug_payload(
+        "bug_auto_apply_hit",
+        requirement_id=None,
+        requirement_name=None,
+        execution_name="s4030(V4.0.3.0)",
+    )
+    payload["draft"]["bugTitle"] = "自动应用命中标题"
+    rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
+    row = db_session.query(BrowserSyncEvent).filter(BrowserSyncEvent.id == rec["event_id"]).first()
+    assert row.mapped_major_version_id == major.id
+    assert row.status == "applied"
+    assert row.applied_bug_tracking_id is not None
+
+
+def test_bug_not_auto_apply_when_major_but_title_empty(db_session):
+    software = SoftwareProduct(name="Survey Master")
+    db_session.add(software)
+    db_session.commit()
+    db_session.refresh(software)
+    _create_major(db_session, software.id, "V4.0.3.0")
+    service = ZentaoSyncService(db_session)
+
+    payload = _mapped_bug_payload(
+        "bug_auto_apply_title_empty",
+        requirement_id=None,
+        requirement_name=None,
+        execution_name="s4030(V4.0.3.0)",
+    )
+    payload["draft"]["bugTitle"] = ""
+    rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
+    row = db_session.query(BrowserSyncEvent).filter(BrowserSyncEvent.id == rec["event_id"]).first()
+    assert row.mapped_major_version_id is not None
+    assert row.status != "applied"
+
+
+def test_bug_not_auto_apply_when_title_present_but_no_major(db_session):
+    service = ZentaoSyncService(db_session)
+    payload = _mapped_bug_payload(
+        "bug_auto_apply_no_major",
+        requirement_id=None,
+        requirement_name=None,
+        execution_id="unknown",
+        execution_name="unknown",
+        affected_version=None,
+    )
+    payload["draft"]["bugTitle"] = "有标题但没版本"
+    rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
+    row = db_session.query(BrowserSyncEvent).filter(BrowserSyncEvent.id == rec["event_id"]).first()
+    assert row.mapped_major_version_id is None
+    assert row.status != "applied"
+
+
+def test_bug_auto_apply_failure_keeps_event_and_reason(db_session, monkeypatch):
+    software = SoftwareProduct(name="Survey Master")
+    db_session.add(software)
+    db_session.commit()
+    db_session.refresh(software)
+    _create_major(db_session, software.id, "V4.0.3.0")
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("mock auto apply fail")
+
+    monkeypatch.setattr(ZentaoSyncService, "_apply_bug", _boom)
+    service = ZentaoSyncService(db_session)
+    payload = _mapped_bug_payload(
+        "bug_auto_apply_fail",
+        requirement_id=None,
+        requirement_name=None,
+        execution_name="s4030(V4.0.3.0)",
+    )
+    payload["draft"]["bugTitle"] = "触发失败路径"
+    rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
+    row = db_session.query(BrowserSyncEvent).filter(BrowserSyncEvent.id == rec["event_id"]).first()
+    assert row.status != "applied"
+    assert "自动应用失败" in str(row.failure_reason or "")
+
+
+def test_non_admin_can_access_zentao_sync_list(db_session):
+    normal_user = _create_user(db_session, "normal_sync_user", role=UserRole.USER)
+    ZentaoSyncService(db_session).receive_event(ZentaoBrowserSyncPayload(**_base_bug_payload("bug_non_admin_list")))
+    client = _make_client(db_session, normal_user)
+    try:
+        resp = client.get("/api/integrations/zentao/browser-events?page=1&page_size=20")
+        assert resp.status_code == 200
+    finally:
+        client.close()
+
+
+def test_non_admin_can_access_zentao_sync_detail(db_session):
+    normal_user = _create_user(db_session, "normal_sync_detail", role=UserRole.USER)
+    rec = ZentaoSyncService(db_session).receive_event(ZentaoBrowserSyncPayload(**_base_bug_payload("bug_non_admin_detail")))
+    client = _make_client(db_session, normal_user)
+    try:
+        resp = client.get(f"/api/integrations/zentao/browser-events/{rec['event_id']}")
+        assert resp.status_code == 200
+    finally:
+        client.close()
 
 
 def test_bug_major_match_keeps_legacy_s4030(db_session):

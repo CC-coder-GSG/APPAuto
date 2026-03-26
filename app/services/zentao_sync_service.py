@@ -429,6 +429,7 @@ class ZentaoSyncService:
                 row.mapped_minor_version_id = minor.id
 
         self._mark_mapped_status(row)
+        self._maybe_auto_apply_bug(row, draft=draft)
 
     def _recommend_requirements(self, row: BrowserSyncEvent) -> list[Requirement]:
         payload = self._event_payload(row)
@@ -532,8 +533,6 @@ class ZentaoSyncService:
         row.applied_case_id = new_case.id
 
     def _apply_bug(self, row: BrowserSyncEvent, actor_id: int | None) -> None:
-        if not row.mapped_minor_version_id:
-            raise HTTPException(status_code=400, detail="Bug 事件尚未映射 minor_version_id")
         if row.display_bucket != "overall" and not row.mapped_requirement_id:
             raise HTTPException(status_code=400, detail="Bug 事件尚未映射 requirement_id")
         if row.display_bucket == "overall" and not row.mapped_major_version_id:
@@ -554,7 +553,8 @@ class ZentaoSyncService:
         draft = payload.get("draft", {})
         source_type = self._parse_bug_source_type(row.mapped_source_type or draft.get("sourceType"))
 
-        if row.display_bucket == "overall" and not row.mapped_requirement_id:
+        use_overall_bucket = row.display_bucket == "overall" or not row.mapped_minor_version_id
+        if use_overall_bucket:
             bug_row = BugTracking(
                 major_version_id=row.mapped_major_version_id,  # type: ignore[arg-type]
                 requirement_id=None,
@@ -618,6 +618,43 @@ class ZentaoSyncService:
         self.db.commit()
 
         row.applied_bug_tracking_id = bug_row.id
+
+    def _maybe_auto_apply_bug(self, row: BrowserSyncEvent, *, draft: dict[str, Any]) -> None:
+        if row.entity_type != "bug":
+            return
+        if not self._auto_apply_bug_enabled():
+            return
+        if row.status == "applied" or row.applied_bug_tracking_id:
+            return
+        if not row.mapped_major_version_id:
+            return
+        bug_title = self._clean_text(row.zentao_bug_title or draft.get("bugTitle"))
+        if not bug_title:
+            return
+        # For auto apply we only require major + title; no minor is required.
+        if not row.mapped_source_type:
+            row.mapped_source_type = BugSourceType.MANUAL.value
+        if row.display_bucket != "overall" and not row.mapped_minor_version_id:
+            row.display_bucket = "overall"
+        try:
+            self._apply_bug(row, actor_id=None)
+            row.status = "applied"
+            row.failure_reason = None
+            audit(
+                self.db,
+                action="zentao_sync.auto_apply_bug",
+                target_type="browser_sync_event",
+                target_id=str(row.id),
+                detail=f"major={row.mapped_major_version_id}",
+            )
+        except Exception as exc:
+            logger.exception("禅道 Bug 自动应用失败 | eventId=%s", row.id)
+            if row.status == "ready_to_apply":
+                row.failure_reason = f"自动应用失败：{exc}"
+            elif row.failure_reason:
+                row.failure_reason = f"{row.failure_reason}；自动应用失败：{exc}"
+            else:
+                row.failure_reason = f"自动应用失败：{exc}"
 
     def _resolve_actor_for_apply(self, payload: dict[str, Any], actor_id: int | None) -> User:
         if actor_id:
@@ -874,7 +911,7 @@ class ZentaoSyncService:
             "zentao_bug_id": row.zentao_bug_id,
             "zentao_case_id": row.zentao_case_id,
             "zentao_req_id": row.zentao_req_id,
-            "title": draft.get("bugTitle") or draft.get("caseTitle"),
+            "title": row.zentao_bug_title or row.zentao_case_title or draft.get("bugTitle") or draft.get("caseTitle"),
             "requirement_name": draft.get("requirementName") or row.zentao_req_id,
             "mapped_requirement_id": row.mapped_requirement_id,
             "mapped_major_version_id": row.mapped_major_version_id,
@@ -911,6 +948,8 @@ class ZentaoSyncService:
             "zentao_case_id": row.zentao_case_id,
             "zentao_req_id": row.zentao_req_id,
             "zentao_requirement_name": row.zentao_requirement_name,
+            "zentao_bug_title": row.zentao_bug_title,
+            "zentao_case_title": row.zentao_case_title,
             "zentao_execution_name": row.zentao_execution_name,
             "zentao_affected_version": row.zentao_affected_version,
             "linked_case_id": row.linked_case_id,
@@ -927,6 +966,7 @@ class ZentaoSyncService:
             "mapped_source_ref": row.mapped_source_ref,
             "applied_case_id": row.applied_case_id,
             "applied_bug_tracking_id": row.applied_bug_tracking_id,
+            "title": row.zentao_bug_title or row.zentao_case_title,
             "draft": payload.get("draft"),
             "result": payload.get("result"),
             "raw_payload": payload,
@@ -949,3 +989,9 @@ class ZentaoSyncService:
         from app.core.config import settings
 
         return bool(settings.zentao_sync_auto_apply_testcase)
+
+    @staticmethod
+    def _auto_apply_bug_enabled() -> bool:
+        from app.core.config import settings
+
+        return bool(settings.zentao_sync_auto_apply_bug)

@@ -68,7 +68,7 @@
     <button onclick="showTab('stage5')">整体测试</button>
     <button onclick="showTab('field-test')">外业测试</button>
     <button id="tabBuildRecordsBtn" class="hidden" onclick="showTab('build-records')">构建记录</button>
-    <button id="tabZentaoSyncBtn" class="hidden" onclick="showTab('zentao-sync')">禅道同步</button>
+    <button id="tabZentaoSyncBtn" class="hidden" onclick="showTab('zentao-sync')">禅道同步中心</button>
     <button onclick="showTab('report')">报表中心</button>
     <button id="tabActivityBtn" class="hidden" onclick="showTab('activity')">活动中心</button>
     <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
@@ -501,7 +501,7 @@
   </section>
 
   <section id="tab-zentao-sync" class="hidden card">
-    <h2>禅道同步中心（仅管理员）</h2>
+    <h2>禅道同步中心</h2>
     <div class="qa-panel qa-panel-soft" style="margin-bottom:12px;">
       <div class="qa-filter-grid qa-filter-grid-zentao">
         <div class="qa-filter-item zt-filter-entity">
@@ -1125,11 +1125,11 @@ async function init(){
 
   await loadSoftwares();
   await loadVersions();
+  document.getElementById('tabZentaoSyncBtn').classList.remove('hidden');
   if(currentUser.role==='admin'){
     await loadUsers();
     document.getElementById('tabAssignBtn').classList.remove('hidden');
     document.getElementById('tabBuildRecordsBtn').classList.remove('hidden');
-    document.getElementById('tabZentaoSyncBtn').classList.remove('hidden');
     document.getElementById('tabActivityBtn').classList.remove('hidden');
     document.getElementById('tabDataBtn').classList.remove('hidden');
     document.getElementById('tabDispatchBtn').classList.remove('hidden');
@@ -1139,7 +1139,6 @@ async function init(){
   }else{
     document.getElementById('tabAssignBtn').classList.add('hidden');
     document.getElementById('tabBuildRecordsBtn').classList.add('hidden');
-    document.getElementById('tabZentaoSyncBtn').classList.add('hidden');
     document.getElementById('tabActivityBtn').classList.add('hidden');
     document.getElementById('tabDataBtn').classList.add('hidden');
     showTab('mine');

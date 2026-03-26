@@ -100,7 +100,7 @@ def list_browser_events(
     only_unapplied: bool = False,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=200),
-    _: User = Depends(_admin_guard),
+    _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     return ZentaoSyncService(db).list_events(
@@ -118,7 +118,7 @@ def list_browser_events(
 
 
 @router.get("/api/integrations/zentao/browser-events/{event_id}")
-def browser_event_detail(event_id: int, _: User = Depends(_admin_guard), db: Session = Depends(get_db)):
+def browser_event_detail(event_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return ZentaoSyncService(db).get_event_detail(event_id)
 
 
