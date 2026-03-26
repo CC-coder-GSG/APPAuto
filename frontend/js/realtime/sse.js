@@ -197,6 +197,8 @@ function scheduleReconnect() {
 export function startSSE() {
   if (started) return;
   started = true;
+  // Always normalize badges on boot: no number => hidden.
+  updateNavBadges();
   connect().catch(() => scheduleReconnect());
 }
 
