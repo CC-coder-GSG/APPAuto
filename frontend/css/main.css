@@ -798,8 +798,12 @@
 }
 
 #tab-zentao-sync .zentao-map-form {
-  display: flex;
-  flex-direction: column;
+  display: block;
+}
+
+#tab-zentao-sync .zentao-map-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
 
@@ -809,10 +813,19 @@
   gap: 6px;
 }
 
-#tab-zentao-sync .zentao-map-grid-two {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+#tab-zentao-sync .zentao-map-field select,
+#tab-zentao-sync .zentao-map-field input,
+#tab-zentao-sync .zentao-map-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+#tab-zentao-sync .zentao-map-field textarea {
+  min-height: 68px;
+}
+
+#tab-zentao-sync .zentao-map-span-full {
+  grid-column: 1 / -1;
 }
 
 #tab-zentao-sync .zentao-map-inline-hint {
@@ -820,11 +833,13 @@
 }
 
 #tab-zentao-sync .zentao-map-actions {
-  margin-top: 4px;
+  margin-top: 8px;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 10px;
 }
 
 @media (max-width: 1200px) {
@@ -890,7 +905,7 @@
     justify-content: flex-start;
   }
   #tab-zentao-sync .zentao-map-head-top,
-  #tab-zentao-sync .zentao-map-grid-two {
+  #tab-zentao-sync .zentao-map-grid {
     grid-template-columns: 1fr;
   }
   #tab-zentao-sync .zentao-map-head-actions,

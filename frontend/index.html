@@ -620,19 +620,19 @@
             <div id="zentaoMapMajorHint" class="muted zentao-map-head-hint">请先从左侧选择事件；若自动识别不准确，可手动指定大版本作为筛选上下文。</div>
           </div>
           <div class="zentao-map-form">
-            <div class="zentao-map-field">
-              <label>需求</label>
-              <select id="zentaoMapRequirementSelect">
-                <option value="">请选择需求</option>
-              </select>
-            </div>
-            <div class="zentao-map-field">
-              <label>小版本</label>
-              <select id="zentaoMapMinorSelect">
-                <option value="">请选择小版本</option>
-              </select>
-            </div>
-            <div class="zentao-map-grid-two">
+            <div class="zentao-map-grid">
+              <div class="zentao-map-field">
+                <label>需求</label>
+                <select id="zentaoMapRequirementSelect">
+                  <option value="">请选择需求</option>
+                </select>
+              </div>
+              <div class="zentao-map-field">
+                <label>小版本</label>
+                <select id="zentaoMapMinorSelect">
+                  <option value="">请选择小版本</option>
+                </select>
+              </div>
               <div class="zentao-map-field">
                 <label>来源类型</label>
                 <select id="zentaoMapSourceType">
@@ -652,27 +652,27 @@
                   <option value="overall">总览池</option>
                 </select>
               </div>
+              <div id="zentaoMapBucketHint" class="muted zentao-map-inline-hint zentao-map-span-full">需求池：挂到具体需求下，参与需求维度统计；总览池：仅归属到版本整体，不挂具体需求。</div>
+              <div class="zentao-map-field">
+                <label>关联用例</label>
+                <input id="zentaoMapLinkedCaseId" placeholder="请输入关联用例ID（可选）">
+              </div>
+              <div class="zentao-map-field">
+                <label>来源引用</label>
+                <input id="zentaoMapSourceRef" placeholder="请输入来源引用（可选）">
+              </div>
+              <div class="zentao-map-field zentao-map-span-full">
+                <label>备注</label>
+                <textarea id="zentaoMapNote" rows="2" placeholder="备注（可选）"></textarea>
+              </div>
+              <div class="zentao-map-actions zentao-map-span-full">
+                <button class="secondary" onclick="saveZentaoSyncMapping()">保存映射</button>
+                <button onclick="applyZentaoSyncEvent()">应用到业务</button>
+                <button class="secondary" style="color:#b91c1c; border-color:#fecaca; background:#fef2f2;" onclick="deleteZentaoSyncEvent()">删除</button>
+              </div>
+              <div id="zentaoMapRuleHint" class="muted zentao-map-inline-hint zentao-map-span-full">当前映射要求：请先从左侧选择一个同步事件。</div>
+              <div class="muted zentao-map-inline-hint zentao-map-span-full" id="zentaoSyncFailureReason">-</div>
             </div>
-            <div id="zentaoMapBucketHint" class="muted zentao-map-inline-hint">需求池：挂到具体需求下，参与需求维度统计；总览池：仅归属到版本整体，不挂具体需求。</div>
-            <div class="zentao-map-field">
-              <label>关联用例</label>
-              <div class="prefix-input"><span>关联用例</span><input id="zentaoMapLinkedCaseId" placeholder="请输入关联用例ID（可选）"></div>
-            </div>
-            <div class="zentao-map-field">
-              <label>来源引用</label>
-              <div class="prefix-input"><span>来源引用</span><input id="zentaoMapSourceRef" placeholder="请输入来源引用（可选）"></div>
-            </div>
-            <div class="zentao-map-field">
-              <label>备注</label>
-              <textarea id="zentaoMapNote" rows="2" placeholder="备注（可选）"></textarea>
-            </div>
-            <div class="zentao-map-actions">
-              <button class="secondary" onclick="saveZentaoSyncMapping()">保存映射</button>
-              <button onclick="applyZentaoSyncEvent()">应用到业务</button>
-              <button class="secondary" style="color:#b91c1c; border-color:#fecaca; background:#fef2f2;" onclick="deleteZentaoSyncEvent()">删除</button>
-            </div>
-            <div id="zentaoMapRuleHint" class="muted zentao-map-inline-hint">当前映射要求：请先从左侧选择一个同步事件。</div>
-            <div class="muted zentao-map-inline-hint" id="zentaoSyncFailureReason">-</div>
           </div>
         </div>
 
