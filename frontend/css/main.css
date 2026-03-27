@@ -717,56 +717,58 @@ body {
   background: linear-gradient(180deg, rgba(239, 246, 255, .88), rgba(248, 250, 252, .98));
 }
 
-.qa-table-zentao-sync tr.sse-glow td {
-  position: relative;
+/* 表格行彩色流光循环动画（Apple Intelligence 同款配色） */
+@keyframes sseRowColorCycle {
+  0%   { box-shadow: inset 0 0 0 2px #818cf8; }
+  20%  { box-shadow: inset 0 0 0 2px #a78bfa; }
+  40%  { box-shadow: inset 0 0 0 2px #f472b6; }
+  60%  { box-shadow: inset 0 0 0 2px #38bdf8; }
+  80%  { box-shadow: inset 0 0 0 2px #34d399; }
+  100% { box-shadow: inset 0 0 0 2px #818cf8; }
 }
 
-.qa-table-zentao-sync tr.sse-glow-blue td {
-  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, .42);
+.qa-table-zentao-sync tr.sse-glow-enter td,
+.qa-table-zentao-sync tr.sse-glow-hold td {
+  animation: sseRowColorCycle 2.4s linear infinite;
 }
 
-.qa-table-zentao-sync tr.sse-glow-green td {
-  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .42);
+.qa-table-zentao-sync tr.sse-glow-exit td {
+  animation: sseRowColorCycle 2.4s linear infinite;
+  opacity: 0.6;
+  transition: opacity .7s ease;
 }
 
-.qa-table-zentao-sync tr.sse-glow-purple td {
-  box-shadow: inset 0 0 0 1px rgba(139, 92, 246, .42);
+.field-test-row-card.sse-glow-enter td,
+.field-test-row-card.sse-glow-hold td {
+  animation: sseRowColorCycle 2.4s linear infinite;
 }
 
-.field-test-row-card.sse-glow td {
-  position: relative;
+.field-test-row-card.sse-glow-exit td {
+  animation: sseRowColorCycle 2.4s linear infinite;
+  opacity: 0.6;
+  transition: opacity .7s ease;
 }
 
-.field-test-row-card.sse-glow-blue td {
-  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, .35);
+#tab-dispatch .dispatch-row-card.sse-glow-enter td,
+#tab-dispatch .dispatch-row-card.sse-glow-hold td {
+  animation: sseRowColorCycle 2.4s linear infinite;
 }
 
-.field-test-row-card.sse-glow-green td {
-  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .35);
+#tab-dispatch .dispatch-row-card.sse-glow-exit td {
+  animation: sseRowColorCycle 2.4s linear infinite;
+  opacity: 0.6;
+  transition: opacity .7s ease;
 }
 
-.field-test-row-card.sse-glow-purple td {
-  box-shadow: inset 0 0 0 1px rgba(139, 92, 246, .35);
+#s5TableContainer tr.stage5-row-card.sse-glow-enter td,
+#s5TableContainer tr.stage5-row-card.sse-glow-hold td {
+  animation: sseRowColorCycle 2.4s linear infinite;
 }
 
-#tab-dispatch .dispatch-row-card.sse-glow td {
-  position: relative;
-}
-
-#tab-dispatch .dispatch-row-card.sse-glow-green td {
-  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .35);
-}
-
-#s5TableContainer tr.stage5-row-card.sse-glow td {
-  position: relative;
-}
-
-#s5TableContainer tr.stage5-row-card.sse-glow-blue td {
-  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, .42);
-}
-
-#s5TableContainer tr.stage5-row-card.sse-glow-green td {
-  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .42);
+#s5TableContainer tr.stage5-row-card.sse-glow-exit td {
+  animation: sseRowColorCycle 2.4s linear infinite;
+  opacity: 0.6;
+  transition: opacity .7s ease;
 }
 
 .zentao-sync-sticky-panel {
@@ -1116,6 +1118,13 @@ body {
   background: #ef4444;
 }
 
+/* Apple Intelligence 旋转彩色光圈边框 */
+@property --sse-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
 .sse-glow {
   position: relative;
   isolation: isolate;
@@ -1124,11 +1133,20 @@ body {
 .sse-glow::before {
   content: "";
   position: absolute;
-  inset: 0;
-  border-radius: 10px;
-  padding: 1px;
-  background: linear-gradient(120deg, rgba(59, 130, 246, 0), rgba(59, 130, 246, .55), rgba(59, 130, 246, 0));
-  background-size: 200% auto;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--sse-angle),
+    transparent   0%,
+    #818cf8      12%,
+    #a78bfa      24%,
+    #f472b6      38%,
+    #fb923c      50%,
+    #38bdf8      64%,
+    #34d399      78%,
+    transparent  88%
+  );
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -1136,45 +1154,29 @@ body {
   opacity: 0;
 }
 
-.sse-glow-blue::before {
-  background: linear-gradient(120deg, rgba(67, 56, 202, 0), rgba(79, 70, 229, .58), rgba(67, 56, 202, 0));
+@keyframes sseBorderSpin {
+  to { --sse-angle: 360deg; }
 }
 
-.sse-glow-green::before {
-  background: linear-gradient(120deg, rgba(6, 95, 70, 0), rgba(5, 150, 105, .58), rgba(6, 95, 70, 0));
+@keyframes sseGlowIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
-.sse-glow-purple::before {
-  background: linear-gradient(120deg, rgba(76, 29, 149, 0), rgba(139, 92, 246, .58), rgba(76, 29, 149, 0));
+@keyframes sseGlowOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
 }
 
 .sse-glow-enter::before {
-  animation: sseWrapEnter .55s ease-out forwards;
+  animation: sseGlowIn .45s ease-out forwards, sseBorderSpin 2.4s linear infinite;
 }
 
 .sse-glow-hold::before {
-  opacity: .72;
-  animation: sseWrapHold 1.2s ease-in-out infinite;
+  opacity: 1;
+  animation: sseBorderSpin 2.4s linear infinite;
 }
 
 .sse-glow-exit::before {
-  animation: sseWrapExit .78s ease forwards;
-}
-
-@keyframes sseWrapEnter {
-  0% { opacity: 0; background-position: 0% 50%; }
-  30% { opacity: .9; }
-  100% { opacity: .72; background-position: 100% 50%; }
-}
-
-@keyframes sseWrapHold {
-  0% { opacity: .52; filter: saturate(100%); }
-  50% { opacity: .76; filter: saturate(118%); }
-  100% { opacity: .52; filter: saturate(100%); }
-}
-
-@keyframes sseWrapExit {
-  0% { opacity: .62; transform: scale(1); }
-  70% { opacity: .22; transform: scale(.998); }
-  100% { opacity: 0; transform: scale(.996); }
+  animation: sseGlowOut .7s ease forwards, sseBorderSpin 2.4s linear infinite;
 }
