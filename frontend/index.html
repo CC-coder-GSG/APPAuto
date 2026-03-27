@@ -1064,11 +1064,9 @@ function showTab(name){
   ['assign','mine','feedback','retest','stage5','field-test','build-records','zentao-sync','report','activity','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
   document.getElementById('tab-'+name).classList.remove('hidden');
   if(window.OmniQASSE && window.OmniQASSE.runtime && window.OmniQASSE.runtime.counters){
-    if(name === 'zentao-sync' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('zentao_sync');
     if(name === 'mine' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('mine_requirement');
     if(name === 'feedback' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('feedback_task');
     if(name === 'retest' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('retest_requirement');
-    if(name === 'stage5' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('overall_bug');
     if(name === 'dispatch' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('mine_bug_dispatch');
   }
   if(name === 'dispatch') { loadDispatchedAll(); }

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models import BugSourceType, BugStage5Record, BugTracking, Requirement, TestCase, User, Version
 from app.services.audit_service import audit
+from app.services.sse_service import sse_publish
 
 
 class Stage5Service:
@@ -161,6 +162,19 @@ class Stage5Service:
         self.db.add(item)
         self.db.commit()
         self.db.refresh(item)
+        sse_publish(
+            "overall_bug_created",
+            {
+                "id": item.id,
+                "bug_id": item.bug_id,
+                "source_type": item.source_type.value if hasattr(item.source_type, "value") else str(item.source_type),
+                "source_ref": item.source_ref,
+                "requirement_id": item.requirement_id,
+                "major_version_id": item.major_version_id,
+                "minor_version_id": item.found_minor_version_id,
+            },
+            channels=["global"],
+        )
         audit(self.db, action="stage5.add_issue", target_type="bug", actor_id=current_user.id, target_id=str(item.id), detail=item.bug_id)
         return {"id": item.id, "message": "Issue added"}
 

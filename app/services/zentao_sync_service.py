@@ -577,6 +577,19 @@ class ZentaoSyncService:
             self.db.add(bug_row)
             self.db.commit()
             self.db.refresh(bug_row)
+            sse_publish(
+                "overall_bug_created",
+                {
+                    "id": bug_row.id,
+                    "bug_id": bug_row.bug_id,
+                    "source_type": bug_row.source_type.value if hasattr(bug_row.source_type, "value") else str(bug_row.source_type),
+                    "source_ref": bug_row.source_ref,
+                    "requirement_id": bug_row.requirement_id,
+                    "major_version_id": bug_row.major_version_id,
+                    "minor_version_id": bug_row.found_minor_version_id,
+                },
+                channels=["global"],
+            )
             audit(
                 self.db,
                 action="bug.create",

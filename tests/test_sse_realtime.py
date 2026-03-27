@@ -9,10 +9,12 @@ from app.api.deps import get_db
 from app.core.security import create_access_token
 from app.main import app
 from app.models import BrowserSyncEvent
+from app.models import BugSourceType
 from app.models.enums import UserRole
 from app.models.user import User
 from app.schemas.zentao_sync import ZentaoBrowserSyncPayload
 from app.services.sse_service import sse_pull_since, sse_publish
+from app.services.stage5_service import Stage5Service
 from app.services.zentao_sync_service import ZentaoSyncService
 
 
@@ -189,3 +191,34 @@ def test_zentao_sync_publish_created_updated_deleted(db_session):
     service.delete_event(row.id, actor_id=None)
     deleted_events = sse_pull_since(cursor, channels={"global"})
     assert any(evt.event == "zentao_sync_deleted" for evt in deleted_events)
+
+
+def test_stage5_add_issue_publishes_overall_bug_created(db_session):
+    user = User(
+        username=f"stage5_tester_{uuid.uuid4().hex[:8]}",
+        display_name="Stage5 SSE Tester",
+        password_hash=User.hash_password("pass"),
+        role=UserRole.USER,
+        session_token=uuid.uuid4().hex,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    service = Stage5Service(db_session)
+    cursor = sse_publish("stage5_cursor", {"ok": True}, channels=["global"])
+    out = service.add_issue(
+        major_version_id=1,
+        requirement_id=None,
+        source_type=BugSourceType.MANUAL,
+        source_ref="stage5-manual",
+        bug_id=f"b#{uuid.uuid4().hex[:6]}",
+        minor_version_id=2,
+        current_user=user,
+    )
+    assert out.get("id")
+
+    events = sse_pull_since(cursor, channels={"global"})
+    created_evt = next((evt for evt in events if evt.event == "overall_bug_created"), None)
+    assert created_evt is not None
+    assert created_evt.data["payload"]["id"] == out["id"]

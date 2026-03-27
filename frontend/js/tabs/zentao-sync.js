@@ -70,6 +70,7 @@ const zentaoBatch = {
   created: [],
   updated: new Map(),
 };
+let zentaoUnreadClearTimer = null;
 
 function zhStatus(v) {
   return STATUS_ZH[String(v || '').toLowerCase()] || String(v || '-');
@@ -748,8 +749,23 @@ function bindTopScrollReset() {
     if (zentaoAtTop() && syncState.unseenNewCount > 0) {
       syncState.unseenNewCount = 0;
       updateTopNotice();
+      if (window.OmniQASSE && typeof window.OmniQASSE.clearScopeUnread === 'function') {
+        window.OmniQASSE.clearScopeUnread('zentao_sync');
+      }
     }
   });
+}
+
+function deferClearZentaoUnread(ms = 1200) {
+  if (zentaoUnreadClearTimer) clearTimeout(zentaoUnreadClearTimer);
+  zentaoUnreadClearTimer = setTimeout(() => {
+    zentaoUnreadClearTimer = null;
+    const tab = document.getElementById('tab-zentao-sync');
+    if (!tab || tab.classList.contains('hidden')) return;
+    if (!window.OmniQASSE || typeof window.OmniQASSE.clearScopeUnread !== 'function') return;
+    // Delay clearing unread until list rows are rendered and first attention pulse had time to play.
+    window.OmniQASSE.clearScopeUnread('zentao_sync');
+  }, ms);
 }
 
 function renderDetail(detail) {
@@ -847,12 +863,10 @@ export async function initZentaoSyncBoard() {
   ensureLoggedIn();
   bindSSE();
   bindTopScrollReset();
-  if (window.OmniQASSE && typeof window.OmniQASSE.clearScopeUnread === 'function') {
-    window.OmniQASSE.clearScopeUnread('zentao_sync');
-  }
   await ensureZentaoMapDataReady();
   await resetZentaoMapForm();
   await loadZentaoSyncBoard(1);
+  deferClearZentaoUnread(1300);
 }
 
 export function scrollZentaoSyncToTop() {
@@ -860,6 +874,9 @@ export function scrollZentaoSyncToTop() {
   if (wrap) wrap.scrollTop = 0;
   syncState.unseenNewCount = 0;
   updateTopNotice();
+  if (window.OmniQASSE && typeof window.OmniQASSE.clearScopeUnread === 'function') {
+    window.OmniQASSE.clearScopeUnread('zentao_sync');
+  }
 }
 
 export async function nextZentaoSyncPage() {

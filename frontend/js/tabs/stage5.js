@@ -2,6 +2,7 @@
 import { state } from '../state.js';
 import { withPrefix, sourceTypeZh, renderBugLink } from '../utils.js';
 let stage5SseBound = false;
+let stage5UnreadClearTimer = null;
 
 export async function loadStage5() {
   const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
@@ -26,7 +27,20 @@ export async function loadStage5() {
   document.getElementById('s5PendingBugs').innerText = pending;
   document.getElementById('s5ReadyRate').innerText = rate + '%';
   renderS5();
+  deferClearOverallUnread();
   window.showMessage && window.showMessage('全景大盘加载成功', 'success');
+}
+
+function deferClearOverallUnread(ms = 1200) {
+  if (stage5UnreadClearTimer) clearTimeout(stage5UnreadClearTimer);
+  stage5UnreadClearTimer = setTimeout(() => {
+    stage5UnreadClearTimer = null;
+    const tab = document.getElementById('tab-stage5');
+    if (!tab || tab.classList.contains('hidden')) return;
+    if (!window.OmniQASSE || typeof window.OmniQASSE.clearScopeUnread !== 'function') return;
+    // Do not clear unread on tab switch immediately; let new rows glow once after render.
+    window.OmniQASSE.clearScopeUnread('overall_bug');
+  }, ms);
 }
 
 export function renderS5() {
