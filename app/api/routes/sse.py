@@ -45,8 +45,11 @@ async def sse_stream(
         event_generator(),
         media_type="text/event-stream",
         headers={
+            # no-cache: do not cache event stream responses
             "Cache-Control": "no-cache",
+            # keep-alive: hint proxies/clients to keep the TCP connection open
             "Connection": "keep-alive",
+            # nginx: disable proxy buffering so events are flushed in real time
             "X-Accel-Buffering": "no",
         },
     )

@@ -18,9 +18,15 @@ class SSEEnvelope:
 
 class SSEEventBus:
     """
-    In-memory SSE event bus.
+    In-memory SSE event bus (single-process scope).
     - publish from sync request handlers
     - stream side polls by last_event_id
+
+    Note:
+    This works for single-process deployments. If you run with multiple workers
+    or multiple app instances, events will not be shared across processes.
+    In that case, replace this with a shared event bus (for example Redis pub/sub
+    + durable cursor store) to keep SSE streams consistent.
     """
 
     def __init__(self, max_events: int = 2000) -> None:

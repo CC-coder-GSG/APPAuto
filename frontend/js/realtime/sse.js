@@ -9,6 +9,7 @@ const refreshTimers = new Map();
 const unreadByScope = new Map();
 const attentionObserved = new WeakMap();
 let attentionObserver = null;
+const SSE_DEBUG = !!window.__OMNIQA_SSE_DEBUG__;
 
 const RUNTIME = {
   lastEventId: Number(localStorage.getItem('sse_last_event_id') || 0) || 0,
@@ -45,6 +46,16 @@ function setConnectionState(next) {
   if (RUNTIME.connectionState === stateValue) return;
   RUNTIME.connectionState = stateValue;
   updateConnectionIndicator();
+}
+
+function debugLog(...args) {
+  if (!SSE_DEBUG) return;
+  console.debug('[SSE]', ...args);
+}
+
+function debugError(...args) {
+  if (!SSE_DEBUG) return;
+  console.error('[SSE]', ...args);
 }
 
 const SCOPE_COUNTER_MAP = {
@@ -135,29 +146,38 @@ function debounceRefresh(key, fn, wait = 700) {
     refreshTimers.delete(key);
     try {
       fn();
-    } catch {}
+    } catch {
+      // no-op
+    }
   }, wait);
   refreshTimers.set(key, timer);
 }
 
+// Visibility-bound auto-refresh mapping: keep tab handlers lightweight and avoid full-page refresh storms.
 function handleVisibleRefreshByEvent(message) {
   const type = String(message?.type || '');
   const visible = visibleTabName();
+
   if ((type === 'workbench_requirement_created' || type === 'workbench_testcase_created') && visible === 'mine' && typeof window.loadMyWorkbench === 'function') {
     debounceRefresh('mine', () => window.loadMyWorkbench());
   }
+
   if (type === 'retest_requirement_status_changed' && visible === 'retest' && typeof window.loadRetest === 'function') {
     debounceRefresh('retest', () => window.loadRetest());
   }
+
   if ((type === 'overall_bug_created' || type === 'overall_bug_closed') && visible === 'stage5' && typeof window.loadStage5 === 'function') {
     debounceRefresh('stage5', () => window.loadStage5());
   }
+
   if ((type === 'feedback_task_created' || type === 'feedback_task_updated') && visible === 'feedback' && typeof window.loadFeedbackBoard === 'function') {
     debounceRefresh('feedback', () => window.loadFeedbackBoard());
   }
+
   if ((type === 'bug_dispatch_created' || type === 'bug_dispatch_updated') && visible === 'dispatch' && typeof window.loadDispatchedAll === 'function') {
     debounceRefresh('dispatch', () => window.loadDispatchedAll());
   }
+
   if ((type === 'field_test_record_created' || type === 'field_test_record_updated') && visible === 'field-test' && typeof window.loadFieldTestBoard === 'function') {
     debounceRefresh('field-test', () => window.loadFieldTestBoard());
   }
@@ -175,26 +195,31 @@ function updateNavBadges() {
     zentao.textContent = RUNTIME.counters.zentaoNew > 0 ? String(RUNTIME.counters.zentaoNew) : '';
     zentao.classList.toggle('hidden', RUNTIME.counters.zentaoNew <= 0);
   }
+
   const minePrimary = document.getElementById('tabMinePrimaryBadge');
   if (minePrimary) {
     minePrimary.textContent = RUNTIME.counters.minePrimary > 0 ? String(RUNTIME.counters.minePrimary) : '';
     minePrimary.classList.toggle('hidden', RUNTIME.counters.minePrimary <= 0);
   }
+
   const mineSecondary = document.getElementById('tabMineSecondaryBadge');
   if (mineSecondary) {
     mineSecondary.textContent = RUNTIME.counters.mineSecondaryBugDispatch > 0 ? String(RUNTIME.counters.mineSecondaryBugDispatch) : '';
     mineSecondary.classList.toggle('hidden', RUNTIME.counters.mineSecondaryBugDispatch <= 0);
   }
+
   const feedback = document.getElementById('tabFeedbackBadge');
   if (feedback) {
     feedback.textContent = RUNTIME.counters.feedback > 0 ? String(RUNTIME.counters.feedback) : '';
     feedback.classList.toggle('hidden', RUNTIME.counters.feedback <= 0);
   }
+
   const retest = document.getElementById('tabRetestBadge');
   if (retest) {
     retest.textContent = RUNTIME.counters.retest > 0 ? String(RUNTIME.counters.retest) : '';
     retest.classList.toggle('hidden', RUNTIME.counters.retest <= 0);
   }
+
   const stage5 = document.getElementById('tabStage5Badge');
   if (stage5) {
     stage5.textContent = RUNTIME.counters.overallBug > 0 ? String(RUNTIME.counters.overallBug) : '';
@@ -242,19 +267,41 @@ async function connect() {
   if (abortController) abortController.abort();
   abortController = new AbortController();
   setConnectionState(reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
+
   const cursor = Number(RUNTIME.lastEventId || 0);
+  const token = String(localStorage.getItem('token') || '').trim();
+  const headers = { Accept: 'text/event-stream' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  debugLog('connect start', { cursor, reconnectAttempts, hasToken: !!token });
+
   const resp = await fetch(`/api/sse/stream?last_event_id=${cursor}`, {
     method: 'GET',
-    headers: { Accept: 'text/event-stream' },
+    headers,
     signal: abortController.signal,
     credentials: 'same-origin',
   });
+
+  if (resp.status === 401) {
+    debugError('connect unauthorized', { status: resp.status });
+    localStorage.removeItem('token');
+    setConnectionState('disconnected');
+    started = false;
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login';
+    }
+    throw new Error('SSE unauthorized (401)');
+  }
+
   if (!resp.ok || !resp.body) {
+    debugError('connect bad response', { status: resp.status, ok: resp.ok, hasBody: !!resp.body });
     throw new Error(`SSE connect failed: ${resp.status}`);
   }
 
   reconnectAttempts = 0;
   setConnectionState('connected');
+  debugLog('connect success', { cursor });
+
   const decoder = new TextDecoder('utf-8');
   const reader = resp.body.getReader();
   let carry = '';
@@ -265,32 +312,50 @@ async function connect() {
     carry = parseSSEChunk(carry, (msg) => {
       if (msg.type === 'ping') return;
       if (msg.id) saveLastEventId(msg.id);
+      debugLog('event', { id: msg.id || null, type: msg.type || 'message' });
       queueUnreadByEvent(msg);
       bumpCounterByEvent(msg);
       emit(msg.type, msg);
       handleVisibleRefreshByEvent(msg);
     });
   }
+
+  debugLog('stream disconnected');
   if (started) setConnectionState('reconnecting');
 }
 
 function scheduleReconnect() {
+  if (!started) return;
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectAttempts += 1;
   setConnectionState('reconnecting');
   const ms = Math.min(15000, 1000 * 2 ** Math.min(5, reconnectAttempts));
+  debugLog('schedule reconnect', { reconnectAttempts, delayMs: ms });
   reconnectTimer = setTimeout(() => {
-    connect().catch(() => scheduleReconnect());
+    connect().catch((err) => {
+      if (String(err?.message || '').includes('401')) {
+        debugError('reconnect stopped (unauthorized)', err);
+        return;
+      }
+      debugError('reconnect failed', err);
+      scheduleReconnect();
+    });
   }, ms);
 }
 
 export function startSSE() {
   if (started) return;
   started = true;
-  // Always normalize badges on boot: no number => hidden.
   updateNavBadges();
   setConnectionState('connecting');
-  connect().catch(() => scheduleReconnect());
+  connect().catch((err) => {
+    if (String(err?.message || '').includes('401')) {
+      debugError('initial connect unauthorized', err);
+      return;
+    }
+    debugError('initial connect failed', err);
+    scheduleReconnect();
+  });
 }
 
 export function stopSSE() {
@@ -321,7 +386,6 @@ export function pulseBoundaryGlow(el, tone = 'blue') {
   if (!el) return;
   const now = Date.now();
   const last = Number(el.dataset.ssePulseTs || 0);
-  // burst-throttle: keep hold phase if events are too dense.
   if (now - last < 1200 && el.classList.contains('sse-glow')) {
     el.dataset.ssePulseTs = String(now);
     el.classList.add('sse-glow-hold');
@@ -367,6 +431,7 @@ export function mountAttention(el, { scope, key, tone = 'blue', hoverDelayMs = 4
       meta.hoverTimer = null;
     }
   };
+
   el.addEventListener('mouseenter', () => {
     clearTimer();
     meta.hoverTimer = setTimeout(() => {
@@ -376,6 +441,7 @@ export function mountAttention(el, { scope, key, tone = 'blue', hoverDelayMs = 4
       el.classList.remove('sse-glow', 'sse-glow-enter', 'sse-glow-hold', 'sse-glow-exit', 'sse-glow-blue', 'sse-glow-green', 'sse-glow-purple');
     }, hoverDelayMs);
   });
+
   el.addEventListener('mouseleave', () => clearTimer());
 }
 
