@@ -833,10 +833,17 @@ function renderDetail(detail) {
   ];
   setText('zentaoSyncOriginInfo', originLines.join('\n'));
 
+  const recMajorId = detail.recommended_major_version_id || detail.mapped_major_version_id;
+  const recMajorNo = majorVersionNoById(recMajorId) || recMajorId || '-';
+  const recMinorNo = majorVersionNoById(detail.recommended_minor_version_id) || detail.recommended_minor_version_id || '-';
+  const recReqId = Number(detail.recommended_requirement_id || 0);
+  const recReq = recReqId ? getRequirementById(syncState.mapRequirements, recReqId) : null;
+  const recReqLabel = recReq ? `${recReq.zentao_req_id || ''} ${recReq.title || ''}`.trim() : (recReqId ? String(recReqId) : '-');
+
   const recLines = [
-    `推荐需求：${detail.recommended_requirement_id || '-'}`,
-    `推荐主版本：${detail.recommended_major_version_id || detail.mapped_major_version_id || '-'}`,
-    `推荐小版本：${detail.recommended_minor_version_id || '-'}`,
+    `推荐需求：${recReqLabel}`,
+    `推荐主版本：${recMajorNo}`,
+    `推荐小版本：${recMinorNo}`,
     `推荐来源类型：${zhSourceType(detail.recommended_source_type)}`,
     `推荐归属范围：${zhBucket(detail.recommended_display_bucket || detail.display_bucket)}`,
     `推荐来源用例关联：${detail.recommended_test_case_id || '-'}`,
