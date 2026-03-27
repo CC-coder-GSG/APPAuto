@@ -7,7 +7,9 @@
       "Bash(sed \"s/.*subscribe\\([''''\"\"]//g\")",
       "Bash(sed \"s/sse_publish\\([''''\"\"]//g\")",
       "Bash(sed \"s/[''''\"\"]//g\")",
-      "Bash(sed \"s/.subscribe\\([''''\"\"]//g\")"
+      "Bash(sed \"s/.subscribe\\([''''\"\"]//g\")",
+      "Bash(grep -n \"workers\\\\|--workers\" *.bat *.cmd *.sh)",
+      "Bash(ls *.bat *.cmd *.sh)"
     ]
   }
 }

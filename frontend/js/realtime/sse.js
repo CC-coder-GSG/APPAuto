@@ -12,7 +12,7 @@ let attentionObserver = null;
 const SSE_DEBUG = !!window.__OMNIQA_SSE_DEBUG__;
 
 const RUNTIME = {
-  lastEventId: Number(localStorage.getItem('sse_last_event_id') || 0) || 0,
+  lastEventId: 0, // 每次页面加载从 0 开始，避免服务重启后 cursor 陈旧导致事件被全部过滤
   connectionState: 'disconnected',
   counters: {
     zentaoNew: 0,
@@ -170,8 +170,8 @@ function handleVisibleRefreshByEvent(message) {
   if ((type === 'field_test_record_created' || type === 'field_test_record_updated') && visible === 'field-test' && typeof window.loadFieldTestBoard === 'function') {
     debounceRefresh('field-test', () => window.loadFieldTestBoard());
   }
-  if (type === 'report_data_changed' && visible === 'report' && typeof window.loadReportData === 'function') {
-    debounceRefresh('report', () => window.loadReportData(), 1200);
+  if (type === 'report_data_changed' && visible === 'report' && typeof window.OmniQAReportTab?.queryReport === 'function') {
+    debounceRefresh('report', () => window.OmniQAReportTab.queryReport(), 1200);
   }
 }
 

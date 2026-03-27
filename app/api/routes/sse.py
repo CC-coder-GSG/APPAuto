@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_current_user
 from app.models import User
-from app.services.sse_service import format_sse, sse_pull_since
+from app.services.sse_service import format_sse, sse_pull_since, sse_wait_for_events
 
 router = APIRouter()
 
@@ -36,10 +36,12 @@ async def sse_stream(
             else:
                 idle_ticks += 1
                 # heartbeat: keep proxies/connections alive.
-                if idle_ticks >= 10:
+                if idle_ticks >= 15:
                     idle_ticks = 0
                     yield "event: ping\ndata: {}\n\n"
-                await asyncio.sleep(0.8)
+                # Wait until a new event is published (or at most 1s), then re-poll.
+                # This replaces the fixed 0.8s sleep and wakes up immediately on publish.
+                await sse_wait_for_events(timeout=1.0)
 
     return StreamingResponse(
         event_generator(),
