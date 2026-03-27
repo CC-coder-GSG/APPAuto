@@ -18,10 +18,10 @@ const buildPending = {
 };
 
 const STATUS_META = {
-  SUCCESS: { text: '成功', bg: '#dcfce7', color: '#166534' },
-  FAILURE: { text: '失败', bg: '#fee2e2', color: '#b91c1c' },
-  ABORTED: { text: '中止', bg: '#e2e8f0', color: '#334155' },
-  UNSTABLE: { text: '不稳定', bg: '#fef3c7', color: '#92400e' },
+  SUCCESS: { text: 'Success', bg: '#dcfce7', color: '#166534' },
+  FAILURE: { text: 'Failure', bg: '#fee2e2', color: '#b91c1c' },
+  ABORTED: { text: 'Aborted', bg: '#e2e8f0', color: '#334155' },
+  UNSTABLE: { text: 'Unstable', bg: '#fef3c7', color: '#92400e' },
 };
 
 function escapeHtml(value) {
@@ -74,13 +74,8 @@ export function jobNameToMajorLabel(jobName) {
   return rest ? `V${a}.${b}.${c}.${rest}` : `V${a}.${b}.${c}`;
 }
 
-function getSelectedJobName() {
-  return document.getElementById('buildRecordsMajorFilter')?.value || '';
-}
-
-function getSelectedStatus() {
-  return document.getElementById('buildRecordsStatusFilter')?.value || '';
-}
+function getSelectedJobName() { return document.getElementById('buildRecordsMajorFilter')?.value || ''; }
+function getSelectedStatus() { return document.getElementById('buildRecordsStatusFilter')?.value || ''; }
 
 function getDateRange() {
   return {
@@ -89,7 +84,7 @@ function getDateRange() {
   };
 }
 
-function setLoading(message = '正在加载构建记录...') {
+function setLoading(message = 'Loading build records...') {
   const wrap = document.getElementById('buildRecordsCardList');
   const empty = document.getElementById('buildRecordsEmpty');
   const moreWrap = document.getElementById('buildRecordsMoreWrap');
@@ -109,7 +104,7 @@ function fillMajorFilterOptions() {
     seen.add(row.job_name);
     jobNames.push(row.job_name);
   }
-  select.innerHTML = ['<option value="">全部大版本</option>']
+  select.innerHTML = ['<option value="">All Majors</option>']
     .concat(jobNames.map((jobName) => `<option value="${escapeHtml(jobName)}">${escapeHtml(jobNameToMajorLabel(jobName))}</option>`))
     .join('');
   if (selected && Array.from(select.options).some((o) => o.value === selected)) select.value = selected;
@@ -148,59 +143,32 @@ function getFilteredRecords() {
 
 function buildCardHtml(row) {
   const summary = (row.change_log || '').trim();
-  const summaryText = summary ? `${summary.slice(0, 140)}${summary.length > 140 ? '...' : ''}` : '暂无日志内容';
+  const summaryText = summary ? `${summary.slice(0, 140)}${summary.length > 140 ? '...' : ''}` : 'No changelog';
   const linkHtml = row.build_url
     ? `<a href="${escapeHtml(row.build_url)}" target="_blank" rel="noopener noreferrer" style="word-break:break-all;">${escapeHtml(row.build_url)}</a>`
-    : '<span class="muted">暂无 Jenkins 链接</span>';
+    : '<span class="muted">No Jenkins URL</span>';
 
   return `
     <div class="card build-record-card" data-build-record-id="${Number(row.id)}" style="margin-bottom:0; border:1px solid #e2e8f0; box-shadow:none;">
       <div class="row" style="justify-content:space-between; align-items:flex-start; gap:14px; margin:0;">
         <div style="min-width:0; flex:1;">
           <div style="font-size:18px; font-weight:800; color:#0f172a;">${escapeHtml(jobNameToMajorLabel(row.job_name))}</div>
-          <div class="muted" style="margin-top:4px; font-size:14px;">${escapeHtml(row.version_name || '暂无小版本信息')}</div>
+          <div class="muted" style="margin-top:4px; font-size:14px;">${escapeHtml(row.version_name || '-')}</div>
         </div>
         <div>${buildStatusBadge(row.build_status)}</div>
       </div>
-
       <div class="row" style="margin-top:14px; flex-wrap:wrap; gap:16px;">
-        <div style="min-width:160px;">
-          <div class="muted" style="font-size:12px;">Jenkins 构建号</div>
-          <div style="margin-top:4px; color:#0f172a; font-weight:700;">#${escapeHtml(row.build_number)}</div>
-        </div>
-        <div style="min-width:180px;">
-          <div class="muted" style="font-size:12px;">构建状态</div>
-          <div style="margin-top:4px; color:#334155;">${escapeHtml(getStatusText(row.build_status))}</div>
-        </div>
-        <div style="min-width:220px;">
-          <div class="muted" style="font-size:12px;">构建时间</div>
-          <div style="margin-top:4px; color:#334155;">${escapeHtml(formatDateTime(row.created_at))}</div>
-        </div>
-        <div style="min-width:220px;">
-          <div class="muted" style="font-size:12px;">更新时间</div>
-          <div style="margin-top:4px; color:#334155;">${escapeHtml(formatDateTime(row.updated_at))}</div>
-        </div>
+        <div style="min-width:160px;"><div class="muted" style="font-size:12px;">Build #</div><div style="margin-top:4px; color:#0f172a; font-weight:700;">#${escapeHtml(row.build_number)}</div></div>
+        <div style="min-width:180px;"><div class="muted" style="font-size:12px;">Status</div><div style="margin-top:4px; color:#334155;">${escapeHtml(getStatusText(row.build_status))}</div></div>
+        <div style="min-width:220px;"><div class="muted" style="font-size:12px;">Created</div><div style="margin-top:4px; color:#334155;">${escapeHtml(formatDateTime(row.created_at))}</div></div>
+        <div style="min-width:220px;"><div class="muted" style="font-size:12px;">Updated</div><div style="margin-top:4px; color:#334155;">${escapeHtml(formatDateTime(row.updated_at))}</div></div>
       </div>
-
       <div class="row" style="margin-top:12px; flex-wrap:wrap; gap:16px;">
-        <div style="min-width:180px; flex:1;">
-          <div class="muted" style="font-size:12px;">分支</div>
-          <div style="margin-top:4px; color:#334155;">${escapeHtml(row.branch || '-')}</div>
-        </div>
-        <div style="min-width:280px; flex:2;">
-          <div class="muted" style="font-size:12px;">Jenkins 链接</div>
-          <div style="margin-top:4px;">${linkHtml}</div>
-        </div>
+        <div style="min-width:180px; flex:1;"><div class="muted" style="font-size:12px;">Branch</div><div style="margin-top:4px; color:#334155;">${escapeHtml(row.branch || '-')}</div></div>
+        <div style="min-width:280px; flex:2;"><div class="muted" style="font-size:12px;">Jenkins URL</div><div style="margin-top:4px;">${linkHtml}</div></div>
       </div>
-
-      <div style="margin-top:12px;">
-        <div class="muted" style="font-size:12px;">小版本日志摘要</div>
-        <div title="${escapeHtml(summary || '暂无日志内容')}" style="margin-top:6px; color:#334155; line-height:1.65; background:#f8fafc; border-radius:10px; padding:10px 12px;">${escapeHtml(summaryText)}</div>
-      </div>
-
-      <div class="row" style="justify-content:flex-end; margin-top:12px;">
-        <button class="secondary" onclick="openBuildRecordLogModal(${row.id})">查看小版本日志</button>
-      </div>
+      <div style="margin-top:12px;"><div class="muted" style="font-size:12px;">Changelog</div><div title="${escapeHtml(summary || 'No changelog')}" style="margin-top:6px; color:#334155; line-height:1.65; background:#f8fafc; border-radius:10px; padding:10px 12px;">${escapeHtml(summaryText)}</div></div>
+      <div class="row" style="justify-content:flex-end; margin-top:12px;"><button class="secondary" onclick="openBuildRecordLogModal(${row.id})">View log</button></div>
     </div>
   `;
 }
@@ -217,13 +185,12 @@ function renderCards() {
   const selectedJob = getSelectedJobName();
   const rows = getFilteredRecords();
   const visibleRows = rows.slice(0, state.visibleCount);
-
   majorBtn.disabled = !selectedJob;
 
   if (!rows.length) {
     wrap.innerHTML = '';
     empty.classList.remove('hidden');
-    empty.innerText = selectedJob ? '当前大版本暂无构建记录' : '暂无构建记录';
+    empty.innerText = selectedJob ? 'No records for selected major' : 'No records';
     moreWrap.classList.add('hidden');
     return;
   }
@@ -233,11 +200,11 @@ function renderCards() {
 
   if (rows.length > visibleRows.length) {
     moreWrap.classList.remove('hidden');
-    moreMeta.innerText = `已显示 ${visibleRows.length} / ${rows.length} 条`;
+    moreMeta.innerText = `Showing ${visibleRows.length} / ${rows.length}`;
     moreBtn.disabled = false;
   } else {
     moreWrap.classList.add('hidden');
-    moreMeta.innerText = `已显示 ${visibleRows.length} / ${rows.length} 条`;
+    moreMeta.innerText = `Showing ${visibleRows.length} / ${rows.length}`;
     moreBtn.disabled = true;
   }
 }
@@ -247,7 +214,7 @@ function openLogModal(title, content) {
   const bodyEl = document.getElementById('buildRecordLogBody');
   if (!titleEl || !bodyEl) return;
   titleEl.innerText = title;
-  bodyEl.innerText = content || '暂无日志内容';
+  bodyEl.innerText = content || 'No changelog';
   openModal('buildRecordLogModal');
 }
 
@@ -269,10 +236,10 @@ function updateBuildTopNotice() {
   const el = document.getElementById('buildRecordsTopNotice');
   if (!el) return;
   if (state.unseenTopNewCount > 0) {
-    el.innerText = `有 ${state.unseenTopNewCount} 条新构建记录`;
+    el.innerText = `There are ${state.unseenTopNewCount} new build records`;
     el.classList.remove('hidden');
   } else {
-    el.innerText = '有 0 条新构建记录';
+    el.innerText = 'There are 0 new build records';
     el.classList.add('hidden');
   }
 }
@@ -321,7 +288,6 @@ function enqueueBuildRealtime(kind, item) {
   if (!item?.id) return;
   if (kind === 'created') buildPending.created.push(item);
   else buildPending.updated.set(Number(item.id), item);
-
   if (buildRealtimeFlushTimer) clearTimeout(buildRealtimeFlushTimer);
   buildRealtimeFlushTimer = setTimeout(flushBuildRealtimeQueue, 280);
 }
@@ -336,7 +302,7 @@ export async function loadBuildRecordsBoard() {
     renderCards();
     clearBuildTopNotice();
   } catch (err) {
-    setLoading(err.message || '加载构建记录失败');
+    setLoading(err.message || 'Load failed');
     throw err;
   }
 }
@@ -359,28 +325,28 @@ export function loadMoreBuildRecords() {
 export function openBuildRecordLogModal(recordId) {
   const row = state.records.find((item) => Number(item.id) === Number(recordId));
   if (!row) {
-    window.showMessage && window.showMessage('未找到对应构建记录', 'error');
+    window.showMessage && window.showMessage('Record not found', 'error');
     return;
   }
-  openLogModal(`${jobNameToMajorLabel(row.job_name)} / ${row.version_name || '小版本日志'}`, row.change_log || '暂无日志内容');
+  openLogModal(`${jobNameToMajorLabel(row.job_name)} / ${row.version_name || 'Version log'}`, row.change_log || 'No changelog');
 }
 
 export async function openMajorBuildLogModal() {
   const jobName = getSelectedJobName();
   if (!jobName) {
-    window.showMessage && window.showMessage('请先选择一个大版本', 'error');
+    window.showMessage && window.showMessage('Please select a major version first', 'error');
     return;
   }
-  const title = `${jobNameToMajorLabel(jobName)} 修改日志`;
-  openLogModal(title, '正在加载大版本修改日志...');
+  const title = `${jobNameToMajorLabel(jobName)} Major Changelog`;
+  openLogModal(title, 'Loading...');
   try {
     const params = new URLSearchParams({ job_name: jobName });
     const result = await (await api(`/api/admin/build-records/major-log?${params.toString()}`)).json();
-    const content = result?.data?.major_log || '暂无大版本日志内容';
+    const content = result?.data?.major_log || 'No major changelog';
     openLogModal(title, content);
   } catch (err) {
     closeModal('buildRecordLogModal');
-    window.showMessage && window.showMessage(err.message || '获取大版本日志失败', 'error');
+    window.showMessage && window.showMessage(err.message || 'Load failed', 'error');
   }
 }
 

@@ -26,13 +26,13 @@ const timelineState = {
 function moduleZh(value) {
   const map = {
     bug: 'Bug',
-    requirement: '闇€姹?,
-    feedback: '鍙嶉',
-    field_test: '澶栦笟娴嬭瘯',
-    retest: '澶嶆祴',
-    admin: '绠＄悊',
+    requirement: 'Requirement',
+    feedback: 'Feedback',
+    field_test: 'Field Test',
+    retest: 'Retest',
+    admin: 'Admin',
   };
-  return map[value] || value || '鍔ㄦ€?;
+  return map[value] || value || 'Activity';
 }
 
 function moduleBadgeStyle(module) {
@@ -62,10 +62,7 @@ function formatShanghaiTime(value) {
   const normalized = /Z$|[+-]\d{2}:\d{2}$/.test(text) ? text : `${text}Z`;
   const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return text;
-  return date.toLocaleString('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    hour12: false,
-  });
+  return date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 }
 
 function saveLocalState() {
@@ -104,9 +101,7 @@ function applySavedState(saved) {
   state.pageSize = Math.max(1, Number(saved.pageSize || 20));
 }
 
-function getRangeDays() {
-  return Number(document.getElementById('activityRangeDays')?.value || 1);
-}
+function getRangeDays() { return Number(document.getElementById('activityRangeDays')?.value || 1); }
 
 function getFeedFilters() {
   return {
@@ -126,7 +121,7 @@ function fillActorOptions(savedActorId = '0') {
   const select = document.getElementById('activityActorSelect');
   if (!select || !window.currentUser || window.currentUser.role !== 'admin') return;
   const users = window.users || [];
-  select.innerHTML = '<option value="0">鍏ㄩ儴浜哄憳</option>' + users.map((user) => `<option value="${user.id}">${user.display_name || user.username}</option>`).join('');
+  select.innerHTML = '<option value="0">All Users</option>' + users.map((user) => `<option value="${user.id}">${user.display_name || user.username}</option>`).join('');
   select.value = Array.from(select.options).some((opt) => opt.value === String(savedActorId)) ? String(savedActorId) : '0';
 }
 
@@ -134,6 +129,7 @@ function renderSummary(summary) {
   const wrap = document.getElementById('activitySummaryCards');
   const highlightWrap = document.getElementById('activityHighlights');
   if (!wrap || !highlightWrap) return;
+
   const cards = summary?.cards || [];
   wrap.innerHTML = cards.map((card) => `
     <div class="metric-card" style="min-width:150px;">
@@ -144,10 +140,10 @@ function renderSummary(summary) {
 
   const highlights = summary?.highlights || [];
   if (!highlights.length) {
-    highlightWrap.innerHTML = '<div class="muted" style="padding:10px 0;">鏈€杩戞病鏈夊叧閿姩鎬?/div>';
+    highlightWrap.innerHTML = '<div class="muted" style="padding:10px 0;">No key activity in current range.</div>';
     return;
   }
-  highlightWrap.innerHTML = highlights.map((item) => `<div class="activity-highlight-item">鈥?${item.summary}</div>`).join('');
+  highlightWrap.innerHTML = highlights.map((item) => `<div class="activity-highlight-item">• ${item.summary}</div>`).join('');
 }
 
 function renderPagination() {
@@ -156,7 +152,7 @@ function renderPagination() {
   const next = document.getElementById('activityNextBtn');
   if (!text || !prev || !next) return;
   const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
-  text.innerText = `绗?${state.page} / ${pages} 椤碉紝鍏?${state.total} 鏉;
+  text.innerText = `Page ${state.page}/${pages}, Total ${state.total}`;
   prev.disabled = state.page <= 1;
   next.disabled = state.page >= pages;
 }
@@ -165,12 +161,13 @@ function renderFeed(feed) {
   const wrap = document.getElementById('activityFeedList');
   const totalEl = document.getElementById('activityFeedMeta');
   if (!wrap || !totalEl) return;
+
   const items = feed?.items || [];
   state.total = Number(feed?.total || 0);
-  totalEl.innerText = `鍏?${state.total} 鏉″姩鎬乣;
+  totalEl.innerText = `Total ${state.total}`;
 
   if (!items.length) {
-    wrap.innerHTML = '<div class="muted" style="padding:18px 0; text-align:center;">褰撳墠绛涢€夋潯浠朵笅鏆傛棤鍔ㄦ€?/div>';
+    wrap.innerHTML = '<div class="muted" style="padding:18px 0; text-align:center;">No activity under current filter.</div>';
     renderPagination();
     return;
   }
@@ -187,22 +184,24 @@ function renderFeed(feed) {
               <span class="badge" style="border-radius:999px; background:${module.bg}; color:${module.color}; border:1px solid ${module.border};">${moduleZh(item.module)}</span>
               <span class="badge" style="border-radius:999px; background:${level.bg}; color:${level.color}; border:none;">${item.action_text || item.action || '-'}</span>
               <span class="muted" style="font-size:12px;">${formatShanghaiTime(item.created_at)}</span>
-              <span class="muted" style="font-size:12px;">${item.actor_name || '绯荤粺'}</span>
+              <span class="muted" style="font-size:12px;">${item.actor_name || 'System'}</span>
             </div>
             <div style="font-weight:700; color:#0f172a; line-height:1.55;">${item.summary || '-'}</div>
             ${targetLine ? `<div class="muted" style="margin-top:4px; line-height:1.55;">${targetLine}</div>` : ''}
             ${item.detail ? `<div class="muted" style="margin-top:4px; line-height:1.55;">${item.detail}</div>` : ''}
           </div>
-          <button class="secondary" onclick="event.stopPropagation(); openActivityItem(${item.id}, '${item.module}', ${item.target_id || 0})">鏌ョ湅</button>
+          <button class="secondary" onclick="event.stopPropagation(); openActivityItem(${item.id}, '${item.module}', ${item.target_id || 0})">View</button>
         </div>
       </div>
     `;
   }).join('');
+
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
     wrap.querySelectorAll('.activity-feed-item[data-activity-id]').forEach((el) => {
       window.OmniQASSE.mountAttention(el, { scope: 'activity_event', key: el.getAttribute('data-activity-id'), tone: 'blue', hoverDelayMs: 420 });
     });
   }
+
   renderPagination();
 }
 
@@ -217,10 +216,10 @@ function updateActivityTopNotice() {
   const el = document.getElementById('activityTopNotice');
   if (!el) return;
   if (activityUnseenTopCount > 0) {
-    el.innerText = `有 ${activityUnseenTopCount} 条新活动`;
+    el.innerText = `There are ${activityUnseenTopCount} new activities`;
     el.classList.remove('hidden');
   } else {
-    el.innerText = '有 0 条新活动';
+    el.innerText = 'There are 0 new activities';
     el.classList.add('hidden');
   }
 }
@@ -307,17 +306,17 @@ export async function pushActivitySummary() {
       only_important: onlyImportant,
     },
   });
-  window.showMessage && window.showMessage('鏈€杩戝姩鎬佹憳瑕佸凡鎺ㄩ€?, 'success');
+  window.showMessage && window.showMessage('Summary pushed.', 'success');
 }
 
 function buildTimelineActionBar() {
   const detailButton = (() => {
     if (!timelineState.targetId) return '';
     if (timelineState.targetType === 'feedback') {
-      return `<button class="secondary" onclick="showTab('feedback'); openFeedbackDetail(${timelineState.targetId}); closeAuditTimelineModal();">鎵撳紑璇︽儏</button>`;
+      return `<button class="secondary" onclick="showTab('feedback'); openFeedbackDetail(${timelineState.targetId}); closeAuditTimelineModal();">Open Detail</button>`;
     }
     if (timelineState.targetType === 'field_test') {
-      return `<button class="secondary" onclick="showTab('field-test'); openFieldTestDetail(${timelineState.targetId}); closeAuditTimelineModal();">鎵撳紑璇︽儏</button>`;
+      return `<button class="secondary" onclick="showTab('field-test'); openFieldTestDetail(${timelineState.targetId}); closeAuditTimelineModal();">Open Detail</button>`;
     }
     return '';
   })();
@@ -325,7 +324,7 @@ function buildTimelineActionBar() {
   return `
     <label style="display:flex; align-items:center; gap:6px; color:#475569; font-size:13px; cursor:pointer; margin-right:8px;">
       <input type="checkbox" ${timelineState.importantOnly ? 'checked' : ''} onchange="window.OmniQAActivityTab.toggleAuditTimelineImportantOnly(this.checked)">
-      浠呯湅鍏抽敭鑺傜偣
+      Important only
     </label>
     ${detailButton}
   `;
@@ -339,7 +338,7 @@ function renderTimelineItems() {
     : (timelineState.items || []);
 
   if (!items.length) {
-    body.innerHTML = '<div class="muted" style="padding:12px 0;">鏆傛棤鏃堕棿绾胯褰?/div>';
+    body.innerHTML = '<div class="muted" style="padding:12px 0;">No timeline records.</div>';
     return;
   }
 
@@ -351,9 +350,9 @@ function renderTimelineItems() {
         <div class="timeline-content">
           <div class="row" style="gap:8px; align-items:center; margin:0; flex-wrap:wrap;">
             <div style="font-weight:700; color:#0f172a;">${item.action_text || item.action || '-'}</div>
-            <span class="badge" style="border-radius:999px; background:${level.bg}; color:${level.color}; border:none;">${item.level === 'critical' ? '鍏抽敭' : item.level === 'important' ? '閲嶈' : '鏅€?}</span>
+            <span class="badge" style="border-radius:999px; background:${level.bg}; color:${level.color}; border:none;">${item.level === 'critical' ? 'Critical' : item.level === 'important' ? 'Important' : 'Normal'}</span>
           </div>
-          <div class="muted" style="font-size:12px; margin-top:4px;">${item.actor_name || '绯荤粺'} / ${formatShanghaiTime(item.created_at)}</div>
+          <div class="muted" style="font-size:12px; margin-top:4px;">${item.actor_name || 'System'} / ${formatShanghaiTime(item.created_at)}</div>
           <div style="margin-top:6px; line-height:1.6; color:#334155;">${item.summary || ''}</div>
           ${item.detail ? `<div class="muted" style="margin-top:4px; line-height:1.6;">${item.detail}</div>` : ''}
         </div>
@@ -391,45 +390,45 @@ export function closeAuditTimelineModal() {
 
 export async function openAuditTimelineModal(targetType, targetId, customTitle = '') {
   if (!targetId) {
-    window.showMessage && window.showMessage('缂哄皯鐩爣瀵硅薄锛屾棤娉曞姞杞芥椂闂寸嚎', 'error');
+    window.showMessage && window.showMessage('Missing target id.', 'error');
     return;
   }
   let url = '';
   let title = customTitle;
   if (targetType === 'bug') {
     url = `/bugs/${targetId}/timeline`;
-    title = title || 'Bug 鏃堕棿绾?;
+    title = title || 'Bug Timeline';
   } else if (targetType === 'requirement') {
     url = `/requirements/${targetId}/timeline`;
-    title = title || '闇€姹傛椂闂寸嚎';
+    title = title || 'Requirement Timeline';
   } else if (targetType === 'feedback') {
     url = `/feedbacks/${targetId}/timeline`;
-    title = title || '鍙嶉鏃堕棿绾?;
+    title = title || 'Feedback Timeline';
   } else if (targetType === 'field_test') {
     url = `/field-tests/${targetId}/timeline`;
-    title = title || '澶栦笟娴嬭瘯鏃堕棿绾?;
+    title = title || 'Field Test Timeline';
   } else {
-    window.showMessage && window.showMessage('褰撳墠瀵硅薄鏆備笉鏀寔鏃堕棿绾挎煡鐪?, 'error');
+    window.showMessage && window.showMessage('Timeline not supported for this type.', 'error');
     return;
   }
   try {
     const items = await (await api(url)).json();
     renderTimelineModal(title, items || [], targetType, targetId);
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '鍔犺浇鏃堕棿绾垮け璐?, 'error');
+    window.showMessage && window.showMessage(err.message || 'Load timeline failed.', 'error');
   }
 }
 
 export async function openActivityItem(_id, module, targetId) {
   if (!targetId) {
-    window.showMessage && window.showMessage('杩欐潯鍔ㄦ€佹病鏈夊彲鏌ョ湅鐨勫璞℃椂闂寸嚎', 'error');
+    window.showMessage && window.showMessage('No timeline target for this item.', 'error');
     return;
   }
-  if (module === 'bug') return openAuditTimelineModal('bug', targetId, 'Bug 鏃堕棿绾?);
-  if (module === 'requirement' || module === 'retest') return openAuditTimelineModal('requirement', targetId, '闇€姹傛椂闂寸嚎');
-  if (module === 'feedback') return openAuditTimelineModal('feedback', targetId, '鍙嶉鏃堕棿绾?);
-  if (module === 'field_test') return openAuditTimelineModal('field_test', targetId, '澶栦笟娴嬭瘯鏃堕棿绾?);
-  window.showMessage && window.showMessage('褰撳墠鍔ㄦ€佹殏涓嶆敮鎸佹墦寮€鏃堕棿绾?, 'error');
+  if (module === 'bug') return openAuditTimelineModal('bug', targetId, 'Bug Timeline');
+  if (module === 'requirement' || module === 'retest') return openAuditTimelineModal('requirement', targetId, 'Requirement Timeline');
+  if (module === 'feedback') return openAuditTimelineModal('feedback', targetId, 'Feedback Timeline');
+  if (module === 'field_test') return openAuditTimelineModal('field_test', targetId, 'Field Test Timeline');
+  window.showMessage && window.showMessage('Open timeline not supported.', 'error');
 }
 
 window.OmniQAActivityTab = {
@@ -489,6 +488,7 @@ function bindActivitySSE() {
     if (activityBatchTimer) clearTimeout(activityBatchTimer);
     activityBatchTimer = setTimeout(flushActivityBatch, 320);
   });
+
   activitySseBound = true;
 }
 
