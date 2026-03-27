@@ -757,6 +757,18 @@ body {
   box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .35);
 }
 
+#s5TableContainer tr.stage5-row-card.sse-glow td {
+  position: relative;
+}
+
+#s5TableContainer tr.stage5-row-card.sse-glow-blue td {
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, .42);
+}
+
+#s5TableContainer tr.stage5-row-card.sse-glow-green td {
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .42);
+}
+
 .zentao-sync-sticky-panel {
   position: sticky;
   top: 16px;
