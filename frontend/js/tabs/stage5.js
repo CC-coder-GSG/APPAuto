@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { withPrefix, sourceTypeZh, renderBugLink } from '../utils.js';
+import { withPrefix, sourceTypeZh, renderBugLink, escapeHtml } from '../utils.js';
 let stage5SseBound = false;
 let stage5UnreadClearTimer = null;
 
@@ -59,12 +59,17 @@ export function renderS5() {
     }
     const failBadge = b.is_retest_failed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; margin-left:4px;">🚨复测打回</span>' : '';
     const dispatchBadge = b.dispatched_to_name ? `<span class="badge" style="background:#ffedd5; color:#ea580c; border:1px solid #fdba74; margin-left:4px;">🪂特派:${b.dispatched_to_name}</span>` : '';
+    const bugHref = b.zentao_bug_url ? `<a class="qa-ext-link" href="${b.zentao_bug_url}" target="_blank" rel="noopener noreferrer">${escapeHtml(b.bug_id || '-')}</a>` : `<span>${escapeHtml(b.bug_id || '-')}</span>`;
+    const bugTitle = escapeHtml(b.zentao_bug_title || b.bug_title || '');
     return `<tr class="stage5-row-card" data-bug-id="${b.id}" style="${rowStyle}">
       <td>
-        ${renderBugLink(b)} <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span> ${failBadge} ${dispatchBadge}
+        ${bugHref} <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span> ${failBadge} ${dispatchBadge}
         <a href="javascript:void(0)" onclick="editS5Bug(${b.id}, '${b.bug_id}')" style="margin-left:8px; font-size:12px; color:#3b82f6; text-decoration:none;">编辑</a>
         <a href="javascript:void(0)" onclick="removeS5Bug(${b.id})" style="margin-left:4px; font-size:12px; color:#ef4444; text-decoration:none;">删除</a>
         ${othersHtml}
+      </td>
+      <td style="vertical-align:middle; padding: 6px 10px;">
+        ${bugTitle ? `<div style="max-height:60px; overflow-y:auto; font-size:13px; color:#475569; line-height:1.65; word-break:break-word;">${bugTitle}</div>` : ''}
       </td>
       <td style="text-decoration: none;">
         <select id='res_${b.id}' style="margin-right: 8px; padding: 2px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 4px; color: #475569;" ${isMyClosed ? 'disabled' : ''}>
