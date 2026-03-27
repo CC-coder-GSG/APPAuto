@@ -1,3 +1,4 @@
+import './realtime/sse.js'; // 必须最先加载，确保 window.OmniQASSE 在各 tab 模块执行 bindXxxSSE() 前已就绪
 import './api.js';
 import './auth.js';
 import './state.js';
@@ -17,7 +18,6 @@ import './tabs/activity.js';
 import './tabs/assign.js';
 import './tabs/dispatch.js';
 import './tabs/data.js';
-import './realtime/sse.js';
 import { runGuardrails } from './guardrails.js';
 
 window.addEventListener('resize', () => {

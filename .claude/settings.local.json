@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find E:APPAUTOAPPAuto -type d -not -path */.*)"
+    ]
+  }
+}

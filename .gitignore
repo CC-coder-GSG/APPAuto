@@ -12,3 +12,4 @@ node_modules/
 .vscode/
 .idea/
 frontend/.tmp_index_script.js
+CLAUDE.md
