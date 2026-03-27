@@ -217,19 +217,59 @@ window.OmniQAStage5Tab = { loadStage5, renderS5, saveS5, editS5Bug, removeS5Bug,
 window.editS5Bug = editS5Bug;
 window.removeS5Bug = removeS5Bug;
 
+// ─── Stage5 SSE: 新 bug 底部提示 + 卡片流光 ──────────────────────────────────
+
+const s5NewBugCount = { value: 0 };
+
+function showS5BottomBanner() {
+  if (!window.OmniQASSE?.showPositionBanner) return;
+  const tableWrap = document.getElementById('s5TableContainer');
+  if (!tableWrap) return;
+  window.OmniQASSE.showPositionBanner({
+    scrollContainer: tableWrap,
+    anchorEl: tableWrap,
+    position: 'bottom',
+    countRef: s5NewBugCount,
+    labelFn: (n) => `⬇ 下面有 ${n} 条新增 Bug，点击刷新`,
+    onClickScroll: () => {
+      s5NewBugCount.value = 0;
+      loadStage5();
+    },
+    bannerId: 'stage5-new-bug',
+  });
+}
+
 function bindStage5SSE() {
   if (stage5SseBound) return;
-  if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
-  const pulse = (payload, tone) => {
+  if (!window.OmniQASSE?.subscribe) return;
+
+  window.OmniQASSE.subscribe('overall_bug_created', ({ payload }) => {
+    const bugId = Number(payload?.id || payload?.bug_id || 0);
+    // Pulse if row exists in DOM
+    if (bugId) {
+      const el = document.querySelector(`.stage5-row-card[data-bug-id='${bugId}']`);
+      if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'blue');
+    }
+    // Check if user is at bottom; if not, show banner
+    const tableWrap = document.getElementById('s5TableContainer');
+    const atBottom = !tableWrap || (tableWrap.scrollHeight - tableWrap.scrollTop - tableWrap.clientHeight <= 80);
+    if (!atBottom) {
+      s5NewBugCount.value += 1;
+      showS5BottomBanner();
+    } else {
+      // At bottom: immediately refresh list
+      s5NewBugCount.value = 0;
+      deferClearOverallUnread(600);
+    }
+  });
+
+  window.OmniQASSE.subscribe('overall_bug_closed', ({ payload }) => {
     const bugId = Number(payload?.id || payload?.bug_id || 0);
     if (!bugId) return;
     const el = document.querySelector(`.stage5-row-card[data-bug-id='${bugId}']`);
-    if (el && typeof window.OmniQASSE.pulseBoundaryGlow === 'function') {
-      window.OmniQASSE.pulseBoundaryGlow(el, tone);
-    }
-  };
-  window.OmniQASSE.subscribe('overall_bug_created', ({ payload }) => pulse(payload, 'blue'));
-  window.OmniQASSE.subscribe('overall_bug_closed', ({ payload }) => pulse(payload, 'green'));
+    if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'teal');
+  });
+
   stage5SseBound = true;
 }
 bindStage5SSE();

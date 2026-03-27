@@ -492,6 +492,17 @@ class RequirementService:
             },
             channels=["global", f"user:{requirement.owner_id}"] if requirement.owner_id else ["global"],
         )
+        if test_completed:
+            sse_publish(
+                "retest_requirement_created",
+                {
+                    "id": requirement.id,
+                    "title": requirement.title,
+                    "owner_id": requirement.owner_id,
+                    "major_version_id": requirement.major_version_id,
+                },
+                channels=["global"],
+            )
         return requirement
 
     def add_case_to_requirement(self, req_id: int, zentao_case_id: str, actor_id: int | None = None) -> dict:

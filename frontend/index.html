@@ -9,67 +9,192 @@
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script type="module" src="/static/js/app.js"></script>
   <style>
-    .text-btn { background:none; border:none; color:#64748b; cursor:pointer; padding:0 4px; font-size:14px; font-weight:bold; }
-    .text-btn:hover { color:#dc2626; }
+    /* Header layout */
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 20px;
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-md);
+      margin-bottom: 14px;
+      border: 1px solid rgba(226, 232, 240, 0.7);
+    }
+    .app-header-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .app-header-brand img {
+      height: 40px;
+      filter: drop-shadow(0 2px 6px rgba(79,70,229,0.18));
+    }
+    .app-header-brand-text h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 900;
+      color: var(--primary);
+      letter-spacing: -0.5px;
+      line-height: 1.1;
+    }
+    .app-header-brand-text span {
+      font-size: 11px;
+      color: var(--text-faint);
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-top: 1px;
+      display: block;
+    }
+    .app-header-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .header-software-pill {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--bg-muted);
+      padding: 5px 10px 5px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border-light);
+    }
+    .header-software-pill label {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 700;
+      white-space: nowrap;
+      letter-spacing: 0.04em;
+    }
+    .header-software-pill select {
+      border: none;
+      background: transparent;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-main);
+      padding: 0;
+      min-width: 140px;
+      cursor: pointer;
+    }
+    .header-software-pill select:focus { box-shadow: none; }
+    .header-user-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-muted);
+      padding: 5px 14px 5px 6px;
+      border-radius: 999px;
+      border: 1px solid var(--border-light);
+    }
+    .header-user-avatar {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .header-user-pill span {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-main);
+      white-space: nowrap;
+    }
+    .header-action-group {
+      display: flex;
+      gap: 6px;
+    }
+    .header-action-group button {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--border-light);
+      font-size: 12.5px;
+      padding: 6px 12px;
+      font-weight: 600;
+      box-shadow: none;
+    }
+    .header-action-group button:hover {
+      background: var(--bg-muted);
+      transform: none;
+      box-shadow: none;
+    }
+    .header-action-group button.danger-btn {
+      color: #dc2626;
+      border-color: #fecaca;
+      background: #fff5f5;
+    }
+    .header-action-group button.danger-btn:hover {
+      background: #fee2e2;
+      border-color: #f87171;
+    }
+    /* Tab nav */
+    #tabs {
+      padding: 6px 10px !important;
+      gap: 2px !important;
+      margin-bottom: 16px !important;
+    }
+    #tabs button { position: relative; }
   </style>
 </head>
 <body>
 <div class="toast-wrap" id="toastWrap"></div>
 <div class="container">
-  <div class="card row" style="justify-content:space-between">
-    <div style="display: flex; align-items: center; gap: 14px; padding: 4px 0;">
-      <img src="/static/omniqa-logo.png" alt="OmniQA Logo" style="height: 46px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));">
 
-      <div style="display: flex; flex-direction: column; justify-content: center;">
-        <h1 style="margin: 0; font-size: 26px; font-weight: 800; color: var(--primary, #2563eb); letter-spacing: 1px; line-height: 1.1; font-family: 'Arial Black', Impact, sans-serif;">
-          QA
-        </h1>
-        <span style="font-size: 13px; color: #64748b; font-weight: 600; letter-spacing: 1.5px; margin-top: 2px;">
-          测试管理系统
-        </span>
+  <!-- Header -->
+  <div class="app-header">
+    <div class="app-header-brand">
+      <img src="/static/omniqa-logo.png" alt="OmniQA Logo">
+      <div class="app-header-brand-text">
+        <h1>OmniQA</h1>
+        <span>测试管理系统</span>
       </div>
     </div>
-    <div style="display: flex; align-items: center; gap: 16px;">
-      <div style="display:flex; align-items:center; gap:8px; background:#f8fafc; padding:6px 10px; border-radius:999px; border:1px solid #e2e8f0;">
-        <span style="font-size:12px; color:#64748b; font-weight:700;">软件</span>
-        <select id="softwareSwitch" onchange="onSoftwareChange()" style="min-width:170px; padding:6px 10px; border-radius:999px; border:1px solid #cbd5e1; background:#fff;"></select>
+    <div class="app-header-controls">
+      <div class="header-software-pill">
+        <label>软件</label>
+        <select id="softwareSwitch" onchange="onSoftwareChange()"></select>
       </div>
-      <div style="display: flex; align-items: center; gap: 8px; background: #f8fafc; padding: 6px 16px 6px 6px; border-radius: 999px; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
-        <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--primary, #2563eb); color: white; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: inset 0 -2px 4px rgba(0,0,0,0.2);">
-          👨‍💻
-        </div>
-        <span id="me" style="font-weight: 700; color: #1e293b; font-size: 14px; letter-spacing: 0.5px;"></span>
+      <div class="header-user-pill">
+        <div class="header-user-avatar">👤</div>
+        <span id="me"></span>
       </div>
-
-      <div style="display: flex; gap: 8px;">
-        <button style="background: transparent; color: #475569; border: 1px solid #cbd5e1; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.borderColor='#0ea5e9'; this.style.color='#0ea5e9'; this.style.background='#ecfeff'" onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#475569'; this.style.background='transparent'" onclick="runFrontendSelfCheck()">🩺 前端自检</button>
-        <button style="background: transparent; color: #475569; border: 1px solid #cbd5e1; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.borderColor='#16a34a'; this.style.color='#16a34a'; this.style.background='#f0fdf4'" onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#475569'; this.style.background='transparent'" onclick="runOnlineApiCheck()">🌐 接口探测</button>
-        <button style="background: transparent; color: #475569; border: 1px solid #cbd5e1; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.borderColor='#7c3aed'; this.style.color='#7c3aed'; this.style.background='#f5f3ff'" onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#475569'; this.style.background='transparent'" onclick="runFullHealthCheck()">🧭 全量体检</button>
-        <button style="background: transparent; color: #475569; border: 1px solid #cbd5e1; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.borderColor='#2563eb'; this.style.color='#2563eb'; this.style.background='#eff6ff'" onmouseout="this.style.borderColor='#cbd5e1'; this.style.color='#475569'; this.style.background='transparent'" onclick="changeMyPassword()">🔐 修改密码</button>
-        <button style="background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; font-weight: 600; transition: all 0.3s;" onmouseover="this.style.background='#fee2e2'; this.style.borderColor='#f87171'" onmouseout="this.style.background='#fef2f2'; this.style.borderColor='#fecaca'" onclick="logout()">🚪 退出系统</button>
+      <div class="header-action-group">
+        <button onclick="runFrontendSelfCheck()">🩺 自检</button>
+        <button onclick="runOnlineApiCheck()">🌐 探测</button>
+        <button onclick="runFullHealthCheck()">🧭 体检</button>
+        <button onclick="changeMyPassword()">🔐 密码</button>
+        <button class="danger-btn" onclick="logout()">退出</button>
       </div>
     </div>
   </div>
 
-  <div id="healthPanel" class="card hidden" style="margin-top: 12px; border-left: 4px solid #0ea5e9; background: #f8fafc;">
+  <div id="healthPanel" class="card hidden" style="margin-bottom:14px; border-left: 3px solid #0ea5e9;">
     <div class="row" style="justify-content: space-between; align-items: center;">
-      <h3 style="margin:0; color:#0f172a;">系统健康检查</h3>
+      <h3 style="margin:0;">系统健康检查</h3>
       <button class="secondary" onclick="document.getElementById('healthPanel').classList.add('hidden')">收起</button>
     </div>
-    <div id="healthPanelMeta" class="muted" style="margin-top:8px;"></div>
-    <div id="healthPanelBody" style="margin-top:8px; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;"></div>
+    <div id="healthPanelMeta" class="muted" style="margin-top:8px; font-size:13px;"></div>
+    <div id="healthPanelBody" style="margin-top:8px; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12.5px;"></div>
   </div>
 
-  <div class="card row" id="tabs">
+  <!-- Tab navigation -->
+  <div id="tabs" class="card row">
     <button id="tabAssignBtn" onclick="showTab('assign')">任务分配台</button>
     <button id="tabMineBtn" onclick="showTab('mine')">我的工作台<span id="tabMinePrimaryBadge" class="nav-badge hidden"></span><span id="tabMineSecondaryBadge" class="nav-badge nav-badge--sub hidden"></span></button>
     <button id="tabFeedbackBtn" onclick="showTab('feedback')">反馈记录与处理<span id="tabFeedbackBadge" class="nav-badge hidden"></span></button>
     <button id="tabRetestBtn" onclick="showTab('retest')">复测工作台<span id="tabRetestBadge" class="nav-badge hidden"></span></button>
     <button id="tabStage5Btn" onclick="showTab('stage5')">整体测试<span id="tabStage5Badge" class="nav-badge hidden"></span></button>
-    <button onclick="showTab('field-test')">外业测试</button>
+    <button id="tabFieldTestBtn" onclick="showTab('field-test')">外业测试</button>
     <button id="tabBuildRecordsBtn" class="hidden" onclick="showTab('build-records')">构建记录</button>
     <button id="tabZentaoSyncBtn" class="hidden" onclick="showTab('zentao-sync')">禅道同步中心<span id="tabZentaoSyncBadge" class="nav-badge hidden"></span></button>
-    <button onclick="showTab('report')">报表中心</button>
+    <button id="tabReportBtn" onclick="showTab('report')">报表中心</button>
     <button id="tabActivityBtn" class="hidden" onclick="showTab('activity')">活动中心</button>
     <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
     <button id="tabDispatchBtn" class="hidden" onclick="showTab('dispatch')">BUG特派</button>

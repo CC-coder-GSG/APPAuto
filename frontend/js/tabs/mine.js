@@ -449,15 +449,37 @@ export function renderMineCards() {
 
 function bindMineSSE() {
   if (mineSseBound) return;
-  if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
+  if (!window.OmniQASSE?.subscribe) return;
+
+  // 新需求进来：尝试增量刷新工作台（保持筛选/折叠状态）
+  window.OmniQASSE.subscribe('workbench_requirement_created', ({ payload }) => {
+    const reqId = Number(payload?.id || 0);
+    if (!reqId) return;
+    const myId = Number(state.currentUser?.id || window.currentUser?.id || 0);
+    if (myId && payload?.owner_id && Number(payload.owner_id) !== myId) return;
+    // Refresh quietly to get new card data; markUnread is handled by sse.js
+    const majorId = Number(document.getElementById('mineMajorSelect')?.value || 0);
+    const mode = document.getElementById('mineDisplayMode')?.value || 'version';
+    if (!majorId && mode === 'version') return;
+    // Debounce so rapid-fire events only trigger one reload
+    if (window._mineSSERequirementTimer) clearTimeout(window._mineSSERequirementTimer);
+    window._mineSSERequirementTimer = setTimeout(async () => {
+      window._mineSSERequirementTimer = null;
+      if (typeof window.loadMyWorkbench === 'function') await window.loadMyWorkbench();
+      // After reload, pulse the new card
+      const el = document.querySelector(`.mine-req-card[data-req-id='${reqId}']`);
+      if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'blue');
+    }, 500);
+  });
+
+  // 新 testcase：容器级轻流光，不进主角标
   window.OmniQASSE.subscribe('workbench_testcase_created', ({ payload }) => {
     const reqId = Number(payload?.requirement_id || 0);
     if (!reqId) return;
     const el = document.querySelector(`.mine-req-card[data-req-id='${reqId}']`);
-    if (el && typeof window.OmniQASSE.pulseBoundaryGlow === 'function') {
-      window.OmniQASSE.pulseBoundaryGlow(el, 'green');
-    }
+    if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'teal');
   });
+
   mineSseBound = true;
 }
 bindMineSSE();

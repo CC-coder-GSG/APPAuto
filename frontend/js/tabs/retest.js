@@ -208,15 +208,32 @@ window.OmniQARetestTab = { loadRetest, toggleRetestMode, setRetest, toggleBugFai
 
 function bindRetestSSE() {
   if (retestSseBound) return;
-  if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
+  if (!window.OmniQASSE?.subscribe) return;
+
+  // 新进入复测需求 → 角标已由 sse.js 处理，此处增量刷新列表
+  window.OmniQASSE.subscribe('retest_requirement_created', ({ payload }) => {
+    const reqId = Number(payload?.id || 0);
+    if (!reqId) return;
+    if (window._retestSSERequirementTimer) clearTimeout(window._retestSSERequirementTimer);
+    window._retestSSERequirementTimer = setTimeout(async () => {
+      window._retestSSERequirementTimer = null;
+      if (typeof window.loadRetest === 'function') await window.loadRetest();
+      const el = document.querySelector(`.retest-req-card[data-req-id='${reqId}']`);
+      if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'blue');
+    }, 600);
+  });
+
+  // 复测通过/不通过 → 卡片级提示，不进角标
   window.OmniQASSE.subscribe('retest_requirement_status_changed', ({ payload }) => {
     const reqId = Number(payload?.requirement_id || 0);
     if (!reqId) return;
     const el = document.querySelector(`.retest-req-card[data-req-id='${reqId}']`);
-    if (!el || typeof window.OmniQASSE.pulseBoundaryGlow !== 'function') return;
+    if (!el) return;
+    // 通过 → 明快绿；不通过 → 深邃紫
     const tone = payload?.retest_passed === true ? 'green' : 'purple';
     window.OmniQASSE.pulseBoundaryGlow(el, tone);
   });
+
   retestSseBound = true;
 }
 bindRetestSSE();

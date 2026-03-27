@@ -526,13 +526,16 @@ body {
 
 .build-record-card {
   position: relative;
-  background: linear-gradient(180deg, rgba(248, 250, 252, .92), rgba(255, 255, 255, .98));
-  transition: box-shadow .2s ease, border-color .2s ease;
+  background: var(--card-bg);
+  border: 1px solid var(--border-light) !important;
+  border-radius: 10px !important;
+  transition: box-shadow 0.18s, border-color 0.18s, transform 0.18s;
 }
 
 .build-record-card:hover {
-  border-color: #bfdbfe !important;
-  box-shadow: 0 8px 18px -12px rgba(30, 64, 175, .35) !important;
+  border-color: #a5b4fc !important;
+  box-shadow: 0 6px 20px -8px rgba(79, 70, 229, 0.2) !important;
+  transform: translateY(-1px);
 }
 
 #tab-field-test .field-test-row-card {
@@ -696,79 +699,50 @@ body {
 }
 
 .qa-table-zentao-sync tr.zentao-row-card td {
-  background: linear-gradient(180deg, rgba(248, 250, 252, .88), rgba(255, 255, 255, .98));
-  border-top: 1px solid rgba(203, 213, 225, .45);
-  border-bottom: 1px solid rgba(203, 213, 225, .45);
+  background: rgba(248, 250, 252, 0.7);
+  border-top: 1px solid rgba(203, 213, 225, 0.4);
+  border-bottom: 1px solid rgba(203, 213, 225, 0.4);
+  transition: background 0.18s;
 }
 
 .qa-table-zentao-sync tr.zentao-row-card td:first-child {
-  border-left: 1px solid rgba(203, 213, 225, .55);
-  border-top-left-radius: 9px;
-  border-bottom-left-radius: 9px;
+  border-left: 1px solid rgba(203, 213, 225, 0.5);
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
 }
 
 .qa-table-zentao-sync tr.zentao-row-card td:last-child {
-  border-right: 1px solid rgba(203, 213, 225, .55);
-  border-top-right-radius: 9px;
-  border-bottom-right-radius: 9px;
+  border-right: 1px solid rgba(203, 213, 225, 0.5);
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
 }
 
 .qa-table-zentao-sync tr.zentao-row-card:hover td {
-  background: linear-gradient(180deg, rgba(239, 246, 255, .88), rgba(248, 250, 252, .98));
+  background: rgba(238, 242, 255, 0.55);
 }
 
-/* 表格行彩色流光循环动画（Apple Intelligence 同款配色） */
-@keyframes sseRowColorCycle {
-  0%   { box-shadow: inset 0 0 0 2px #818cf8; }
-  20%  { box-shadow: inset 0 0 0 2px #a78bfa; }
-  40%  { box-shadow: inset 0 0 0 2px #f472b6; }
-  60%  { box-shadow: inset 0 0 0 2px #38bdf8; }
-  80%  { box-shadow: inset 0 0 0 2px #34d399; }
-  100% { box-shadow: inset 0 0 0 2px #818cf8; }
+/* 禅道行卡片之间的间隔 spacer row */
+.qa-table-zentao-sync tr.zentao-spacer-row td {
+  padding: 0;
+  height: 5px;
+  background: transparent;
+  border: none;
 }
 
-.qa-table-zentao-sync tr.sse-glow-enter td,
-.qa-table-zentao-sync tr.sse-glow-hold td {
-  animation: sseRowColorCycle 2.4s linear infinite;
-}
-
-.qa-table-zentao-sync tr.sse-glow-exit td {
-  animation: sseRowColorCycle 2.4s linear infinite;
-  opacity: 0.6;
-  transition: opacity .7s ease;
-}
-
+/* Table-row SSE glow — 由 style.css 统一定义，这里只做行级微调 */
+.qa-table-zentao-sync tr.zentao-row-card.sse-glow-enter td,
 .field-test-row-card.sse-glow-enter td,
-.field-test-row-card.sse-glow-hold td {
-  animation: sseRowColorCycle 2.4s linear infinite;
-}
-
-.field-test-row-card.sse-glow-exit td {
-  animation: sseRowColorCycle 2.4s linear infinite;
-  opacity: 0.6;
-  transition: opacity .7s ease;
-}
-
 #tab-dispatch .dispatch-row-card.sse-glow-enter td,
-#tab-dispatch .dispatch-row-card.sse-glow-hold td {
-  animation: sseRowColorCycle 2.4s linear infinite;
+#s5TableContainer tr.stage5-row-card.sse-glow-enter td {
+  transition: background 0.45s ease;
 }
 
-#tab-dispatch .dispatch-row-card.sse-glow-exit td {
-  animation: sseRowColorCycle 2.4s linear infinite;
-  opacity: 0.6;
-  transition: opacity .7s ease;
-}
-
-#s5TableContainer tr.stage5-row-card.sse-glow-enter td,
-#s5TableContainer tr.stage5-row-card.sse-glow-hold td {
-  animation: sseRowColorCycle 2.4s linear infinite;
-}
-
+.qa-table-zentao-sync tr.zentao-row-card.sse-glow-exit td,
+.field-test-row-card.sse-glow-exit td,
+#tab-dispatch .dispatch-row-card.sse-glow-exit td,
 #s5TableContainer tr.stage5-row-card.sse-glow-exit td {
-  animation: sseRowColorCycle 2.4s linear infinite;
-  opacity: 0.6;
-  transition: opacity .7s ease;
+  opacity: 0.65;
+  transition: opacity 0.6s ease;
 }
 
 .zentao-sync-sticky-panel {
@@ -1034,149 +1008,4 @@ body {
   }
 }
 
-.nav-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 6px;
-  margin-left: 6px;
-  border-radius: 999px;
-  background: #dc2626;
-  color: #fff;
-  font-size: 11px;
-  line-height: 1;
-  font-weight: 600;
-}
-
-.nav-badge.hidden,
-.nav-badge:empty {
-  display: none !important;
-}
-
-.nav-badge--sub {
-  min-width: 14px;
-  height: 14px;
-  padding: 0 4px;
-  margin-left: 4px;
-  background: #0ea5e9;
-  font-size: 10px;
-}
-
-.sse-conn-badge {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid #cbd5e1;
-  background: #f8fafc;
-  color: #475569;
-  font-size: 12px;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.sse-conn-badge::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #94a3b8;
-}
-
-.sse-conn-badge.connected {
-  border-color: #86efac;
-  background: #f0fdf4;
-  color: #166534;
-}
-
-.sse-conn-badge.connected::before {
-  background: #22c55e;
-}
-
-.sse-conn-badge.reconnecting {
-  border-color: #bfdbfe;
-  background: #eff6ff;
-  color: #1d4ed8;
-}
-
-.sse-conn-badge.reconnecting::before {
-  background: #3b82f6;
-}
-
-.sse-conn-badge.disconnected {
-  border-color: #fecaca;
-  background: #fef2f2;
-  color: #991b1b;
-}
-
-.sse-conn-badge.disconnected::before {
-  background: #ef4444;
-}
-
-/* Apple Intelligence 旋转彩色光圈边框 */
-@property --sse-angle {
-  syntax: '<angle>';
-  initial-value: 0deg;
-  inherits: false;
-}
-
-.sse-glow {
-  position: relative;
-  isolation: isolate;
-}
-
-.sse-glow::before {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  border-radius: inherit;
-  padding: 2px;
-  background: conic-gradient(
-    from var(--sse-angle),
-    transparent   0%,
-    #818cf8      12%,
-    #a78bfa      24%,
-    #f472b6      38%,
-    #fb923c      50%,
-    #38bdf8      64%,
-    #34d399      78%,
-    transparent  88%
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  opacity: 0;
-}
-
-@keyframes sseBorderSpin {
-  to { --sse-angle: 360deg; }
-}
-
-@keyframes sseGlowIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
-@keyframes sseGlowOut {
-  from { opacity: 1; }
-  to   { opacity: 0; }
-}
-
-.sse-glow-enter::before {
-  animation: sseGlowIn .45s ease-out forwards, sseBorderSpin 2.4s linear infinite;
-}
-
-.sse-glow-hold::before {
-  opacity: 1;
-  animation: sseBorderSpin 2.4s linear infinite;
-}
-
-.sse-glow-exit::before {
-  animation: sseGlowOut .7s ease forwards, sseBorderSpin 2.4s linear infinite;
-}
+/* nav-badge / sse-conn-badge / sse-glow 已统一移至 style.css */

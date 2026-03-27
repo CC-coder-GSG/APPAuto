@@ -614,16 +614,38 @@ function zentaoAtTop() {
   return wrap.scrollTop <= 12;
 }
 
+const _zentaoTopBannerCount = { value: 0 };
+
 function updateTopNotice() {
+  // Legacy DOM notice (keep for backward compat if element exists)
   const notice = document.getElementById('zentaoSyncTopNotice');
-  if (!notice) return;
-  if (syncState.unseenNewCount <= 0) {
-    notice.classList.add('hidden');
-    notice.textContent = '有 0 条新同步记录';
-    return;
+  if (notice) {
+    if (syncState.unseenNewCount <= 0) {
+      notice.classList.add('hidden');
+    } else {
+      notice.classList.remove('hidden');
+      notice.textContent = `有 ${syncState.unseenNewCount} 条新同步记录`;
+    }
   }
-  notice.classList.remove('hidden');
-  notice.textContent = `有 ${syncState.unseenNewCount} 条新同步记录`;
+  // New position-aware banner
+  if (!window.OmniQASSE?.showPositionBanner) return;
+  _zentaoTopBannerCount.value = syncState.unseenNewCount;
+  if (syncState.unseenNewCount <= 0) return;
+  const tableWrap = document.querySelector('#tab-zentao-sync .zentao-sync-table-wrap');
+  if (!tableWrap) return;
+  window.OmniQASSE.showPositionBanner({
+    scrollContainer: tableWrap,
+    anchorEl: tableWrap,
+    position: 'top',
+    countRef: _zentaoTopBannerCount,
+    labelFn: (n) => `⬆ 有 ${n} 条新同步记录，点击滚到顶部`,
+    onClickScroll: () => {
+      tableWrap.scrollTop = 0;
+      syncState.unseenNewCount = 0;
+      window.OmniQASSE?.clearScopeUnread?.('zentao_sync');
+    },
+    bannerId: 'zentao-new',
+  });
 }
 
 function glowRowByEventId(eventId, tone = 'blue') {
@@ -701,13 +723,15 @@ function bindSSE() {
 
     if (insertedIds.length) {
       if (zentaoAtTop()) {
+        // 新记录：深邃蓝紫
         insertedIds.forEach((id) => glowRowByEventId(id, 'purple'));
       } else {
         syncState.unseenNewCount += insertedIds.length;
         updateTopNotice();
       }
     }
-    updatedIds.forEach((id) => glowRowByEventId(id, 'green'));
+    // 状态变化：青绿色
+    updatedIds.forEach((id) => glowRowByEventId(id, 'teal'));
   };
 
   const enqueueZentaoBatch = (kind, item) => {

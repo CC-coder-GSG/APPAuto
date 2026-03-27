@@ -108,14 +108,14 @@ window.OmniQADispatchTab = { searchDispatchBug, confirmDispatchBug, loadDispatch
 function bindDispatchSSE() {
   if (dispatchSseBound) return;
   if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
-  const onDispatchEvent = ({ payload }) => {
+  const makeDispatchHandler = (tone) => ({ payload }) => {
     const tab = document.getElementById('tab-dispatch');
     if (!tab || tab.classList.contains('hidden')) return;
 
     const id = Number(payload?.id || 0);
     if (id > 0 && typeof window.OmniQASSE.pulseBoundaryGlow === 'function') {
       const existed = document.querySelector(`.dispatch-row-card[data-bug-id='${id}']`);
-      if (existed) window.OmniQASSE.pulseBoundaryGlow(existed, 'green');
+      if (existed) window.OmniQASSE.pulseBoundaryGlow(existed, tone);
     }
 
     if (dispatchSseRefreshTimer) clearTimeout(dispatchSseRefreshTimer);
@@ -124,8 +124,8 @@ function bindDispatchSSE() {
     }, 450);
   };
 
-  window.OmniQASSE.subscribe('bug_dispatch_created', onDispatchEvent);
-  window.OmniQASSE.subscribe('bug_dispatch_updated', onDispatchEvent);
+  window.OmniQASSE.subscribe('bug_dispatch_created', makeDispatchHandler('amber'));
+  window.OmniQASSE.subscribe('bug_dispatch_updated', makeDispatchHandler('teal'));
   dispatchSseBound = true;
 }
 

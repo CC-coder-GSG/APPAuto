@@ -5,6 +5,7 @@ import { renderBugLink } from '../utils.js';
 let currentPage = 1;
 let currentPageSize = 10;
 let feedbackSseBound = false;
+const _feedbackTopBannerCount = { value: 0 };
 
 function feedbackStatusZh(v) {
   const m = { pending: '待处理', processing: '处理中', resolved: '已处理', closed: '已关闭' };
@@ -517,14 +518,49 @@ window.OmniQAFeedbackTab = {
 function bindFeedbackSSE() {
   if (feedbackSseBound) return;
   if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
+
+  // New feedback created → top banner if scrolled down, otherwise reload & glow
+  window.OmniQASSE.subscribe('feedback_task_created', ({ payload }) => {
+    const tab = document.getElementById('tab-feedback');
+    if (!tab || tab.classList.contains('hidden')) return;
+    const feedbackId = Number(payload?.id || 0);
+    const tableEl = document.getElementById('feedbackTable')?.closest('table');
+    const rect = tableEl?.getBoundingClientRect();
+    const atTop = !rect || rect.top >= 0;
+    if (!atTop && window.OmniQASSE.showPositionBanner) {
+      _feedbackTopBannerCount.value += 1;
+      window.OmniQASSE.showPositionBanner({
+        scrollContainer: document.scrollingElement || document.documentElement,
+        anchorEl: tableEl,
+        position: 'top',
+        countRef: _feedbackTopBannerCount,
+        labelFn: (n) => `↑ ${n} 条新反馈任务`,
+        onClickScroll: () => tableEl?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+        bannerId: 'feedback-top-banner',
+      });
+      return;
+    }
+    if (window._feedbackSSETimer) clearTimeout(window._feedbackSSETimer);
+    window._feedbackSSETimer = setTimeout(async () => {
+      _feedbackTopBannerCount.value = 0;
+      await loadFeedbackBoard(1);
+      if (feedbackId) {
+        const el = document.querySelector(`.feedback-row-card[data-feedback-id='${feedbackId}']`);
+        if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'blue');
+      }
+    }, 400);
+  });
+
+  // Feedback status/assignment updated → teal glow on existing row
   window.OmniQASSE.subscribe('feedback_task_updated', ({ payload }) => {
     const id = Number(payload?.id || 0);
     if (!id) return;
     const el = document.querySelector(`.feedback-row-card[data-feedback-id='${id}']`);
     if (el && typeof window.OmniQASSE.pulseBoundaryGlow === 'function') {
-      window.OmniQASSE.pulseBoundaryGlow(el, 'green');
+      window.OmniQASSE.pulseBoundaryGlow(el, 'teal');
     }
   });
+
   feedbackSseBound = true;
 }
 bindFeedbackSSE();

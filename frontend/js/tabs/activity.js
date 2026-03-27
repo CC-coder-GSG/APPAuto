@@ -212,20 +212,43 @@ function isActivityNearTop() {
   return rect.top >= 0 && rect.top <= Math.max(260, Math.round(window.innerHeight * 0.45));
 }
 
+const _activityTopBannerCount = { value: 0 };
+
 function updateActivityTopNotice() {
+  // Legacy DOM notice
   const el = document.getElementById('activityTopNotice');
-  if (!el) return;
-  if (activityUnseenTopCount > 0) {
-    el.innerText = `There are ${activityUnseenTopCount} new activities`;
-    el.classList.remove('hidden');
-  } else {
-    el.innerText = 'There are 0 new activities';
-    el.classList.add('hidden');
+  if (el) {
+    if (activityUnseenTopCount > 0) {
+      el.innerText = `有 ${activityUnseenTopCount} 条新活动`;
+      el.classList.remove('hidden');
+    } else {
+      el.classList.add('hidden');
+    }
   }
+  // New position-aware banner
+  if (!window.OmniQASSE?.showPositionBanner) return;
+  _activityTopBannerCount.value = activityUnseenTopCount;
+  if (activityUnseenTopCount <= 0) return;
+  const feedList = document.getElementById('activityFeedList');
+  if (!feedList) return;
+  window.OmniQASSE.showPositionBanner({
+    scrollContainer: feedList.closest('[style*="overflow"], .card') || feedList.parentElement,
+    anchorEl: feedList,
+    position: 'top',
+    countRef: _activityTopBannerCount,
+    labelFn: (n) => `⬆ 有 ${n} 条新活动，点击查看`,
+    onClickScroll: () => {
+      activityUnseenTopCount = 0;
+      _activityTopBannerCount.value = 0;
+      revealActivityRealtimeNew();
+    },
+    bannerId: 'activity-new',
+  });
 }
 
 function clearActivityTopNotice() {
   activityUnseenTopCount = 0;
+  _activityTopBannerCount.value = 0;
   updateActivityTopNotice();
 }
 

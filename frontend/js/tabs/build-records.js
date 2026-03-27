@@ -232,20 +232,39 @@ function isBuildListNearTop() {
   return rect.top >= 0 && rect.top <= Math.max(260, Math.round(window.innerHeight * 0.45));
 }
 
+const _buildTopBannerCount = { value: 0 };
+
 function updateBuildTopNotice() {
+  // Legacy DOM notice
   const el = document.getElementById('buildRecordsTopNotice');
-  if (!el) return;
-  if (state.unseenTopNewCount > 0) {
-    el.innerText = `There are ${state.unseenTopNewCount} new build records`;
-    el.classList.remove('hidden');
-  } else {
-    el.innerText = 'There are 0 new build records';
-    el.classList.add('hidden');
+  if (el) {
+    if (state.unseenTopNewCount > 0) {
+      el.innerText = `有 ${state.unseenTopNewCount} 条新构建记录`;
+      el.classList.remove('hidden');
+    } else {
+      el.classList.add('hidden');
+    }
   }
+  // Position-aware banner
+  if (!window.OmniQASSE?.showPositionBanner) return;
+  _buildTopBannerCount.value = state.unseenTopNewCount;
+  if (state.unseenTopNewCount <= 0) return;
+  const cardList = document.getElementById('buildRecordsCardList');
+  if (!cardList) return;
+  window.OmniQASSE.showPositionBanner({
+    scrollContainer: cardList.closest('[style*="overflow"]') || cardList.parentElement,
+    anchorEl: cardList,
+    position: 'top',
+    countRef: _buildTopBannerCount,
+    labelFn: (n) => `⬆ 有 ${n} 条新构建记录，点击查看`,
+    onClickScroll: () => revealBuildRealtimeNew(),
+    bannerId: 'build-new',
+  });
 }
 
 function clearBuildTopNotice() {
   state.unseenTopNewCount = 0;
+  _buildTopBannerCount.value = 0;
   updateBuildTopNotice();
 }
 
@@ -280,8 +299,13 @@ function flushBuildRealtimeQueue() {
 
   renderCards();
   if (createdItems.length > 0) clearBuildTopNotice();
-  createdItems.forEach((item) => pulseBuildCard(item.id, 'purple'));
-  updatedItems.forEach((item) => pulseBuildCard(item.id, 'green'));
+  createdItems.forEach((item) => pulseBuildCard(item.id, 'blue'));
+  updatedItems.forEach((item) => {
+    // 成功 → green, 失败 → purple, 其他 → teal
+    const status = String(item.build_status || '').toUpperCase();
+    const tone = status === 'SUCCESS' ? 'green' : status === 'FAILURE' ? 'purple' : 'teal';
+    pulseBuildCard(item.id, tone);
+  });
 }
 
 function enqueueBuildRealtime(kind, item) {

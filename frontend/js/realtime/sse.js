@@ -24,60 +24,46 @@ const RUNTIME = {
   },
 };
 
+// ─── Connection indicator ────────────────────────────────────────────────────
+
 function updateConnectionIndicator() {
   const el = document.getElementById('sseConnectionState');
   if (!el) return;
-  const stateTextMap = {
-    connected: '实时已连接',
+  const map = {
+    connected:    '实时已连接',
     reconnecting: '实时重连中',
-    connecting: '实时连接中',
+    connecting:   '实时连接中',
     disconnected: '实时未连接',
   };
   const cur = String(RUNTIME.connectionState || 'disconnected');
-  el.textContent = stateTextMap[cur] || stateTextMap.disconnected;
+  el.textContent = map[cur] || map.disconnected;
   el.classList.remove('hidden', 'connected', 'reconnecting', 'disconnected');
+  el.classList.remove('hidden');
   if (cur === 'connected') el.classList.add('connected');
   else if (cur === 'reconnecting' || cur === 'connecting') el.classList.add('reconnecting');
   else el.classList.add('disconnected');
 }
 
 function setConnectionState(next) {
-  const stateValue = String(next || 'disconnected');
-  if (RUNTIME.connectionState === stateValue) return;
-  RUNTIME.connectionState = stateValue;
+  const v = String(next || 'disconnected');
+  if (RUNTIME.connectionState === v) return;
+  RUNTIME.connectionState = v;
   updateConnectionIndicator();
 }
 
-function debugLog(...args) {
-  if (!SSE_DEBUG) return;
-  console.debug('[SSE]', ...args);
-}
+function debugLog(...args) { if (SSE_DEBUG) console.debug('[SSE]', ...args); }
+function debugError(...args) { if (SSE_DEBUG) console.error('[SSE]', ...args); }
 
-function debugError(...args) {
-  if (!SSE_DEBUG) return;
-  console.error('[SSE]', ...args);
-}
+// ─── Counter & badge management ──────────────────────────────────────────────
 
 const SCOPE_COUNTER_MAP = {
-  zentao_sync: 'zentaoNew',
-  mine_requirement: 'minePrimary',
-  mine_bug_dispatch: 'mineSecondaryBugDispatch',
-  feedback_task: 'feedback',
-  retest_requirement: 'retest',
-  overall_bug: 'overallBug',
+  zentao_sync:          'zentaoNew',
+  mine_requirement:     'minePrimary',
+  mine_bug_dispatch:    'mineSecondaryBugDispatch',
+  feedback_task:        'feedback',
+  retest_requirement:   'retest',
+  overall_bug:          'overallBug',
 };
-
-function emit(type, message) {
-  const direct = listeners.get(type) || [];
-  const wildcard = listeners.get('*') || [];
-  [...direct, ...wildcard].forEach((cb) => {
-    try {
-      cb(message);
-    } catch (err) {
-      console.error('SSE listener error', err);
-    }
-  });
-}
 
 function getUnreadSet(scope) {
   if (!unreadByScope.has(scope)) unreadByScope.set(scope, new Set());
@@ -85,10 +71,9 @@ function getUnreadSet(scope) {
 }
 
 function adjustCounterByScope(scope, delta) {
-  const counterKey = SCOPE_COUNTER_MAP[scope];
-  if (!counterKey) return;
-  const next = Math.max(0, Number(RUNTIME.counters[counterKey] || 0) + delta);
-  RUNTIME.counters[counterKey] = next;
+  const key = SCOPE_COUNTER_MAP[scope];
+  if (!key) return;
+  RUNTIME.counters[key] = Math.max(0, (RUNTIME.counters[key] || 0) + delta);
 }
 
 function markUnread(scope, key) {
@@ -122,66 +107,75 @@ function queueUnreadByEvent(message) {
   const type = String(message?.type || '');
   const payload = message?.payload || {};
   const item = payload?.item || {};
-  if (type === 'zentao_sync_created' && item?.id) markUnread('zentao_sync', item.id);
-  if (type === 'workbench_requirement_created' && payload?.id) markUnread('mine_requirement', payload.id);
-  if (type === 'bug_dispatch_created' && payload?.id) markUnread('mine_bug_dispatch', payload.id);
-  if (type === 'feedback_task_created' && payload?.id) markUnread('feedback_task', payload.id);
-  if (type === 'retest_requirement_created' && payload?.id) markUnread('retest_requirement', payload.id);
-  if (type === 'overall_bug_created' && payload?.id) markUnread('overall_bug', payload.id);
-  if (type === 'zentao_sync_deleted' && payload?.id) markRead('zentao_sync', payload.id);
+  if (type === 'zentao_sync_created'          && item?.id)      markUnread('zentao_sync', item.id);
+  if (type === 'workbench_requirement_created' && payload?.id)   markUnread('mine_requirement', payload.id);
+  if (type === 'bug_dispatch_created'          && payload?.id)   markUnread('mine_bug_dispatch', payload.id);
+  if (type === 'feedback_task_created'         && payload?.id)   markUnread('feedback_task', payload.id);
+  if (type === 'retest_requirement_created'    && payload?.id)   markUnread('retest_requirement', payload.id);
+  if (type === 'overall_bug_created'           && payload?.id)   markUnread('overall_bug', payload.id);
+  if (type === 'zentao_sync_deleted'           && payload?.id)   markRead('zentao_sync', payload.id);
 }
 
+function updateNavBadges() {
+  const badge = (id, counter) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const n = RUNTIME.counters[counter] || 0;
+    el.textContent = n > 0 ? String(n) : '';
+    el.classList.toggle('hidden', n <= 0);
+  };
+  badge('tabZentaoSyncBadge',  'zentaoNew');
+  badge('tabMinePrimaryBadge', 'minePrimary');
+  badge('tabMineSecondaryBadge', 'mineSecondaryBugDispatch');
+  badge('tabFeedbackBadge',    'feedback');
+  badge('tabRetestBadge',      'retest');
+  badge('tabStage5Badge',      'overallBug');
+}
+
+function bumpCounterByEvent(message) {
+  // assignee-only filter for personal events
+  const payload = message?.payload || {};
+  const myId = Number(state.currentUser?.id || 0);
+  if (payload?.assignee_id && myId && Number(payload.assignee_id) !== myId) return;
+  updateNavBadges();
+}
+
+// ─── Active tab detection ────────────────────────────────────────────────────
+
 function visibleTabName() {
-  const names = ['assign', 'mine', 'feedback', 'retest', 'stage5', 'field-test', 'build-records', 'zentao-sync', 'report', 'activity', 'data', 'dispatch'];
+  const names = ['assign','mine','feedback','retest','stage5','field-test','build-records','zentao-sync','report','activity','data','dispatch'];
   return names.find((n) => {
     const el = document.getElementById(`tab-${n}`);
     return el && !el.classList.contains('hidden');
   }) || '';
 }
 
+// ─── Debounce refresh (fallback for pages without incremental logic) ─────────
+
 function debounceRefresh(key, fn, wait = 700) {
   const old = refreshTimers.get(key);
   if (old) clearTimeout(old);
   const timer = setTimeout(() => {
     refreshTimers.delete(key);
-    try {
-      fn();
-    } catch {
-      // no-op
-    }
+    try { fn(); } catch { /* no-op */ }
   }, wait);
   refreshTimers.set(key, timer);
 }
 
-// Visibility-bound auto-refresh mapping: keep tab handlers lightweight and avoid full-page refresh storms.
+// Only used for pages that still use full reloads (report, field-test)
 function handleVisibleRefreshByEvent(message) {
   const type = String(message?.type || '');
   const visible = visibleTabName();
 
-  if ((type === 'workbench_requirement_created' || type === 'workbench_testcase_created') && visible === 'mine' && typeof window.loadMyWorkbench === 'function') {
-    debounceRefresh('mine', () => window.loadMyWorkbench());
-  }
-
-  if (type === 'retest_requirement_status_changed' && visible === 'retest' && typeof window.loadRetest === 'function') {
-    debounceRefresh('retest', () => window.loadRetest());
-  }
-
-  if ((type === 'overall_bug_created' || type === 'overall_bug_closed') && visible === 'stage5' && typeof window.loadStage5 === 'function') {
-    debounceRefresh('stage5', () => window.loadStage5());
-  }
-
-  if ((type === 'feedback_task_created' || type === 'feedback_task_updated') && visible === 'feedback' && typeof window.loadFeedbackBoard === 'function') {
-    debounceRefresh('feedback', () => window.loadFeedbackBoard());
-  }
-
-  if ((type === 'bug_dispatch_created' || type === 'bug_dispatch_updated') && visible === 'dispatch' && typeof window.loadDispatchedAll === 'function') {
-    debounceRefresh('dispatch', () => window.loadDispatchedAll());
-  }
-
   if ((type === 'field_test_record_created' || type === 'field_test_record_updated') && visible === 'field-test' && typeof window.loadFieldTestBoard === 'function') {
     debounceRefresh('field-test', () => window.loadFieldTestBoard());
   }
+  if (type === 'report_data_changed' && visible === 'report' && typeof window.loadReportData === 'function') {
+    debounceRefresh('report', () => window.loadReportData(), 1200);
+  }
 }
+
+// ─── Event ID persistence ────────────────────────────────────────────────────
 
 function saveLastEventId(id) {
   if (!id) return;
@@ -189,53 +183,7 @@ function saveLastEventId(id) {
   localStorage.setItem('sse_last_event_id', String(RUNTIME.lastEventId));
 }
 
-function updateNavBadges() {
-  const zentao = document.getElementById('tabZentaoSyncBadge');
-  if (zentao) {
-    zentao.textContent = RUNTIME.counters.zentaoNew > 0 ? String(RUNTIME.counters.zentaoNew) : '';
-    zentao.classList.toggle('hidden', RUNTIME.counters.zentaoNew <= 0);
-  }
-
-  const minePrimary = document.getElementById('tabMinePrimaryBadge');
-  if (minePrimary) {
-    minePrimary.textContent = RUNTIME.counters.minePrimary > 0 ? String(RUNTIME.counters.minePrimary) : '';
-    minePrimary.classList.toggle('hidden', RUNTIME.counters.minePrimary <= 0);
-  }
-
-  const mineSecondary = document.getElementById('tabMineSecondaryBadge');
-  if (mineSecondary) {
-    mineSecondary.textContent = RUNTIME.counters.mineSecondaryBugDispatch > 0 ? String(RUNTIME.counters.mineSecondaryBugDispatch) : '';
-    mineSecondary.classList.toggle('hidden', RUNTIME.counters.mineSecondaryBugDispatch <= 0);
-  }
-
-  const feedback = document.getElementById('tabFeedbackBadge');
-  if (feedback) {
-    feedback.textContent = RUNTIME.counters.feedback > 0 ? String(RUNTIME.counters.feedback) : '';
-    feedback.classList.toggle('hidden', RUNTIME.counters.feedback <= 0);
-  }
-
-  const retest = document.getElementById('tabRetestBadge');
-  if (retest) {
-    retest.textContent = RUNTIME.counters.retest > 0 ? String(RUNTIME.counters.retest) : '';
-    retest.classList.toggle('hidden', RUNTIME.counters.retest <= 0);
-  }
-
-  const stage5 = document.getElementById('tabStage5Badge');
-  if (stage5) {
-    stage5.textContent = RUNTIME.counters.overallBug > 0 ? String(RUNTIME.counters.overallBug) : '';
-    stage5.classList.toggle('hidden', RUNTIME.counters.overallBug <= 0);
-  }
-}
-
-function bumpCounterByEvent(message) {
-  const type = String(message?.type || '');
-  const payload = message?.payload || {};
-  if (payload?.assignee_id && Number(payload.assignee_id) !== Number(state.currentUser?.id || 0)) return;
-  if (type === '__noop__') {
-    // no-op placeholder
-  }
-  updateNavBadges();
-}
+// ─── SSE stream parsing ──────────────────────────────────────────────────────
 
 function parseSSEChunk(buffer, onMessage) {
   const parts = buffer.split('\n\n');
@@ -246,22 +194,40 @@ function parseSSEChunk(buffer, onMessage) {
     let event = 'message';
     const dataLines = [];
     lines.forEach((line) => {
-      if (line.startsWith('id:')) id = line.slice(3).trim();
+      if (line.startsWith('id:'))    id = line.slice(3).trim();
       else if (line.startsWith('event:')) event = line.slice(6).trim();
-      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+      else if (line.startsWith('data:'))  dataLines.push(line.slice(5).trim());
     });
     const raw = dataLines.join('\n');
     if (!raw) return;
     let payload = {};
-    try {
-      payload = JSON.parse(raw);
-    } catch {
-      payload = { raw };
-    }
+    try { payload = JSON.parse(raw); } catch { payload = { raw }; }
     onMessage({ id: Number(id || payload.id || 0) || null, type: event || payload.type || 'message', ...payload });
   });
   return rest;
 }
+
+// ─── Publish-subscribe ───────────────────────────────────────────────────────
+
+function emit(type, message) {
+  const direct = listeners.get(type) || [];
+  const wildcard = listeners.get('*') || [];
+  [...direct, ...wildcard].forEach((cb) => {
+    try { cb(message); } catch (err) { console.error('[SSE] listener error', err); }
+  });
+}
+
+export function subscribeSSE(type, callback) {
+  const arr = listeners.get(type) || [];
+  arr.push(callback);
+  listeners.set(type, arr);
+  return () => {
+    const list = listeners.get(type) || [];
+    listeners.set(type, list.filter((fn) => fn !== callback));
+  };
+}
+
+// ─── Connect / reconnect ─────────────────────────────────────────────────────
 
 async function connect() {
   if (abortController) abortController.abort();
@@ -273,34 +239,27 @@ async function connect() {
   const headers = { Accept: 'text/event-stream' };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  debugLog('connect start', { cursor, reconnectAttempts, hasToken: !!token });
+  debugLog('connect', { cursor, reconnectAttempts });
 
   const resp = await fetch(`/api/sse/stream?last_event_id=${cursor}`, {
-    method: 'GET',
-    headers,
+    method: 'GET', headers,
     signal: abortController.signal,
     credentials: 'same-origin',
   });
 
   if (resp.status === 401) {
-    debugError('connect unauthorized', { status: resp.status });
     localStorage.removeItem('token');
     setConnectionState('disconnected');
     started = false;
-    if (window.location.pathname !== '/login') {
-      window.location.href = '/login';
-    }
+    if (window.location.pathname !== '/login') window.location.href = '/login';
     throw new Error('SSE unauthorized (401)');
   }
 
-  if (!resp.ok || !resp.body) {
-    debugError('connect bad response', { status: resp.status, ok: resp.ok, hasBody: !!resp.body });
-    throw new Error(`SSE connect failed: ${resp.status}`);
-  }
+  if (!resp.ok || !resp.body) throw new Error(`SSE connect failed: ${resp.status}`);
 
   reconnectAttempts = 0;
   setConnectionState('connected');
-  debugLog('connect success', { cursor });
+  debugLog('connected');
 
   const decoder = new TextDecoder('utf-8');
   const reader = resp.body.getReader();
@@ -312,7 +271,7 @@ async function connect() {
     carry = parseSSEChunk(carry, (msg) => {
       if (msg.type === 'ping') return;
       if (msg.id) saveLastEventId(msg.id);
-      debugLog('event', { id: msg.id || null, type: msg.type || 'message' });
+      debugLog('event', msg.type);
       queueUnreadByEvent(msg);
       bumpCounterByEvent(msg);
       emit(msg.type, msg);
@@ -320,7 +279,7 @@ async function connect() {
     });
   }
 
-  debugLog('stream disconnected');
+  debugLog('stream ended');
   if (started) setConnectionState('reconnecting');
 }
 
@@ -330,13 +289,10 @@ function scheduleReconnect() {
   reconnectAttempts += 1;
   setConnectionState('reconnecting');
   const ms = Math.min(15000, 1000 * 2 ** Math.min(5, reconnectAttempts));
-  debugLog('schedule reconnect', { reconnectAttempts, delayMs: ms });
+  debugLog('reconnect in', ms, 'ms');
   reconnectTimer = setTimeout(() => {
     connect().catch((err) => {
-      if (String(err?.message || '').includes('401')) {
-        debugError('reconnect stopped (unauthorized)', err);
-        return;
-      }
+      if (String(err?.message || '').includes('401')) return;
       debugError('reconnect failed', err);
       scheduleReconnect();
     });
@@ -349,10 +305,7 @@ export function startSSE() {
   updateNavBadges();
   setConnectionState('connecting');
   connect().catch((err) => {
-    if (String(err?.message || '').includes('401')) {
-      debugError('initial connect unauthorized', err);
-      return;
-    }
+    if (String(err?.message || '').includes('401')) return;
     debugError('initial connect failed', err);
     scheduleReconnect();
   });
@@ -367,15 +320,7 @@ export function stopSSE() {
   setConnectionState('disconnected');
 }
 
-export function subscribeSSE(type, callback) {
-  const arr = listeners.get(type) || [];
-  arr.push(callback);
-  listeners.set(type, arr);
-  return () => {
-    const list = listeners.get(type) || [];
-    listeners.set(type, list.filter((fn) => fn !== callback));
-  };
-}
+// ─── Glow animation ──────────────────────────────────────────────────────────
 
 function beginGlowPhase(el, cls) {
   el.classList.remove('sse-glow-enter', 'sse-glow-hold', 'sse-glow-exit');
@@ -386,19 +331,23 @@ export function pulseBoundaryGlow(el, tone = 'blue') {
   if (!el) return;
   const now = Date.now();
   const last = Number(el.dataset.ssePulseTs || 0);
+  // Throttle: if already glowing within 1200ms, just stay in hold
   if (now - last < 1200 && el.classList.contains('sse-glow')) {
     el.dataset.ssePulseTs = String(now);
-    el.classList.add('sse-glow-hold');
+    beginGlowPhase(el, 'sse-glow-hold');
     return;
   }
   el.dataset.ssePulseTs = String(now);
-  el.classList.remove('sse-glow-blue', 'sse-glow-green', 'sse-glow-purple');
+  el.classList.remove('sse-glow-blue', 'sse-glow-teal', 'sse-glow-green', 'sse-glow-purple', 'sse-glow-amber');
   el.classList.add(`sse-glow-${tone}`);
   beginGlowPhase(el, 'sse-glow-enter');
-  setTimeout(() => beginGlowPhase(el, 'sse-glow-hold'), 520);
-  setTimeout(() => beginGlowPhase(el, 'sse-glow-exit'), 2650);
-  setTimeout(() => el.classList.remove('sse-glow', 'sse-glow-enter', 'sse-glow-hold', 'sse-glow-exit', `sse-glow-${tone}`), 3450);
+  // Phase timing: enter 480ms → hold 2200ms → exit 650ms → cleanup
+  setTimeout(() => { if (el.classList.contains('sse-glow')) beginGlowPhase(el, 'sse-glow-hold'); }, 480);
+  setTimeout(() => { if (el.classList.contains('sse-glow')) beginGlowPhase(el, 'sse-glow-exit'); }, 2680);
+  setTimeout(() => el.classList.remove('sse-glow','sse-glow-enter','sse-glow-hold','sse-glow-exit','sse-glow-blue','sse-glow-teal','sse-glow-green','sse-glow-purple','sse-glow-amber'), 3380);
 }
+
+// ─── IntersectionObserver — viewport-aware attention ─────────────────────────
 
 function ensureAttentionObserver() {
   if (attentionObserver) return attentionObserver;
@@ -408,11 +357,11 @@ function ensureAttentionObserver() {
       const meta = attentionObserved.get(el);
       if (!meta) return;
       meta.inView = !!entry.isIntersecting;
-      if (meta.inView && getUnreadSet(meta.scope).has(meta.key)) {
+      if (meta.inView && !meta.read && getUnreadSet(meta.scope).has(meta.key)) {
         pulseBoundaryGlow(el, meta.tone || 'blue');
       }
     });
-  }, { threshold: 0.25 });
+  }, { threshold: 0.2 });
   return attentionObserver;
 }
 
@@ -421,16 +370,11 @@ export function mountAttention(el, { scope, key, tone = 'blue', hoverDelayMs = 4
   const meta = { scope, key: String(key), tone, inView: false, read: false, hoverTimer: null };
   attentionObserved.set(el, meta);
   ensureAttentionObserver().observe(el);
-  if (getUnreadSet(scope).has(meta.key)) {
-    pulseBoundaryGlow(el, tone);
-  }
 
-  const clearTimer = () => {
-    if (meta.hoverTimer) {
-      clearTimeout(meta.hoverTimer);
-      meta.hoverTimer = null;
-    }
-  };
+  // If already unread, trigger glow immediately
+  if (getUnreadSet(scope).has(meta.key)) pulseBoundaryGlow(el, tone);
+
+  const clearTimer = () => { if (meta.hoverTimer) { clearTimeout(meta.hoverTimer); meta.hoverTimer = null; } };
 
   el.addEventListener('mouseenter', () => {
     clearTimer();
@@ -438,20 +382,120 @@ export function mountAttention(el, { scope, key, tone = 'blue', hoverDelayMs = 4
       if (meta.read) return;
       meta.read = true;
       markRead(scope, meta.key);
-      el.classList.remove('sse-glow', 'sse-glow-enter', 'sse-glow-hold', 'sse-glow-exit', 'sse-glow-blue', 'sse-glow-green', 'sse-glow-purple');
+      el.classList.remove('sse-glow','sse-glow-enter','sse-glow-hold','sse-glow-exit','sse-glow-blue','sse-glow-teal','sse-glow-green','sse-glow-purple','sse-glow-amber');
     }, hoverDelayMs);
   });
 
   el.addEventListener('mouseleave', () => clearTimer());
 }
 
+// ─── Position-aware banners (顶部/底部新记录提示) ────────────────────────────
+
+/**
+ * showPositionBanner — 在容器内显示"有 N 条新记录"提示 banner
+ *
+ * @param {Object} opts
+ *   scrollContainer  — 监听滚动的元素（通常是列表外层容器）
+ *   anchorEl         — banner 插入到哪个 DOM 元素之前/之后
+ *   position         — 'top' | 'bottom'
+ *   countRef         — { value: number } 共享计数引用
+ *   labelFn          — (n) => string，生成提示文字
+ *   onClickScroll    — banner 被点击时滚动目标元素
+ *   bannerId         — banner 的唯一 id，用于去重
+ */
+export function showPositionBanner({
+  scrollContainer,
+  anchorEl,
+  position = 'top',
+  countRef,
+  labelFn,
+  onClickScroll,
+  bannerId,
+}) {
+  if (!anchorEl || !countRef) return;
+  const n = countRef.value;
+  if (n <= 0) return;
+
+  // Remove existing banner with same id
+  const existingId = `sse-banner-${bannerId}`;
+  document.getElementById(existingId)?.remove();
+
+  const banner = document.createElement('div');
+  banner.id = existingId;
+  banner.className = `sse-position-banner ${position}`;
+  banner.setAttribute('role', 'status');
+  banner.setAttribute('aria-live', 'polite');
+
+  const label = document.createElement('span');
+  label.textContent = labelFn(n);
+
+  const dismiss = document.createElement('button');
+  dismiss.className = 'banner-dismiss';
+  dismiss.textContent = '×';
+  dismiss.title = '关闭';
+  dismiss.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dismissBanner(banner, countRef);
+  });
+
+  banner.appendChild(label);
+  banner.appendChild(dismiss);
+
+  // Click banner → scroll to new records
+  banner.addEventListener('click', () => {
+    if (onClickScroll) {
+      onClickScroll();
+    }
+    dismissBanner(banner, countRef);
+  });
+
+  // Insert banner
+  if (position === 'top') {
+    anchorEl.parentNode?.insertBefore(banner, anchorEl);
+  } else {
+    anchorEl.parentNode?.insertBefore(banner, anchorEl.nextSibling);
+  }
+
+  // Auto-dismiss when scrolled to correct position
+  if (scrollContainer) {
+    const checkScroll = () => {
+      const atEdge = position === 'top'
+        ? scrollContainer.scrollTop <= 60
+        : scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight <= 60;
+      if (atEdge) {
+        dismissBanner(banner, countRef);
+        scrollContainer.removeEventListener('scroll', checkScroll);
+      }
+    };
+    scrollContainer.addEventListener('scroll', checkScroll, { passive: true });
+  }
+}
+
+function dismissBanner(banner, countRef) {
+  if (!banner || !banner.parentNode) return;
+  banner.classList.add('dismissing');
+  setTimeout(() => banner.remove(), 240);
+  if (countRef) countRef.value = 0;
+}
+
+export function updateBannerLabel(bannerId, labelFn, countRef) {
+  const banner = document.getElementById(`sse-banner-${bannerId}`);
+  if (!banner || !countRef) return;
+  const label = banner.querySelector('span');
+  if (label) label.textContent = labelFn(countRef.value);
+}
+
+// ─── Public API ──────────────────────────────────────────────────────────────
+
 window.OmniQASSE = {
-  start: startSSE,
-  stop: stopSSE,
-  subscribe: subscribeSSE,
+  start:             startSSE,
+  stop:              stopSSE,
+  subscribe:         subscribeSSE,
   pulseBoundaryGlow,
   mountAttention,
   markRead,
   clearScopeUnread,
-  runtime: RUNTIME,
+  showPositionBanner,
+  updateBannerLabel,
+  runtime:           RUNTIME,
 };
