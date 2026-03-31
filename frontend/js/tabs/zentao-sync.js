@@ -207,6 +207,36 @@ function setMapFormEnabled(enabled) {
   if (resetManualBtn) resetManualBtn.disabled = !canWrite;
 }
 
+// 用例只需要「需求」字段，其余字段仅 Bug 使用，置灰不可操作
+const BUG_ONLY_FIELD_IDS = [
+  'zentaoMapMinorSelect',
+  'zentaoMapSourceType',
+  'zentaoMapDisplayBucket',
+  'zentaoMapLinkedCaseId',
+  'zentaoMapSourceRef',
+  'zentaoMapNote',
+];
+
+function applyEntityConstraints(detail) {
+  const isTestcase = detail?.entity_type === 'testcase';
+  BUG_ONLY_FIELD_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (isTestcase) el.disabled = true;
+    const wrapper = el.closest('.zentao-map-field');
+    if (wrapper) {
+      wrapper.style.opacity = isTestcase ? '0.38' : '';
+      wrapper.style.pointerEvents = isTestcase ? 'none' : '';
+      wrapper.title = isTestcase ? '用例同步不使用此字段' : '';
+    }
+  });
+  // 归属范围提示行单独处理（不在 .zentao-map-field 内）
+  const bucketHint = document.getElementById('zentaoMapBucketHint');
+  if (bucketHint) {
+    bucketHint.style.opacity = isTestcase ? '0.38' : '';
+  }
+}
+
 function versionByIdMap() {
   const m = new Map();
   getVersions().forEach((v) => m.set(Number(v.id), v));
@@ -500,6 +530,7 @@ function renderMapSelectors(detail) {
   renderMajorContext(detail);
   updateBucketHint();
   updateRuleHint(detail);
+  applyEntityConstraints(detail);
 }
 
 function bindMapInteractions() {
@@ -943,18 +974,23 @@ export async function saveZentaoSyncMapping() {
   const displayBucket = document.getElementById('zentaoMapDisplayBucket')?.value || '';
   const note = (document.getElementById('zentaoMapNote')?.value || '').trim();
 
-  if (!displayBucket) {
-    window.showMessage?.('请选择归属范围（需求池/总览池）', 'error');
-    return;
-  }
+  const isTestcase = syncState.currentEvent?.entity_type === 'testcase';
 
-  if (displayBucket === 'requirement' && !requirementId) {
-    window.showMessage?.('归属范围为需求池时，需求为必选项', 'error');
-    return;
-  }
-
-  if (displayBucket === 'overall' && !minorVersionId) {
-    window.showMessage?.('归属范围为总览池时，请至少选择小版本', 'error');
+  if (!isTestcase) {
+    if (!displayBucket) {
+      window.showMessage?.('请选择归属范围（需求池/总览池）', 'error');
+      return;
+    }
+    if (displayBucket === 'requirement' && !requirementId) {
+      window.showMessage?.('归属范围为需求池时，需求为必选项', 'error');
+      return;
+    }
+    if (displayBucket === 'overall' && !minorVersionId) {
+      window.showMessage?.('归属范围为总览池时，请至少选择小版本', 'error');
+      return;
+    }
+  } else if (!requirementId) {
+    window.showMessage?.('用例同步必须选择需求', 'error');
     return;
   }
 
