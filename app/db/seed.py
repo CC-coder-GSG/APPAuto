@@ -227,6 +227,27 @@ def ensure_bug_schema_compat(db: Session) -> None:
         db.rollback()
         logger.warning("bug_tracking 禅道唯一索引创建失败，已跳过。请检查历史重复数据。", exc_info=True)
 
+    # 回填：source_type=CASE 但 source_ref 为空的历史记录，通过关联的同步事件补全 source_ref
+    result = db.execute(text("""
+        UPDATE bug_tracking
+        SET source_ref = CAST((
+            SELECT bse.mapped_test_case_id
+            FROM browser_sync_events bse
+            WHERE bse.client_record_id = bug_tracking.zentao_client_record_id
+              AND bse.mapped_test_case_id IS NOT NULL
+        ) AS TEXT)
+        WHERE source_type = 'CASE'
+          AND (source_ref IS NULL OR source_ref = '')
+          AND EXISTS (
+              SELECT 1 FROM browser_sync_events bse
+              WHERE bse.client_record_id = bug_tracking.zentao_client_record_id
+                AND bse.mapped_test_case_id IS NOT NULL
+          )
+    """))
+    if result.rowcount:
+        db.commit()
+        logger.info("bug_tracking source_ref 回填完成，修复记录数：%d", result.rowcount)
+
 
 def ensure_testcase_schema_compat(db: Session) -> None:
     rows = db.execute(text("PRAGMA table_info(test_cases)")).fetchall()

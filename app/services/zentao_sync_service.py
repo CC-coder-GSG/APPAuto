@@ -604,7 +604,7 @@ class ZentaoSyncService:
                 minor_version_id=row.mapped_minor_version_id,
                 requirement_id=decision.requirement_id or row.mapped_requirement_id,  # type: ignore[arg-type]
                 source_type=source_type,
-                source_ref=row.mapped_source_ref or draft.get("sourceRef"),
+                source_ref=row.mapped_source_ref or draft.get("sourceRef") or (str(row.mapped_test_case_id) if row.mapped_test_case_id and source_type == BugSourceType.CASE else None),
                 actor=actor,
             )
 
