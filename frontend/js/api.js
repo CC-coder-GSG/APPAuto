@@ -28,6 +28,10 @@
     throw new Error('401');
   }
 
+  if (response.status === 403) {
+    throw new Error('无权限执行此操作');
+  }
+
   if (!response.ok) {
     let message = `请求失败 (HTTP ${response.status})`;
     try {

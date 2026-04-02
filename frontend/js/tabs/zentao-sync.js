@@ -105,7 +105,7 @@ function getVersions() {
 }
 
 function getRequirements() {
-  return Array.isArray(window.dataOverviewCache?.requirements) ? window.dataOverviewCache.requirements : [];
+  return Array.isArray(window.zentaoRequirementsCache) ? window.zentaoRequirementsCache : [];
 }
 
 function localizeFreeText(text) {
@@ -564,14 +564,9 @@ export async function ensureZentaoMapDataReady() {
       }
     }
 
-    const overviewReady = !!(window.dataOverviewCache && Array.isArray(window.dataOverviewCache.requirements));
-    if (!overviewReady) {
-      if (typeof window.loadDataOverview === 'function') {
-        await window.loadDataOverview();
-      } else {
-        const data = await (await api('/admin/data-overview')).json();
-        window.dataOverviewCache = data;
-      }
+    if (!Array.isArray(window.zentaoRequirementsCache)) {
+      const data = await (await api('/api/integrations/zentao/requirements')).json();
+      window.zentaoRequirementsCache = data.requirements || [];
     }
   } catch (err) {
     window.showMessage?.(err.message || '禅道同步初始化数据加载失败', 'error');

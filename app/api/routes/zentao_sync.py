@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.core.config import settings
-from app.models import User
+from app.models import Requirement, User
 from app.schemas.zentao_sync import ZentaoBrowserSyncPayload
 from app.services.permission_service import ensure_admin
 from app.services.zentao_sync_service import ZentaoSyncService
@@ -50,6 +50,26 @@ def verify_zentao_sync_api_key(
 def _admin_guard(current_user: User = Depends(get_current_user)) -> User:
     ensure_admin(current_user)
     return current_user
+
+
+@router.get("/api/integrations/zentao/requirements")
+def list_zentao_requirements(
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """供禅道同步中心使用的需求列表，任意登录用户可访问。"""
+    reqs = db.query(Requirement).order_by(Requirement.id.desc()).all()
+    return {
+        "requirements": [
+            {
+                "id": r.id,
+                "zentao_req_id": r.zentao_req_id,
+                "title": r.title,
+                "major_version_id": r.major_version_id,
+            }
+            for r in reqs
+        ]
+    }
 
 
 @router.options("/api/integrations/zentao/browser-events")

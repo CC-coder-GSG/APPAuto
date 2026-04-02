@@ -38,9 +38,7 @@ class Settings(BaseSettings):
         origins = _split_csv(self.cors_allowed_origins_raw)
         if origins:
             return origins
-        if self.env.lower() == 'dev':
-            return ['*']
-        return []
+        return ['*']
 
     @model_validator(mode='after')
     def _validate_secret_key(self):
