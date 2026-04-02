@@ -56,7 +56,7 @@ class RetestService:
         ).all() if req_ids else []
         free_bug_rows = self.db.query(BugTracking).filter(
             BugTracking.requirement_id.in_(req_ids),
-            BugTracking.source_type == BugSourceType.MANUAL,
+            BugTracking.source_type.in_([BugSourceType.MANUAL, BugSourceType.REQUIREMENT]),
         ).all() if req_ids else []
         retest_bug_rows = self.db.query(BugTracking).filter(
             BugTracking.requirement_id.in_(req_ids),

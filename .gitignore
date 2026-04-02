@@ -12,4 +12,5 @@ node_modules/
 .vscode/
 .idea/
 frontend/.tmp_index_script.js
+.playwright-mcp/
 CLAUDE.md

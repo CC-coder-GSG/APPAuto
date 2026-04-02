@@ -344,7 +344,7 @@ def my_workbench(
     free_bug_rows = (
         db.query(BugTracking)
         .options(joinedload(BugTracking.dispatched_to))
-        .filter(BugTracking.requirement_id.in_(req_ids), BugTracking.source_type == BugSourceType.MANUAL)
+        .filter(BugTracking.requirement_id.in_(req_ids), BugTracking.source_type.in_([BugSourceType.MANUAL, BugSourceType.REQUIREMENT]))
         .all()
         if req_ids
         else []
