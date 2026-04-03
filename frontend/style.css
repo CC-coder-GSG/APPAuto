@@ -756,6 +756,14 @@ tbody tr:hover {
   isolation: isolate;
 }
 
+/* <tr> 元素加 position:relative 会触发表格列宽重算导致内容错位，
+   覆盖回 static；tr 上的 ::before 伪元素在表格里本身也不可靠，
+   实际视觉效果由 td 级别的 box-shadow 动画承载，无需定位上下文 */
+tr.sse-glow {
+  position: static;
+  isolation: auto;
+}
+
 /* Base: hidden gradient border overlay */
 .sse-glow::before {
   content: "";
