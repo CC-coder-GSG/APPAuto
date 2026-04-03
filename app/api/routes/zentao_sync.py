@@ -12,7 +12,6 @@ from app.api.deps import get_current_user, get_db
 from app.core.config import settings
 from app.models import Requirement, User
 from app.schemas.zentao_sync import ZentaoBrowserSyncPayload
-from app.services.permission_service import ensure_admin
 from app.services.zentao_sync_service import ZentaoSyncService
 
 router = APIRouter()
@@ -45,11 +44,6 @@ def verify_zentao_sync_api_key(
 
     if (x_zentao_sync_key or "").strip() != server_key:
         raise HTTPException(status_code=401, detail="X-Zentao-Sync-Key 无效")
-
-
-def _admin_guard(current_user: User = Depends(get_current_user)) -> User:
-    ensure_admin(current_user)
-    return current_user
 
 
 @router.get("/api/integrations/zentao/requirements")
@@ -146,7 +140,7 @@ def browser_event_detail(event_id: int, _: User = Depends(get_current_user), db:
 def map_browser_event(
     event_id: int,
     payload: BrowserSyncMapPayload,
-    current_user: User = Depends(_admin_guard),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     return ZentaoSyncService(db).map_event(
@@ -163,19 +157,19 @@ def map_browser_event(
 
 
 @router.post("/api/integrations/zentao/browser-events/{event_id}/apply")
-def apply_browser_event(event_id: int, current_user: User = Depends(_admin_guard), db: Session = Depends(get_db)):
+def apply_browser_event(event_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return ZentaoSyncService(db).apply_event(event_id, actor_id=current_user.id)
 
 
 @router.delete("/api/integrations/zentao/browser-events/{event_id}")
-def delete_browser_event(event_id: int, current_user: User = Depends(_admin_guard), db: Session = Depends(get_db)):
+def delete_browser_event(event_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return ZentaoSyncService(db).delete_event(event_id, actor_id=current_user.id)
 
 
 @router.post("/api/integrations/zentao/browser-events/apply-batch")
 def apply_browser_events_batch(
     payload: BrowserSyncBatchApplyPayload,
-    current_user: User = Depends(_admin_guard),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     return ZentaoSyncService(db).apply_batch(actor_id=current_user.id, limit=payload.limit)

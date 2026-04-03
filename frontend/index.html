@@ -691,7 +691,7 @@
         </div>
         <div class="qa-filter-actions zt-filter-actions">
           <button onclick="loadZentaoSyncBoard(1)">刷新</button>
-          <button class="secondary" onclick="applyZentaoSyncBatch()">批量应用待应用事件</button>
+          <button id="zentaoBatchApplyBtn" class="secondary" onclick="applyZentaoSyncBatch()">批量应用待应用事件</button>
         </div>
       </div>
     </div>
@@ -794,7 +794,7 @@
                 <label>备注</label>
                 <textarea id="zentaoMapNote" rows="2" placeholder="备注（可选）"></textarea>
               </div>
-              <div class="zentao-map-actions zentao-map-span-full">
+              <div id="zentaoMapAdminActions" class="zentao-map-actions zentao-map-span-full">
                 <button class="secondary" onclick="saveZentaoSyncMapping()">保存映射</button>
                 <button onclick="applyZentaoSyncEvent()">应用到业务</button>
                 <button class="secondary" style="color:#b91c1c; border-color:#fecaca; background:#fef2f2;" onclick="deleteZentaoSyncEvent()">删除</button>

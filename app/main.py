@@ -20,10 +20,13 @@ app = FastAPI(title="APPAuto", version="0.3.0")
 scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+_cors_origins = settings.cors_allowed_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_allowed_origins,
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    # allow_credentials=True 与 allow_origins=['*'] 不兼容（CORS 规范禁止）
+    # 本项目使用 JWT Bearer Token（不依赖 Cookie），无需凭证模式
+    allow_credentials=_cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
