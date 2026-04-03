@@ -654,6 +654,12 @@
             <option value="failed">应用失败</option>
           </select>
         </div>
+        <div class="qa-filter-item zt-filter-product">
+          <label>产品</label>
+          <select id="zentaoSyncProductFilter" onchange="loadZentaoSyncBoard(1)">
+            <option value="">全部产品</option>
+          </select>
+        </div>
         <div class="qa-filter-item zt-filter-bucket">
           <label>归属范围</label>
           <select id="zentaoSyncDisplayBucket" onchange="loadZentaoSyncBoard(1)">
@@ -750,6 +756,12 @@
           </div>
           <div class="zentao-map-form">
             <div class="zentao-map-grid">
+              <div class="zentao-map-field zentao-map-span-full zentao-map-product-row">
+                <label>产品/应用</label>
+                <select id="zentaoMapProductSelect" onchange="onZentaoProductChange()">
+                  <option value="">全部产品（不限制）</option>
+                </select>
+              </div>
               <div class="zentao-map-field">
                 <label>需求</label>
                 <select id="zentaoMapRequirementSelect">
@@ -1820,6 +1832,10 @@ function onZentaoManualMajorChange(){
 
 function resetZentaoManualMajor(){
   return window.OmniQAZentaoSyncTab.resetZentaoManualMajor();
+}
+
+function onZentaoProductChange(){
+  return window.OmniQAZentaoSyncTab.onZentaoProductChange();
 }
 
 async function nextZentaoSyncPage(){

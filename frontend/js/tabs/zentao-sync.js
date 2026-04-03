@@ -64,6 +64,7 @@ const syncState = {
   useManualMajor: false,
   unseenNewCount: 0,
   sseBound: false,
+  selectedProductId: null,
 };
 let zentaoBatchTimer = null;
 const zentaoBatch = {
@@ -108,6 +109,10 @@ function getRequirements() {
   return Array.isArray(window.zentaoRequirementsCache) ? window.zentaoRequirementsCache : [];
 }
 
+function getSoftwareProducts() {
+  return Array.isArray(window.zentaoSoftwareProductsCache) ? window.zentaoSoftwareProductsCache : [];
+}
+
 function localizeFreeText(text) {
   const raw = String(text || '');
   if (!raw) return '-';
@@ -146,6 +151,7 @@ function currentQuery() {
     dateFrom: document.getElementById('zentaoSyncDateFrom')?.value || '',
     dateTo: document.getElementById('zentaoSyncDateTo')?.value || '',
     onlyUnapplied: !!document.getElementById('zentaoSyncOnlyUnapplied')?.checked,
+    productId: Number(document.getElementById('zentaoSyncProductFilter')?.value || 0) || null,
   };
 }
 
@@ -180,6 +186,7 @@ function setText(id, text) {
 
 function setMapFormEnabled(enabled) {
   const ids = [
+    'zentaoMapProductSelect',
     'zentaoMapRequirementSelect',
     'zentaoMapMinorSelect',
     'zentaoMapSourceType',
@@ -250,10 +257,10 @@ function majorVersionNoById(id) {
 }
 
 function getSoftwareMajorIds() {
-  const currentSoftwareId = getCurrentSoftwareId();
+  const productId = syncState.selectedProductId;
   return new Set(
     getVersions()
-      .filter((v) => v.version_type === 'major' && (!currentSoftwareId || Number(v.software_id || 0) === currentSoftwareId))
+      .filter((v) => v.version_type === 'major' && (!productId || Number(v.software_id || 0) === productId))
       .map((v) => Number(v.id))
   );
 }
@@ -298,7 +305,7 @@ function renderMajorContext(detail) {
   const manualSelect = document.getElementById('zentaoMapManualMajorSelect');
   if (!majorText || !sourceText || !hint || !manualWrap || !manualSelect) return;
 
-  const majors = getVersions().filter((v) => v.version_type === 'major' && (!getCurrentSoftwareId() || Number(v.software_id || 0) === getCurrentSoftwareId()));
+  const majors = getVersions().filter((v) => v.version_type === 'major' && (!syncState.selectedProductId || Number(v.software_id || 0) === syncState.selectedProductId));
   manualSelect.innerHTML = "<option value=''>请选择大版本</option>" + majors.map((v) => `<option value='${v.id}'>${escapeHtml(v.version_no || '')}</option>`).join('');
   if (syncState.manualMajorVersionId) manualSelect.value = String(syncState.manualMajorVersionId);
 
@@ -329,11 +336,14 @@ function resolveEventMajorHint(detail) {
 
 function getFilteredRequirements(detail) {
   const reqs = getRequirements();
+  const productId = syncState.selectedProductId;
   const majorIds = getSoftwareMajorIds();
   const majorHint = resolveEventMajorHint(detail);
   const result = reqs.filter((r) => {
     const majorId = Number(r.major_version_id || 0);
     if (!majorId) return false;
+    // If product is selected but has no versions, show no requirements for that product
+    if (productId && majorIds.size === 0) return false;
     if (majorIds.size > 0 && !majorIds.has(majorId)) return false;
     if (majorHint && majorId !== majorHint) return false;
     return true;
@@ -348,7 +358,7 @@ function getRequirementById(requirements, requirementId) {
 
 function getMinorOptionsForContext(detail, selectedRequirementId) {
   const allMinors = getVersions().filter((v) => v.version_type === 'minor');
-  const currentSoftwareId = getCurrentSoftwareId();
+  const productId = syncState.selectedProductId;
   const vMap = versionByIdMap();
   const majorIds = getSoftwareMajorIds();
 
@@ -367,9 +377,9 @@ function getMinorOptionsForContext(detail, selectedRequirementId) {
     if (targetMajorId && parent !== targetMajorId) return false;
     if (!targetMajorId) {
       if (majorIds.size > 0 && !majorIds.has(parent)) return false;
-      if (currentSoftwareId) {
+      if (productId) {
         const major = vMap.get(parent);
-        if (!major || Number(major.software_id || 0) !== currentSoftwareId) return false;
+        if (!major || Number(major.software_id || 0) !== productId) return false;
       }
     }
     return true;
@@ -475,6 +485,29 @@ export function resetZentaoManualMajor() {
   refillRequirementAndMinorOptions(false);
 }
 
+export function onZentaoProductChange() {
+  const select = document.getElementById('zentaoMapProductSelect');
+  if (!select) return;
+  syncState.selectedProductId = Number(select.value || 0) || null;
+  syncState.manualMajorVersionId = null;
+  syncState.useManualMajor = false;
+  renderMajorContext(syncState.currentEvent);
+  refillRequirementAndMinorOptions(false);
+}
+
+function renderProductSelectOptions(detail) {
+  const productSelect = document.getElementById('zentaoMapProductSelect');
+  if (!productSelect) return;
+  const products = getSoftwareProducts();
+  productSelect.innerHTML =
+    "<option value=''>全部产品（不限制）</option>" +
+    products.map((p) => `<option value='${p.id}'>${escapeHtml(p.name)}</option>`).join('');
+  if (detail && detail.recommended_software_id) {
+    syncState.selectedProductId = detail.recommended_software_id;
+  }
+  productSelect.value = syncState.selectedProductId ? String(syncState.selectedProductId) : '';
+}
+
 function renderMapSelectors(detail) {
   const reqSelect = document.getElementById('zentaoMapRequirementSelect');
   const minorSelect = document.getElementById('zentaoMapMinorSelect');
@@ -484,6 +517,7 @@ function renderMapSelectors(detail) {
   const displayBucket = document.getElementById('zentaoMapDisplayBucket');
   if (!reqSelect || !minorSelect || !sourceType || !displayBucket) return;
 
+  renderProductSelectOptions(detail);
   syncState.mapRequirements = getFilteredRequirements(detail);
 
   const reqOptions = ["<option value=''>请选择需求</option>"];
@@ -506,6 +540,8 @@ function renderMapSelectors(detail) {
     if (linkedCaseId) linkedCaseId.value = '';
     const note = document.getElementById('zentaoMapNote');
     if (note) note.value = '';
+    const productSelect = document.getElementById('zentaoMapProductSelect');
+    if (productSelect) productSelect.value = '';
     renderMajorContext(null);
     updateBucketHint();
     updateRuleHint(null);
@@ -568,6 +604,11 @@ export async function ensureZentaoMapDataReady() {
       const data = await (await api('/api/integrations/zentao/requirements')).json();
       window.zentaoRequirementsCache = data.requirements || [];
     }
+
+    if (!Array.isArray(window.zentaoSoftwareProductsCache)) {
+      const data = await (await api('/api/integrations/zentao/software-products')).json();
+      window.zentaoSoftwareProductsCache = data.software_products || [];
+    }
   } catch (err) {
     window.showMessage?.(err.message || '禅道同步初始化数据加载失败', 'error');
     return false;
@@ -583,6 +624,7 @@ export async function initZentaoMapForm() {
   syncState.resolvedMajorVersionId = null;
   syncState.resolvedMajorVersionNo = '未识别';
   syncState.resolvedMajorSource = '未识别';
+  syncState.selectedProductId = null;
   renderMapSelectors(null);
 }
 
@@ -603,6 +645,7 @@ function renderList() {
     tb.innerHTML = syncState.items.map((it) => {
       const no = it.entity_type === 'bug' ? it.zentao_bug_id || '-' : it.zentao_case_id || '-';
       const title = it.title || '-';
+      const productName = it.zentao_product_name || '';
       const selected = syncState.currentEvent?.id === it.id;
       const deleteBtn = isAdminUser()
         ? `<button class='secondary' style='color:#b91c1c; border-color:#fecaca; background:#fef2f2;' onclick='deleteZentaoSyncEvent(${it.id})'>删除</button>`
@@ -611,7 +654,7 @@ function renderList() {
         <td>${fmt(it.created_at)}</td>
         <td>${escapeHtml(zhEntity(it.entity_type))}</td>
         <td>${escapeHtml(no)}</td>
-        <td class='col-text col-title' title='${escapeHtml(title)}'><span class='cell-ellipsis'>${escapeHtml(title)}</span></td>
+        <td class='col-text col-title' title='${escapeHtml(title)}'><span class='cell-ellipsis'>${escapeHtml(title)}</span>${productName ? `<br><small style='color:#94a3b8; font-size:0.78em;'>${escapeHtml(productName)}</small>` : ''}</td>
         <td>${escapeHtml(it.creator_name || '-')}</td>
         <td class='col-status'>${statusBadge(it.status)}</td>
         <td class='col-actions'>
@@ -848,6 +891,7 @@ function renderDetail(detail) {
   const originLines = [
     `禅道 Bug：${detail.zentao_bug_id || '-'}`,
     `禅道用例：${detail.zentao_case_id || '-'}`,
+    `产品/应用：${detail.zentao_product_name || '-'}`,
     `标题：${bugTitle}`,
     `需求编号：${requirementId}`,
     `需求名称：${requirementName}`,
@@ -884,9 +928,21 @@ function renderDetail(detail) {
   renderMapSelectors(detail);
 }
 
+function renderProductFilterOptions() {
+  const sel = document.getElementById('zentaoSyncProductFilter');
+  if (!sel) return;
+  const products = getSoftwareProducts();
+  const val = sel.value;
+  sel.innerHTML =
+    "<option value=''>全部产品</option>" +
+    products.map((p) => `<option value='${p.id}'>${escapeHtml(p.name)}</option>`).join('');
+  if (val) sel.value = val;
+}
+
 export async function loadZentaoSyncBoard(page = 1) {
   ensureLoggedIn();
   await ensureZentaoMapDataReady();
+  renderProductFilterOptions();
   bindMapInteractions();
   if (!syncState.currentEvent) renderMapSelectors(null);
 
@@ -901,6 +957,7 @@ export async function loadZentaoSyncBoard(page = 1) {
   if (q.dateFrom) params.set('date_from', q.dateFrom);
   if (q.dateTo) params.set('date_to', q.dateTo);
   if (q.onlyUnapplied) params.set('only_unapplied', 'true');
+  if (q.productId) params.set('software_id', String(q.productId));
 
   const data = await (await api(`/api/integrations/zentao/browser-events?${params.toString()}`)).json();
   syncState.items = data.items || [];
@@ -1081,6 +1138,7 @@ window.OmniQAZentaoSyncTab = {
   toggleManualMajorSelector,
   onZentaoManualMajorChange,
   resetZentaoManualMajor,
+  onZentaoProductChange,
   loadZentaoSyncBoard,
   nextZentaoSyncPage,
   prevZentaoSyncPage,

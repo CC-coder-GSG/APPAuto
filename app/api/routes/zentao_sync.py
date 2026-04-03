@@ -66,6 +66,15 @@ def list_zentao_requirements(
     }
 
 
+@router.get("/api/integrations/zentao/software-products")
+def list_zentao_software_products(
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """供禅道同步中心使用的产品/应用列表。"""
+    return {"software_products": ZentaoSyncService(db).get_software_products()}
+
+
 @router.options("/api/integrations/zentao/browser-events")
 @router.options("/api/zentao/browser-sync")
 def zentao_sync_options() -> JSONResponse:
@@ -112,6 +121,7 @@ def list_browser_events(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     only_unapplied: bool = False,
+    software_id: Optional[int] = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=200),
     _: User = Depends(get_current_user),
@@ -126,6 +136,7 @@ def list_browser_events(
         date_from=date_from,
         date_to=date_to,
         only_unapplied=only_unapplied,
+        software_id=software_id,
         page=page,
         page_size=page_size,
     )

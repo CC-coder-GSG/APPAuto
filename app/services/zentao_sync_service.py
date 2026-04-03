@@ -172,11 +172,17 @@ class ZentaoSyncService:
         date_from: str | None = None,
         date_to: str | None = None,
         only_unapplied: bool = False,
+        software_id: int | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> dict[str, Any]:
         date_from_dt = self._parse_date(date_from, end_of_day=False)
         date_to_dt = self._parse_date(date_to, end_of_day=True)
+        product_name_filter: str | None = None
+        if software_id:
+            sw = self.db.query(SoftwareProduct).filter(SoftwareProduct.id == software_id).first()
+            if sw and sw.name:
+                product_name_filter = sw.name
         result = self.repo.list_events(
             entity_type=entity_type,
             status=status,
@@ -186,6 +192,7 @@ class ZentaoSyncService:
             date_from=date_from_dt,
             date_to=date_to_dt,
             only_unapplied=only_unapplied,
+            product_name_filter=product_name_filter,
             page=page,
             page_size=page_size,
         )
@@ -200,7 +207,14 @@ class ZentaoSyncService:
         row = self.repo.get_event(event_id)
         if not row:
             raise HTTPException(status_code=404, detail="同步事件不存在")
-        return self._serialize_event_detail(row)
+        detail = self._serialize_event_detail(row)
+        sw_ids = self._guess_software_ids(row.zentao_product_name, row.zentao_project_name)
+        detail["recommended_software_id"] = sw_ids[0] if sw_ids else None
+        return detail
+
+    def get_software_products(self) -> list[dict]:
+        rows = self.db.query(SoftwareProduct).order_by(SoftwareProduct.id).all()
+        return [{"id": r.id, "name": r.name} for r in rows]
 
     # -------- mapping --------
     def map_event(
@@ -1227,6 +1241,8 @@ class ZentaoSyncService:
             "zentao_bug_id": row.zentao_bug_id,
             "zentao_case_id": row.zentao_case_id,
             "zentao_req_id": row.zentao_req_id,
+            "zentao_product_id": row.zentao_product_id,
+            "zentao_product_name": row.zentao_product_name,
             "title": row.zentao_bug_title or row.zentao_case_title or draft.get("bugTitle") or draft.get("caseTitle"),
             "requirement_name": draft.get("requirementName") or row.zentao_req_id,
             "mapped_requirement_id": row.mapped_requirement_id,

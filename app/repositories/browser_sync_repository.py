@@ -50,6 +50,7 @@ class BrowserSyncRepository:
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         only_unapplied: bool = False,
+        product_name_filter: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> dict:
@@ -69,6 +70,8 @@ class BrowserSyncRepository:
             query = query.filter(BrowserSyncEvent.created_at <= date_to)
         if only_unapplied:
             query = query.filter(BrowserSyncEvent.status != "applied")
+        if product_name_filter:
+            query = query.filter(BrowserSyncEvent.zentao_product_name.like(f"%{product_name_filter}%"))
         if keyword:
             kw = f"%{keyword.strip()}%"
             query = query.filter(
