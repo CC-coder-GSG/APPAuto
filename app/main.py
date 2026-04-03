@@ -21,12 +21,17 @@ scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 _cors_origins = settings.cors_allowed_origins
+if _cors_origins == ["*"]:
+    # Starlette 1.x 只在请求带 Cookie 时才将 allow_all_origins 的响应从 * 换成具体 Origin。
+    # Tampermonkey GM_xmlhttpRequest 不带 Cookie，因此用 allow_origin_regex='.*' 走
+    # "非通配符但匹配任意来源"路径，Starlette 会始终回显请求中的具体 Origin，
+    # 配合 allow_credentials=True 输出合法 CORS 响应。
+    _cors_kw: dict = {"allow_origins": [], "allow_origin_regex": ".*", "allow_credentials": True}
+else:
+    _cors_kw = {"allow_origins": _cors_origins, "allow_credentials": True}
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
-    # allow_credentials=True 与 allow_origins=['*'] 不兼容（CORS 规范禁止）
-    # 本项目使用 JWT Bearer Token（不依赖 Cookie），无需凭证模式
-    allow_credentials=_cors_origins != ["*"],
+    **_cors_kw,
     allow_methods=["*"],
     allow_headers=["*"],
 )
