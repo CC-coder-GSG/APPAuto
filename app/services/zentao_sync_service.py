@@ -252,6 +252,8 @@ class ZentaoSyncService:
             row.mapped_minor_version_id = mv.id
             if row.mapped_major_version_id and mv.parent_id != row.mapped_major_version_id:
                 raise HTTPException(status_code=400, detail="小版本与已映射需求的大版本不匹配")
+            if not row.mapped_major_version_id and mv.parent_id:
+                row.mapped_major_version_id = mv.parent_id
 
         if source_type:
             source_type = source_type.strip().lower()
