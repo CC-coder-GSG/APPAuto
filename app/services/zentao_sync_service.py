@@ -757,6 +757,16 @@ class ZentaoSyncService:
             ).all()
             if rows:
                 return sorted(rows, key=self._version_order_key, reverse=True)[0]
+
+        # Trim-fallback：处理 3 段大版本（如 V2.0.0）被解析为 V2.0.0.0 的情况
+        for key in like_keys:
+            if key.count(".") >= 3:
+                trimmed = key.rsplit(".", 1)[0]  # V2.0.0.0 → V2.0.0
+                rows = _apply_soft_filter(
+                    self.db.query(Version).filter(Version.version_type == VersionType.MAJOR, Version.version_no == trimmed)
+                ).all()
+                if rows:
+                    return sorted(rows, key=self._version_order_key, reverse=True)[0]
         return None
 
     def _match_major_by_affected_version(
@@ -778,7 +788,28 @@ class ZentaoSyncService:
         exact = query.filter(Version.version_no == guessed).order_by(Version.id.desc()).first()
         if exact:
             return exact
-        return query.filter(Version.version_no.like(f"{guessed}%")).order_by(Version.id.desc()).first()
+        like_match = query.filter(Version.version_no.like(f"{guessed}%")).order_by(Version.id.desc()).first()
+        if like_match:
+            return like_match
+
+        # Fallback：通过 build_no 找到小版本，再从 parent_id 反推大版本
+        # 解决 VERSION_PREFIX_RE 多捕获一段（如 2.0.0.260401）导致猜测值偏长的问题
+        if parsed.build_no:
+            minor = (
+                self.db.query(Version)
+                .filter(Version.version_type == VersionType.MINOR, Version.version_no.like(f"%({parsed.build_no})%"))
+                .order_by(Version.id.desc())
+                .first()
+            )
+            if minor and minor.parent_id:
+                parent = (
+                    self.db.query(Version)
+                    .filter(Version.id == minor.parent_id, Version.version_type == VersionType.MAJOR)
+                    .first()
+                )
+                if parent and (not software_ids or parent.software_id in software_ids):
+                    return parent
+        return None
 
     def _guess_software_ids(self, product_name: str | None, project_name: str | None) -> list[int]:
         tokens = [token for token in [product_name, project_name] if token]
