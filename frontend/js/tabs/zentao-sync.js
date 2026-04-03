@@ -201,17 +201,16 @@ function setMapFormEnabled(enabled) {
     if (el) el.disabled = !enabled;
   });
 
-  const canWrite = enabled && isAdminUser();
   const saveBtn = document.querySelector("#tab-zentao-sync button[onclick='saveZentaoSyncMapping()']");
   const applyBtn = document.querySelector("#tab-zentao-sync button[onclick='applyZentaoSyncEvent()']");
   const deleteBtn = document.querySelector("#tab-zentao-sync button[onclick='deleteZentaoSyncEvent()']");
   const toggleManualBtn = document.querySelector("#tab-zentao-sync button[onclick='toggleManualMajorSelector()']");
   const resetManualBtn = document.querySelector("#tab-zentao-sync button[onclick='resetZentaoManualMajor()']");
-  if (saveBtn) saveBtn.disabled = !canWrite;
-  if (applyBtn) applyBtn.disabled = !canWrite;
-  if (deleteBtn) deleteBtn.disabled = !canWrite;
-  if (toggleManualBtn) toggleManualBtn.disabled = !canWrite;
-  if (resetManualBtn) resetManualBtn.disabled = !canWrite;
+  if (saveBtn) saveBtn.disabled = !enabled;
+  if (applyBtn) applyBtn.disabled = !enabled;
+  if (deleteBtn) deleteBtn.disabled = !enabled;
+  if (toggleManualBtn) toggleManualBtn.disabled = !enabled;
+  if (resetManualBtn) resetManualBtn.disabled = !enabled;
 }
 
 // 用例只需要「需求」字段，其余字段仅 Bug 使用，置灰不可操作
@@ -647,9 +646,7 @@ function renderList() {
       const title = it.title || '-';
       const productName = it.zentao_product_name || '';
       const selected = syncState.currentEvent?.id === it.id;
-      const deleteBtn = isAdminUser()
-        ? `<button class='secondary' style='color:#b91c1c; border-color:#fecaca; background:#fef2f2;' onclick='deleteZentaoSyncEvent(${it.id})'>删除</button>`
-        : '';
+      const deleteBtn = `<button class='secondary' style='color:#b91c1c; border-color:#fecaca; background:#fef2f2;' onclick='deleteZentaoSyncEvent(${it.id})'>删除</button>`;
       return `<tr class='zentao-row-card' data-event-id='${it.id}' style="${selected ? 'background:#eff6ff;' : ''}">
         <td>${fmt(it.created_at)}</td>
         <td>${escapeHtml(zhEntity(it.entity_type))}</td>
