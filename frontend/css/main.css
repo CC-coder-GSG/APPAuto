@@ -1021,10 +1021,10 @@ body {
 }
 
 .app-header {
-  background: rgba(0, 0, 0, 0.8) !important;
+  background: rgba(255, 255, 255, 0.88) !important;
   backdrop-filter: saturate(180%) blur(20px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
-  box-shadow: none !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07) !important;
   border-radius: 8px !important;
   padding: 10px 16px !important;
 }
@@ -1035,7 +1035,7 @@ body {
 }
 
 .app-header-brand-text h1 {
-  color: #ffffff !important;
+  color: #1d1d1f !important;
   font-size: 20px !important;
   font-weight: 600 !important;
   line-height: 1.1 !important;
@@ -1043,23 +1043,27 @@ body {
 }
 
 .app-header-brand-text span {
-  color: rgba(255, 255, 255, 0.72) !important;
-  letter-spacing: 0.08em !important;
+  color: rgba(0, 0, 0, 0.56) !important;
+  letter-spacing: 0.04em !important;
 }
 
 .header-software-pill,
 .header-user-pill {
-  background: rgba(255, 255, 255, 0.1) !important;
-  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  background: rgba(0, 0, 0, 0.04) !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
 }
 
-.header-software-pill label,
+.header-software-pill label {
+  color: rgba(0, 0, 0, 0.56) !important;
+}
+
 .header-user-pill span {
-  color: rgba(255, 255, 255, 0.92) !important;
+  color: #1d1d1f !important;
 }
 
 .header-software-pill select {
-  color: #ffffff !important;
+  color: #1d1d1f !important;
+  background: transparent !important;
 }
 
 .header-user-avatar {
@@ -1071,21 +1075,26 @@ body {
   padding: 6px 10px !important;
   border-radius: 980px !important;
   background: transparent !important;
-  color: #2997ff !important;
-  border: 1px solid #2997ff !important;
+  color: #0066cc !important;
+  border: 1px solid rgba(0, 113, 227, 0.45) !important;
 }
 
 .header-action-group button:hover {
-  background: rgba(255, 255, 255, 0.1) !important;
-  color: #43a2ff !important;
-  border-color: #43a2ff !important;
+  background: rgba(0, 113, 227, 0.06) !important;
+  color: #005bb5 !important;
+  border-color: #005bb5 !important;
 }
 
-.header-action-group button.danger-btn,
+.header-action-group button.danger-btn {
+  color: #d92c2c !important;
+  border-color: rgba(217, 44, 44, 0.4) !important;
+  background: transparent !important;
+}
+
 .header-action-group button.danger-btn:hover {
-  color: #ffb4b4 !important;
-  border-color: rgba(255, 180, 180, 0.7) !important;
-  background: rgba(217, 44, 44, 0.12) !important;
+  background: rgba(217, 44, 44, 0.06) !important;
+  border-color: #b41f1f !important;
+  color: #b41f1f !important;
 }
 
 #healthPanel {
@@ -1406,9 +1415,9 @@ button.secondary {
 #tabs .sse-conn-badge {
   height: 24px !important;
   border-radius: 980px !important;
-  border-color: rgba(255, 255, 255, 0.22) !important;
-  background: rgba(255, 255, 255, 0.08) !important;
-  color: rgba(255, 255, 255, 0.86) !important;
+  border-color: rgba(0, 0, 0, 0.14) !important;
+  background: rgba(0, 0, 0, 0.04) !important;
+  color: rgba(0, 0, 0, 0.65) !important;
 }
 
 /* table polish */
@@ -1707,6 +1716,34 @@ section.card > h2 {
   .row {
     gap: 8px !important;
   }
+}
+
+/* ===== Checkbox 全局对齐修复 ===== */
+input[type="checkbox"],
+input[type="radio"] {
+  vertical-align: middle !important;
+  position: relative;
+  top: -1px;
+  accent-color: #0071e3;
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+label:has(input[type="checkbox"]),
+label:has(input[type="radio"]) {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  cursor: pointer;
+}
+
+label:has(input[type="checkbox"]) input,
+label:has(input[type="radio"]) input {
+  margin-right: 0 !important;
+  top: 0 !important;
 }
 
 /* ===== Apple Round 2 — Precision Finish ===== */

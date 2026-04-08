@@ -557,12 +557,25 @@
         </div>
 
         <div id="fieldTestBugWrap" class="hidden ft-bug-wrap">
-          <label>Bug 编号（测试未通过时必填）</label>
-          <div class="ft-bug-input-group">
-            <div class="prefix-input"><span>b#</span><input id="fieldTestBugInput" inputmode="numeric" oninput="digitsOnly(this)" placeholder="输入数字部分"></div>
-            <button class="secondary" onclick="addFieldTestBug()">➕ 添加 Bug</button>
+          <label>关联 Bug（测试未通过时必填）</label>
+
+          <!-- 搜索已有 Bug -->
+          <div class="ft-bug-input-group" style="margin-top:8px;">
+            <div class="prefix-input" style="flex:1;">
+              <span>🔎</span>
+              <input id="fieldTestFormBugSearchInput" placeholder="搜索已有 Bug 编号（支持模糊）" oninput="searchFieldTestFormBugOptions(this.value)">
+            </div>
+            <select id="fieldTestFormBugSearchSelect" style="min-width:180px;"><option value="">选择已有 Bug</option></select>
+            <button class="secondary" onclick="addFieldTestSearchedBug()">关联已有 Bug</button>
           </div>
-          <div id="fieldTestBugList" style="margin-top:8px;"></div>
+
+          <!-- 手动输入新 Bug -->
+          <div class="ft-bug-input-group" style="margin-top:8px;">
+            <div class="prefix-input"><span>b#</span><input id="fieldTestBugInput" inputmode="numeric" oninput="digitsOnly(this)" placeholder="手动输入数字编号"></div>
+            <button class="secondary" onclick="addFieldTestBug()">➕ 新增 Bug</button>
+          </div>
+
+          <div id="fieldTestBugList" style="margin-top:10px;"></div>
         </div>
 
         <div style="margin-top:12px;">
@@ -1920,6 +1933,14 @@ async function addFieldTestDetailBug(recordId){
 
 async function searchFieldTestBugOptions(recordId, keyword){
   return window.OmniQAFieldTestTab.searchFieldTestBugOptions(recordId, keyword);
+}
+
+async function searchFieldTestFormBugOptions(keyword){
+  return window.OmniQAFieldTestTab.searchFieldTestFormBugOptions(keyword);
+}
+
+function addFieldTestSearchedBug(){
+  return window.OmniQAFieldTestTab.addFieldTestSearchedBug();
 }
 
 async function linkFieldTestDetailBug(recordId){

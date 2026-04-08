@@ -579,6 +579,36 @@ export async function prevFieldTestPage() {
   await loadFieldTestBoard(state.page);
 }
 
+// ── 表单内搜索已有 Bug（新增/编辑时使用，复用 feedbacks/bug-options 接口）──────
+export async function searchFieldTestFormBugOptions(keyword) {
+  try {
+    const sid = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+    const params = new URLSearchParams();
+    if (keyword) params.set('keyword', keyword);
+    if (sid) params.set('software_id', String(sid));
+    params.set('limit', '30');
+    const rows = await (await api(`/feedbacks/bug-options?${params.toString()}`)).json();
+    const sel = document.getElementById('fieldTestFormBugSearchSelect');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">选择已有 Bug</option>' + (rows || []).map((b) => {
+      const title = b.zentao_bug_title ? ` - ${b.zentao_bug_title.slice(0, 28)}` : '';
+      return `<option value="${b.bug_id}">${b.bug_id}${title}</option>`;
+    }).join('');
+  } catch (_) {
+    // 搜索失败不打断表单操作
+  }
+}
+
+export function addFieldTestSearchedBug() {
+  const sel = document.getElementById('fieldTestFormBugSearchSelect');
+  const bugId = sel?.value?.trim();
+  if (!bugId) { window.showMessage && window.showMessage('请先从下拉列表选择一个 Bug', 'error'); return; }
+  if (state.bugDrafts.includes(bugId)) { window.showMessage && window.showMessage('该 Bug 已添加', 'error'); return; }
+  state.bugDrafts.push(bugId);
+  if (sel) sel.value = '';
+  renderBugDrafts();
+}
+
 window.OmniQAFieldTestTab = {
   loadFieldTestBoard,
   onFieldTestMajorChange,
@@ -596,6 +626,8 @@ window.OmniQAFieldTestTab = {
   addFieldTestDetailBug,
   searchFieldTestBugOptions,
   linkFieldTestDetailBug,
+  searchFieldTestFormBugOptions,
+  addFieldTestSearchedBug,
   nextFieldTestPage,
   prevFieldTestPage,
   openFieldTestCreate,
