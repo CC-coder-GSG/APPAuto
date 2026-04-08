@@ -887,3 +887,275 @@ tr.sse-glow-exit td {
     padding: 12px;
   }
 }
+
+/* ===== Apple Visual Refresh (non-functional style override) ===== */
+:root {
+  --primary: #0071e3;
+  --primary-hover: #0077ed;
+  --primary-light: #e8f3ff;
+  --primary-ring: rgba(0, 113, 227, 0.24);
+  --success: #2d9f5b;
+  --danger: #d92c2c;
+  --danger-hover: #b51f1f;
+  --warning: #b67a10;
+  --bg-color: #f5f5f7;
+  --bg-muted: #fbfbfd;
+  --card-bg: #ffffff;
+  --text-main: #1d1d1f;
+  --text-regular: #1d1d1f;
+  --text-muted: rgba(0, 0, 0, 0.8);
+  --text-faint: rgba(0, 0, 0, 0.48);
+  --border-light: rgba(0, 0, 0, 0.08);
+  --border-mid: rgba(0, 0, 0, 0.14);
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 12px;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-md: rgba(0, 0, 0, 0.22) 3px 5px 30px 0px;
+  --shadow-lg: rgba(0, 0, 0, 0.24) 0 14px 40px 0;
+  --transition: all 0.22s ease;
+}
+
+body {
+  font-family: "SF Pro Text", "SF Pro Display", "PingFang SC", "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+  background: #f5f5f7 !important;
+  color: #1d1d1f !important;
+  line-height: 1.47 !important;
+  letter-spacing: -0.374px !important;
+}
+
+h1, h2, h3 {
+  font-family: "SF Pro Display", "SF Pro Text", "PingFang SC", sans-serif !important;
+  letter-spacing: -0.02em !important;
+}
+
+h2 {
+  font-size: 28px !important;
+  line-height: 1.14 !important;
+  font-weight: 600 !important;
+}
+
+.card {
+  border-radius: 8px !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: none !important;
+}
+
+input,
+select,
+textarea {
+  border-radius: 8px !important;
+  border: 1px solid rgba(0, 0, 0, 0.14) !important;
+  font-size: 14px !important;
+  color: #1d1d1f !important;
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+.prefix-input:focus-within {
+  border-color: #0071e3 !important;
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.24) !important;
+}
+
+button {
+  background: #0071e3 !important;
+  border: 1px solid transparent !important;
+  color: #fff !important;
+  border-radius: 8px !important;
+  padding: 7px 12px !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  letter-spacing: -0.02em !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+button:hover {
+  background: #0077ed !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+button.secondary {
+  background: transparent !important;
+  color: #0066cc !important;
+  border: 1px solid #0066cc !important;
+  border-radius: 980px !important;
+}
+
+button.secondary:hover {
+  background: #f5f5f7 !important;
+  color: #005bb5 !important;
+  border-color: #005bb5 !important;
+}
+
+#tabs {
+  background: rgba(0, 0, 0, 0.8) !important;
+  backdrop-filter: saturate(180%) blur(20px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: none !important;
+  border-radius: 8px !important;
+}
+
+#tabs button {
+  background: transparent !important;
+  color: rgba(255, 255, 255, 0.86) !important;
+  border: 1px solid transparent !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  box-shadow: none !important;
+}
+
+#tabs button:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+}
+
+#tabs button.active-tab {
+  background: #fff !important;
+  color: #1d1d1f !important;
+  border-color: rgba(255, 255, 255, 0.35) !important;
+}
+
+th {
+  background: #fbfbfd !important;
+  color: rgba(0, 0, 0, 0.8) !important;
+  text-transform: none !important;
+}
+
+tbody tr:hover {
+  background: #f5f5f7 !important;
+}
+
+.nav-badge {
+  background: #0071e3 !important;
+  box-shadow: none !important;
+}
+
+.toast.info,
+.toast.success,
+.toast.error {
+  background: #1d1d1f !important;
+}
+
+/* ===== Login Apple Finish ===== */
+body:has(.container.login) {
+  background: #f5f5f7 !important;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 0 !important;
+  justify-content: center;
+  align-items: center;
+}
+
+/* ===== Apple Round 2 — Hover / Motion / Typography ===== */
+
+/* Apple cards are static — remove all hover lifts */
+.activity-feed-item:hover {
+  transform: none !important;
+  box-shadow: none !important;
+  border-color: rgba(0, 0, 0, 0.14) !important;
+}
+
+.mine-req-card:hover {
+  transform: none !important;
+  box-shadow: none !important;
+  border-color: rgba(0, 0, 0, 0.14) !important;
+}
+
+/* Metric cards — pure white, clean Apple card */
+.metric-card {
+  background: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: none !important;
+}
+
+/* Metric value — tighter SF Pro Display treatment */
+.metric-value {
+  font-size: 34px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.5px !important;
+  line-height: 1.07 !important;
+  color: #1d1d1f !important;
+}
+
+.metric-title {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.12px !important;
+  color: #0066cc !important;
+  text-transform: none !important;
+}
+
+/* Bug chip — Apple-style muted red */
+.bug-chip {
+  background: #fff5f5 !important;
+  color: #b4232a !important;
+  border: 1px solid rgba(217, 44, 44, 0.28) !important;
+  border-radius: 980px !important;
+}
+
+/* Toast — refined Apple dark */
+.toast {
+  border-radius: 8px !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.224px !important;
+}
+
+/* Login card — more Apple-like */
+.container.login {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 80vh;
+  margin: 0 auto !important;
+  max-width: 380px !important;
+}
+
+.container.login .card {
+  border-radius: 18px !important;
+  padding: 36px 32px !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: rgba(0, 0, 0, 0.1) 0 4px 24px 0 !important;
+  background: #ffffff !important;
+}
+
+.container.login h2 {
+  font-size: 28px !important;
+  font-weight: 600 !important;
+  line-height: 1.07 !important;
+  letter-spacing: -0.5px !important;
+  margin-bottom: 24px !important;
+  color: #1d1d1f !important;
+}
+
+.container.login .row {
+  margin-bottom: 12px !important;
+}
+
+.container.login input {
+  font-size: 17px !important;
+  padding: 10px 14px !important;
+  min-height: 44px !important;
+  border-radius: 8px !important;
+  letter-spacing: -0.374px !important;
+}
+
+.container.login button {
+  min-height: 44px !important;
+  font-size: 17px !important;
+  font-weight: 400 !important;
+  border-radius: 8px !important;
+  letter-spacing: -0.374px !important;
+}
+
+.container.login .muted {
+  margin-top: 8px !important;
+  font-size: 14px !important;
+  letter-spacing: -0.224px !important;
+}

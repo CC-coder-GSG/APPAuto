@@ -36,13 +36,13 @@ body {
 }
 
 .ft-primary-btn {
-  background: #2563eb;
-  border: 1px solid #1d4ed8;
+  background: #0071e3;
+  border: 1px solid transparent;
   color: #fff;
 }
 
 .ft-primary-btn:hover {
-  background: #1d4ed8;
+  background: #0077ed;
 }
 
 .ft-modal-mask {
@@ -91,8 +91,8 @@ body {
 #fieldTestFormModal select:focus,
 #fieldTestFormModal input:not([type="checkbox"]):not([type="radio"]):focus,
 #fieldTestFormModal textarea:focus {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+  border-color: #0071e3;
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.24);
 }
 
 .ft-modal-header {
@@ -123,9 +123,9 @@ body {
 
 .ft-bug-wrap {
   margin-top: 12px;
-  background: #fef2f2;
-  border: 1px dashed #f87171;
-  border-radius: 10px;
+  background: rgba(217, 44, 44, 0.04);
+  border: 1px solid rgba(217, 44, 44, 0.2);
+  border-radius: 8px;
   padding: 10px;
 }
 
@@ -510,8 +510,9 @@ body {
 }
 
 .activity-feed-item:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 18px -8px rgba(15, 23, 42, 0.18);
+  transform: none;
+  box-shadow: none;
+  border-color: rgba(0, 0, 0, 0.14);
 }
 
 .sse-inline-notice {
@@ -533,9 +534,9 @@ body {
 }
 
 .build-record-card:hover {
-  border-color: #a5b4fc !important;
-  box-shadow: 0 6px 20px -8px rgba(79, 70, 229, 0.2) !important;
-  transform: translateY(-1px);
+  border-color: rgba(0, 113, 227, 0.4) !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
 #tab-field-test .field-test-row-card {
@@ -1009,3 +1010,831 @@ body {
 }
 
 /* nav-badge / sse-conn-badge / sse-glow 已统一移至 style.css */
+
+/* ===== Apple Page-Level Override ===== */
+body {
+  background: #f5f5f7 !important;
+}
+
+.container {
+  max-width: 1440px !important;
+}
+
+.app-header {
+  background: rgba(0, 0, 0, 0.8) !important;
+  backdrop-filter: saturate(180%) blur(20px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: none !important;
+  border-radius: 8px !important;
+  padding: 10px 16px !important;
+}
+
+.app-header-brand img {
+  height: 32px !important;
+  filter: none !important;
+}
+
+.app-header-brand-text h1 {
+  color: #ffffff !important;
+  font-size: 20px !important;
+  font-weight: 600 !important;
+  line-height: 1.1 !important;
+  letter-spacing: -0.02em !important;
+}
+
+.app-header-brand-text span {
+  color: rgba(255, 255, 255, 0.72) !important;
+  letter-spacing: 0.08em !important;
+}
+
+.header-software-pill,
+.header-user-pill {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+}
+
+.header-software-pill label,
+.header-user-pill span {
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+
+.header-software-pill select {
+  color: #ffffff !important;
+}
+
+.header-user-avatar {
+  background: #0071e3 !important;
+}
+
+.header-action-group button {
+  font-size: 12px !important;
+  padding: 6px 10px !important;
+  border-radius: 980px !important;
+  background: transparent !important;
+  color: #2997ff !important;
+  border: 1px solid #2997ff !important;
+}
+
+.header-action-group button:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #43a2ff !important;
+  border-color: #43a2ff !important;
+}
+
+.header-action-group button.danger-btn,
+.header-action-group button.danger-btn:hover {
+  color: #ffb4b4 !important;
+  border-color: rgba(255, 180, 180, 0.7) !important;
+  background: rgba(217, 44, 44, 0.12) !important;
+}
+
+#healthPanel {
+  border-left: 2px solid #0071e3 !important;
+}
+
+section.card,
+#tabs.card,
+#healthPanel.card {
+  border-radius: 8px !important;
+}
+
+.details,
+details,
+.qa-panel,
+.zentao-sync-shell-modern,
+.zentao-sync-sticky-panel,
+.zentao-info-card,
+.build-record-card,
+.activity-feed-item,
+.mine-req-card,
+.metric-card,
+.chart-box {
+  border-radius: 8px !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  box-shadow: none !important;
+}
+
+.metric-card {
+  background: #ffffff !important;
+}
+
+.metric-title,
+.qa-ext-link {
+  color: #0066cc !important;
+}
+
+.timeline-dot {
+  background: #0071e3 !important;
+  box-shadow: none !important;
+}
+
+.sse-inline-notice,
+.sse-position-banner.top,
+.sse-position-banner.bottom {
+  background: #eef6ff !important;
+  border-color: rgba(0, 113, 227, 0.35) !important;
+  color: #005bb5 !important;
+}
+
+[style*="background: #f8fafc"] {
+  background: #fbfbfd !important;
+}
+
+[style*="background:#f8fafc"] {
+  background: #fbfbfd !important;
+}
+
+[style*="border:1px solid #e2e8f0"],
+[style*="border: 1px solid #e2e8f0"] {
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+
+[style*="border-left: 4px solid #f97316"] {
+  border-left: 2px solid #0071e3 !important;
+}
+
+[style*="background: #ffedd5"] {
+  background: #eef6ff !important;
+}
+
+[style*="color: #ea580c"] {
+  color: #005bb5 !important;
+}
+
+@media (max-width: 1024px) {
+  .app-header {
+    gap: 10px !important;
+  }
+
+  .app-header-controls {
+    width: 100% !important;
+    justify-content: flex-start !important;
+  }
+
+  .header-action-group {
+    flex-wrap: wrap !important;
+  }
+}
+
+/* ===== Apple Fine-Tuning Round 2 ===== */
+.app-header {
+  position: sticky !important;
+  top: 8px;
+  z-index: 1100;
+}
+
+#tabs {
+  position: sticky;
+  top: 68px;
+  z-index: 1090;
+}
+
+section.card > h2 {
+  margin-bottom: 18px !important;
+  color: #1d1d1f !important;
+}
+
+/* Dynamic tab cards generated by JS */
+#tab-mine details.mine-req-card,
+#tab-retest details.retest-req-card,
+#tab-feedback #feedbackDetailBody .card,
+#tab-stage5 .card,
+#tab-field-test .field-test-row-card,
+#tab-zentao-sync .zentao-info-card,
+#tab-zentao-sync .zentao-sync-sticky-panel {
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  background: #ffffff !important;
+}
+
+#tab-mine details.mine-req-card[open] summary,
+#tab-retest details.retest-req-card[open] summary {
+  border-bottom-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Badge and status cleanup */
+#tab-mine .badge,
+#tab-retest .badge,
+#tab-stage5 .badge,
+#tab-feedback .badge,
+#tab-field-test .badge,
+#tab-zentao-sync .badge {
+  border-radius: 980px !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: none !important;
+}
+
+#tab-mine [style*="background:#ffedd5"],
+#tab-retest [style*="background:#ffedd5"],
+#tab-stage5 [style*="background:#ffedd5"],
+#tab-zentao-sync [style*="background:#ffedd5"] {
+  background: #eef6ff !important;
+  color: #005bb5 !important;
+  border-color: rgba(0, 113, 227, 0.3) !important;
+}
+
+#tab-mine [style*="background:#fee2e2"],
+#tab-retest [style*="background:#fee2e2"],
+#tab-stage5 [style*="background:#fee2e2"],
+#tab-feedback [style*="background:#fee2e2"],
+#tab-field-test [style*="background:#fee2e2"],
+#tab-zentao-sync [style*="background:#fee2e2"] {
+  background: #fff5f5 !important;
+  color: #b4232a !important;
+  border-color: rgba(217, 44, 44, 0.3) !important;
+}
+
+#tab-mine [style*="background:#dcfce7"],
+#tab-retest [style*="background:#dcfce7"],
+#tab-stage5 [style*="background:#dcfce7"],
+#tab-zentao-sync [style*="background:#dcfce7"] {
+  background: #f3faf5 !important;
+  color: #186a3b !important;
+  border-color: rgba(45, 159, 91, 0.3) !important;
+}
+
+#tab-mine [style*="background:#f1f5f9"],
+#tab-retest [style*="background:#f1f5f9"],
+#tab-stage5 [style*="background:#f1f5f9"],
+#tab-feedback [style*="background:#f1f5f9"],
+#tab-field-test [style*="background:#f1f5f9"],
+#tab-zentao-sync [style*="background:#f1f5f9"] {
+  background: #fbfbfd !important;
+  color: rgba(0, 0, 0, 0.8) !important;
+}
+
+/* Links and danger inline actions generated in JS */
+#tab-mine a[style*="color:#ef4444"],
+#tab-retest a[style*="color:#ef4444"],
+#tab-stage5 a[style*="color:#ef4444"],
+#tab-feedback a[style*="color:#ef4444"],
+#tab-field-test a[style*="color:#dc2626"],
+#tab-zentao-sync a[style*="color:#b91c1c"] {
+  color: #b4232a !important;
+}
+
+#tab-mine a[style*="color:#3b82f6"],
+#tab-retest a[style*="color:#3b82f6"],
+#tab-stage5 a[style*="color:#3b82f6"],
+#tab-feedback a[style*="color:#4338ca"],
+#tab-zentao-sync a[style*="color:#1d4ed8"] {
+  color: #0066cc !important;
+}
+
+/* Normalize inline heavy shadows/radius from JS templates */
+[style*="box-shadow:0 4px 6px -1px"],
+[style*="box-shadow: 0 4px 6px -1px"],
+[style*="box-shadow:0 1px 3px"],
+[style*="box-shadow: 0 1px 3px"],
+[style*="box-shadow:0 2px 8px"],
+[style*="box-shadow: 0 2px 8px"] {
+  box-shadow: none !important;
+}
+
+[style*="border-radius:10px"],
+[style*="border-radius: 10px"],
+[style*="border-radius:12px"],
+[style*="border-radius: 12px"] {
+  border-radius: 8px !important;
+}
+
+/* Modal panel consistency */
+[data-modal-display="flex"] > div {
+  border-radius: 8px !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: none !important;
+}
+
+@media (max-width: 900px) {
+  #tabs {
+    top: 62px;
+  }
+
+  section.card {
+    padding: 16px 14px !important;
+  }
+}
+
+/* ===== Apple Perfection Pass ===== */
+:root {
+  --apple-black: #000000;
+  --apple-near-black: #1d1d1f;
+  --apple-light: #f5f5f7;
+  --apple-surface: #fbfbfd;
+  --apple-blue: #0071e3;
+  --apple-link: #0066cc;
+  --apple-link-dark: #2997ff;
+}
+
+body {
+  color: var(--apple-near-black) !important;
+}
+
+.container {
+  padding: 0 2px !important;
+}
+
+section.card {
+  padding: 20px 20px !important;
+  margin-bottom: 14px !important;
+}
+
+label,
+.muted,
+small,
+summary,
+th,
+td {
+  letter-spacing: -0.01em !important;
+}
+
+label {
+  color: rgba(0, 0, 0, 0.8) !important;
+  font-weight: 500 !important;
+}
+
+.muted {
+  color: rgba(0, 0, 0, 0.56) !important;
+}
+
+input,
+select,
+textarea,
+.prefix-input {
+  min-height: 36px;
+  background: #ffffff !important;
+}
+
+textarea {
+  min-height: 92px;
+  line-height: 1.5 !important;
+}
+
+.prefix-input span {
+  background: #f3f3f5 !important;
+  color: rgba(0, 0, 0, 0.56) !important;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.prefix-input:focus-within {
+  outline: 2px solid #0071e3 !important;
+  outline-offset: 1px !important;
+}
+
+button {
+  min-height: 34px;
+}
+
+button.secondary {
+  min-height: 34px;
+}
+
+/* tab nav rhythm */
+#tabs {
+  padding: 6px 8px !important;
+}
+
+#tabs button {
+  border-radius: 980px !important;
+  padding: 7px 12px !important;
+}
+
+#tabs .sse-conn-badge {
+  height: 24px !important;
+  border-radius: 980px !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: rgba(255, 255, 255, 0.86) !important;
+}
+
+/* table polish */
+table,
+.qa-table,
+.qa-table-feedback,
+.qa-table-zentao-sync,
+.qa-table-field-test {
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-radius: 8px !important;
+  overflow: hidden !important;
+  background: #ffffff !important;
+}
+
+th {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+
+td {
+  font-size: 13px !important;
+}
+
+tbody tr:hover td {
+  background: #f7f7f9 !important;
+}
+
+/* unify old inline tokens to Apple semantic colors */
+[style*="color:#0f172a"],
+[style*="color: #0f172a"],
+[style*="color:#334155"],
+[style*="color: #334155"],
+[style*="color:#475569"],
+[style*="color: #475569"] {
+  color: #1d1d1f !important;
+}
+
+[style*="color:#64748b"],
+[style*="color: #64748b"],
+[style*="color:#94a3b8"],
+[style*="color: #94a3b8"] {
+  color: rgba(0, 0, 0, 0.56) !important;
+}
+
+[style*="color:#1d4ed8"],
+[style*="color: #1d4ed8"],
+[style*="color:#2563eb"],
+[style*="color: #2563eb"],
+[style*="color:#3b82f6"],
+[style*="color: #3b82f6"],
+[style*="color:#4338ca"],
+[style*="color: #4338ca"] {
+  color: #0066cc !important;
+}
+
+[style*="background:#eff6ff"],
+[style*="background: #eff6ff"],
+[style*="background:#eef2ff"],
+[style*="background: #eef2ff"],
+[style*="background:#e0f2fe"],
+[style*="background: #e0f2fe"] {
+  background: #eef6ff !important;
+}
+
+[style*="border:2px solid #3b82f6"],
+[style*="border: 2px solid #3b82f6"],
+[style*="border:2px solid #16a34a"],
+[style*="border: 2px solid #16a34a"] {
+  border: 1px solid rgba(0, 113, 227, 0.28) !important;
+}
+
+[style*="border:1px dashed #93c5fd"],
+[style*="border: 1px dashed #93c5fd"],
+[style*="border:1px dashed #86efac"],
+[style*="border: 1px dashed #86efac"],
+[style*="border-top:1px dashed #e2e8f0"],
+[style*="border-top: 1px dashed #e2e8f0"],
+[style*="border-bottom:1px dashed #e2e8f0"],
+[style*="border-bottom: 1px dashed #e2e8f0"] {
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+/* keep stage/retest cards clean when done */
+#tab-mine [style*="text-decoration:line-through"],
+#tab-retest [style*="text-decoration:line-through"],
+#tab-stage5 [style*="text-decoration:line-through"] {
+  color: rgba(0, 0, 0, 0.42) !important;
+}
+
+/* links */
+a,
+.qa-ext-link {
+  color: #0066cc;
+}
+
+a:hover,
+.qa-ext-link:hover {
+  color: #005bb5;
+}
+
+/* custom scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.24) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 980px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.32);
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* mobile refinement */
+@media (max-width: 760px) {
+  .app-header {
+    top: 4px;
+    padding: 8px 10px !important;
+  }
+
+  #tabs {
+    top: 56px;
+  }
+
+  #tabs button {
+    padding: 6px 10px !important;
+  }
+
+  h2 {
+    font-size: 24px !important;
+  }
+
+  section.card {
+    padding: 14px 12px !important;
+  }
+}
+
+/* ===== Final Closure Pass ===== */
+/* tighten global rhythm */
+.row {
+  gap: 10px !important;
+}
+
+.card {
+  padding: 18px 18px !important;
+}
+
+/* stronger visual hierarchy in sections */
+section.card > h2 {
+  font-size: 30px !important;
+  font-weight: 600 !important;
+  line-height: 1.12 !important;
+  letter-spacing: -0.02em !important;
+}
+
+/* normalize dynamic inline text colors still left in js templates */
+#tab-mine [style*="color:#16a34a"],
+#tab-retest [style*="color:#16a34a"],
+#tab-stage5 [style*="color:#16a34a"],
+#tab-feedback [style*="color:#16a34a"],
+#tab-field-test [style*="color:#16a34a"],
+#tab-zentao-sync [style*="color:#16a34a"],
+#tab-mine [style*="color: #16a34a"],
+#tab-retest [style*="color: #16a34a"],
+#tab-stage5 [style*="color: #16a34a"],
+#tab-feedback [style*="color: #16a34a"],
+#tab-field-test [style*="color: #16a34a"],
+#tab-zentao-sync [style*="color: #16a34a"] {
+  color: #186a3b !important;
+}
+
+#tab-mine [style*="color:#dc2626"],
+#tab-retest [style*="color:#dc2626"],
+#tab-stage5 [style*="color:#dc2626"],
+#tab-feedback [style*="color:#dc2626"],
+#tab-field-test [style*="color:#dc2626"],
+#tab-zentao-sync [style*="color:#dc2626"],
+#tab-mine [style*="color: #dc2626"],
+#tab-retest [style*="color: #dc2626"],
+#tab-stage5 [style*="color: #dc2626"],
+#tab-feedback [style*="color: #dc2626"],
+#tab-field-test [style*="color: #dc2626"],
+#tab-zentao-sync [style*="color: #dc2626"] {
+  color: #b4232a !important;
+}
+
+#tab-mine [style*="color:#b91c1c"],
+#tab-retest [style*="color:#b91c1c"],
+#tab-stage5 [style*="color:#b91c1c"],
+#tab-feedback [style*="color:#b91c1c"],
+#tab-field-test [style*="color:#b91c1c"],
+#tab-zentao-sync [style*="color:#b91c1c"],
+#tab-mine [style*="color: #b91c1c"],
+#tab-retest [style*="color: #b91c1c"],
+#tab-stage5 [style*="color: #b91c1c"],
+#tab-feedback [style*="color: #b91c1c"],
+#tab-field-test [style*="color: #b91c1c"],
+#tab-zentao-sync [style*="color: #b91c1c"] {
+  color: #962129 !important;
+}
+
+#tab-mine [style*="color:#ea580c"],
+#tab-retest [style*="color:#ea580c"],
+#tab-stage5 [style*="color:#ea580c"],
+#tab-feedback [style*="color:#ea580c"],
+#tab-field-test [style*="color:#ea580c"],
+#tab-zentao-sync [style*="color:#ea580c"],
+#tab-mine [style*="color: #ea580c"],
+#tab-retest [style*="color: #ea580c"],
+#tab-stage5 [style*="color: #ea580c"],
+#tab-feedback [style*="color: #ea580c"],
+#tab-field-test [style*="color: #ea580c"],
+#tab-zentao-sync [style*="color: #ea580c"] {
+  color: #005bb5 !important;
+}
+
+/* normalize dynamic inline backgrounds */
+#tab-mine [style*="background:#f0fdf4"],
+#tab-retest [style*="background:#f0fdf4"],
+#tab-stage5 [style*="background:#f0fdf4"],
+#tab-feedback [style*="background:#f0fdf4"],
+#tab-field-test [style*="background:#f0fdf4"],
+#tab-zentao-sync [style*="background:#f0fdf4"],
+#tab-mine [style*="background: #f0fdf4"],
+#tab-retest [style*="background: #f0fdf4"],
+#tab-stage5 [style*="background: #f0fdf4"],
+#tab-feedback [style*="background: #f0fdf4"],
+#tab-field-test [style*="background: #f0fdf4"],
+#tab-zentao-sync [style*="background: #f0fdf4"] {
+  background: #f3faf5 !important;
+}
+
+#tab-mine [style*="background:#fef2f2"],
+#tab-retest [style*="background:#fef2f2"],
+#tab-stage5 [style*="background:#fef2f2"],
+#tab-feedback [style*="background:#fef2f2"],
+#tab-field-test [style*="background:#fef2f2"],
+#tab-zentao-sync [style*="background:#fef2f2"],
+#tab-mine [style*="background: #fef2f2"],
+#tab-retest [style*="background: #fef2f2"],
+#tab-stage5 [style*="background: #fef2f2"],
+#tab-feedback [style*="background: #fef2f2"],
+#tab-field-test [style*="background: #fef2f2"],
+#tab-zentao-sync [style*="background: #fef2f2"] {
+  background: #fff5f5 !important;
+}
+
+/* table/action alignment cleanup */
+#tab-feedback .col-actions,
+#tab-field-test .col-actions,
+#tab-zentao-sync .col-actions,
+#tab-retest .col-actions,
+#tab-stage5 .col-actions {
+  white-space: nowrap;
+}
+
+#tab-feedback button,
+#tab-field-test button,
+#tab-zentao-sync button,
+#tab-retest button,
+#tab-stage5 button,
+#tab-mine button {
+  border-radius: 8px !important;
+}
+
+/* reduce visual noise in dense cards */
+#tab-mine details summary,
+#tab-retest details summary,
+#tab-stage5 details summary {
+  padding-top: 2px;
+  padding-bottom: 10px;
+}
+
+/* final mobile closure */
+@media (max-width: 760px) {
+  section.card > h2 {
+    font-size: 24px !important;
+  }
+
+  .card {
+    padding: 14px 12px !important;
+  }
+
+  .row {
+    gap: 8px !important;
+  }
+}
+
+/* ===== Apple Round 2 — Precision Finish ===== */
+
+/* Body-level letter-spacing — the #1 SF Pro differentiator */
+body {
+  letter-spacing: -0.374px !important;
+}
+
+/* Inputs/selects — tighter like SF Pro Text */
+input,
+select,
+textarea {
+  letter-spacing: -0.224px !important;
+}
+
+/* Buttons — proper Apple tracking */
+button {
+  letter-spacing: -0.224px !important;
+}
+
+/* th — Apple-style muted column header */
+th {
+  font-weight: 600 !important;
+  letter-spacing: -0.12px !important;
+  color: rgba(0, 0, 0, 0.56) !important;
+  background: #fbfbfd !important;
+  font-size: 11.5px !important;
+  text-transform: none !important;
+}
+
+/* td — proper text treatment */
+td {
+  letter-spacing: -0.224px !important;
+  color: #1d1d1f !important;
+}
+
+/* Metric value — prominent Apple Display numeral */
+.metric-value {
+  font-size: 34px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.5px !important;
+  line-height: 1.07 !important;
+}
+
+/* Metric title — subtle Apple label */
+.metric-title {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.12px !important;
+  text-transform: none !important;
+  color: #0066cc !important;
+}
+
+/* qa-panel-soft — clean Apple surface */
+.qa-panel-soft {
+  box-shadow: none !important;
+  background: #fbfbfd !important;
+  border-radius: 8px !important;
+}
+
+/* Chart box */
+.chart-box {
+  background: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: none !important;
+}
+
+/* SSE inline notice — solid Apple blue tint, no dashes */
+.sse-inline-notice {
+  background: #eef6ff !important;
+  border: 1px solid rgba(0, 113, 227, 0.3) !important;
+  border-style: solid !important;
+  color: #0066cc !important;
+  border-radius: 8px !important;
+}
+
+/* Zentao sticky panel */
+.zentao-sync-sticky-panel {
+  background: #fbfbfd !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: none !important;
+}
+
+.zentao-info-card {
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: none !important;
+}
+
+/* Map actions dashed border — make solid Apple-style */
+#tab-zentao-sync .zentao-map-actions {
+  border-top: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Minor context panel */
+#tab-zentao-sync .zentao-major-context {
+  background: #fbfbfd !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-radius: 8px !important;
+}
+
+/* Free bug box — clean surface */
+.free-bug-box {
+  background: #fbfbfd !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  border-style: solid !important;
+}
+
+/* Section card header spacing */
+section.card > h2 {
+  padding-bottom: 16px !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.07) !important;
+  margin-bottom: 20px !important;
+}
+
+/* Timeline dot */
+.timeline-dot {
+  background: #0071e3 !important;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15) !important;
+}
+
+/* Badge status — pill shape Apple */
+.badge--status {
+  letter-spacing: -0.12px !important;
+}
+
+@media (max-width: 760px) {
+  body {
+    letter-spacing: -0.224px !important;
+  }
+}
