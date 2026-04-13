@@ -71,14 +71,16 @@ export function renderS5() {
       <td style="vertical-align:middle; padding: 6px 10px;">
         ${bugTitle ? `<div style="max-height:60px; overflow-y:auto; font-size:13px; color:#475569; line-height:1.65; word-break:break-word;">${bugTitle}</div>` : ''}
       </td>
-      <td style="text-decoration: none;">
-        <select id='res_${b.id}' style="margin-right: 8px; padding: 2px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 4px; color: #475569;" ${isMyClosed ? 'disabled' : ''}>
-          <option value="fixed" ${b.my_resolution === 'fixed' ? 'selected' : ''}>🚀修复通过</option>
-          <option value="false_alarm" ${b.my_resolution === 'false_alarm' ? 'selected' : ''}>⚠️误报</option>
-          <option value="rejected" ${b.my_resolution === 'rejected' ? 'selected' : ''}>⛔拒绝修复</option>
-        </select>
-        <label style="color: #0f172a; font-weight: bold;"><input id='done_${b.id}' type='checkbox' ${isMyClosed ? 'checked' : ''} onchange="this.nextSibling.disabled=this.checked"> 我的闭环确认</label>
-        <button class="${isMyClosed ? 'secondary' : ''}" onclick='saveS5(${b.id})' style="margin-left:8px;">保存记录</button>
+      <td style="text-decoration: none; vertical-align: middle;">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <select id='res_${b.id}' style="padding: 2px; font-size: 13px; border: 1px solid #cbd5e1; border-radius: 4px; color: #475569;" ${isMyClosed ? 'disabled' : ''}>
+            <option value="fixed" ${b.my_resolution === 'fixed' ? 'selected' : ''}>🚀修复通过</option>
+            <option value="false_alarm" ${b.my_resolution === 'false_alarm' ? 'selected' : ''}>⚠️误报</option>
+            <option value="rejected" ${b.my_resolution === 'rejected' ? 'selected' : ''}>⛔拒绝修复</option>
+          </select>
+          <label style="color: #0f172a; font-weight: bold; display: flex; align-items: center; gap: 4px; margin: 0;"><input id='done_${b.id}' type='checkbox' ${isMyClosed ? 'checked' : ''} onchange="this.nextSibling.disabled=this.checked"> 我的闭环确认</label>
+          <button class="${isMyClosed ? 'secondary' : ''}" onclick='saveS5(${b.id})'>保存记录</button>
+        </div>
       </td>
     </tr>`;
   }).join('');

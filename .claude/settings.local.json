@@ -9,7 +9,10 @@
       "Bash(sed \"s/[''''\"\"]//g\")",
       "Bash(sed \"s/.subscribe\\([''''\"\"]//g\")",
       "Bash(grep -n \"workers\\\\|--workers\" *.bat *.cmd *.sh)",
-      "Bash(ls *.bat *.cmd *.sh)"
+      "Bash(ls *.bat *.cmd *.sh)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }
