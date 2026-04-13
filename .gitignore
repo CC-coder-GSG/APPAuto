@@ -16,3 +16,4 @@ node_modules/
 frontend/.tmp_index_script.js
 .playwright-mcp/
 CLAUDE.md
+.claude/settings.local.json
