@@ -313,7 +313,7 @@ export function renderDataOverview() {
     const majorMinors = minors.filter((m) => m.parent_id === major.id);
     const reqs = (data.requirements || []).filter((r) => r.major_version_id === major.id && activeMajorIds.has(Number(r.major_version_id)));
     const majorOpen = isMajorExpanded(major.id);
-    let minorHtml = majorMinors.map((m) => `<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-right:8px;padding-right:2px;">🏷️ ${m.version_no} <button class="text-btn" title="编辑" onclick="editVersion(${m.id},'${m.version_no}','minor',${major.id})">✎</button><button class="text-btn" title="删除" onclick="removeVersion(${m.id})">×</button></span>`).join('');
+    let minorHtml = majorMinors.map((m) => `<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-right:8px;">🏷️ ${m.version_no} <a href="javascript:void(0)" title="编辑" onclick="editVersion(${m.id},'${m.version_no}','minor',${major.id})" style="color:#3b82f6;margin-left:4px;text-decoration:none;">✎</a><a href="javascript:void(0)" title="删除" onclick="removeVersion(${m.id})" style="color:#ef4444;margin-left:2px;text-decoration:none;">×</a></span>`).join('');
     if (!minorHtml) minorHtml = '<span class="muted" style="font-size:13px;">暂无发包记录</span>';
     let reqHtml = reqs.map((req) => {
       const reqBugs = (data.bugs || []).filter((b) => b.requirement_id === req.id);
