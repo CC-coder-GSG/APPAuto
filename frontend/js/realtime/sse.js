@@ -12,7 +12,9 @@ let attentionObserver = null;
 const SSE_DEBUG = !!window.__OMNIQA_SSE_DEBUG__;
 
 const RUNTIME = {
-  lastEventId: 0, // 每次页面加载从 0 开始，避免服务重启后 cursor 陈旧导致事件被全部过滤
+  // 使用 sessionStorage 跨页面刷新保留 cursor，避免重放历史事件导致角标膨胀。
+  // sessionStorage 在标签页关闭后自动清空，服务器重启后新开标签页会从 0 开始，不会卡死。
+  lastEventId: Number(sessionStorage.getItem('sse_last_event_id') || 0),
   connectionState: 'disconnected',
   counters: {
     zentaoNew: 0,
@@ -34,6 +36,7 @@ function updateConnectionIndicator() {
     reconnecting: '实时重连中',
     connecting:   '实时连接中',
     disconnected: '实时未连接',
+    error:        '实时连接异常',
   };
   const cur = String(RUNTIME.connectionState || 'disconnected');
   el.textContent = map[cur] || map.disconnected;
@@ -132,11 +135,9 @@ function updateNavBadges() {
   badge('tabStage5Badge',      'overallBug');
 }
 
-function bumpCounterByEvent(message) {
-  // assignee-only filter for personal events
-  const payload = message?.payload || {};
-  const myId = Number(state.currentUser?.id || 0);
-  if (payload?.assignee_id && myId && Number(payload.assignee_id) !== myId) return;
+function bumpCounterByEvent() {
+  // 每次收到事件都刷新角标 DOM，保证 markUnread 更新的计数及时体现。
+  // assignee 过滤放在 queueUnreadByEvent 层负责，这里不重复判断。
   updateNavBadges();
 }
 
@@ -180,7 +181,7 @@ function handleVisibleRefreshByEvent(message) {
 function saveLastEventId(id) {
   if (!id) return;
   RUNTIME.lastEventId = Number(id) || RUNTIME.lastEventId;
-  localStorage.setItem('sse_last_event_id', String(RUNTIME.lastEventId));
+  sessionStorage.setItem('sse_last_event_id', String(RUNTIME.lastEventId));
 }
 
 // ─── SSE stream parsing ──────────────────────────────────────────────────────
@@ -201,7 +202,16 @@ function parseSSEChunk(buffer, onMessage) {
     const raw = dataLines.join('\n');
     if (!raw) return;
     let payload = {};
-    try { payload = JSON.parse(raw); } catch { payload = { raw }; }
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      debugError('malformed SSE JSON, skipping event', raw.slice(0, 120));
+      return;
+    }
+    if (typeof payload !== 'object' || payload === null) {
+      debugError('SSE payload is not an object, skipping', raw.slice(0, 120));
+      return;
+    }
     onMessage({ id: Number(id || payload.id || 0) || null, type: event || payload.type || 'message', ...payload });
   });
   return rest;
@@ -264,19 +274,29 @@ async function connect() {
   const decoder = new TextDecoder('utf-8');
   const reader = resp.body.getReader();
   let carry = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    carry += decoder.decode(value, { stream: true });
-    carry = parseSSEChunk(carry, (msg) => {
-      if (msg.type === 'ping') return;
-      if (msg.id) saveLastEventId(msg.id);
-      debugLog('event', msg.type);
-      queueUnreadByEvent(msg);
-      bumpCounterByEvent(msg);
-      emit(msg.type, msg);
-      handleVisibleRefreshByEvent(msg);
-    });
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      carry += decoder.decode(value, { stream: true });
+      carry = parseSSEChunk(carry, (msg) => {
+        if (msg.type === 'ping') return;
+        if (msg.id) saveLastEventId(msg.id);
+        debugLog('event', msg.type);
+        try {
+          queueUnreadByEvent(msg);
+          bumpCounterByEvent();
+          emit(msg.type, msg);
+          handleVisibleRefreshByEvent(msg);
+        } catch (handlerErr) {
+          debugError('event handler error', msg.type, handlerErr);
+        }
+      });
+    }
+  } catch (streamErr) {
+    setConnectionState('error');
+    debugError('stream read error', streamErr);
+    throw streamErr;
   }
 
   debugLog('stream ended');

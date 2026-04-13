@@ -69,11 +69,17 @@ class SSEEventBus:
             return [e for e in self._events if e.id > last_event_id and (set(e.channels) & channels)]
 
     async def wait_for_events(self, timeout: float = 1.0) -> None:
-        """Async-safe wait: returns when new events are published or timeout expires."""
+        """Async-safe wait: returns when new events are published or timeout expires.
+
+        clear() is called BEFORE wait() so that any publish() signal that arrives
+        between two consecutive wait_for_events() calls is not silently dropped.
+        Since asyncio is single-threaded, there is no await between clear() and
+        wait(), so no publish() callback can fire in that gap.
+        """
         notify = self._get_notify()
+        notify.clear()
         try:
             await asyncio.wait_for(asyncio.shield(notify.wait()), timeout=timeout)
-            notify.clear()
         except asyncio.TimeoutError:
             pass
 

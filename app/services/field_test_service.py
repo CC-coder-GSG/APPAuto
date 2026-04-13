@@ -22,6 +22,7 @@ from app.models import (
     VersionType,
 )
 from app.services.audit_service import audit
+from app.services.sse_service import sse_publish
 
 B_PATTERN = re.compile(r"^b#\d+$")
 
@@ -214,6 +215,17 @@ class FieldTestService:
             target_id=str(row.id),
             detail=f"result={row.result_status.value},bugs={len(normalized_bug_ids)}",
         )
+        sse_publish(
+            "field_test_record_created",
+            {
+                "id": row.id,
+                "major_version_id": row.major_version_id,
+                "minor_version_id": row.minor_version_id,
+                "tester_id": row.tester_id,
+                "result_status": row.result_status.value,
+            },
+            channels=["global"],
+        )
         return {
             "message": "外业测试记录已创建",
             "record": self.get_detail(row.id, actor),
@@ -296,6 +308,17 @@ class FieldTestService:
             actor_id=actor.id,
             target_id=str(row.id),
             detail=f"result={row.result_status.value},added_bugs={len(created_bug_ids)}",
+        )
+        sse_publish(
+            "field_test_record_updated",
+            {
+                "id": row.id,
+                "major_version_id": row.major_version_id,
+                "minor_version_id": row.minor_version_id,
+                "tester_id": row.tester_id,
+                "result_status": row.result_status.value,
+            },
+            channels=["global"],
         )
         return {
             "message": "外业测试记录已更新",

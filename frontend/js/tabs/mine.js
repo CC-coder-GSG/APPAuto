@@ -480,6 +480,14 @@ function bindMineSSE() {
     if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'teal');
   });
 
+  // 新 bug（执行阶段挂载到需求）：在需求卡片上显示琥珀色流光，不进主角标
+  window.OmniQASSE.subscribe('bug_created', ({ payload }) => {
+    const reqId = Number(payload?.requirement_id || 0);
+    if (!reqId) return;
+    const el = document.querySelector(`.mine-req-card[data-req-id='${reqId}']`);
+    if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'amber');
+  });
+
   mineSseBound = true;
 }
 bindMineSSE();

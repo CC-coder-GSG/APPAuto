@@ -1,7 +1,9 @@
 import { api } from './api.js';
 
 export function logout() {
+  window.OmniQASSE?.stop();
   localStorage.removeItem('token');
+  sessionStorage.removeItem('sse_last_event_id');
   window.location.href = '/login';
 }
 
