@@ -120,6 +120,8 @@ function bindDispatchSSE() {
 
     if (dispatchSseRefreshTimer) clearTimeout(dispatchSseRefreshTimer);
     dispatchSseRefreshTimer = setTimeout(() => {
+      const t = document.getElementById('tab-dispatch');
+      if (!t || t.classList.contains('hidden')) return;
       loadDispatchedAll().catch(() => {});
     }, 450);
   };

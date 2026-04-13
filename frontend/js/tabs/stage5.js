@@ -85,6 +85,7 @@ export function renderS5() {
     </tr>`;
   }).join('');
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
+    window.OmniQASSE.releaseAttention?.();
     document.querySelectorAll('.stage5-row-card[data-bug-id]').forEach((el) => {
       window.OmniQASSE.mountAttention(el, { scope: 'overall_bug', key: el.getAttribute('data-bug-id'), tone: 'blue', hoverDelayMs: 420 });
     });
@@ -227,6 +228,19 @@ window.removeS5Bug = removeS5Bug;
 // ─── Stage5 SSE: 新 bug 底部提示 + 卡片流光 ──────────────────────────────────
 
 const s5NewBugCount = { value: 0 };
+let s5ReloadTimer = null;
+
+function deferReloadStage5(ms = 600) {
+  if (s5ReloadTimer) clearTimeout(s5ReloadTimer);
+  s5ReloadTimer = setTimeout(() => {
+    s5ReloadTimer = null;
+    const tab = document.getElementById('tab-stage5');
+    if (!tab || tab.classList.contains('hidden')) return;
+    const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
+    if (!majorId) return;
+    loadStage5().catch(() => {});
+  }, ms);
+}
 
 function showS5BottomBanner() {
   if (!window.OmniQASSE?.showPositionBanner) return;
@@ -264,9 +278,9 @@ function bindStage5SSE() {
       s5NewBugCount.value += 1;
       showS5BottomBanner();
     } else {
-      // At bottom: immediately refresh list
+      // At bottom: reload list to show new bug (loadStage5 internally calls deferClearOverallUnread)
       s5NewBugCount.value = 0;
-      deferClearOverallUnread(600);
+      deferReloadStage5(600);
     }
   });
 

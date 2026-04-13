@@ -132,6 +132,7 @@ function renderFeedbackList(rows) {
     </tr>
   `).join('');
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
+    window.OmniQASSE.releaseAttention?.();
     document.querySelectorAll('.feedback-row-card[data-feedback-id]').forEach((el) => {
       window.OmniQASSE.mountAttention(el, { scope: 'feedback_task', key: el.getAttribute('data-feedback-id'), tone: 'blue', hoverDelayMs: 420 });
     });

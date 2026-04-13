@@ -138,6 +138,7 @@ export async function loadRetest() {
       </details>`;
   }).join('');
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
+    window.OmniQASSE.releaseAttention?.();
     document.querySelectorAll('.retest-req-card[data-req-id]').forEach((el) => {
       window.OmniQASSE.mountAttention(el, { scope: 'retest_requirement', key: el.getAttribute('data-req-id'), tone: 'purple', hoverDelayMs: 420 });
     });
@@ -217,6 +218,8 @@ function bindRetestSSE() {
     if (window._retestSSERequirementTimer) clearTimeout(window._retestSSERequirementTimer);
     window._retestSSERequirementTimer = setTimeout(async () => {
       window._retestSSERequirementTimer = null;
+      const tab = document.getElementById('tab-retest');
+      if (!tab || tab.classList.contains('hidden')) return;
       if (typeof window.loadRetest === 'function') await window.loadRetest();
       const el = document.querySelector(`.retest-req-card[data-req-id='${reqId}']`);
       if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'blue');

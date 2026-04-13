@@ -441,6 +441,7 @@ export function renderMineCards() {
   const mineCards = document.getElementById('mineCards');
   if (mineCards) mineCards.innerHTML = (state.currentFeedbackTodoHtml || '') + state.currentDispatchHtml + reqsHtml;
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
+    window.OmniQASSE.releaseAttention?.();
     document.querySelectorAll('.mine-req-card[data-req-id]').forEach((el) => {
       window.OmniQASSE.mountAttention(el, { scope: 'mine_requirement', key: el.getAttribute('data-req-id'), tone: 'blue', hoverDelayMs: 420 });
     });
@@ -465,6 +466,8 @@ function bindMineSSE() {
     if (window._mineSSERequirementTimer) clearTimeout(window._mineSSERequirementTimer);
     window._mineSSERequirementTimer = setTimeout(async () => {
       window._mineSSERequirementTimer = null;
+      const tab = document.getElementById('tab-mine');
+      if (!tab || tab.classList.contains('hidden')) return;
       if (typeof window.loadMyWorkbench === 'function') await window.loadMyWorkbench();
       // After reload, pulse the new card
       const el = document.querySelector(`.mine-req-card[data-req-id='${reqId}']`);

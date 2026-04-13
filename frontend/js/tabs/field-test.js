@@ -651,6 +651,8 @@ function bindFieldTestSSE() {
   const scheduleReload = (targetId, tone) => {
     if (fieldTestSseRefreshTimer) clearTimeout(fieldTestSseRefreshTimer);
     fieldTestSseRefreshTimer = setTimeout(() => {
+      const t = document.getElementById('tab-field-test');
+      if (!t || t.classList.contains('hidden')) return;
       loadFieldTestBoard().then(() => {
         if (targetId > 0) pulseFieldTestRow(targetId, tone);
       }).catch(() => {});

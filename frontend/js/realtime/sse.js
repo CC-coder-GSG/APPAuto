@@ -385,6 +385,17 @@ function ensureAttentionObserver() {
   return attentionObserver;
 }
 
+/**
+ * 在每次整体重渲染前调用，断开 observer 并释放对旧 DOM 节点的强引用，避免内存泄漏。
+ * 下次 mountAttention 调用时 ensureAttentionObserver() 会自动创建新 observer。
+ */
+export function releaseAttention() {
+  if (attentionObserver) {
+    attentionObserver.disconnect();
+    attentionObserver = null;
+  }
+}
+
 export function mountAttention(el, { scope, key, tone = 'blue', hoverDelayMs = 420 } = {}) {
   if (!el || !scope || key == null) return;
   const meta = { scope, key: String(key), tone, inView: false, read: false, hoverTimer: null };
@@ -513,6 +524,7 @@ window.OmniQASSE = {
   subscribe:         subscribeSSE,
   pulseBoundaryGlow,
   mountAttention,
+  releaseAttention,
   markRead,
   clearScopeUnread,
   showPositionBanner,

@@ -197,6 +197,7 @@ function renderFeed(feed) {
   }).join('');
 
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
+    window.OmniQASSE.releaseAttention?.();
     wrap.querySelectorAll('.activity-feed-item[data-activity-id]').forEach((el) => {
       window.OmniQASSE.mountAttention(el, { scope: 'activity_event', key: el.getAttribute('data-activity-id'), tone: 'blue', hoverDelayMs: 420 });
     });

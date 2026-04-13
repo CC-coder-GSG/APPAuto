@@ -665,6 +665,7 @@ function renderList() {
   }
 
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
+    window.OmniQASSE.releaseAttention?.();
     document.querySelectorAll('tr.zentao-row-card[data-event-id]').forEach((el) => {
       window.OmniQASSE.mountAttention(el, { scope: 'zentao_sync', key: el.getAttribute('data-event-id'), tone: 'purple', hoverDelayMs: 420 });
     });
