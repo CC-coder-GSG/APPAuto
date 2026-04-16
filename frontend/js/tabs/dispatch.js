@@ -56,12 +56,15 @@ export async function loadDispatchedAll() {
     }
     table.innerHTML = filteredData.map((b) => {
       const statusHtml = b.closed ? `<span style="color:#16a34a;font-weight:bold;">已闭环 (${resZh[b.resolution] || '修复'})</span>` : '<span style="color:#dc2626;">处理中</span>';
+      const ztBugId = (b.bug_id || '').replace(/\D/g, '');
+      const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:4px;"></span>` : '';
       return `<tr class="dispatch-row-card" data-bug-id="${b.id}">
-        <td>${renderBugLink(b)}</td>
+        <td>${renderBugLink(b)}${ztSlot}</td>
         <td><span class="badge" style="background:#ffedd5;color:#ea580c; border:1px solid #fdba74;">特派给 ${b.dispatched_to_name}</span></td>
         <td>${statusHtml}</td>
       </tr>`;
     }).join('');
+    window.OmniQAZentao?.hydrateContainer(table.closest('table') || table);
   } catch (e) {
     console.error('加载特派列表失败', e);
   }

@@ -9,6 +9,15 @@ from app.db.base import Base
 from app.models import AuditLog, BugStage5Record, BugTracking, Requirement, TestCase, TestExecution, User, Version
 
 
+@pytest.fixture(autouse=True)
+def _clear_stage5_sync_cache():
+    """Reset the in-memory sync cache before each test to ensure test isolation."""
+    import app.services.stage5_service as svc
+    svc._sync_cache.clear()
+    yield
+    svc._sync_cache.clear()
+
+
 @pytest.fixture()
 def db_session():
     engine = create_engine(

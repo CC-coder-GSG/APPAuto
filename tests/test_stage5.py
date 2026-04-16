@@ -156,3 +156,106 @@ def test_stage5_overview_contains_field_test_source_type(db_session):
     service = Stage5Service(db_session)
     data = service.overview(major.id, me)
     assert data["bug_pool"][0]["source_type"] == "field_test"
+
+
+class _FakeZentaoClient:
+    def __init__(self, payload_map):
+        self.payload_map = payload_map
+
+    def get(self, path, params=None):
+        return self.payload_map.get(path)
+
+
+def test_stage5_sync_zentao_major_bugs_creates_remote_bugs(db_session):
+    major = _create_major(db_session, "V4.0.3.1")
+    minor = _create_minor(db_session, major.id, "4.0.3.1.260413(40311001)")
+    minor.zentao_build_id = 4416
+    db_session.commit()
+    user = _create_user(db_session, "stage5_sync_user")
+
+    service = Stage5Service(db_session)
+    fake_client = _FakeZentaoClient({
+        "projects": {"projects": [{"id": 9, "name": "Survey"}]},
+        "projects/9/executions": {"executions": [{"id": 4031, "name": "s4031"}]},
+        "executions/4031/bugs": {
+            "bugs": [
+                {"id": 7001, "title": "同步进来的 Bug 1", "openedBuild": {"4416": "build-4416"}},
+                {"id": 7002, "title": "同步进来的 Bug 2", "openedBuild": {"4416": "build-4416"}},
+            ]
+        },
+        "builds/4416/bugs": None,
+    })
+    service._get_zentao_client_ctx = lambda user_id: (fake_client, "http://zentao")  # type: ignore[method-assign]
+
+    result = service.sync_zentao_major_bugs(major_version_id=major.id, current_user=user)
+
+    rows = db_session.query(BugTracking).filter(BugTracking.major_version_id == major.id).order_by(BugTracking.bug_id.asc()).all()
+    assert result["remote_total"] == 2
+    assert result["created"] == 2
+    assert [row.bug_id for row in rows] == ["b#7001", "b#7002"]
+    assert all(row.zentao_bug_url == f"http://zentao/bug-view-{row.zentao_bug_id}.html" for row in rows)
+    assert all(row.found_minor_version_id == minor.id for row in rows)
+
+
+def test_stage5_sync_zentao_major_bugs_updates_existing_bug_without_duplicate(db_session):
+    major = _create_major(db_session, "V4.0.3.1")
+    user = _create_user(db_session, "stage5_sync_user2")
+    existing = BugTracking(
+        major_version_id=major.id,
+        requirement_id=None,
+        source_type=BugSourceType.MANUAL,
+        bug_id="b#7101",
+        created_by_id=user.id,
+        zentao_bug_id="7101",
+        zentao_bug_title="旧标题",
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    service = Stage5Service(db_session)
+    fake_client = _FakeZentaoClient({
+        "projects": {"projects": [{"id": 9, "name": "Survey"}]},
+        "projects/9/executions": {"executions": [{"id": 4031, "name": "s4031"}]},
+        "executions/4031/bugs": {
+            "bugs": [
+                {"id": 7101, "title": "新标题", "openedBuild": {}},
+            ]
+        },
+    })
+    service._get_zentao_client_ctx = lambda user_id: (fake_client, "http://zentao")  # type: ignore[method-assign]
+
+    result = service.sync_zentao_major_bugs(major_version_id=major.id, current_user=user)
+
+    rows = db_session.query(BugTracking).filter(BugTracking.zentao_bug_id == "7101").all()
+    assert len(rows) == 1
+    assert rows[0].zentao_bug_title == "新标题"
+    assert result["created"] == 0
+    assert result["updated"] == 1
+
+
+def test_stage5_sync_zentao_major_bugs_fetches_remote_execution_builds_without_local_minor(db_session):
+    major = _create_major(db_session, "V4.0.3.1")
+    user = _create_user(db_session, "stage5_sync_user3")
+
+    service = Stage5Service(db_session)
+    fake_client = _FakeZentaoClient({
+        "projects": {"projects": [{"id": 9, "name": "Survey"}]},
+        "projects/9/executions": {"executions": [{"id": 4031, "name": "s4031"}]},
+        "executions/4031/bugs": {"bugs": []},
+        "executions/4031/builds": {"builds": [{"id": 5522, "name": "4031-build"}]},
+        "builds/5522/bugs": {
+            "bugs": [
+                {"id": 7201, "title": "仅挂在远端 build 下的 Bug", "openedBuild": {"5522": "build-5522"}},
+            ]
+        },
+    })
+    service._get_zentao_client_ctx = lambda user_id: (fake_client, "http://zentao")  # type: ignore[method-assign]
+
+    result = service.sync_zentao_major_bugs(major_version_id=major.id, current_user=user)
+
+    rows = db_session.query(BugTracking).filter(BugTracking.major_version_id == major.id).all()
+    assert result["remote_total"] == 1
+    assert result["created"] == 1
+    assert len(rows) == 1
+    assert rows[0].bug_id == "b#7201"
+    assert rows[0].zentao_bug_title == "仅挂在远端 build 下的 Bug"

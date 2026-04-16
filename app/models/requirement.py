@@ -33,6 +33,11 @@ class Requirement(Base):
     test_notes_updated_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     status: Mapped[RequirementStatus] = mapped_column(SAEnum(RequirementStatus), default=RequirementStatus.PENDING, nullable=False)
 
+    # Zentao anchor fields
+    zentao_story_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    zentao_plan_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    zentao_plan_title_cache: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

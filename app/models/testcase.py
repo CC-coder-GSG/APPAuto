@@ -30,6 +30,8 @@ class TestCase(Base):
     zentao_sync_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     zentao_sync_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     zentao_raw_payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Zentao anchor: numeric case id for direct API access (e.g. /v1/testcases/{id})
+    zentao_case_numeric_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     creator_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 

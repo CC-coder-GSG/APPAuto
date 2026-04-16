@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models import User
+from app.services.permission_service import get_allowed_tabs, serialize_tab_permissions
 from app.services.audit_service import audit
 
 
@@ -14,6 +15,7 @@ def _user_to_dict(user: User) -> dict:
         "display_name": user.shown_name,
         "role": user.role.value,
         "is_team_member": user.is_team_member,
+        "allowed_tabs": get_allowed_tabs(user),
         "created_at": user.created_at.isoformat(),
     }
 
@@ -79,6 +81,23 @@ class UserService:
         db.commit()
         audit(db, action="user.update_team_status", target_type="user", actor_id=actor_id, target_id=str(user.id), detail=f"{old_value}->{user.is_team_member}")
         return {"message": "Team member status updated"}
+
+    @staticmethod
+    def update_tab_permissions(db: Session, user_id: int, tab_keys: list[str], actor_id: int | None = None) -> dict:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        user.tab_permissions = serialize_tab_permissions(tab_keys)
+        db.commit()
+        audit(
+            db,
+            action="user.update_tab_permissions",
+            target_type="user",
+            actor_id=actor_id,
+            target_id=str(user.id),
+            detail=user.tab_permissions or "[]",
+        )
+        return {"message": "User tab permissions updated", "allowed_tabs": get_allowed_tabs(user)}
 
     @staticmethod
     def delete_user(db: Session, user_id: int, actor_id: int | None = None) -> dict:

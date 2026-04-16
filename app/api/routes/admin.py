@@ -15,7 +15,7 @@ from app.models import AuditLog, BugTracking, Requirement, User, Version
 from app.schemas.admin import JenkinsBuildReportPayload
 from app.services.activity_service import ActivityService
 from app.services.build_record_service import BuildRecordService
-from app.services.permission_service import ensure_admin
+from app.services.permission_service import ensure_admin, ensure_tab_access, get_allowed_tabs
 from app.services.push_service import PushService
 
 router = APIRouter()
@@ -109,7 +109,7 @@ def _build_requirement_link_logs(db: Session, limit: int = 300) -> list[dict]:
 
 @router.get("/admin/data-overview")
 def admin_data_overview(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "data")
     reqs = (
         db.query(Requirement)
         .options(joinedload(Requirement.test_cases), joinedload(Requirement.test_notes_updated_by))
@@ -125,6 +125,7 @@ def admin_data_overview(current_user=Depends(get_current_user), db: Session = De
                 "display_name": u.shown_name,
                 "role": u.role.value,
                 "is_team_member": u.is_team_member,
+                "allowed_tabs": get_allowed_tabs(u),
                 "created_at": u.created_at.isoformat(),
             }
             for u in db.query(User).order_by(User.id.asc()).all()
@@ -172,7 +173,7 @@ def admin_data_overview(current_user=Depends(get_current_user), db: Session = De
 
 @router.get("/admin/requirement-link-logs")
 def admin_requirement_link_logs(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "data")
     return _build_requirement_link_logs(db, limit=300)
 
 
@@ -191,7 +192,7 @@ def admin_activity_feed(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "activity")
     return ActivityService(db).list_feed(
         target_type=target_type,
         action=action,
@@ -217,7 +218,7 @@ def admin_activity_summary(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "activity")
     end_at = date_to or datetime.utcnow()
     start_at = date_from or (end_at - timedelta(days=days))
     return ActivityService(db).get_summary(
@@ -329,7 +330,7 @@ def admin_build_records(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "build-records")
     return BuildRecordService(db).list_records(
         limit=limit,
         offset=offset,
@@ -345,7 +346,7 @@ def admin_build_records_major_log(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "build-records")
     job_name_text = (job_name or "").strip()
     if not job_name_text:
         raise HTTPException(status_code=400, detail="job_name 不能为空")
@@ -370,7 +371,7 @@ def admin_build_record_detail(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "build-records")
     row = BuildRecordService(db).get_record(record_id)
     if not row:
         raise HTTPException(status_code=404, detail="构建记录不存在")

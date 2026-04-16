@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.models import UserRole
-from app.services.permission_service import ensure_admin
+from app.services.permission_service import ALL_TAB_KEYS, ensure_admin
 from app.services.user_service import UserService
 
 router = APIRouter()
@@ -39,9 +39,12 @@ class PasswordResetPayload(BaseModel):
     new_password: str = Field(min_length=3, max_length=128)
 
 
+class TabPermissionsPayload(BaseModel):
+    allowed_tabs: list[str] = Field(default_factory=list, description=f"支持的 tab: {', '.join(ALL_TAB_KEYS)}")
+
+
 @router.get("/users")
 def list_users(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
-    ensure_admin(current_user)
     return UserService.list_users(db)
 
 
@@ -86,3 +89,9 @@ def change_my_password(payload: PasswordChangePayload, current_user=Depends(get_
 def reset_user_password(user_id: int, payload: PasswordResetPayload, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     ensure_admin(current_user)
     return UserService.reset_user_password(db, user_id, payload.new_password, actor_id=current_user.id)
+
+
+@router.put("/users/{user_id}/tab-permissions")
+def update_user_tab_permissions(user_id: int, payload: TabPermissionsPayload, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    ensure_admin(current_user)
+    return UserService.update_tab_permissions(db, user_id, payload.allowed_tabs, actor_id=current_user.id)

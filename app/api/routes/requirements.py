@@ -12,7 +12,7 @@ from app.api.deps import get_current_user, get_db
 from app.models import BugSourceType, BugTracking, Requirement, User, Version, VersionType
 from app.integrations.wecom import send_markdown
 from app.services.activity_service import ActivityService
-from app.services.permission_service import ensure_admin
+from app.services.permission_service import ensure_admin, ensure_tab_access
 from app.services.requirement_service import RequirementService
 
 router = APIRouter()
@@ -108,7 +108,7 @@ def admin_list_requirements(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "assign")
     q = (
         db.query(Requirement)
         .options(joinedload(Requirement.owner), joinedload(Requirement.retester), joinedload(Requirement.test_cases), joinedload(Requirement.major_version))
@@ -147,7 +147,7 @@ def admin_requirements_progress(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "assign")
 
     q = (
         db.query(Requirement)
@@ -273,6 +273,17 @@ def admin_requirements_progress(
         "retest_pending_by_major": retest_pending_by_major,
     }
 
+
+@router.post("/requirements/admin/sync-zentao")
+def admin_sync_requirements_from_zentao(
+    major_version_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_tab_access(current_user, "assign")
+    service = RequirementService(db)
+    return service.sync_zentao_major_requirements(major_version_id, current_user)
+
 @router.get("/requirements/admin/link-options")
 def admin_link_options(
     source_major_version_id: int,
@@ -280,7 +291,7 @@ def admin_link_options(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "assign")
     service = RequirementService(db)
     return service.list_requirements_for_link(source_major_version_id, target_major_version_id)
 
@@ -290,7 +301,7 @@ def admin_link_major(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "assign")
     service = RequirementService(db)
     return service.link_requirements_from_major(
         target_major_version_id=payload.target_major_version_id,
@@ -435,7 +446,7 @@ def delete_case(case_id: int, current_user: User = Depends(get_current_user), db
 
 @router.post("/requirements/assign-and-publish")
 async def assign_and_publish(payload: AssignPublishPayload, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "assign")
     service = RequirementService(db)
     users_map = {u.id: u.shown_name for u in db.query(User).all()}
     result = service.assign_and_publish(

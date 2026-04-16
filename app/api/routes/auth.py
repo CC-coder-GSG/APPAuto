@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.services.auth_service import AuthService
+from app.services.permission_service import get_allowed_tabs
 
 router = APIRouter()
 
@@ -23,4 +24,5 @@ def auth_me(current_user=Depends(get_current_user)):
         "display_name": current_user.shown_name,
         "role": current_user.role.value,
         "is_team_member": getattr(current_user, "is_team_member", True),
+        "allowed_tabs": get_allowed_tabs(current_user),
     }

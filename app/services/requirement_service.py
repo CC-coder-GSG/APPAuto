@@ -8,8 +8,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Requirement, RequirementStatus, RequirementStatusHistory, TestCase, TestExecution, TestResultStatus, User, UserRole, Version, VersionType
+from app.models.user_zentao_binding import UserZentaoBinding
 from app.services.audit_service import audit
 from app.services.sse_service import sse_publish
+from app.services.zentao_auth_service import get_valid_token
+from app.services.zentao_client_service import ZentaoAPIError, ZentaoClient
 from app.utils.state_machine import ensure_requirement_transition
 from app.utils.validators import validate_req_id
 
@@ -25,6 +28,154 @@ class RequirementService:
         if version.version_type != VersionType.MAJOR:
             raise HTTPException(status_code=400, detail="major_version_id 必须指向大版本")
         return version
+
+    def _get_zentao_client(self, user_id: int) -> ZentaoClient | None:
+        binding = self.db.query(UserZentaoBinding).filter(UserZentaoBinding.user_id == user_id).first()
+        if not binding or not binding.base_url:
+            return None
+        token = get_valid_token(user_id, self.db)
+        if not token:
+            return None
+        return ZentaoClient(base_url=binding.base_url.rstrip("/"), token=token)
+
+    def _fetch_execution_story_rows(self, client: ZentaoClient, execution_id: int) -> list[dict]:
+        candidate_paths = [
+            (f"executions/{execution_id}/stories", {"limit": 500}),
+            (f"executions/{execution_id}/requirements", {"limit": 500}),
+            (f"executions/{execution_id}", {"limit": 500}),
+        ]
+        for path, params in candidate_paths:
+            try:
+                data = client.get(path, params=params) or {}
+            except ZentaoAPIError:
+                continue
+            rows = None
+            if isinstance(data, dict):
+                for key in ("stories", "requirements", "data", "items"):
+                    bucket = data.get(key)
+                    if isinstance(bucket, list):
+                        rows = bucket
+                        break
+                    if isinstance(bucket, dict):
+                        rows = [v for v in bucket.values() if isinstance(v, dict)]
+                        break
+            elif isinstance(data, list):
+                rows = [v for v in data if isinstance(v, dict)]
+            if rows:
+                return rows
+        return []
+
+    def sync_zentao_major_requirements(self, major_version_id: int, current_user: User) -> dict:
+        major = self.ensure_major_version_exists(major_version_id)
+        if not major.zentao_execution_id:
+            raise HTTPException(status_code=400, detail="当前大版本尚未绑定禅道 execution，无法同步需求")
+
+        client = self._get_zentao_client(current_user.id)
+        if client is None:
+            raise HTTPException(status_code=400, detail="当前用户未配置可用的禅道绑定")
+
+        story_rows = self._fetch_execution_story_rows(client, major.zentao_execution_id)
+        if not story_rows:
+            return {"remote_total": 0, "created": 0, "updated": 0}
+
+        existing_rows = (
+            self.db.query(Requirement)
+            .filter(Requirement.major_version_id == major_version_id)
+            .all()
+        )
+        existing_by_story_id = {int(r.zentao_story_id): r for r in existing_rows if r.zentao_story_id}
+        existing_by_req_id = {r.zentao_req_id: r for r in existing_rows}
+        account_to_user_id = {
+            (b.zentao_account or "").strip(): b.user_id
+            for b in self.db.query(UserZentaoBinding).filter(UserZentaoBinding.zentao_account.isnot(None)).all()
+        }
+
+        created = 0
+        updated = 0
+
+        for story in story_rows:
+            story_id = story.get("id")
+            if not story_id:
+                continue
+            try:
+                story_id_int = int(story_id)
+            except Exception:
+                continue
+
+            title = str(story.get("title") or "").strip()
+            if not title:
+                continue
+
+            req_no = f"r#{story_id_int}"
+            assigned_to = story.get("assignedTo") or {}
+            if isinstance(assigned_to, dict):
+                assigned_account = str(assigned_to.get("account") or "").strip()
+            else:
+                assigned_account = str(assigned_to or "").strip()
+            mapped_owner_id = account_to_user_id.get(assigned_account) if assigned_account else None
+
+            plan = story.get("plan")
+            plan_id = None
+            plan_title = None
+            if isinstance(plan, dict) and plan:
+                first_key = next(iter(plan.keys()))
+                try:
+                    plan_id = int(first_key)
+                except Exception:
+                    plan_id = None
+                plan_title = str(plan.get(first_key) or "").strip() or None
+
+            row = existing_by_story_id.get(story_id_int) or existing_by_req_id.get(req_no)
+            if row:
+                changed = False
+                if row.title != title:
+                    row.title = title
+                    changed = True
+                if row.zentao_story_id != story_id_int:
+                    row.zentao_story_id = story_id_int
+                    changed = True
+                if row.zentao_plan_id != plan_id:
+                    row.zentao_plan_id = plan_id
+                    changed = True
+                if row.zentao_plan_title_cache != plan_title:
+                    row.zentao_plan_title_cache = plan_title
+                    changed = True
+                if mapped_owner_id and row.owner_id is None:
+                    row.owner_id = mapped_owner_id
+                    self.recalculate_requirement_status(row, actor_id=current_user.id)
+                    changed = True
+                if changed:
+                    updated += 1
+                continue
+
+            new_req = Requirement(
+                zentao_req_id=req_no,
+                title=title,
+                major_version_id=major_version_id,
+                owner_id=mapped_owner_id,
+                status=RequirementStatus.PENDING,
+                zentao_story_id=story_id_int,
+                zentao_plan_id=plan_id,
+                zentao_plan_title_cache=plan_title,
+            )
+            self.db.add(new_req)
+            self.db.flush()
+            self.recalculate_requirement_status(new_req, actor_id=current_user.id)
+            self._record_status_history(new_req, None, new_req.status, actor_id=current_user.id)
+            existing_by_story_id[story_id_int] = new_req
+            existing_by_req_id[req_no] = new_req
+            created += 1
+
+        self.db.commit()
+        audit(
+            self.db,
+            action="requirement.sync_zentao_major",
+            target_type="version",
+            actor_id=current_user.id,
+            target_id=str(major_version_id),
+            detail=f"remote_total={len(story_rows)},created={created},updated={updated}",
+        )
+        return {"remote_total": len(story_rows), "created": created, "updated": updated}
 
     def create_requirement(self, zentao_req_id: str, title: str, major_version_id: int, actor_id: int | None = None) -> dict:
         self.ensure_major_version_exists(major_version_id)

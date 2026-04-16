@@ -58,9 +58,11 @@ function renderBugChip(req, bug) {
   const verText = bug.fixed_minor_version_no
     ? `<span style="color:#16a34a; font-size:11px; margin-left:4px;">(✅解决于: 🏷️${bug.fixed_minor_version_no})</span>`
     : `<span style="color:#94a3b8; font-size:11px; margin-left:4px;">(发现于: 🏷️${bug.found_minor_version_no || '未知'})</span>`;
+  const ztBugId = (bug.bug_id || '').replace(/\D/g, '');
+  const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:4px;"></span>` : '';
 
   return `<span class="badge" style="background:#f1f5f9; border:1px solid #cbd5e1; padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
-      ${renderBugLink(bug)} ${verText} ${dBadge}
+      ${renderBugLink(bug)} ${ztSlot} ${verText} ${dBadge}
       <a href="javascript:void(0)" title="编辑" onclick="${req.test_completed ? 'return false;' : `editWorkbenchBug(${bug.id}, '${bug.bug_id}')`}" style="color:${req.test_completed ? '#94a3b8' : '#3b82f6'}; margin-left:4px; text-decoration:none;">✎</a>
       <a href="javascript:void(0)" title="删除" onclick="${req.test_completed ? 'return false;' : `removeWorkbenchBug(${bug.id})`}" style="color:${req.test_completed ? '#94a3b8' : '#ef4444'}; margin-left:2px; text-decoration:none;">×</a>
   </span>`;
@@ -411,10 +413,13 @@ export function renderMineCards() {
 
     const freeBugHtml = (req.free_bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无自由Bug</span>';
 
+    const ztStoryId = (req.zentao_req_id || '').replace(/\D/g, '');
+    const ztStorySlot = ztStoryId ? `<span class="zt-story-slot" data-zt-story-id="${ztStoryId}" style="margin-left:6px; vertical-align:middle;"></span>` : '';
+
     return `
       <details class="mine-req-card" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
-          <div>${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${req.zentao_req_id} ${req.title}</span></div>
+          <div>${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${req.zentao_req_id} ${req.title}</span>${ztStorySlot}</div>
           ${isFullyCompleted ? '<span style="color:#16a34a; font-size:14px; background:#f0fdf4; padding:4px 8px; border-radius:4px; border:1px solid #bbf7d0;">✅ 测试已完成</span>' : '<span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开卡片)</span>'}
         </summary>
         <div style="margin-top: 12px;">
@@ -439,7 +444,10 @@ export function renderMineCards() {
   }).join('');
 
   const mineCards = document.getElementById('mineCards');
-  if (mineCards) mineCards.innerHTML = (state.currentFeedbackTodoHtml || '') + state.currentDispatchHtml + reqsHtml;
+  if (mineCards) {
+    mineCards.innerHTML = (state.currentFeedbackTodoHtml || '') + state.currentDispatchHtml + reqsHtml;
+    window.OmniQAZentao?.hydrateContainer(mineCards);
+  }
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
     window.OmniQASSE.releaseAttention?.();
     document.querySelectorAll('.mine-req-card[data-req-id]').forEach((el) => {

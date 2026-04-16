@@ -11,7 +11,7 @@ from app.api.deps import get_current_user, get_db
 from app.models import BugSourceType, User
 from app.services.activity_service import ActivityService
 from app.services.bug_service import BugService
-from app.services.permission_service import ensure_admin
+from app.services.permission_service import ensure_admin, ensure_tab_access
 from app.services.push_service import PushService
 
 router = APIRouter()
@@ -74,14 +74,14 @@ def toggle_bug_retest_fail(bug_id: int, payload: BugRetestFailPayload, current_u
 
 @router.get("/bugs/search")
 def search_bug(bug_id: str, software_id: Optional[int] = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "dispatch")
     service = BugService(db)
     return service.search_bug(bug_id, software_id=software_id)
 
 
 @router.post("/bugs/{bug_id}/dispatch")
 async def dispatch_bug(bug_id: int, payload: DispatchPayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "dispatch")
     service = BugService(db)
     push_service = PushService(db)
     result, user, bug = service.dispatch_bug(bug_id, payload.user_id, actor_id=current_user.id)
@@ -98,7 +98,7 @@ def dispatched_to_me(major_version_id: int, current_user: User = Depends(get_cur
 
 @router.get("/bugs/dispatched-all")
 def get_all_dispatched_bugs(software_id: Optional[int] = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    ensure_admin(current_user)
+    ensure_tab_access(current_user, "dispatch")
     service = BugService(db)
     return service.dispatched_all(software_id=software_id)
 

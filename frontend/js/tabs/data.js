@@ -1,6 +1,20 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
 import { withPrefix, renderBugLink, renderCaseLink } from '../utils.js';
+const TAB_PERMISSION_OPTIONS = [
+  { key: 'assign', label: '任务分配台' },
+  { key: 'mine', label: '我的工作台' },
+  { key: 'feedback', label: '反馈记录与处理' },
+  { key: 'retest', label: '复测工作台' },
+  { key: 'stage5', label: '整体测试' },
+  { key: 'field-test', label: '外业测试' },
+  { key: 'build-records', label: '构建记录' },
+  { key: 'zentao-sync', label: '禅道同步中心' },
+  { key: 'report', label: '报表中心' },
+  { key: 'activity', label: '活动中心' },
+  { key: 'data', label: '数据管理台' },
+  { key: 'dispatch', label: 'BUG特派' },
+];
 
 function isMajorExpanded(majorId) {
   return state.dataTreeExpandedMajors[String(majorId)] === true;
@@ -248,6 +262,13 @@ export function expandAllMajorBodies() {
 export function renderDataOverview() {
   const data = state.dataOverviewCache || { users: [], versions: [], requirements: [], bugs: [] };
   const activeMajorIds = new Set((window.versions || []).filter((v) => v.version_type === 'major').map((v) => Number(v.id)));
+  const isAdmin = String(window.currentUser?.role || '') === 'admin';
+  const adminControls = document.getElementById('dataAdminControls');
+  const readOnlyHint = document.getElementById('dataReadonlyHint');
+  const dangerHint = document.getElementById('dataDangerHint');
+  if (adminControls) adminControls.classList.toggle('hidden', !isAdmin);
+  if (readOnlyHint) readOnlyHint.classList.toggle('hidden', isAdmin);
+  if (dangerHint) dangerHint.classList.toggle('hidden', !isAdmin);
   const usersCard = document.getElementById('dataUsersCard');
   if (usersCard) usersCard.classList.toggle('hidden', !state.dataViewState.showUsers);
   const dataUsers = document.getElementById('dataUsers');
@@ -257,6 +278,7 @@ export function renderDataOverview() {
       : (data.users || []).map((u) => {
         const safeUsername = String(u.username || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const safeDisplayName = String(u.display_name || u.username || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const safeAllowedTabs = encodeURIComponent(JSON.stringify(u.allowed_tabs || []));
         return `<div class="card" style="margin-bottom:12px; padding:14px 16px; border:1px solid #e2e8f0; box-shadow:none;">
           <div style="display:grid; grid-template-columns:minmax(220px, 1fr) auto; gap:12px; align-items:center;">
             <div style="display:flex; align-items:center; gap:10px; min-width:0;">
@@ -264,8 +286,10 @@ export function renderDataOverview() {
               <span class="badge" style="background:#f8fafc; color:#64748b;">账号: ${u.username}</span>
               <span class="badge" style="background:${u.role === 'admin' ? '#dbeafe' : '#f1f5f9'}; color:${u.role === 'admin' ? '#1d4ed8' : '#475569'}">${u.role === 'admin' ? '管理员' : '普通用户'}</span>
               <span class="badge" style="background:${u.is_team_member ? '#dcfce7' : '#fee2e2'}; color:${u.is_team_member ? '#166534' : '#991b1b'}">${u.is_team_member ? '组员' : '编外'}</span>
+              ${Array.isArray(u.allowed_tabs) && u.allowed_tabs.length ? `<span class="badge" style="background:#eef2ff; color:#4338ca;">页面权限 ${u.allowed_tabs.length} 项</span>` : ''}
             </div>
-            <div class="row" style="justify-content:flex-end; gap:8px; margin:0; flex-wrap:wrap;">
+            <div class="row" style="justify-content:flex-end; gap:8px; margin:0; flex-wrap:wrap; ${isAdmin ? '' : 'display:none;'}">
+              <button class="secondary" onclick="openUserTabPermissionModal(${u.id}, '${safeUsername}', decodeURIComponent('${safeAllowedTabs}'))">页面权限</button>
               <button class="secondary" onclick="renameUserDisplayName(${u.id}, '${safeDisplayName}', '${safeUsername}')">重命名</button>
               <button onclick="toggleRole(${u.id},'${u.role}')">设为${u.role === 'admin' ? '普通用户' : '管理员'}</button>
               <button class="secondary" onclick="toggleTeamMember(${u.id}, ${u.is_team_member ? false : true})">${u.is_team_member ? '设为编外人员' : '设为组员'}</button>
@@ -313,7 +337,12 @@ export function renderDataOverview() {
     const majorMinors = minors.filter((m) => m.parent_id === major.id);
     const reqs = (data.requirements || []).filter((r) => r.major_version_id === major.id && activeMajorIds.has(Number(r.major_version_id)));
     const majorOpen = isMajorExpanded(major.id);
-    let minorHtml = majorMinors.map((m) => `<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-right:8px;">🏷️ ${m.version_no} <a href="javascript:void(0)" title="编辑" onclick="editVersion(${m.id},'${m.version_no}','minor',${major.id})" style="color:#3b82f6;margin-left:4px;text-decoration:none;">✎</a><a href="javascript:void(0)" title="删除" onclick="removeVersion(${m.id})" style="color:#ef4444;margin-left:2px;text-decoration:none;">×</a></span>`).join('');
+    let minorHtml = majorMinors.map((m) => {
+      const actionHtml = isAdmin
+        ? ` <a href="javascript:void(0)" title="编辑" onclick="editVersion(${m.id},'${m.version_no}','minor',${major.id})" style="color:#3b82f6;margin-left:4px;text-decoration:none;">✎</a><a href="javascript:void(0)" title="删除" onclick="removeVersion(${m.id})" style="color:#ef4444;margin-left:2px;text-decoration:none;">×</a>`
+        : '';
+      return `<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-right:8px;">🏷️ ${m.version_no}${actionHtml}</span>`;
+    }).join('');
     if (!minorHtml) minorHtml = '<span class="muted" style="font-size:13px;">暂无发包记录</span>';
     let reqHtml = reqs.map((req) => {
       const reqBugs = (data.bugs || []).filter((b) => b.requirement_id === req.id);
@@ -325,20 +354,35 @@ export function renderDataOverview() {
         : '';
       const casesListHtml = (req.case_ids || []).map((cId) => {
         const relatedBugs = caseBugs.filter((b) => b.source_ref === cId);
-        let bHtml = relatedBugs.map((b) => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 关联 Bug: ${renderBugLink(b)} <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="openAuditTimelineModal('bug', ${b.id}, 'Bug 时间线')">🕓</button><button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button></div>`).join('');
+        let bHtml = relatedBugs.map((b) => {
+          const actions = isAdmin
+            ? `<button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button>`
+            : '';
+          return `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 关联 Bug: ${renderBugLink(b)} <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="openAuditTimelineModal('bug', ${b.id}, 'Bug 时间线')">🕓</button>${actions}</div>`;
+        }).join('');
         if (!bHtml) bHtml = '<div style="margin-left:24px; color:#10b981; font-size:13px; margin-top:4px;">↳ ✓ 完美通过，无关联Bug</div>';
         const caseObj = (req.test_cases || []).find((x) => String(x.zentao_case_id) === String(cId));
         return `<div style="margin-top:12px;">🧪 <b>用例 [${caseObj ? renderCaseLink(caseObj) : cId}]</b> ${bHtml}</div>`;
       }).join('');
-      const freeBugsHtml = freeBugs.map((b) => `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 自由 Bug: ${renderBugLink(b)} <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="openAuditTimelineModal('bug', ${b.id}, 'Bug 时间线')">🕓</button><button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button></div>`).join('');
+      const freeBugsHtml = freeBugs.map((b) => {
+        const actions = isAdmin
+          ? `<button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button>`
+          : '';
+        return `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 自由 Bug: ${renderBugLink(b)} <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="openAuditTimelineModal('bug', ${b.id}, 'Bug 时间线')">🕓</button>${actions}</div>`;
+      }).join('');
+      const reqActionButtons = isAdmin
+        ? `
+            <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); editReq(${req.id},'${req.zentao_req_id}','${req.title}',${major.id})">编辑</button>
+            <button class="danger" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); removeReq(${req.id})">删除</button>
+          `
+        : '';
       return `
       <div style="border:1px solid #e2e8f0; border-radius:6px; margin-bottom:12px; background:#fff;">
         <div style="padding:10px 12px; cursor:pointer; background:#f8fafc; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;" onclick="document.getElementById('req_body_${req.id}').classList.toggle('hidden')">
           <span style="font-size:14px;">📄 <b>${req.zentao_req_id}</b> ${req.title}</span>
           <span>
             <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); openAuditTimelineModal('requirement', ${req.id}, '需求时间线')">时间线</button>
-            <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); editReq(${req.id},'${req.zentao_req_id}','${req.title}',${major.id})">编辑</button>
-            <button class="danger" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); removeReq(${req.id})">删除</button>
+            ${reqActionButtons}
           </span>
         </div>
         <div id="req_body_${req.id}" class="hidden" style="padding:12px; background:#fff;">
@@ -361,14 +405,17 @@ export function renderDataOverview() {
       </div>`;
     }).join('');
     if (!reqHtml) reqHtml = '<div class="muted" style="font-size:13px;">暂无下辖需求</div>';
+    const majorActionButtons = isAdmin
+      ? `
+          <button class="secondary" onclick="event.stopPropagation(); editVersion(${major.id},'${major.version_no}','major',null)">编辑版本</button>
+          <button class="danger" onclick="event.stopPropagation(); removeVersion(${major.id})">删除整体</button>
+        `
+      : '';
     treeHtml += `
     <div style="border:2px solid #cbd5e1; border-radius:8px; margin-bottom:16px; background:#fff; overflow:hidden;">
       <div style="padding:12px 16px; background:#f1f5f9; border-bottom:1px solid #cbd5e1; cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="toggleMajorBody(${major.id})">
         <span style="font-size:16px; font-weight:bold; color:#0f172a;">📦 大版本：${major.version_no}</span>
-        <span>
-          <button class="secondary" onclick="event.stopPropagation(); editVersion(${major.id},'${major.version_no}','major',null)">编辑版本</button>
-          <button class="danger" onclick="event.stopPropagation(); removeVersion(${major.id})">删除整体</button>
-        </span>
+        <span>${majorActionButtons}</span>
       </div>
       <div id="major_body_${major.id}" class="${majorOpen ? '' : 'hidden'}" style="padding:16px; background:#f8fafc;">
         ${state.dataViewState.showVersions ? `<div style="margin-bottom:20px; padding-bottom:12px; border-bottom:1px dashed #cbd5e1;">
@@ -443,6 +490,83 @@ export async function removeUser(userId, username) {
   }
 }
 
+function ensureUserTabPermissionModal() {
+  let modal = document.getElementById('userTabPermissionModal');
+  if (modal) return modal;
+  modal = document.createElement('div');
+  modal.id = 'userTabPermissionModal';
+  modal.className = 'hidden';
+  modal.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;';
+  modal.innerHTML = `
+    <div style="width:min(640px, 94vw); max-height:90vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:22px;">
+      <div class="row" style="justify-content:space-between; align-items:center; margin:0 0 14px;">
+        <h3 id="userTabPermissionTitle" style="margin:0; color:#0f172a;">页面权限</h3>
+        <button class="secondary" onclick="closeUserTabPermissionModal()">关闭</button>
+      </div>
+      <div id="userTabPermissionOptions" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px;"></div>
+      <div class="row" style="justify-content:flex-end; margin:18px 0 0;">
+        <button class="secondary" onclick="closeUserTabPermissionModal()">取消</button>
+        <button onclick="saveUserTabPermissions()">保存权限</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  return modal;
+}
+
+export function openUserTabPermissionModal(userId, username, allowedTabs = []) {
+  const modal = ensureUserTabPermissionModal();
+  modal.dataset.userId = String(userId);
+  const title = document.getElementById('userTabPermissionTitle');
+  if (title) title.innerText = `页面权限：${username}`;
+  const options = document.getElementById('userTabPermissionOptions');
+  let normalizedTabs = allowedTabs;
+  if (typeof normalizedTabs === 'string') {
+    try {
+      normalizedTabs = JSON.parse(normalizedTabs);
+    } catch {
+      normalizedTabs = [];
+    }
+  }
+  const current = new Set(Array.isArray(normalizedTabs) ? normalizedTabs : []);
+  if (options) {
+    options.innerHTML = TAB_PERMISSION_OPTIONS.map((item) => `
+      <label style="display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc;">
+        <input type="checkbox" value="${item.key}" ${current.has(item.key) ? 'checked' : ''}>
+        <span>${item.label}</span>
+      </label>`).join('');
+  }
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+}
+
+export function closeUserTabPermissionModal() {
+  const modal = document.getElementById('userTabPermissionModal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.style.display = 'none';
+}
+
+export async function saveUserTabPermissions() {
+  const modal = document.getElementById('userTabPermissionModal');
+  if (!modal) return;
+  const userId = Number(modal.dataset.userId || 0);
+  if (!userId) return;
+  const allowedTabs = Array.from(modal.querySelectorAll('input[type="checkbox"]:checked')).map((el) => el.value);
+  try {
+    await api(`/users/${userId}/tab-permissions`, {
+      method: 'PUT',
+      headers: window.H,
+      body: { allowed_tabs: allowedTabs },
+    });
+    window.showMessage && window.showMessage('页面权限已更新', 'success');
+    closeUserTabPermissionModal();
+    await loadDataOverview();
+    if (typeof window.loadUsers === 'function') await window.loadUsers();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '页面权限更新失败', 'error');
+  }
+}
+
 export async function renameUserDisplayName(userId, currentDisplayName, username) {
   const next = prompt(`请输入用户【${username}】的新显示名称：`, currentDisplayName || username);
   if (!next) return;
@@ -512,6 +636,65 @@ export async function editBug(id, b) {
   await loadDataOverview();
 }
 
+export async function loadZtProjects() {
+  const sel = document.getElementById('ztProjectSelect');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">-- 加载中... --</option>';
+  try {
+    const res = await api('/zentao/projects');
+    const projects = await res.json();
+    if (!Array.isArray(projects) || projects.length === 0) {
+      sel.innerHTML = '<option value="">-- 暂无可用项目（请先绑定禅道账号）--</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">请选择禅道项目</option>' + projects.map((p) => `<option value="${p.id}">${p.name}</option>`).join('');
+  } catch (err) {
+    sel.innerHTML = '<option value="">-- 加载失败 --</option>';
+    window.showMessage && window.showMessage(err.message || '加载禅道项目失败', 'error');
+  }
+}
+
+export async function syncZtVersions() {
+  const softwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+  if (!softwareId) {
+    window.showMessage && window.showMessage('请先在顶部选择软件产品', 'error');
+    return;
+  }
+  const projectId = Number(document.getElementById('ztProjectSelect')?.value || 0);
+  if (!projectId) {
+    window.showMessage && window.showMessage('请选择禅道项目', 'error');
+    return;
+  }
+  const syncMinor = document.getElementById('ztSyncMinorSelect')?.value !== '0';
+  const btn = document.getElementById('ztSyncVersionsBtn');
+  const resultEl = document.getElementById('ztSyncResult');
+  if (btn) { btn.disabled = true; btn.textContent = '同步中...'; }
+  if (resultEl) { resultEl.style.display = 'none'; resultEl.textContent = ''; }
+  try {
+    const res = await api('/zentao/sync-versions', {
+      method: 'POST',
+      headers: window.H,
+      body: { software_id: softwareId, zentao_project_id: projectId, sync_minor: syncMinor },
+    });
+    const data = await res.json();
+    if (resultEl) {
+      resultEl.style.display = 'block';
+      resultEl.innerHTML = `<span style="color:#16a34a; font-weight:bold;">✅ 同步完成</span>　${data.summary || ''}`;
+    }
+    window.showMessage && window.showMessage('版本同步完成：' + (data.summary || ''), 'success');
+    await window.loadVersions();
+    await loadDataOverview();
+  } catch (err) {
+    if (resultEl) {
+      resultEl.style.display = 'block';
+      resultEl.innerHTML = `<span style="color:#dc2626;">❌ 同步失败：${err.message || '未知错误'}</span>`;
+    }
+    window.showMessage && window.showMessage(err.message || '同步失败', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '开始同步'; }
+  }
+}
+
 window.OmniQADataTab = {
   createSoftware,
   createVersion,
@@ -538,6 +721,16 @@ window.OmniQADataTab = {
   editReq,
   editBug,
   toggleMajorBody,
+  loadZtProjects,
+  syncZtVersions,
+  openUserTabPermissionModal,
+  closeUserTabPermissionModal,
+  saveUserTabPermissions,
 };
 
 window.toggleMajorBody = toggleMajorBody;
+window.loadZtProjects = loadZtProjects;
+window.syncZtVersions = syncZtVersions;
+window.openUserTabPermissionModal = openUserTabPermissionModal;
+window.closeUserTabPermissionModal = closeUserTabPermissionModal;
+window.saveUserTabPermissions = saveUserTabPermissions;

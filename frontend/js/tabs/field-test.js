@@ -297,12 +297,15 @@ export async function openFieldTestDetail(recordId) {
   try {
     const row = await (await api(`/field-tests/${recordId}`)).json();
     const canEdit = canEditRow(row);
-    const bugHtml = (row.bugs || []).map((b) => `
+    const bugHtml = (row.bugs || []).map((b) => {
+      const ztBugId = (b.bug_id || '').replace(/\D/g, '');
+      const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:4px;"></span>` : '';
+      return `
       <span class="badge" style="margin-right:6px; margin-bottom:6px; display:inline-flex; align-items:center;">
-        ${renderBugLink(b)}
+        ${renderBugLink(b)}${ztSlot}
         ${canEdit ? `<a href="javascript:void(0)" onclick="unlinkFieldTestBug(${row.id}, ${b.id})" style="margin-left:6px; color:#dc2626; text-decoration:none;">×</a>` : ''}
       </span>
-    `).join('') || '<span class="muted">暂无关联 Bug</span>';
+    `}).join('') || '<span class="muted">暂无关联 Bug</span>';
 
     const body = document.getElementById('fieldTestDetailBody');
     const title = document.getElementById('fieldTestDetailTitle');
@@ -342,6 +345,7 @@ export async function openFieldTestDetail(recordId) {
       `;
     }
     openDetailPanel();
+    if (body) window.OmniQAZentao?.hydrateContainer(body);
     if (canEdit) {
       await searchFieldTestBugOptions(row.id, '');
     }

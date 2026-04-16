@@ -45,6 +45,9 @@ def ensure_user_schema_compat(db: Session) -> None:
     if "display_name" not in cols:
         db.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(80)"))
         db.commit()
+    if "tab_permissions" not in cols:
+        db.execute(text("ALTER TABLE users ADD COLUMN tab_permissions TEXT"))
+        db.commit()
     # 历史用户默认显示名回填为账号名
     db.execute(text("UPDATE users SET display_name = username WHERE display_name IS NULL OR TRIM(display_name) = ''"))
     db.commit()
@@ -96,6 +99,15 @@ def ensure_requirement_schema_compat(db: Session) -> None:
         db.commit()
     if "test_notes_updated_by_id" not in req_cols:
         db.execute(text("ALTER TABLE requirements ADD COLUMN test_notes_updated_by_id INTEGER"))
+        db.commit()
+    if "zentao_story_id" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN zentao_story_id INTEGER"))
+        db.commit()
+    if "zentao_plan_id" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN zentao_plan_id INTEGER"))
+        db.commit()
+    if "zentao_plan_title_cache" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN zentao_plan_title_cache VARCHAR(255)"))
         db.commit()
 
     idx_rows = db.execute(text("PRAGMA index_list(requirements)")).fetchall()
@@ -184,6 +196,17 @@ def ensure_requirement_schema_compat(db: Session) -> None:
         db.commit()
 
 
+def ensure_stage5_schema_compat(db: Session) -> None:
+    rows = db.execute(text("PRAGMA table_info(bug_stage5_records)")).fetchall()
+    cols = {r[1] for r in rows}
+    if "source" not in cols:
+        db.execute(text("ALTER TABLE bug_stage5_records ADD COLUMN source VARCHAR(20) NOT NULL DEFAULT 'manual'"))
+        db.commit()
+    if "comment" not in cols:
+        db.execute(text("ALTER TABLE bug_stage5_records ADD COLUMN comment VARCHAR"))
+        db.commit()
+
+
 def ensure_bug_schema_compat(db: Session) -> None:
     rows = db.execute(text("PRAGMA table_info(bug_tracking)")).fetchall()
     cols = {r[1] for r in rows}
@@ -214,6 +237,15 @@ def ensure_bug_schema_compat(db: Session) -> None:
         "zentao_sync_status": "VARCHAR(40)",
         "zentao_sync_message": "TEXT",
         "zentao_raw_payload": "TEXT",
+        "last_zentao_synced_at": "DATETIME",
+        "zentao_live_status": "VARCHAR(40)",
+        "zentao_deleted": "BOOLEAN NOT NULL DEFAULT 0",
+        "zentao_closed_by_account": "VARCHAR(100)",
+        "zentao_closed_by_name": "VARCHAR(100)",
+        "zentao_close_date": "DATETIME",
+        "zentao_close_comment": "TEXT",
+        "zentao_assigned_to_account": "VARCHAR(100)",
+        "zentao_assigned_to_name": "VARCHAR(100)",
     }
     for col, sql_type in column_defs.items():
         if col not in cols:

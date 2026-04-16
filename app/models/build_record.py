@@ -26,5 +26,12 @@ class BuildRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, index=True)
 
+    # Auto-archive status: set after upsert_report() attempts to create a minor version
+    # Values: "ok" | "skipped" | "no_parent" | "empty_version_name" | "not_success" | "error"
+    auto_archive_status: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    # The minor version ID that was created or found during auto-archive
+    auto_archive_minor_version_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    auto_archive_message: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
 
 __all__ = ["BuildRecord"]

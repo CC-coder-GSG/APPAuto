@@ -33,16 +33,31 @@ class Stage5IssueCreatePayload(BaseModel):
     minor_version_id: Optional[int] = None
 
 
+class Stage5ZentaoSyncPayload(BaseModel):
+    major_version_id: int
+    force: bool = False
+
+
 @router.get("/stage5/overview")
-def stage5_overview(major_version_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def stage5_overview(major_version_id: int, software_id: Optional[int] = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     service = Stage5Service(db)
-    return service.overview(major_version_id, current_user)
+    return service.overview(major_version_id, current_user, software_id=software_id)
 
 
 @router.get("/stage5/search-options")
 def get_stage5_search_options(major_version_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     service = Stage5Service(db)
     return service.search_options(major_version_id)
+
+
+@router.post("/stage5/sync-zentao-bugs")
+def sync_stage5_zentao_bugs(payload: Stage5ZentaoSyncPayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    service = Stage5Service(db)
+    return service.sync_zentao_major_bugs(
+        major_version_id=payload.major_version_id,
+        current_user=current_user,
+        force=payload.force,
+    )
 
 
 @router.put("/stage5/bugs/{bug_track_id}/result")

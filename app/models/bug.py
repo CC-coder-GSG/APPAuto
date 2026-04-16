@@ -61,6 +61,26 @@ class BugTracking(Base):
     zentao_sync_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     zentao_sync_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     zentao_raw_payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Zentao anchor fields — supplemental linkage for API hydration
+    zentao_story_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    zentao_build_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    zentao_release_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    zentao_testtask_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_zentao_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_zentao_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Live status cached from last sync or hydration: "active" / "resolved" / "closed"
+    zentao_live_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    zentao_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Cached closer info from Zentao
+    zentao_closed_by_account: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    zentao_closed_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    zentao_close_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    zentao_close_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Cached assignee info
+    zentao_assigned_to_account: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    zentao_assigned_to_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # Remote last-edited timestamp from Zentao
+    zentao_remote_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

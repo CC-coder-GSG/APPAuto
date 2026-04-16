@@ -18,6 +18,9 @@ class BugStage5Record(Base):
     test_done = Column(Boolean, default=False)
     newly_found_bug_id = Column(String, nullable=True)
     resolution = Column(String, default="fixed")
+    # 'manual' = user checked the box themselves; 'zentao_sync' = auto-created by Zentao sync
+    source = Column(String(20), default="manual", nullable=False, server_default="manual")
+    comment = Column(String, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     bug = relationship("BugTracking", back_populates="stage5_records")

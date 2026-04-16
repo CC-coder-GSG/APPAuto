@@ -44,9 +44,14 @@ export function renderBugLink(bug) {
   const bugId = escapeHtml(bug?.bug_id || '-');
   const href = toAbsoluteUrl(bug?.zentao_bug_url);
   const title = escapeHtml(bug?.zentao_bug_title || bug?.bug_title || '');
+  const numericId = String(bug?.bug_id || '').replace(/\D/g, '');
+  // When no URL is available locally, render with qa-bug-id-nohref so the
+  // hydrator can upgrade this span to a link after fetching the URL from Zentao.
   const link = href
     ? `<a class="qa-ext-link" href="${href}" target="_blank" rel="noopener noreferrer">${bugId}</a>`
-    : `<span>${bugId}</span>`;
+    : numericId
+      ? `<span class="qa-bug-id-nohref" data-zt-bug-id="${numericId}">${bugId}</span>`
+      : `<span>${bugId}</span>`;
   const tip = title ? `<span class="qa-title-tip" title="${title}">ⓘ</span>` : '';
   return `${link}${tip}`;
 }

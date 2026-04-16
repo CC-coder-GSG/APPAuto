@@ -170,6 +170,7 @@
         <button onclick="runOnlineApiCheck()">🌐 探测</button>
         <button onclick="runFullHealthCheck()">🧭 体检</button>
         <button onclick="changeMyPassword()">🔐 密码</button>
+        <button id="zentaoBindingBtn" onclick="window.OmniQAZentaoBinding?.open()" title="管理禅道账号绑定">🔌 禅道<span id="ztSyncDot" data-state="none" title=""></span></button>
         <button class="danger-btn" onclick="logout()">退出</button>
       </div>
     </div>
@@ -202,11 +203,11 @@
   </div>
 
   <section id="tab-assign" class="hidden card">
-    <h2>任务分配台（仅管理员）</h2>
+    <h2>任务分配台</h2>
     <details id="assignCreateBlock" open style="border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; background:#fff;">
       <summary style="cursor:pointer; font-weight:700; color:#0f172a; list-style:none;">任务创建台</summary>
       <div style="margin-top:10px;">
-        <div class="row"><label>大版本</label><select id="assignMajorSelect" onchange="loadAssignBoard()"></select><button onclick="loadAssignBoard()">加载</button><button onclick="publishAssign()">一键发布（更新分配）</button></div>
+      <div class="row"><label>大版本</label><select id="assignMajorSelect" onchange="loadAssignBoard()"></select><button onclick="loadAssignBoard()">加载</button><button class="secondary" onclick="syncAssignRequirementsFromZentao()">同步禅道需求</button><button onclick="publishAssign()">一键发布（更新分配）</button></div>
         <table><thead><tr><th>需求</th><th>负责人</th></tr></thead><tbody id="assignTable"></tbody></table>
       </div>
     </details>
@@ -352,11 +353,15 @@
 
     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;">
       <h3>新建反馈</h3>
-      <div class="row" style="align-items:flex-end; flex-wrap:wrap;">
-        <div class="prefix-input"><span>f#</span><input id="newFeedbackNoNum" inputmode="numeric" oninput="digitsOnly(this)" placeholder="仅填写数字，例如 12"></div>
-        <textarea id="newFeedbackSummary" rows="2" placeholder="反馈概览（必填）" style="min-width:320px;"></textarea>
-        <input id="newFeedbackFiles" type="file" multiple>
-        <button onclick="createFeedback()">提交反馈</button>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <div class="row" style="align-items:center; flex-wrap:wrap;">
+          <div class="prefix-input"><span>f#</span><input id="newFeedbackNoNum" inputmode="numeric" oninput="digitsOnly(this)" placeholder="仅填写数字，例如 12"></div>
+          <input id="newFeedbackSummary" placeholder="反馈概览（必填）" style="min-width:360px; flex:1; padding:10px 12px; border:1px solid #cbd5e1; border-radius:10px;">
+        </div>
+        <div class="row" style="align-items:center; flex-wrap:wrap;">
+          <input id="newFeedbackFiles" type="file" multiple>
+          <button onclick="createFeedback()">提交反馈</button>
+        </div>
       </div>
     </div>
 
@@ -402,6 +407,7 @@
         <span style="font-weight: bold; color: #334155; margin-right: 8px;">🎯 提取Bug池:</span>
         <label>大版本</label><select id="s5MajorSelect"></select>
         <button onclick="loadStage5()">加载全景大盘</button>
+        <button class="secondary" onclick="syncStage5FromZentao({ force: true })">强制同步禅道并刷新</button>
       </div>
       <div class="row" style="border-top: 1px dashed #cbd5e1; padding-top: 12px;">
         <span style="font-weight: bold; color: #334155; margin-right: 8px;">🚀 回归发包环境:</span>
@@ -419,8 +425,20 @@
       </div>
     </div>
 
+    <div id="s5PagerBar" class="hidden" style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin: 0 0 12px; padding: 12px 16px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px;">
+      <div id="s5PagerSummary" style="font-size:13px; color:#475569;">共 0 条</div>
+      <div class="row" style="margin:0; gap:10px; align-items:center;">
+        <label style="margin:0; color:#334155;">每页显示</label>
+        <input id="s5PageSizeInput" type="number" min="1" max="500" value="20" style="width:88px; padding:6px 8px;">
+        <button class="secondary" onclick="applyS5PageSize()">应用</button>
+        <button id="s5PrevPageBtn" class="secondary" onclick="prevS5Page()">上一页</button>
+        <span id="s5PageText" style="min-width:92px; text-align:center; color:#334155;">第 1 / 1 页</span>
+        <button id="s5NextPageBtn" class="secondary" onclick="nextS5Page()">下一页</button>
+      </div>
+    </div>
+
     <table id="s5TableContainer" class="hidden">
-      <thead><tr><th style="width:260px">Bug 编号 (来源)</th><th>Bug 标题</th><th style="width:420px">验证操作</th></tr></thead>
+      <thead id="s5TableHead"><tr><th style="width:260px">Bug 编号 (来源)</th><th>Bug 标题</th><th style="width:420px">验证操作</th></tr></thead>
       <tbody id="s5Table"></tbody>
     </table>
     <h3>➕ 新增问题</h3>
@@ -1043,7 +1061,11 @@
   </section>
 
   <section id="tab-data" class="hidden card">
-    <h2>数据管理台（仅管理员）</h2>
+    <h2>数据管理台</h2>
+    <div id="dataReadonlyHint" class="hidden muted" style="margin-bottom:12px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc;">
+      当前账号为只读访问，可查看数据与日志，但不能执行创建、编辑、删除等管理操作。
+    </div>
+    <div id="dataAdminControls">
     <div class="card">
       <h3>新增与导入需求</h3>
       <div class="row">
@@ -1086,6 +1108,23 @@
     </div>
 
     <div class="card">
+      <h3>从禅道同步版本</h3>
+      <div class="row" style="align-items: flex-end; flex-wrap: wrap; gap: 8px;">
+        <div>
+          <label style="font-size:12px; color:#64748b; display:block; margin-bottom:4px;">禅道项目</label>
+          <select id="ztProjectSelect" style="min-width:180px;"><option value="">-- 加载中... --</option></select>
+        </div>
+        <div>
+          <label style="font-size:12px; color:#64748b; display:block; margin-bottom:4px;">同步子版本</label>
+          <select id="ztSyncMinorSelect"><option value="1">是</option><option value="0">否</option></select>
+        </div>
+        <button id="ztLoadProjectsBtn" class="secondary" onclick="loadZtProjects()">刷新项目列表</button>
+        <button id="ztSyncVersionsBtn" onclick="syncZtVersions()">开始同步</button>
+      </div>
+      <div id="ztSyncResult" style="margin-top:10px; font-size:13px; color:#475569; display:none;"></div>
+    </div>
+
+    <div class="card">
       <h3>新增用户</h3>
       <div class="row">
         <input id="createUsername" placeholder="用户名">
@@ -1093,6 +1132,7 @@
         <select id="createUserRole"><option value="user">普通用户</option><option value="admin">管理员</option></select>
         <button onclick="createUser()">创建用户</button>
       </div>
+    </div>
     </div>
 
     <div class="card">
@@ -1140,7 +1180,7 @@
       </div>
     </details>
 
-    <p class="warn">危险操作：删除大版本会级联删除其下需求、用例和Bug。</p>
+    <p id="dataDangerHint" class="warn">危险操作：删除大版本会级联删除其下需求、用例和Bug。</p>
     <div class="row" style="justify-content: space-between; align-items: center; margin-top: 24px; margin-bottom: 12px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">
       <h3 style="margin: 0;">🌳 质量资产大盘 (树形追溯)</h3>
       <div>
@@ -1171,6 +1211,130 @@
         <button class="secondary" onclick="closeBuildRecordLogModal()">关闭</button>
       </div>
       <pre id="buildRecordLogBody" style="white-space:pre-wrap; word-break:break-word; margin:0; color:#334155; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;">暂无日志内容</pre>
+    </div>
+  </div>
+
+  <!-- Stage5 Reactivate Bug Modal -->
+  <div id="s5ReactivateModal" class="hidden" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
+    <div style="width:min(520px, 95vw); max-height:90vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <h3 style="margin:0; color:#0f172a; font-size:16px;">🔄 重新激活禅道 Bug</h3>
+        <button class="secondary" onclick="closeS5ReactivateModal()" style="padding:4px 10px; font-size:13px;">✕ 关闭</button>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:6px;">重新指派给</label>
+        <div id="s5ReactivateUserSelectContainer">
+          <div style="color:#94a3b8; font-size:13px;">加载候选人中...</div>
+        </div>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:6px;">影响版本（可选）</label>
+        <select id="s5ReactivateBuildSelect" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;">
+          <option value="">-- 选择影响版本（可选）--</option>
+        </select>
+      </div>
+      <div style="margin-bottom:20px;">
+        <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:6px;">重新激活说明</label>
+        <textarea id="s5ReactivateComment" placeholder="填写重新激活的原因（将同步写入禅道备注）" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px; resize:vertical; min-height:60px;"></textarea>
+      </div>
+      <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <button class="secondary" onclick="closeS5ReactivateModal()">取消</button>
+        <button onclick="submitS5Reactivate()">确认重新激活</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stage5 Assign Bug Modal -->
+  <div id="s5AssignModal" class="hidden" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
+    <div style="width:min(480px, 95vw); max-height:90vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <h3 style="margin:0; color:#0f172a; font-size:16px;">🙋 重新指派禅道 Bug</h3>
+        <button class="secondary" onclick="closeS5AssignModal()" style="padding:4px 10px; font-size:13px;">✕ 关闭</button>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:6px;">指派给</label>
+        <div id="s5AssignUserSelectContainer">
+          <div style="color:#94a3b8; font-size:13px;">加载候选人中...</div>
+        </div>
+      </div>
+      <div style="margin-bottom:20px;">
+        <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:6px;">备注（可选）</label>
+        <textarea id="s5AssignComment" placeholder="指派说明（可选）" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px; resize:vertical; min-height:50px;"></textarea>
+      </div>
+      <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <button class="secondary" onclick="closeS5AssignModal()">取消</button>
+        <button onclick="submitS5Assign()">确认指派</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Zentao Account Binding Modal -->
+  <div id="zentaoBindingModal" class="hidden" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
+    <div style="width:min(520px, 95vw); max-height:90vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:0;">
+
+      <!-- Header -->
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:18px 20px 14px; border-bottom:1px solid #e2e8f0;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:22px;">🔌</span>
+          <div>
+            <h3 style="margin:0; color:#0f172a; font-size:16px;">禅道账号绑定</h3>
+            <p style="margin:2px 0 0; font-size:12px; color:#64748b;">绑定后系统可实时读取禅道数据</p>
+          </div>
+        </div>
+        <button id="ztCloseBtn" class="secondary" style="padding:6px 14px;">关闭</button>
+      </div>
+
+      <div style="padding:18px 20px;">
+
+        <!-- Current binding status -->
+        <div style="margin-bottom:18px;">
+          <p style="margin:0 0 8px; font-size:13px; font-weight:600; color:#475569;">当前绑定状态</p>
+          <div id="ztBindingStatus"></div>
+        </div>
+
+        <!-- Form -->
+        <div style="border-top:1px solid #f1f5f9; padding-top:16px;">
+          <p style="margin:0 0 12px; font-size:13px; font-weight:600; color:#475569;">账号配置</p>
+
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <div>
+              <label style="font-size:12px; font-weight:600; color:#64748b; display:block; margin-bottom:4px;">禅道地址</label>
+              <input id="ztBaseUrl" type="url" placeholder="http://192.168.2.148:81/zentao"
+                style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:7px; font-size:13px; color:#0f172a;">
+            </div>
+            <div>
+              <label style="font-size:12px; font-weight:600; color:#64748b; display:block; margin-bottom:4px;">禅道账号</label>
+              <input id="ztAccount" type="text" placeholder="your_zentao_username" autocomplete="username"
+                style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:7px; font-size:13px; color:#0f172a;">
+            </div>
+            <div>
+              <label style="font-size:12px; font-weight:600; color:#64748b; display:block; margin-bottom:4px;">禅道密码</label>
+              <input id="ztPassword" type="password" placeholder="••••••••" autocomplete="current-password"
+                style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:7px; font-size:13px; color:#0f172a;">
+              <p id="ztPasswordHint" style="display:none; margin:4px 0 0; font-size:11px; color:#94a3b8;">
+                已有密码，留空则保持不变（需重新输入确认）
+              </p>
+            </div>
+          </div>
+
+          <!-- Test connection result -->
+          <p id="ztTestResult" style="margin:10px 0 0; font-size:12px; min-height:16px;"></p>
+        </div>
+
+        <!-- Action buttons -->
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:18px; padding-top:14px; border-top:1px solid #f1f5f9;">
+          <button id="ztSaveBtn" style="flex:1; min-width:100px;">保存绑定</button>
+          <button id="ztTestBtn" class="secondary" style="flex:1; min-width:100px;">测试连接</button>
+          <button id="ztRefreshBtn" class="secondary" style="display:none; flex:1; min-width:100px;">刷新 Token</button>
+          <button id="ztDeleteBtn" class="secondary" style="display:none; color:#dc2626; border-color:#fca5a5; min-width:80px;">删除绑定</button>
+        </div>
+
+        <!-- Security note -->
+        <p style="margin:12px 0 0; font-size:11px; color:#94a3b8; text-align:center;">
+          密码加密存储于服务端，不会明文传输或显示
+        </p>
+
+      </div>
     </div>
   </div>
 
@@ -1210,7 +1374,44 @@ function sourceTypeZh(v){
 }
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
+const ALL_TAB_KEYS=['assign','mine','feedback','retest','stage5','field-test','build-records','zentao-sync','report','activity','data','dispatch'];
+const DEFAULT_ALLOWED_TABS=['mine','feedback','retest','stage5','field-test','zentao-sync','report'];
+function getAllowedTabs(){
+  if(!currentUser) return new Set(DEFAULT_ALLOWED_TABS);
+  if(currentUser.role==='admin') return new Set(ALL_TAB_KEYS);
+  const tabs=Array.isArray(currentUser.allowed_tabs)&&currentUser.allowed_tabs.length?currentUser.allowed_tabs:DEFAULT_ALLOWED_TABS;
+  return new Set(tabs);
+}
+function canAccessTab(name){return getAllowedTabs().has(name)}
+function applyTabVisibility(){
+  const buttonMap={
+    'assign':'tabAssignBtn','mine':'tabMineBtn','feedback':'tabFeedbackBtn','retest':'tabRetestBtn',
+    'stage5':'tabStage5Btn','field-test':'tabFieldTestBtn','build-records':'tabBuildRecordsBtn',
+    'zentao-sync':'tabZentaoSyncBtn','report':'tabReportBtn','activity':'tabActivityBtn',
+    'data':'tabDataBtn','dispatch':'tabDispatchBtn'
+  };
+  ALL_TAB_KEYS.forEach((name)=>{
+    const btn=document.getElementById(buttonMap[name]);
+    if(btn) btn.classList.toggle('hidden', !canAccessTab(name));
+  });
+  if(document.getElementById('reportUserWrap')){
+    document.getElementById('reportUserWrap').classList.toggle('hidden', currentUser?.role!=='admin');
+  }
+}
+function getDefaultVisibleTab(){
+  return ['assign','mine','feedback','retest','stage5','field-test','build-records','zentao-sync','report','activity','data','dispatch']
+    .find((name)=>canAccessTab(name)) || 'mine';
+}
 function showTab(name){
+  if(!canAccessTab(name)){
+    const fallback=getDefaultVisibleTab();
+    if(name!==fallback){
+      window.showMessage&&window.showMessage('当前账号无权限访问该页面','error');
+      name=fallback;
+    }else{
+      return;
+    }
+  }
   ['assign','mine','feedback','retest','stage5','field-test','build-records','zentao-sync','report','activity','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
   document.getElementById('tab-'+name).classList.remove('hidden');
   if(window.OmniQASSE && window.OmniQASSE.runtime && window.OmniQASSE.runtime.counters){
@@ -1221,6 +1422,7 @@ function showTab(name){
   }
   if(name === 'dispatch') { loadDispatchedAll(); }
   if(name === 'data' && !dataOverviewCache) { loadDataOverview().catch(err=>showMessage(err.message||'加载数据管理台失败','error')); }
+  if(name === 'data') { window.loadZtProjects && window.loadZtProjects().catch(()=>{}); }
   if(name === 'mine') { loadMyWorkbench().catch(err=>showMessage(err.message||'加载我的工作台失败','error')); }
   if(name === 'feedback') { loadFeedbackBoard().catch(err=>showMessage(err.message||'加载反馈列表失败','error')); }
   if(name === 'retest') { loadRetest().catch(err=>showMessage(err.message||'加载复测工作台失败','error')); }
@@ -1311,24 +1513,10 @@ async function init(){
 
   await loadSoftwares();
   await loadVersions();
-  document.getElementById('tabZentaoSyncBtn').classList.remove('hidden');
-  if(currentUser.role==='admin'){
-    await loadUsers();
-    document.getElementById('tabAssignBtn').classList.remove('hidden');
-    document.getElementById('tabBuildRecordsBtn').classList.remove('hidden');
-    document.getElementById('tabActivityBtn').classList.remove('hidden');
-    document.getElementById('tabDataBtn').classList.remove('hidden');
-    document.getElementById('tabDispatchBtn').classList.remove('hidden');
-    document.getElementById('reportUserWrap').classList.remove('hidden');
-    fillReportUsers();
-    showTab('assign');
-  }else{
-    document.getElementById('tabAssignBtn').classList.add('hidden');
-    document.getElementById('tabBuildRecordsBtn').classList.add('hidden');
-    document.getElementById('tabActivityBtn').classList.add('hidden');
-    document.getElementById('tabDataBtn').classList.add('hidden');
-    showTab('mine');
-  }
+  await loadUsers();
+  applyTabVisibility();
+  fillReportUsers();
+  showTab(getDefaultVisibleTab());
 }
 
 async function loadUsers(){
@@ -1408,7 +1596,13 @@ async function loadVersions(){
 }
 function fillVersionSelects(){
   const majors=versions.filter(v=>v.version_type==='major');
-  ['mineMajorSelect','retestMajorSelect','s5MajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
+  ['mineMajorSelect','retestMajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
+  const s5MajorEl=document.getElementById('s5MajorSelect');
+  if(s5MajorEl){
+    s5MajorEl.innerHTML = majors.length
+      ? "<option value='0'>全部版本</option>" + majors.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('')
+      : "<option value='0'>全部版本</option>";
+  }
   fillSelect('linkSourceMajorSelect', majors);
   const assignMajorEl=document.getElementById('assignMajorSelect');
   if(assignMajorEl){
@@ -1442,7 +1636,7 @@ function fillMinorSelectByMajor(majorSelectId, minorSelectId){
   const minorEl=document.getElementById(minorSelectId);
   if(!majorEl||!minorEl) return;
   const majorId=Number(majorEl.value||0);
-  if(majorSelectId==='feedbackMajorSelect' && majorId===0){
+  if((majorSelectId==='feedbackMajorSelect' || majorSelectId==='s5MajorSelect') && majorId===0){
     const allMinors=versions.filter(v=>v.version_type==='minor');
     if(allMinors.length===0){
       minorEl.innerHTML="<option value=''>暂无子版本</option>";

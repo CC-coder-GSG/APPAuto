@@ -66,8 +66,10 @@ export async function loadRetest() {
     const caseHtml = (req.test_cases || []).map((c) => {
       const bugs = (c.bugs || []).map((b) => {
         if (b.is_retest_failed) evidenceCount++;
+        const ztBugId = (b.bug_id || '').replace(/\D/g, '');
+        const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
         return `<div style="margin-top:4px;">
-          <span class="badge" style="background:#fef2f2; color:#dc2626; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>
+          <span class="badge" style="background:#fef2f2; color:#dc2626; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>
           <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
         </div>`;
       }).join('');
@@ -79,19 +81,23 @@ export async function loadRetest() {
 
     const freeBugHtml = (req.free_bugs || []).map((b) => {
       if (b.is_retest_failed) evidenceCount++;
+      const ztBugId = (b.bug_id || '').replace(/\D/g, '');
+      const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
       return `<div style="margin-bottom:6px;">
-      <span class="badge" style="background:#fff7ed; color:#ea580c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>
+      <span class="badge" style="background:#fff7ed; color:#ea580c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>
       <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
     </div>`;
     }).join('');
 
     const retestBugHtml = (req.retest_bugs || []).map((b) => {
       if (!b.closed) evidenceCount++;
+      const ztBugId = (b.bug_id || '').replace(/\D/g, '');
+      const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
       const closedTag = b.closed
         ? '<span class="badge" style="background:#dcfce7; color:#166534; margin-left:6px; padding:1px 6px;">✅已闭环</span>'
         : '<span class="badge" style="background:#fee2e2; color:#b91c1c; margin-left:6px; padding:1px 6px;">⏳未闭环</span>';
       return `<div style="margin-bottom:6px;">
-      <span class="badge" style="background:#fee2e2; color:#b91c1c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)} <span style="color:#94a3b8;font-size:11px;">(复测新增)</span></span>${closedTag}
+      <span class="badge" style="background:#fee2e2; color:#b91c1c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(复测新增)</span></span>${closedTag}
     </div>`;
     }).join('');
 
@@ -143,6 +149,7 @@ export async function loadRetest() {
       window.OmniQASSE.mountAttention(el, { scope: 'retest_requirement', key: el.getAttribute('data-req-id'), tone: 'purple', hoverDelayMs: 420 });
     });
   }
+  window.OmniQAZentao?.hydrateContainer(container);
 }
 
 export async function setRetest(id, passed, hasEvidence) {

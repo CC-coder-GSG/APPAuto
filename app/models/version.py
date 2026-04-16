@@ -21,6 +21,20 @@ class Version(Base):
     software_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
+    # Zentao anchor fields — applicable to both MAJOR and MINOR versions
+    # MAJOR: zentao_project_id / zentao_execution_id are primary anchors
+    # MINOR: zentao_build_id / zentao_testtask_id / zentao_release_id are additionally populated
+    zentao_project_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    zentao_project_name_cache: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    zentao_execution_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    zentao_execution_name_cache: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    zentao_build_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    zentao_build_name_cache: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    zentao_testtask_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    zentao_testtask_name_cache: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    zentao_release_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    zentao_release_name_cache: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     parent = relationship("Version", remote_side=[id], back_populates="children")
     children = relationship("Version", back_populates="parent", cascade="all, delete-orphan")
     requirements = relationship("Requirement", back_populates="major_version", cascade="all, delete-orphan", foreign_keys="Requirement.major_version_id")

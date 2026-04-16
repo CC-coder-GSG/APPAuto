@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     wecom_webhook_url: str = Field(default_factory=lambda: os.getenv('APP_WECOM_WEBHOOK_URL', os.getenv('WECHAT_WEBHOOK_URL', '')))
     scheduler_timezone: str = Field(default_factory=lambda: os.getenv('APP_SCHEDULER_TIMEZONE', os.getenv('SCHEDULER_TIMEZONE', 'Asia/Shanghai')))
 
+    # Zentao API direct integration
+    # Used to encrypt/decrypt per-user Zentao passwords stored in user_zentao_bindings.
+    # Must be a URL-safe base64-encoded 32-byte key (Fernet key).
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # If not set, a deterministic fallback derived from secret_key is used (development only).
+    zentao_binding_secret: str = Field(default_factory=lambda: os.getenv('APP_ZENTAO_BINDING_SECRET', os.getenv('ZENTAO_BINDING_SECRET', '')))
+
     # Zentao browser sync integration
     zentao_sync_enabled: bool = Field(default_factory=lambda: os.getenv('APP_ZENTAO_SYNC_ENABLED', os.getenv('ZENTAO_SYNC_ENABLED', 'true')).lower() == 'true')
     zentao_sync_api_key: str = Field(default_factory=lambda: os.getenv('APP_ZENTAO_SYNC_API_KEY', os.getenv('ZENTAO_SYNC_API_KEY', '')))

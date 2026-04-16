@@ -14,6 +14,7 @@ from app.models.software import SoftwareProduct
 from app.models.stage5 import BugStage5Record
 from app.models.testcase import TestCase
 from app.models.user import User
+from app.models.user_zentao_binding import UserZentaoBinding
 from app.models.version import Version
 
 __all__ = [
@@ -40,6 +41,7 @@ __all__ = [
     "TestResultStatus",
     "User",
     "UserRole",
+    "UserZentaoBinding",
     "Version",
     "VersionType",
 ]

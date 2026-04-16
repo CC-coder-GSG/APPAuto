@@ -64,7 +64,8 @@ function buildStatusBadge(status) {
 
 export function jobNameToMajorLabel(jobName) {
   const text = String(jobName || '').trim();
-  const match = text.match(/^s(\d{3,})$/i);
+  // Allow optional suffix after - or _ (e.g. s40311-1, s40311_free -> V4.0.3.11)
+  const match = text.match(/^s(\d{3,})(?:[-_].*)?$/i);
   if (!match) return text || '-';
   const digits = match[1];
   const a = digits[0];
@@ -141,6 +142,29 @@ function getFilteredRecords() {
     .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 }
 
+const ARCHIVE_STATUS_META = {
+  ok:                 { icon: '✅', color: '#16a34a', label: '已归档' },
+  skipped:            { icon: '⏭', color: '#64748b', label: '已跳过（重复）' },
+  not_success:        { icon: '⚫', color: '#94a3b8', label: '非 SUCCESS，跳过' },
+  empty_version_name: { icon: '⚠️', color: '#d97706', label: '版本名为空，跳过' },
+  no_parent:          { icon: '🔍', color: '#d97706', label: '未找到父大版本' },
+  error:              { icon: '❌', color: '#dc2626', label: '归档异常' },
+};
+
+function buildArchiveStatusHtml(row) {
+  if (!row.auto_archive_status) return '';
+  const meta = ARCHIVE_STATUS_META[row.auto_archive_status] || { icon: '❓', color: '#64748b', label: row.auto_archive_status };
+  const msg = row.auto_archive_message || '';
+  return `
+    <div style="margin-top:10px; display:flex; align-items:flex-start; gap:8px; padding:8px 12px; background:#f8fafc; border-left:3px solid ${meta.color}; border-radius:0 6px 6px 0;">
+      <span style="font-size:14px; line-height:1.5;">${meta.icon}</span>
+      <div style="font-size:12px; color:#334155; line-height:1.5;">
+        <span style="font-weight:600; color:${meta.color};">小版本归档：${escapeHtml(meta.label)}</span>
+        ${msg ? `<span class="muted" style="margin-left:6px;">${escapeHtml(msg)}</span>` : ''}
+      </div>
+    </div>`;
+}
+
 function buildCardHtml(row) {
   const summary = (row.change_log || '').trim();
   const summaryText = summary ? `${summary.slice(0, 140)}${summary.length > 140 ? '...' : ''}` : '暂无变更日志';
@@ -168,6 +192,7 @@ function buildCardHtml(row) {
         <div style="min-width:280px; flex:2;"><div class="muted" style="font-size:12px;">Jenkins 链接</div><div style="margin-top:4px;">${linkHtml}</div></div>
       </div>
       <div style="margin-top:12px;"><div class="muted" style="font-size:12px;">变更日志</div><div title="${escapeHtml(summary || '暂无变更日志')}" style="margin-top:6px; color:#334155; line-height:1.65; background:#f8fafc; border-radius:10px; padding:10px 12px;">${escapeHtml(summaryText)}</div></div>
+      ${buildArchiveStatusHtml(row)}
       <div class="row" style="justify-content:flex-end; margin-top:12px;"><button class="secondary" onclick="openBuildRecordLogModal(${row.id})">查看日志</button></div>
     </div>
   `;

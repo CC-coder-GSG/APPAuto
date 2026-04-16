@@ -12,6 +12,7 @@ from app.api.deps import get_current_user, get_db
 from app.core.config import settings
 from app.models import Requirement, User
 from app.schemas.zentao_sync import ZentaoBrowserSyncPayload
+from app.services.permission_service import ensure_tab_access
 from app.services.zentao_sync_service import ZentaoSyncService
 
 router = APIRouter()
@@ -48,10 +49,11 @@ def verify_zentao_sync_api_key(
 
 @router.get("/api/integrations/zentao/requirements")
 def list_zentao_requirements(
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """供禅道同步中心使用的需求列表，任意登录用户可访问。"""
+    ensure_tab_access(current_user, "zentao-sync")
     reqs = db.query(Requirement).order_by(Requirement.id.desc()).all()
     return {
         "requirements": [
@@ -68,10 +70,11 @@ def list_zentao_requirements(
 
 @router.get("/api/integrations/zentao/software-products")
 def list_zentao_software_products(
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """供禅道同步中心使用的产品/应用列表。"""
+    ensure_tab_access(current_user, "zentao-sync")
     return {"software_products": ZentaoSyncService(db).get_software_products()}
 
 
@@ -124,9 +127,10 @@ def list_browser_events(
     software_id: Optional[int] = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=200),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    ensure_tab_access(current_user, "zentao-sync")
     return ZentaoSyncService(db).list_events(
         entity_type=entity_type,
         status=status,
@@ -143,7 +147,8 @@ def list_browser_events(
 
 
 @router.get("/api/integrations/zentao/browser-events/{event_id}")
-def browser_event_detail(event_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def browser_event_detail(event_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    ensure_tab_access(current_user, "zentao-sync")
     return ZentaoSyncService(db).get_event_detail(event_id)
 
 
@@ -154,6 +159,7 @@ def map_browser_event(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    ensure_tab_access(current_user, "zentao-sync")
     return ZentaoSyncService(db).map_event(
         event_id,
         requirement_id=payload.requirement_id,
@@ -169,11 +175,13 @@ def map_browser_event(
 
 @router.post("/api/integrations/zentao/browser-events/{event_id}/apply")
 def apply_browser_event(event_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    ensure_tab_access(current_user, "zentao-sync")
     return ZentaoSyncService(db).apply_event(event_id, actor_id=current_user.id)
 
 
 @router.delete("/api/integrations/zentao/browser-events/{event_id}")
 def delete_browser_event(event_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    ensure_tab_access(current_user, "zentao-sync")
     return ZentaoSyncService(db).delete_event(event_id, actor_id=current_user.id)
 
 
@@ -183,4 +191,5 @@ def apply_browser_events_batch(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    ensure_tab_access(current_user, "zentao-sync")
     return ZentaoSyncService(db).apply_batch(actor_id=current_user.id, limit=payload.limit)

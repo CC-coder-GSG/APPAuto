@@ -21,6 +21,26 @@ function syncLinkSourceMajorOptions() {
     .join('');
 }
 
+export async function syncAssignRequirementsFromZentao(options = {}) {
+  const { silent = false } = options;
+  const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
+  if (!majorId) {
+    if (!silent) window.showMessage && window.showMessage('请先选择一个具体大版本再同步需求', 'error');
+    return null;
+  }
+  try {
+    const res = await api(`/requirements/admin/sync-zentao?major_version_id=${majorId}`, { method: 'POST' });
+    const data = await res.json();
+    if (!silent) {
+      window.showMessage && window.showMessage(`禅道需求同步完成：远端 ${data.remote_total || 0} 条，新增 ${data.created || 0} 条，更新 ${data.updated || 0} 条`, 'success');
+    }
+    return data;
+  } catch (err) {
+    if (!silent) window.showMessage && window.showMessage(err.message || '同步禅道需求失败', 'error');
+    return null;
+  }
+}
+
 function renderAssignProgress(data) {
   const area = document.getElementById('assignProgressArea');
   if (!area) return;
@@ -111,6 +131,10 @@ export async function loadAssignBoard() {
   const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
   const sid = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
   syncLinkSourceMajorOptions();
+
+  if (majorId) {
+    await syncAssignRequirementsFromZentao({ silent: true });
+  }
 
   if (getUsers().length === 0 && typeof window.loadUsers === 'function') {
     await window.loadUsers();
@@ -292,8 +316,10 @@ window.OmniQAAssignTab = {
   loadAssignProgress,
   toggleAssignProgressPendingOnly,
   publishAssign,
+  syncAssignRequirementsFromZentao,
   loadLinkCandidates,
   toggleLinkSelectAll,
   confirmLinkRequirements,
 };
 window.toggleAssignProgressPendingOnly = toggleAssignProgressPendingOnly;
+window.syncAssignRequirementsFromZentao = syncAssignRequirementsFromZentao;

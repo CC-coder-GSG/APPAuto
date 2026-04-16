@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from passlib.context import CryptContext
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, Integer, String
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -22,11 +22,13 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(SAEnum(UserRole), default=UserRole.USER, nullable=False)
     is_team_member: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    tab_permissions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     session_token: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     assigned_requirements = relationship("Requirement", back_populates="owner", foreign_keys="Requirement.owner_id")
     retested_requirements = relationship("Requirement", back_populates="retester", foreign_keys="Requirement.retested_by_id")
+    zentao_binding = relationship("UserZentaoBinding", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
     @staticmethod
     def hash_password(raw_password: str) -> str:
