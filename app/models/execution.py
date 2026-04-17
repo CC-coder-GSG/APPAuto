@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.enums import TestResultStatus
+from app.utils.time_utils import local_now
 
 
 class TestExecution(Base):
@@ -23,7 +24,7 @@ class TestExecution(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     executed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
-    executed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    executed_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
 
     requirement = relationship("Requirement", back_populates="test_executions")
     minor_version = relationship("Version", back_populates="executions")

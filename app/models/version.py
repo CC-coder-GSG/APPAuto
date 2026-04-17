@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.enums import VersionType
+from app.utils.time_utils import local_now
 
 
 class Version(Base):
@@ -19,7 +20,7 @@ class Version(Base):
     version_type: Mapped[VersionType] = mapped_column(SAEnum(VersionType), nullable=False)
     parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("versions.id", ondelete="CASCADE"), nullable=True)
     software_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
 
     # Zentao anchor fields — applicable to both MAJOR and MINOR versions
     # MAJOR: zentao_project_id / zentao_execution_id are primary anchors

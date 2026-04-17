@@ -112,6 +112,7 @@ export async function loadStage5(options = {}) {
     : `/stage5/overview?major_version_id=${majorId}`;
   const data = await (await api(url)).json();
   if (majorId !== 0) await loadS5OptionsData(majorId);
+  refreshS5EntryMode();
   toggleS5BugInputs();
   state.stage5Rows = data.bug_pool || [];
   state.stage5AllVersionsMode = !!data.all_versions_mode;
@@ -164,14 +165,6 @@ function buildS5RowHtml(b, allVersionsMode) {
   const isZentaoBug = !!b.zentao_bug_id;
   const zentaoStatus = (b.zentao_live_status || '').toLowerCase();
 
-  let othersHtml = '';
-  const resZh = { fixed: '修复通过', false_alarm: '误报', rejected: '拒绝修复' };
-  if (b.other_records && b.other_records.length > 0) {
-    othersHtml = `<div style="margin-top: 6px; font-size: 12px; text-decoration: none;">` + b.other_records.map((r) => {
-      const status = r.test_done ? `<span style="color:#16a34a; font-weight:bold;">✅闭环(${resZh[r.resolution] || '修复'})</span>` : '<span style="color:#dc2626;">⏳未闭环</span>';
-      return `<span class="badge" style="background:#f1f5f9; color:#475569; margin-right:4px; padding: 2px 6px;">🙋‍♂️ ${r.username}: ${status} (发包: 🏷️${r.minor_version_no})</span>`;
-    }).join('') + `</div>`;
-  }
   const failBadge = b.is_retest_failed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; margin-left:4px;">🚨复测打回</span>' : '';
   const dispatchBadge = b.dispatched_to_name ? `<span class="badge" style="background:#ffedd5; color:#ea580c; border:1px solid #fdba74; margin-left:4px;">🪂特派:${b.dispatched_to_name}</span>` : '';
 
@@ -189,9 +182,14 @@ function buildS5RowHtml(b, allVersionsMode) {
   const closedByMeta = b.zentao_closed_by_name ? `<span class="badge" style="background:#ecfdf5; color:#047857;">禅道关闭 ${escapeHtml(b.zentao_closed_by_name)}</span>` : '';
   const closeDateMeta = b.zentao_close_date ? `<span class="badge" style="background:#f1f5f9; color:#475569;">${escapeHtml(b.zentao_close_date)}</span>` : '';
   const closeCommentPreview = (b.zentao_close_comment || '').trim();
-  const closeCommentHtml = closeCommentPreview
-    ? `<div style="margin-top:6px; font-size:12px; color:#475569; line-height:1.6; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:8px; padding:8px 10px;">禅道备注：${escapeHtml(closeCommentPreview)}</div>`
-    : '';
+  const detailMeta = [
+    (b.other_records && b.other_records.length > 0)
+      ? `<span class="badge" style="background:#eff6ff; color:#1d4ed8;">他人闭环 ${b.other_records.length}</span>`
+      : '',
+    closeCommentPreview
+      ? `<span class="badge" style="background:#f8fafc; color:#475569;">有关闭备注</span>`
+      : '',
+  ].filter(Boolean).join('');
 
   const versionCell = allVersionsMode
     ? `<td style="vertical-align:middle; padding: 6px 10px; white-space:nowrap; font-size:12px; color:#475569;"><span class="badge" style="background:#eff6ff; color:#2563eb;">${escapeHtml(b.major_version_no || '')}</span></td>`
@@ -239,12 +237,11 @@ function buildS5RowHtml(b, allVersionsMode) {
     ${versionCell}
     <td style="vertical-align:middle; padding:6px 10px;">
       <div>${bugHref}${ztSlot} <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span>${failBadge}${dispatchBadge}</div>
-      ${othersHtml}
+      ${detailMeta ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">${detailMeta}</div>` : ''}
     </td>
     <td style="vertical-align:middle; padding:6px 10px;">
       ${bugTitle ? `<div style="max-height:60px; overflow-y:auto; font-size:13px; color:#475569; line-height:1.65; word-break:break-word;">${bugTitle}</div>` : '<span style="color:#94a3b8;">-</span>'}
       ${(syncMeta || assignedMeta || closedByMeta || closeDateMeta) ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">${syncMeta}${assignedMeta}${closedByMeta}${closeDateMeta}</div>` : ''}
-      ${closeCommentHtml}
     </td>
     <td style="vertical-align:middle; padding:6px 8px; width:120px;">${actionsHtml}</td>
     <td style="text-decoration:none; vertical-align:middle; padding:6px 10px;">
@@ -260,6 +257,98 @@ function buildS5RowHtml(b, allVersionsMode) {
       </div>
     </td>
   </tr>`;
+}
+
+function getS5ResolutionLabel(value) {
+  return {
+    fixed: '修复通过',
+    false_alarm: '误报',
+    rejected: '拒绝修复',
+  }[String(value || '')] || '-';
+}
+
+function buildS5OtherRecordsHtml(records) {
+  if (!(records && records.length > 0)) {
+    return '<div style="font-size:12px; color:#94a3b8;">暂无其他测试人员闭环记录</div>';
+  }
+  return `<div style="display:flex; flex-direction:column; gap:8px;">${records.map((record) => {
+    const status = record.test_done
+      ? `<span style="color:#16a34a; font-weight:600;">已闭环</span>`
+      : `<span style="color:#dc2626; font-weight:600;">未闭环</span>`;
+    const resolution = record.test_done
+      ? `<span class="badge" style="background:#ecfdf5; color:#166534;">${getS5ResolutionLabel(record.resolution)}</span>`
+      : '';
+    return `<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:8px 10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;">
+      <span class="badge" style="background:#e2e8f0; color:#334155;">${escapeHtml(record.username || '-')}</span>
+      ${status}
+      ${resolution}
+      <span style="font-size:12px; color:#64748b;">发包：${escapeHtml(record.minor_version_no || '-')}</span>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function buildS5DetailRowHtml(b, colSpan) {
+  const statusBadges = [
+    b.zentao_live_status
+      ? `<span class="badge" style="background:#f8fafc; color:#475569;">禅道状态 ${escapeHtml(b.zentao_live_status)}</span>`
+      : '',
+    b.zentao_assigned_to_name
+      ? `<span class="badge" style="background:#faf5ff; color:#7c3aed;">当前指派 ${escapeHtml(b.zentao_assigned_to_name)}</span>`
+      : '',
+    b.zentao_closed_by_name
+      ? `<span class="badge" style="background:#ecfdf5; color:#047857;">关闭人 ${escapeHtml(b.zentao_closed_by_name)}</span>`
+      : '',
+    b.zentao_close_date
+      ? `<span class="badge" style="background:#f1f5f9; color:#475569;">关闭时间 ${escapeHtml(b.zentao_close_date)}</span>`
+      : '',
+    b.last_zentao_synced_at
+      ? `<span class="badge" style="background:#eff6ff; color:#2563eb;">同步 ${escapeHtml(b.last_zentao_synced_at)}</span>`
+      : '',
+  ].filter(Boolean).join('');
+  const previewAction = b.zentao_bug_id
+    ? `<a href="javascript:void(0)" onclick="openS5PreviewById(${b.id})" style="font-size:12px; text-decoration:none; color:#0f766e;">打开禅道预览</a>`
+    : '<span style="font-size:12px; color:#94a3b8;">本地 Bug 无禅道预览</span>';
+  const closeCommentBlock = (b.zentao_close_comment || '').trim()
+    ? `<div style="margin-top:12px;">
+        <div style="font-size:12px; font-weight:600; color:#334155; margin-bottom:6px;">禅道关闭备注</div>
+        <div style="font-size:12px; color:#475569; line-height:1.7; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:8px; padding:10px 12px; white-space:pre-wrap; word-break:break-word;">${escapeHtml(b.zentao_close_comment)}</div>
+      </div>`
+    : '';
+  return `<tr class="stage5-detail-row hidden" data-bug-id="${b.id}">
+    <td colspan="${colSpan}" style="padding:0 10px 10px 10px; background:#fcfcfd;">
+      <div style="border:1px solid #e2e8f0; border-top:none; border-radius:0 0 10px 10px; background:#ffffff; padding:12px 14px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+          <div style="font-size:13px; font-weight:700; color:#0f172a;">Bug 详情</div>
+          <div>${previewAction}</div>
+        </div>
+        ${statusBadges ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;">${statusBadges}</div>` : ''}
+        ${closeCommentBlock}
+        <div style="margin-top:12px;">
+          <div style="font-size:12px; font-weight:600; color:#334155; margin-bottom:8px;">其他人闭环记录</div>
+          ${buildS5OtherRecordsHtml(b.other_records)}
+        </div>
+      </div>
+    </td>
+  </tr>`;
+}
+
+function mountS5DetailRows(table, pageRows, colSpan) {
+  pageRows.forEach((bug) => {
+    const rowEl = table.querySelector(`.stage5-row-card[data-bug-id="${bug.id}"]`);
+    if (!rowEl || rowEl.nextElementSibling?.matches(`.stage5-detail-row[data-bug-id="${bug.id}"]`)) return;
+    rowEl.insertAdjacentHTML('afterend', buildS5DetailRowHtml(bug, colSpan));
+  });
+}
+
+export function toggleS5DetailRow(id, forceExpand = null) {
+  const detailRow = document.querySelector(`.stage5-detail-row[data-bug-id="${id}"]`);
+  if (!detailRow) return;
+  const shouldExpand = typeof forceExpand === 'boolean'
+    ? forceExpand
+    : detailRow.classList.contains('hidden');
+  detailRow.classList.toggle('hidden', !shouldExpand);
+  const toggleLink = document.querySelector(`[data-s5-toggle-link][data-bug-id="${id}"]`);
+  if (toggleLink) toggleLink.textContent = shouldExpand ? '收起' : '展开';
 }
 
 export function renderS5() {
@@ -278,6 +367,27 @@ export function renderS5() {
   table.innerHTML = pageRows.length
     ? pageRows.map((b) => buildS5RowHtml(b, allVersionsMode)).join('')
     : `<tr><td colspan="${colSpan}" style="text-align:center; color:#94a3b8; padding:24px 12px;">暂无 Bug 数据</td></tr>`;
+
+  mountS5DetailRows(table, pageRows, colSpan);
+
+  pageRows.forEach((bug) => {
+    const rowEl = table.querySelector(`.stage5-row-card[data-bug-id="${bug.id}"]`);
+    const actionCell = rowEl?.children?.[allVersionsMode ? 3 : 2];
+    const firstActionRow = actionCell?.querySelector('div > div');
+    if (!firstActionRow) return;
+    const inserted = [];
+    if (bug?.zentao_bug_id && !firstActionRow.querySelector('[data-s5-preview-link]')) {
+      inserted.push(`<a data-s5-preview-link="1" href="javascript:void(0)" onclick="openS5PreviewById(${bug.id})" style="font-size:12px; text-decoration:none; white-space:nowrap; color:#0f766e;">预览</a>`);
+    }
+    if (!firstActionRow.querySelector('[data-s5-toggle-link]')) {
+      inserted.push(`<a data-s5-toggle-link="1" data-bug-id="${bug.id}" href="javascript:void(0)" onclick="toggleS5DetailRow(${bug.id})" style="font-size:12px; text-decoration:none; white-space:nowrap; color:#2563eb;">展开</a>`);
+    }
+    if (!inserted.length) return;
+    firstActionRow.insertAdjacentHTML(
+      'afterbegin',
+      `${inserted.join('<span style="color:#e2e8f0; margin:0 2px;">|</span>')}<span style="color:#e2e8f0; margin:0 2px;">|</span>`,
+    );
+  });
 
   updateS5PagerBar();
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
@@ -482,6 +592,183 @@ function openS5ReactivateById(id) {
   const bug = state.stage5Rows.find((b) => b.id === id);
   if (!bug?.zentao_bug_id) return;
   openS5ReactivateModal(id, bug.zentao_bug_id);
+}
+
+function openS5PreviewById(id) {
+  const bug = state.stage5Rows.find((item) => item.id === id);
+  if (!bug?.zentao_bug_id) return;
+  openZentaoBugPreview(Number(bug.zentao_bug_id), bug);
+}
+
+function getCurrentS5MajorVersion() {
+  const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
+  if (!majorId) return null;
+  return (state.versions || []).find((item) => Number(item.id) === majorId && item.version_type === 'major') || null;
+}
+
+export function refreshS5EntryMode() {
+  const panel = document.getElementById('s5LocalBugPanel');
+  const hint = document.getElementById('s5LocalBugHint');
+  const title = document.getElementById('s5LocalBugTitle');
+  if (!panel || !hint || !title) return;
+
+  const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
+  const major = getCurrentS5MajorVersion();
+  let visible = true;
+  let hintText = '当前大版本未配置禅道执行版本，可临时录入本地 Bug。';
+
+  if (!majorId) {
+    visible = false;
+    hintText = '全部版本视图下不允许直接新增本地 Bug，请先切换到具体大版本。';
+  } else if (major?.zentao_execution_id) {
+    visible = false;
+    hintText = '当前大版本已配置禅道执行版本，请优先使用上方“新建禅道Bug”。';
+  }
+
+  panel.classList.toggle('hidden', !visible);
+  title.innerText = visible ? '➕ 新增问题' : '➕ 本地新增已隐藏';
+  hint.innerText = hintText;
+}
+
+function _sanitizePreviewHtml(rawHtml) {
+  const template = document.createElement('template');
+  template.innerHTML = String(rawHtml || '');
+
+  const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META']);
+  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT);
+  const toRemove = [];
+  while (walker.nextNode()) {
+    const el = walker.currentNode;
+    if (blockedTags.has(el.tagName)) {
+      toRemove.push(el);
+      continue;
+    }
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase();
+      const value = String(attr.value || '');
+      if (name.startsWith('on')) {
+        el.removeAttribute(attr.name);
+        continue;
+      }
+      if ((name === 'href' || name === 'src') && /^\s*javascript:/i.test(value)) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  }
+  toRemove.forEach((node) => node.remove());
+  return template.innerHTML || '<span style="color:#94a3b8;">暂无内容</span>';
+}
+
+function _renderPreviewMetaGrid(preview) {
+  const fields = [
+    ['状态', preview.status_zh || preview.status || '-'],
+    ['解决方案', preview.resolution_zh || preview.resolution || '-'],
+    ['Bug 类型', preview.type_zh || preview.type || '-'],
+    ['严重程度', preview.severity ? `S${preview.severity}` : '-'],
+    ['优先级', preview.pri ? `P${preview.pri}` : '-'],
+    ['指派给', preview.assigned_to || '-'],
+    ['创建人', preview.opened_by || '-'],
+    ['创建时间', preview.opened_date || '-'],
+    ['模块', preview.module || '-'],
+    ['影响版本', preview.opened_build || '-'],
+    ['执行版本', preview.execution || '-'],
+    ['关联故事', preview.story_title || '-'],
+    ['项目', preview.project || '-'],
+    ['关闭人', preview.closed_by || '-'],
+    ['关闭时间', preview.closed_date || '-'],
+    ['截止日期', preview.deadline || '-'],
+  ];
+  return fields.map(([label, value]) => `
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px;">
+      <div style="font-size:12px; color:#64748b; margin-bottom:4px;">${escapeHtml(label)}</div>
+      <div style="font-size:13px; color:#0f172a; line-height:1.6; word-break:break-word;">${escapeHtml(value)}</div>
+    </div>
+  `).join('');
+}
+
+function _renderPreviewActions(preview) {
+  const actions = Array.isArray(preview.actions) ? preview.actions : [];
+  if (!actions.length) {
+    return '<div style="color:#94a3b8; font-size:13px;">暂无流转记录</div>';
+  }
+  return actions.map((item) => `
+    <div style="padding:10px 12px; border:1px solid #e2e8f0; border-radius:10px; background:#fff;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:6px;">
+        <span style="font-size:12px; color:#475569;">${escapeHtml(item.date || '-')}</span>
+        <span class="badge" style="background:#eff6ff; color:#2563eb;">${escapeHtml(item.actor || '系统')}</span>
+        <span class="badge" style="background:#f8fafc; color:#475569;">${escapeHtml(item.action_zh || item.action || '操作')}</span>
+      </div>
+      <div style="font-size:13px; color:#334155; line-height:1.7; word-break:break-word;">${escapeHtml(item.comment || '无备注')}</div>
+    </div>
+  `).join('');
+}
+
+export async function openZentaoBugPreview(ztId, bugRow = null) {
+  const modal = document.getElementById('zentaoBugPreviewModal');
+  const titleEl = document.getElementById('zentaoBugPreviewTitle');
+  const metaEl = document.getElementById('zentaoBugPreviewMeta');
+  const bodyEl = document.getElementById('zentaoBugPreviewBody');
+  const errorEl = document.getElementById('zentaoBugPreviewError');
+  const linkEl = document.getElementById('zentaoBugPreviewLink');
+  if (!modal || !titleEl || !metaEl || !bodyEl || !errorEl || !linkEl) return;
+
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+  titleEl.innerText = bugRow?.zentao_bug_title || `Bug #${ztId}`;
+  metaEl.innerText = `禅道 Bug #${ztId}`;
+  bodyEl.innerHTML = '<div style="color:#64748b; font-size:13px;">正在加载禅道 Bug 详情...</div>';
+  errorEl.style.display = 'none';
+  linkEl.classList.add('hidden');
+  linkEl.removeAttribute('href');
+
+  try {
+    const preview = await (await api(`/zentao/bugs/${Number(ztId)}/preview`)).json();
+    titleEl.innerText = preview.title || bugRow?.zentao_bug_title || `Bug #${ztId}`;
+    metaEl.innerText = `禅道 Bug #${ztId} · ${preview.status_zh || preview.status || '未知状态'}`;
+    if (preview.zentao_url) {
+      linkEl.href = preview.zentao_url;
+      linkEl.classList.remove('hidden');
+    }
+    bodyEl.innerHTML = `
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-bottom:16px;">
+        ${_renderPreviewMetaGrid(preview)}
+      </div>
+      <div style="margin-bottom:16px;">
+        <div style="font-size:14px; font-weight:700; color:#0f172a; margin-bottom:8px;">复现步骤</div>
+        <div style="border:1px solid #e2e8f0; border-radius:12px; padding:14px; background:#f8fafc; color:#334155; line-height:1.8;">
+          ${_sanitizePreviewHtml(preview.steps)}
+        </div>
+      </div>
+      <div style="margin-bottom:16px;">
+        <div style="font-size:14px; font-weight:700; color:#0f172a; margin-bottom:8px;">附件</div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+          ${(preview.files || []).length ? preview.files.map((item) => `
+            <a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener noreferrer" class="badge" style="background:#eff6ff; color:#2563eb; text-decoration:none;">
+              ${escapeHtml(item.title || '附件')}
+            </a>
+          `).join('') : '<span style="color:#94a3b8; font-size:13px;">暂无附件</span>'}
+        </div>
+      </div>
+      <div>
+        <div style="font-size:14px; font-weight:700; color:#0f172a; margin-bottom:8px;">流转记录</div>
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          ${_renderPreviewActions(preview)}
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    errorEl.innerText = err.message || '加载禅道 Bug 详情失败';
+    errorEl.style.display = 'block';
+    bodyEl.innerHTML = '<div style="color:#94a3b8; font-size:13px;">无法获取禅道详情，请检查绑定或稍后重试。</div>';
+  }
+}
+
+export function closeZentaoBugPreview() {
+  const modal = document.getElementById('zentaoBugPreviewModal');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.style.display = 'none';
+  }
 }
 
 export async function pushStage5() {
@@ -744,6 +1031,48 @@ export function closeS5AssignModal() {
 
 let _s5CreateBugMeta = null;
 
+function _resetS5CreateBugForm() {
+  ['s5CreateBugTitle', 's5CreateBugSteps'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  ['s5CreateBugSeverity', 's5CreateBugPri'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '3';
+  });
+  ['s5CreateBugModule', 's5CreateBugBuild', 's5CreateBugStory'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const typeEl = document.getElementById('s5CreateBugType');
+  if (typeEl) typeEl.value = 'codeerror';
+}
+
+function _fillS5CreateBugSelect(selectId, options, placeholder, defaultValue = '') {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  const entries = Object.entries(options || {});
+  const allowEmpty = selectId !== 's5CreateBugType';
+  const html = [];
+  if (allowEmpty) {
+    html.push(`<option value="">${escapeHtml(placeholder)}</option>`);
+  }
+  entries.forEach(([value, label]) => {
+    html.push(`<option value="${escapeHtml(value)}">${escapeHtml(label || value)}</option>`);
+  });
+  if (!entries.length && !allowEmpty) {
+    html.push('<option value="codeerror">codeerror</option>');
+  }
+  select.innerHTML = html.join('');
+  if (defaultValue && entries.some(([value]) => value === defaultValue)) {
+    select.value = defaultValue;
+  } else if (allowEmpty) {
+    select.value = '';
+  } else {
+    select.value = entries[0]?.[0] || 'codeerror';
+  }
+}
+
 export async function openS5CreateZentaoBugModal() {
   const modal = document.getElementById('s5CreateZentaoBugModal');
   if (!modal) return;
@@ -756,13 +1085,11 @@ export async function openS5CreateZentaoBugModal() {
   const errEl = document.getElementById('s5CreateBugErrorMsg');
   if (errEl) errEl.style.display = 'none';
 
-  // Reset fields
-  ['s5CreateBugTitle', 's5CreateBugSteps'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.value = '';
-  });
-  document.getElementById('s5CreateBugSeverity').value = '3';
-  document.getElementById('s5CreateBugPri').value = '3';
+  _resetS5CreateBugForm();
+  _fillS5CreateBugSelect('s5CreateBugModule', {}, '-- 请选择模块 --');
+  _fillS5CreateBugSelect('s5CreateBugBuild', {}, '-- 请选择版本 --');
+  _fillS5CreateBugSelect('s5CreateBugStory', {}, '-- 不关联故事 --');
+  _fillS5CreateBugSelect('s5CreateBugType', { codeerror: '代码错误 (codeerror)' }, 'codeerror', 'codeerror');
 
   if (!majorId) {
     if (hintEl) hintEl.innerText = '⚠️ 请先在整体测试页选择一个具体大版本';
@@ -814,6 +1141,16 @@ export async function openS5CreateZentaoBugModal() {
         }
       }
     }
+
+    _fillS5CreateBugSelect('s5CreateBugModule', _s5CreateBugMeta.modules || {}, '-- 请选择模块 --');
+    _fillS5CreateBugSelect('s5CreateBugBuild', _s5CreateBugMeta.builds || {}, '-- 请选择版本 --');
+    _fillS5CreateBugSelect('s5CreateBugStory', _s5CreateBugMeta.stories || {}, '-- 不关联故事 --');
+    _fillS5CreateBugSelect(
+      's5CreateBugType',
+      Object.keys(_s5CreateBugMeta.bug_types || {}).length ? _s5CreateBugMeta.bug_types : { codeerror: '代码错误 (codeerror)' },
+      'codeerror',
+      'codeerror',
+    );
   } catch (err) {
     if (hintEl) hintEl.innerText = `加载失败: ${err.message}`;
     if (userContainer) userContainer.innerHTML = '<div style="color:#dc2626; font-size:13px;">获取元数据失败</div>';
@@ -832,6 +1169,10 @@ export async function submitS5CreateZentaoBug() {
   const severity = Number(document.getElementById('s5CreateBugSeverity')?.value || 3);
   const pri = Number(document.getElementById('s5CreateBugPri')?.value || 3);
   const assignedTo = document.getElementById('s5CreateBugAssignTo')?.value || '';
+  const moduleId = document.getElementById('s5CreateBugModule')?.value || '';
+  const openedBuild = document.getElementById('s5CreateBugBuild')?.value || '';
+  const storyId = document.getElementById('s5CreateBugStory')?.value || '';
+  const bugType = document.getElementById('s5CreateBugType')?.value || 'codeerror';
   const errEl = document.getElementById('s5CreateBugErrorMsg');
 
   if (!title) {
@@ -858,7 +1199,10 @@ export async function submitS5CreateZentaoBug() {
       pri,
       steps,
       assigned_to: assignedTo,
-      bug_type: 'codeerror',
+      opened_build: openedBuild ? [openedBuild] : [],
+      bug_type: bugType,
+      module_id: moduleId || null,
+      story_id: storyId || null,
       major_version_id: majorId || null,
       found_minor_version_id: minorId || null,
     };
@@ -884,6 +1228,7 @@ window.OmniQAStage5Tab = {
   editS5Bug,
   removeS5Bug,
   pushStage5,
+  refreshS5EntryMode,
   toggleS5BugInputs,
   loadS5OptionsData,
   submitS5Bug,
@@ -898,9 +1243,12 @@ window.OmniQAStage5Tab = {
   submitS5Assign,
   closeS5AssignModal,
   toggleS5CloseComment,
+  openZentaoBugPreview,
+  closeZentaoBugPreview,
   openS5CreateZentaoBugModal,
   closeS5CreateZentaoBugModal,
   submitS5CreateZentaoBug,
+  toggleS5DetailRow,
 };
 window.editS5Bug = editS5Bug;
 window.editS5BugById = editS5BugById;
@@ -913,7 +1261,11 @@ window.prevS5Page = prevS5Page;
 window.nextS5Page = nextS5Page;
 window.applyS5PageSize = applyS5PageSize;
 window.saveS5 = saveS5;
+window.openS5PreviewById = openS5PreviewById;
+window.toggleS5DetailRow = toggleS5DetailRow;
 window.toggleS5CloseComment = toggleS5CloseComment;
+window.openZentaoBugPreview = openZentaoBugPreview;
+window.closeZentaoBugPreview = closeZentaoBugPreview;
 window.openS5ReactivateModal = openS5ReactivateModal;
 window.submitS5Reactivate = submitS5Reactivate;
 window.closeS5ReactivateModal = closeS5ReactivateModal;

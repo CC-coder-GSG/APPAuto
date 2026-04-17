@@ -7,6 +7,7 @@ from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.utils.time_utils import local_now
 
 
 class SoftwareProduct(Base):
@@ -14,7 +15,7 @@ class SoftwareProduct(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
 
     # Zentao anchor fields
     zentao_product_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)

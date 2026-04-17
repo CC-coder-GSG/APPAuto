@@ -19,8 +19,8 @@ row(s) in the local database to keep cached fields in sync.
 """
 from __future__ import annotations
 
+import json
 import logging
-from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -35,6 +35,8 @@ from app.models.user_zentao_binding import UserZentaoBinding
 from app.services.audit_service import audit
 from app.services.zentao_auth_service import get_valid_token, invalidate_token
 from app.services.zentao_client_service import ZentaoClient, ZentaoAPIError
+from app.services.zentao_normalizer import normalize_bug_detail
+from app.utils.time_utils import local_now
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +76,8 @@ class CreateBugPayload(BaseModel):
     assigned_to: str = ""
     opened_build: list[str] = []
     bug_type: str = "codeerror"
+    module_id: Optional[str] = None
+    story_id: Optional[str] = None
     # Local tracking context
     major_version_id: Optional[int] = None
     requirement_id: Optional[int] = None
@@ -129,6 +133,9 @@ def get_create_bug_meta(
     # Fetch user list from create-bug page JSON for the first product
     users: dict[str, str] = {}
     builds: dict[str, str] = {}
+    modules: dict[str, str] = {}
+    stories: dict[str, str] = {}
+    bug_types: dict[str, str] = {}
     if product_ids:
         meta = client.get_create_bug_meta(product_ids[0], execution_id or 0)
         if meta:
@@ -137,17 +144,19 @@ def get_create_bug_meta(
                 if isinstance(display, str) and len(display) > 2 and display[1] == ":":
                     display = display[2:]
                 users[account] = display
-            builds_raw = meta.get("builds") or {}
-            if isinstance(builds_raw, dict):
-                for bid, bval in builds_raw.items():
-                    name = bval if isinstance(bval, str) else (bval.get("name") or str(bid))
-                    builds[str(bid)] = name
+            builds = _normalize_meta_options(meta.get("builds"))
+            modules = _normalize_meta_options(meta.get("moduleOptionMenu") or meta.get("modules") or meta.get("module"))
+            stories = _normalize_meta_options(meta.get("stories") or meta.get("story"))
+            bug_types = _normalize_meta_options(meta.get("typeList") or meta.get("type"))
 
     return {
         "product_ids": product_ids,
         "execution_id": execution_id,
         "users": users,
         "builds": builds,
+        "modules": modules,
+        "stories": stories,
+        "bug_types": bug_types,
     }
 
 
@@ -174,11 +183,15 @@ def create_zentao_bug(
     if payload.execution_id:
         body["execution"] = payload.execution_id
     if payload.steps:
-        body["steps"] = payload.steps
+        body["steps"] = _format_steps_html(payload.steps)
     if payload.assigned_to:
         body["assignedTo"] = payload.assigned_to
     if payload.opened_build:
         body["openedBuild"] = payload.opened_build
+    if payload.module_id:
+        body["module"] = payload.module_id
+    if payload.story_id:
+        body["story"] = payload.story_id
 
     try:
         result = client.create_bug(body)
@@ -219,13 +232,16 @@ def create_zentao_bug(
         zentao_bug_id=zentao_bug_id,
         zentao_bug_title=payload.title,
         zentao_bug_url=f"{base_url}/bug-view-{zentao_bug_id}.html" if base_url else None,
+        zentao_product_id=str(payload.product_id),
+        zentao_execution_id=str(payload.execution_id) if payload.execution_id else None,
+        zentao_opened_build_ids=json.dumps(payload.opened_build or [], ensure_ascii=False),
         zentao_live_status="active",
         zentao_assigned_to_account=payload.assigned_to or None,
         zentao_assigned_to_name=payload.assigned_to or None,
         zentao_sync_status="synced",
         zentao_sync_message="通过测试管理系统创建",
-        last_zentao_synced_at=datetime.utcnow(),
-        last_zentao_checked_at=datetime.utcnow(),
+        last_zentao_synced_at=local_now(),
+        last_zentao_checked_at=local_now(),
     )
     db.add(local_row)
     try:
@@ -243,6 +259,40 @@ def create_zentao_bug(
         "local_id": local_row.id if local_row.id else None,
         "bug_id": bug_id_str,
     }
+
+
+@router.get("/bugs/{zt_id}/preview")
+def get_bug_preview(
+    zt_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    client = _get_client(current_user.id, db)
+    if client is None:
+        raise HTTPException(status_code=400, detail="当前用户未配置可用的禅道绑定")
+
+    binding = db.query(UserZentaoBinding).filter(UserZentaoBinding.user_id == current_user.id).first()
+    base_url = (binding.base_url or "").rstrip("/") if binding else ""
+
+    try:
+        raw = client.get_bug(zt_id)
+    except ZentaoAPIError as exc:
+        if exc.status_code == 401:
+            invalidate_token(current_user.id, db)
+            client = _get_client(current_user.id, db)
+            if client is None:
+                raise HTTPException(status_code=400, detail="禅道 token 刷新失败")
+            raw = client.get_bug(zt_id)
+        else:
+            raise HTTPException(status_code=exc.status_code or 502, detail=f"禅道获取Bug详情失败: {exc.message}")
+
+    if not raw:
+        raise HTTPException(status_code=404, detail="禅道中未找到该 Bug")
+
+    preview = normalize_bug_detail(raw, base_url=base_url)
+    if not preview:
+        raise HTTPException(status_code=502, detail="禅道 Bug 详情解析失败")
+    return preview
 
 @router.get("/bugs/{zt_id}/action-meta")
 def get_bug_action_meta(
@@ -520,7 +570,7 @@ def delete_zentao_bug(
         rows = db.query(BugTracking).filter(BugTracking.zentao_bug_id == str(zt_id)).all()
         for row in rows:
             row.zentao_deleted = True
-            row.updated_at = datetime.utcnow()
+            row.updated_at = local_now()
         db.commit()
     except Exception as e:
         logger.warning("delete_zentao_bug: local update failed: %s", e)
@@ -567,7 +617,7 @@ def _update_local_live_status(db: Session, zt_id_str: str, status: str) -> None:
         rows = db.query(BugTracking).filter(BugTracking.zentao_bug_id == zt_id_str).all()
         for row in rows:
             row.zentao_live_status = status
-            row.updated_at = datetime.utcnow()
+            row.updated_at = local_now()
         db.commit()
     except Exception as e:
         logger.warning("_update_local_live_status: %s", e)
@@ -581,7 +631,7 @@ def _reset_local_closed(db: Session, zt_id_str: str) -> None:
         for row in rows:
             row.closed = False
             row.closed_by_id = None
-            row.updated_at = datetime.utcnow()
+            row.updated_at = local_now()
         db.commit()
     except Exception as e:
         logger.warning("_reset_local_closed: %s", e)
@@ -593,8 +643,50 @@ def _sync_local_title(db: Session, zt_id_str: str, title: str) -> None:
         rows = db.query(BugTracking).filter(BugTracking.zentao_bug_id == zt_id_str).all()
         for row in rows:
             row.zentao_bug_title = title
-            row.updated_at = datetime.utcnow()
+            row.updated_at = local_now()
         db.commit()
     except Exception as e:
         logger.warning("_sync_local_title: %s", e)
         db.rollback()
+
+
+def _normalize_meta_options(raw: object) -> dict[str, str]:
+    result: dict[str, str] = {}
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if key in (None, "", "0", 0):
+                continue
+            label = ""
+            if isinstance(value, dict):
+                label = (
+                    value.get("name")
+                    or value.get("title")
+                    or value.get("pathName")
+                    or value.get("text")
+                    or ""
+                )
+            else:
+                label = str(value or "")
+            label = str(label).strip()
+            if label:
+                result[str(key)] = label
+    elif isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("id") or item.get("value")
+            label = item.get("name") or item.get("title") or item.get("pathName") or item.get("text")
+            if key and label:
+                result[str(key)] = str(label).strip()
+    return result
+
+
+def _format_steps_html(text: str) -> str:
+    content = (text or "").strip()
+    if not content:
+        return ""
+    if any(tag in content.lower() for tag in ("<p", "<br", "<div", "<ol", "<ul", "<li")):
+        return content
+    lines = [line.strip() for line in content.replace("\r\n", "\n").split("\n") if line.strip()]
+    body = "<br>".join(lines)
+    return f"<p>[步骤]</p><p>{body}</p><p>[结果]</p><p></p><p>[期望]</p><p></p>"

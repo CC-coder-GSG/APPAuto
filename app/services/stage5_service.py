@@ -15,6 +15,7 @@ from app.services.audit_service import audit
 from app.services.sse_service import sse_publish
 from app.services.zentao_auth_service import get_valid_token
 from app.services.zentao_client_service import ZentaoClient
+from app.utils.time_utils import local_now
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +198,7 @@ class Stage5Service:
         record.test_done = test_done
         record.newly_found_bug_id = newly_found_bug_id
         record.resolution = resolution
-        record.updated_at = datetime.utcnow()
+        record.updated_at = local_now()
         self.db.commit()
 
         all_records = self.db.query(BugStage5Record).filter(BugStage5Record.bug_tracking_id == bug_track_id).all()
@@ -285,7 +286,7 @@ class Stage5Service:
         # --- Sync cache check ---
         if not force:
             last_sync = _sync_cache.get(major_version_id)
-            if last_sync and (datetime.utcnow() - last_sync) < _SYNC_CACHE_TTL:
+            if last_sync and (local_now() - last_sync) < _SYNC_CACHE_TTL:
                 return {
                     "major_version_id": major.id,
                     "major_version_no": major.version_no,
@@ -308,7 +309,7 @@ class Stage5Service:
 
         remote_bugs = self._fetch_zentao_bugs_for_major(client, major, execution_id)
         if not remote_bugs:
-            _sync_cache[major_version_id] = datetime.utcnow()
+            _sync_cache[major_version_id] = local_now()
             return {
                 "major_version_id": major.id,
                 "major_version_no": major.version_no,
@@ -373,7 +374,7 @@ class Stage5Service:
                 self._auto_create_zentao_close_record(bug_row, normalized)
 
         self.db.commit()
-        _sync_cache[major_version_id] = datetime.utcnow()
+        _sync_cache[major_version_id] = local_now()
         return {
             "major_version_id": major.id,
             "major_version_no": major.version_no,
@@ -714,7 +715,7 @@ class Stage5Service:
             bug_row.zentao_execution_name = major.zentao_execution_name_cache or major.version_no
             bug_row.zentao_sync_status = "synced"
             bug_row.zentao_sync_message = "通过 Stage5 版本全量同步"
-            bug_row.last_zentao_synced_at = datetime.utcnow()
+            bug_row.last_zentao_synced_at = local_now()
             if normalized.get("status"):
                 bug_row.zentao_live_status = normalized["status"]
             if bug_row.requirement_id is None:
@@ -740,7 +741,7 @@ class Stage5Service:
             bug_row.zentao_sync_status = "synced"
             bug_row.zentao_sync_message = "通过 Stage5 版本全量同步"
             bug_row.zentao_display_bucket = "overall"
-            bug_row.last_zentao_synced_at = datetime.utcnow()
+            bug_row.last_zentao_synced_at = local_now()
             if normalized.get("status"):
                 bug_row.zentao_live_status = normalized["status"]
             updated = False
@@ -801,7 +802,7 @@ class Stage5Service:
         if existing_sync:
             if existing_sync.comment != close_comment:
                 existing_sync.comment = close_comment
-                existing_sync.updated_at = datetime.utcnow()
+                existing_sync.updated_at = local_now()
             return
 
         # Check if the user already manually closed this bug — don't overwrite manual records
@@ -821,7 +822,7 @@ class Stage5Service:
                 manual_record.comment = close_comment
                 manual_record.resolution = "fixed"
                 manual_record.minor_version_id = manual_record.minor_version_id or bug_row.found_minor_version_id
-                manual_record.updated_at = datetime.utcnow()
+                manual_record.updated_at = local_now()
             return
 
         # Create a new zentao_sync record

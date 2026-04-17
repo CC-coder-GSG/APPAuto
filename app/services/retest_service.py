@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.models import BugSourceType, BugTracking, Requirement, User, Version, VersionType
 from app.services.audit_service import audit
 from app.services.sse_service import sse_publish
+from app.utils.time_utils import local_now
 
 
 class RetestService:
@@ -160,7 +161,7 @@ class RetestService:
         req.retest_passed = retest_passed if retest_completed else None
         req.retest_minor_version_id = retest_minor_version_id if retest_completed else None
         req.retested_by_id = current_user.id if retest_completed else None
-        req.retested_at = datetime.utcnow() if retest_completed else None
+        req.retested_at = local_now() if retest_completed else None
         self.db.commit()
         audit(self.db, action="retest.submit", target_type="requirement", actor_id=current_user.id, target_id=str(req.id), detail=f"passed={req.retest_passed},minor={req.retest_minor_version_id}")
         sse_publish(

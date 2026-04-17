@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.user_zentao_binding import UserZentaoBinding
+from app.utils.time_utils import utc_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -105,12 +106,12 @@ def _fetch_new_token(binding: UserZentaoBinding) -> tuple[str, datetime] | None:
             try:
                 expires_at = datetime.utcfromtimestamp(int(expired_at_ts))
             except Exception:
-                expires_at = datetime.utcnow().replace(microsecond=0)
+                expires_at = utc_now_naive().replace(microsecond=0)
                 from datetime import timedelta
                 expires_at += timedelta(seconds=7200)
         else:
             from datetime import timedelta
-            expires_at = datetime.utcnow().replace(microsecond=0) + timedelta(seconds=7200)
+            expires_at = utc_now_naive().replace(microsecond=0) + timedelta(seconds=7200)
         return token, expires_at
     except httpx.HTTPStatusError as e:
         logger.warning("zentao_auth: HTTP error for user_id=%s status=%s", binding.user_id, e.response.status_code)
@@ -151,7 +152,7 @@ def get_valid_token(user_id: int, db: Session) -> str | None:
 
     # Attempt refresh
     result = _fetch_new_token(binding)
-    now = datetime.utcnow().replace(microsecond=0)
+    now = utc_now_naive().replace(microsecond=0)
     if result:
         token_value, expires_at = result
         binding.token_value = token_value

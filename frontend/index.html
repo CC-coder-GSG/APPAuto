@@ -405,7 +405,7 @@
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; margin-bottom: 16px;">
       <div class="row" style="margin-bottom: 12px;">
         <span style="font-weight: bold; color: #334155; margin-right: 8px;">🎯 提取Bug池:</span>
-        <label>大版本</label><select id="s5MajorSelect"></select>
+        <label>大版本</label><select id="s5MajorSelect" onchange="window.OmniQAStage5Tab?.refreshS5EntryMode?.()"></select>
         <button onclick="loadStage5()">加载全景大盘</button>
         <button class="secondary" onclick="syncStage5FromZentao({ force: true })">强制同步禅道并刷新</button>
         <button class="secondary" onclick="openS5CreateZentaoBugModal()" style="color:#7c3aed; border-color:#c4b5fd;">➕ 新建禅道Bug</button>
@@ -442,8 +442,9 @@
       <thead id="s5TableHead"><tr><th style="width:260px">Bug 编号 (来源)</th><th>Bug 标题</th><th style="width:420px">验证操作</th></tr></thead>
       <tbody id="s5Table"></tbody>
     </table>
-    <h3>➕ 新增问题</h3>
-    <div class="row" style="margin-top: 16px; align-items: flex-end; background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px dashed #cbd5e1;">
+    <h3 id="s5LocalBugTitle">➕ 新增问题</h3>
+    <div id="s5LocalBugHint" class="muted" style="margin: 0 0 8px; font-size: 13px;"></div>
+    <div id="s5LocalBugPanel" class="row" style="margin-top: 16px; align-items: flex-end; background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px dashed #cbd5e1;">
       <div>
         <label style="font-weight:bold; color:#334155;">来源类型</label>
         <select id="s5BugSource" onchange="toggleS5BugInputs()" style="padding: 6px;">
@@ -1315,9 +1316,29 @@
     </div>
   </div>
 
+  <!-- Zentao Bug Preview Modal -->
+  <div id="zentaoBugPreviewModal" class="hidden" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
+    <div style="width:min(860px, 96vw); max-height:92vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:18px;">
+        <div>
+          <div id="zentaoBugPreviewMeta" style="font-size:12px; color:#64748b; margin-bottom:6px;">Bug 详情</div>
+          <h3 id="zentaoBugPreviewTitle" style="margin:0; color:#0f172a; font-size:18px; line-height:1.5;">加载中...</h3>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <a id="zentaoBugPreviewLink" class="secondary hidden" href="#" target="_blank" rel="noopener noreferrer" style="padding:6px 10px; text-decoration:none;">打开禅道</a>
+          <button class="secondary" onclick="closeZentaoBugPreview()">关闭</button>
+        </div>
+      </div>
+      <div id="zentaoBugPreviewError" style="display:none; color:#dc2626; font-size:13px; margin-bottom:12px;"></div>
+      <div id="zentaoBugPreviewBody">
+        <div style="color:#64748b; font-size:13px;">正在加载禅道 Bug 详情...</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Stage5 Create Zentao Bug Modal -->
   <div id="s5CreateZentaoBugModal" class="hidden" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
-    <div style="width:min(600px, 96vw); max-height:92vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
+    <div style="width:min(760px, 96vw); max-height:92vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
         <h3 style="margin:0; color:#0f172a; font-size:16px;">📝 新建禅道 Bug</h3>
         <button class="secondary" onclick="closeS5CreateZentaoBugModal()" style="padding:4px 10px; font-size:13px;">✕ 关闭</button>
@@ -1331,6 +1352,18 @@
         <div>
           <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">指派给</label>
           <div id="s5CreateBugUserContainer" style="min-height:36px;"><div style="color:#94a3b8; font-size:13px; padding:8px 0;">加载候选人中...</div></div>
+        </div>
+        <div>
+          <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">所属模块</label>
+          <select id="s5CreateBugModule" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            <option value="">-- 请选择模块 --</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">影响版本</label>
+          <select id="s5CreateBugBuild" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            <option value="">-- 请选择版本 --</option>
+          </select>
         </div>
         <div>
           <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">严重程度</label>
@@ -1348,6 +1381,18 @@
             <option value="2">P2 - 高</option>
             <option value="3" selected>P3 - 中</option>
             <option value="4">P4 - 低</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">Bug 类型</label>
+          <select id="s5CreateBugType" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            <option value="codeerror">codeerror</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">关联需求/故事</label>
+          <select id="s5CreateBugStory" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            <option value="">-- 不关联故事 --</option>
           </select>
         </div>
       </div>

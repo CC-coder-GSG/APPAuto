@@ -13,6 +13,7 @@ from app.services.audit_service import audit
 from app.services.sse_service import sse_publish
 from app.services.zentao_auth_service import get_valid_token
 from app.services.zentao_client_service import ZentaoAPIError, ZentaoClient
+from app.utils.time_utils import local_now
 from app.utils.state_machine import ensure_requirement_transition
 from app.utils.validators import validate_req_id
 
@@ -477,7 +478,7 @@ class RequirementService:
 
         old_len = len((req.test_notes or "").strip())
         req.test_notes = (test_notes or "").strip() or None
-        req.test_notes_updated_at = datetime.utcnow()
+        req.test_notes_updated_at = local_now()
         req.test_notes_updated_by_id = current_user.id
         self.db.commit()
         self.db.refresh(req)
@@ -751,7 +752,7 @@ class RequirementService:
         execution.result_status = TestResultStatus(result_status)
         execution.notes = notes
         execution.executed_by_id = actor_id
-        execution.executed_at = datetime.utcnow()
+        execution.executed_at = local_now()
         requirement.test_completed = test_completed
         self.recalculate_requirement_status(requirement, actor_id=actor_id)
         self.db.commit()
@@ -849,6 +850,6 @@ class RequirementService:
                 from_status=from_status,
                 to_status=to_status,
                 changed_by_id=actor_id,
-                changed_at=datetime.utcnow(),
+                changed_at=local_now(),
             )
         )

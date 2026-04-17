@@ -7,6 +7,7 @@ from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.utils.time_utils import local_now
 
 
 class BuildRecord(Base):
@@ -23,8 +24,8 @@ class BuildRecord(Base):
     branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     build_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     change_log: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False, index=True)
 
     # Auto-archive status: set after upsert_report() attempts to create a minor version
     # Values: "ok" | "skipped" | "no_parent" | "empty_version_name" | "not_success" | "error"

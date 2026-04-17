@@ -38,6 +38,7 @@ from app.services.zentao_matcher import (
     parse_affected_version,
     pick_best_title_match,
 )
+from app.utils.time_utils import local_now
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,7 @@ class ZentaoSyncService:
             action=payload.action,
             source=payload.source,
             captured_at=payload.capturedAt,
-            received_at=datetime.utcnow(),
+            received_at=local_now(),
             top_href=payload.topHref,
             page_url=payload.pageUrl,
             page_type=payload.pageType,

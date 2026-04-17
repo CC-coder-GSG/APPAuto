@@ -17,6 +17,7 @@ from app.services.activity_service import ActivityService
 from app.services.build_record_service import BuildRecordService
 from app.services.permission_service import ensure_admin, ensure_tab_access, get_allowed_tabs
 from app.services.push_service import PushService
+from app.utils.time_utils import local_now
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -226,7 +227,7 @@ def admin_activity_summary(
     db: Session = Depends(get_db),
 ):
     ensure_tab_access(current_user, "activity")
-    end_at = date_to or datetime.utcnow()
+    end_at = date_to or local_now()
     start_at = date_from or (end_at - timedelta(days=days))
     return ActivityService(db).get_summary(
         date_from=start_at,

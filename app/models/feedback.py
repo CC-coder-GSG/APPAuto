@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.enums import FeedbackStatus
+from app.utils.time_utils import local_now
 
 
 class FeedbackRecord(Base):
@@ -29,8 +30,8 @@ class FeedbackRecord(Base):
     handled_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     handled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False)
 
     major_version = relationship("Version", foreign_keys=[major_version_id])
     minor_version = relationship("Version", foreign_keys=[minor_version_id])
@@ -58,7 +59,7 @@ class FeedbackAttachment(Base):
     file_size: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_image: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     uploaded_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
 
     feedback = relationship("FeedbackRecord", back_populates="attachments")
     uploader = relationship("User", foreign_keys=[uploaded_by_id])
@@ -72,7 +73,7 @@ class FeedbackBugLink(Base):
     feedback_id: Mapped[int] = mapped_column(ForeignKey("feedback_records.id", ondelete="CASCADE"), nullable=False, index=True)
     bug_id: Mapped[int] = mapped_column(ForeignKey("bug_tracking.id", ondelete="CASCADE"), nullable=False, index=True)
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
 
     feedback = relationship("FeedbackRecord", back_populates="bug_links")
     bug = relationship("BugTracking")

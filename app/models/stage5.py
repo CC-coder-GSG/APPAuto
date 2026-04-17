@@ -6,6 +6,7 @@ from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
+from app.utils.time_utils import local_now
 
 
 class BugStage5Record(Base):
@@ -21,7 +22,7 @@ class BugStage5Record(Base):
     # 'manual' = user checked the box themselves; 'zentao_sync' = auto-created by Zentao sync
     source = Column(String(20), default="manual", nullable=False, server_default="manual")
     comment = Column(String, nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=local_now, onupdate=local_now)
 
     bug = relationship("BugTracking", back_populates="stage5_records")
     user = relationship("User")

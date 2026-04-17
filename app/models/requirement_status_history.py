@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.enums import RequirementStatus
+from app.utils.time_utils import local_now
 
 
 class RequirementStatusHistory(Base):
@@ -18,11 +19,10 @@ class RequirementStatusHistory(Base):
     from_status: Mapped[Optional[RequirementStatus]] = mapped_column(SAEnum(RequirementStatus), nullable=True)
     to_status: Mapped[RequirementStatus] = mapped_column(SAEnum(RequirementStatus), nullable=False, index=True)
     changed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
-    changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False, index=True)
 
     requirement = relationship("Requirement")
     changed_by = relationship("User", foreign_keys=[changed_by_id])
 
 
 __all__ = ["RequirementStatusHistory"]
-

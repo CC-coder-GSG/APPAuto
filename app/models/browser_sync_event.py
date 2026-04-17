@@ -7,6 +7,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.utils.time_utils import local_now
 
 
 class BrowserSyncEvent(Base):
@@ -18,7 +19,7 @@ class BrowserSyncEvent(Base):
     action: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     captured_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
 
     top_href: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     page_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -64,8 +65,8 @@ class BrowserSyncEvent(Base):
     applied_case_id: Mapped[Optional[int]] = mapped_column(ForeignKey("test_cases.id"), nullable=True)
     applied_bug_tracking_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bug_tracking.id"), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False)
 
 
 __all__ = ["BrowserSyncEvent"]

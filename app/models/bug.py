@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.enums import BugSourceType
+from app.utils.time_utils import local_now
 
 
 class BugTracking(Base):
@@ -81,8 +82,8 @@ class BugTracking(Base):
     zentao_assigned_to_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     # Remote last-edited timestamp from Zentao
     zentao_remote_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False)
 
     requirement = relationship("Requirement", back_populates="bug_tracks")
     major_version = relationship("Version", back_populates="bugs", foreign_keys=[major_version_id])

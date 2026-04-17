@@ -7,6 +7,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstr
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.utils.time_utils import local_now
 
 
 class UserZentaoBinding(Base):
@@ -42,8 +43,8 @@ class UserZentaoBinding(Base):
     last_refresh_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # ok | error
     last_error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False)
 
     user = relationship("User", back_populates="zentao_binding")
 

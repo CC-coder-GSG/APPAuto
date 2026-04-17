@@ -9,6 +9,7 @@ from app.models import BugTracking, Requirement
 from app.services.requirement_service import RequirementService
 from app.services.retest_service import RetestService
 from app.services.stage5_service import Stage5Service
+from app.utils.time_utils import local_now
 
 
 class PushService:
@@ -70,7 +71,7 @@ class PushService:
         await self.send_markdown(md)
 
     def build_daily_report_message(self) -> str:
-        today = datetime.utcnow().date()
+        today = local_now().date()
         total = self.db.query(Requirement).count()
         tested = self.db.query(Requirement).filter(Requirement.test_completed.is_(True)).count()
         untested = total - tested

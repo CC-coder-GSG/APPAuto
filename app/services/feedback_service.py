@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.models import AuditLog, BugSourceType, BugTracking, FeedbackAttachment, FeedbackBugLink, FeedbackRecord, FeedbackStatus, User, Version
 from app.services.audit_service import audit
 from app.services.sse_service import sse_publish
+from app.utils.time_utils import local_now
 
 F_PATTERN = re.compile(r"^\d+$")
 B_PATTERN = re.compile(r"^b#\d+$")
@@ -308,7 +309,7 @@ class FeedbackService:
         row.handled_major_version_id = handled_major_version_id
         row.handled_minor_version_id = handled_minor_version_id
         row.handled_by_id = actor.id
-        row.handled_at = datetime.utcnow()
+        row.handled_at = local_now()
         self._assert_status_transition(row.status, status, actor)
         row.status = status
         self.db.commit()
@@ -341,7 +342,7 @@ class FeedbackService:
         row = self.db.query(FeedbackRecord).filter(FeedbackRecord.id == feedback_id).first()
         if not row:
             raise HTTPException(status_code=404, detail="反馈不存在")
-        now = datetime.utcnow()
+        now = local_now()
         folder = UPLOAD_ROOT / now.strftime("%Y") / now.strftime("%m")
         folder.mkdir(parents=True, exist_ok=True)
         suffix = Path(upload_file.filename or "").suffix.lower()

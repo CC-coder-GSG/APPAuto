@@ -11,6 +11,7 @@ Usage:
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -129,7 +130,17 @@ class ZentaoClient:
                 return None
             if resp.status_code != 200:
                 return None
-            return resp.json()
+            result = resp.json()
+            # Zentao page JSON often wraps the actual payload inside:
+            # {"status":"success","data":"{\"users\":{...},...}"}
+            if isinstance(result, dict) and isinstance(result.get("data"), str):
+                try:
+                    decoded = json.loads(result["data"])
+                    if isinstance(decoded, dict):
+                        return decoded
+                except Exception:
+                    logger.debug("ZentaoClient.get_page: nested data decode failed path=%s", path, exc_info=True)
+            return result
         except Exception as e:
             logger.warning("ZentaoClient.get_page error path=%s: %s", path, e)
             return None

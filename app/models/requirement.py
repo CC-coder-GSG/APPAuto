@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.enums import RequirementStatus
+from app.utils.time_utils import local_now
 
 
 class Requirement(Base):
@@ -38,8 +39,8 @@ class Requirement(Base):
     zentao_plan_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     zentao_plan_title_cache: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False)
 
     major_version = relationship("Version", back_populates="requirements", foreign_keys=[major_version_id])
     retest_minor_version = relationship("Version", foreign_keys=[retest_minor_version_id])

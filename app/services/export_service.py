@@ -11,6 +11,7 @@ from openpyxl import Workbook
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Requirement, TestExecution
+from app.utils.time_utils import local_now
 
 
 class ExportService:
@@ -62,7 +63,7 @@ class ExportService:
 
         fields = ["requirement_id", "major_version", "zentao_req_id", "title", "owner", "case_ids", "case_completed", "test_completed", "status", "minor_version", "result_status", "bug_id", "source_case_id", "executed_at"]
         tmp_dir = Path(tempfile.gettempdir())
-        stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        stamp = local_now().strftime("%Y%m%d_%H%M%S")
         if format == "csv":
             out_path = tmp_dir / f"appauto_export_{stamp}.csv"
             with out_path.open("w", newline="", encoding="utf-8-sig") as f:

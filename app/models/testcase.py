@@ -7,6 +7,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstr
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.utils.time_utils import local_now
 
 
 class TestCase(Base):
@@ -33,7 +34,7 @@ class TestCase(Base):
     # Zentao anchor: numeric case id for direct API access (e.g. /v1/testcases/{id})
     zentao_case_numeric_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     creator_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
 
     requirement = relationship("Requirement", back_populates="test_cases")
 

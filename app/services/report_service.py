@@ -24,6 +24,7 @@ from app.models import (
     Version,
     VersionType,
 )
+from app.utils.time_utils import local_now
 
 
 class ReportService:
@@ -541,7 +542,7 @@ class ReportService:
     ) -> dict:
         sdt = datetime.combine(start_date, datetime.min.time())
         edt = datetime.combine(end_date, datetime.max.time())
-        now = datetime.utcnow()
+        now = local_now()
 
         req_overdue_dt = now - timedelta(days=req_overdue_days)
         fb_overdue_dt = now - timedelta(days=feedback_overdue_days)
@@ -867,7 +868,7 @@ class ReportService:
         - local_closed_no_zentao: bugs with a local closure record but zentao status != closed
         - zentao_deleted_count: bugs soft-deleted in Zentao
         """
-        now = datetime.utcnow()
+        now = local_now()
         stale_cutoff = now - timedelta(minutes=stale_minutes)
 
         # Build scope filter

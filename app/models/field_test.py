@@ -8,6 +8,7 @@ from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Integer, String, Te
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.utils.time_utils import local_now
 
 
 class FieldTestPurposeType(str, Enum):
@@ -39,8 +40,8 @@ class FieldTestRecord(Base):
     tester_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False)
 
     major_version = relationship("Version", foreign_keys=[major_version_id])
     minor_version = relationship("Version", foreign_keys=[minor_version_id])
@@ -56,7 +57,7 @@ class FieldTestBugLink(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     field_test_record_id: Mapped[int] = mapped_column(ForeignKey("field_test_records.id", ondelete="CASCADE"), nullable=False, index=True)
     bug_tracking_id: Mapped[int] = mapped_column(ForeignKey("bug_tracking.id", ondelete="CASCADE"), nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
 
     field_test = relationship("FieldTestRecord", back_populates="bug_links")
     bug = relationship("BugTracking")

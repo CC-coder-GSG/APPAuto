@@ -7,6 +7,7 @@ from sqlalchemy import DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.utils.time_utils import local_now
 
 
 class AuditLog(Base):
@@ -18,4 +19,4 @@ class AuditLog(Base):
     target_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     target_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False, index=True)

@@ -9,6 +9,7 @@ from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import AuditLog, BugTracking, FeedbackRecord, FieldTestRecord, Requirement, TestCase, User, Version
+from app.utils.time_utils import local_now
 
 
 ACTION_META: dict[str, dict[str, Any]] = {
@@ -459,7 +460,7 @@ class ActivityService:
         return {"cards": cards, "highlights": highlights}
 
     def build_push_markdown(self, *, hours: int = 24, target_types: list[str] | None = None, software_id: int | None = None, only_important: bool = True) -> str:
-        end_at = datetime.utcnow()
+        end_at = local_now()
         start_at = end_at - timedelta(hours=hours)
         summary = self.get_summary(date_from=start_at, date_to=end_at, target_types=target_types, software_id=software_id, only_important=only_important)
         items = self.list_feed(
