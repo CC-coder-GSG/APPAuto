@@ -662,14 +662,22 @@ function _sanitizePreviewHtml(rawHtml) {
 let _zentaoPreviewImageGallery = [];
 let _zentaoPreviewImageIndex = -1;
 
+function _isPreviewImageFile(item) {
+  if (!item) return false;
+  if (item.is_image) return true;
+  const text = String(item.extension || item.title || '').trim().toLowerCase();
+  const ext = text.includes('.') ? text.split('.').pop() : text;
+  return ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'].includes(ext);
+}
+
 function _renderPreviewFiles(preview) {
   const files = Array.isArray(preview.files) ? preview.files : [];
   if (!files.length) {
     return '<span style="color:#94a3b8; font-size:13px;">暂无附件</span>';
   }
 
-  const imageFiles = files.filter((item) => item?.is_image && item?.url);
-  const otherFiles = files.filter((item) => !item?.is_image || !item?.url);
+  const imageFiles = files.filter((item) => _isPreviewImageFile(item) && item?.url);
+  const otherFiles = files.filter((item) => !_isPreviewImageFile(item) || !item?.url);
 
   const imageBlock = imageFiles.length ? `
     <div style="margin-bottom:${otherFiles.length ? '14px' : '0'};">
@@ -709,7 +717,7 @@ function _renderPreviewFiles(preview) {
 
 function _setZentaoPreviewImageGallery(files) {
   _zentaoPreviewImageGallery = (Array.isArray(files) ? files : [])
-    .filter((item) => item?.is_image && item?.url)
+    .filter((item) => _isPreviewImageFile(item) && item?.url)
     .map((item) => ({
       url: String(item.url || ''),
       title: String(item.title || '图片附件'),

@@ -129,18 +129,35 @@ def normalize_bug_detail(raw: dict, base_url: str = "") -> dict:
     for item in raw_files:
         if not isinstance(item, dict):
             continue
+        file_title = (
+            item.get("title")
+            or item.get("name")
+            or item.get("pathName")
+            or item.get("pathname")
+            or item.get("text")
+            or ""
+        )
         file_url = _normalize_zentao_url(
             base_url,
-            item.get("url") or item.get("downloadUrl") or item.get("webPath") or item.get("pathname") or "",
+            item.get("previewUrl")
+            or item.get("viewUrl")
+            or item.get("thumbUrl")
+            or item.get("url")
+            or item.get("downloadUrl")
+            or item.get("downloadURL")
+            or item.get("webPath")
+            or item.get("pathName")
+            or item.get("pathname")
+            or "",
         )
         extension = str(item.get("extension") or item.get("ext") or "").strip().lower()
         files.append(
             {
-                "title": item.get("title") or item.get("name") or "",
+                "title": file_title,
                 "url": file_url,
                 "extension": extension,
                 "is_image": _is_image_file(
-                    item.get("title") or item.get("name") or "",
+                    file_title,
                     extension=extension,
                     mime=item.get("mimeType") or item.get("mime"),
                 ),
