@@ -207,5 +207,67 @@ class ZentaoClient:
         path = f"bug-{action}-{bug_id}.json"
         return self.get_page(path)
 
+    def create_bug(self, data: dict) -> dict | None:
+        """POST /v1/bugs — create a new bug in Zentao."""
+        return self.post("bugs", data)
+
+    def get_execution_context(self, execution_id: int) -> dict:
+        """
+        Return {product_ids: [...], project_id: int|None} for the given execution.
+        Uses GET /v1/executions/{id}.
+        """
+        try:
+            resp = self.get(f"executions/{execution_id}")
+            if not resp:
+                return {"product_ids": [], "project_id": None}
+            execution = resp.get("execution") or resp
+            if not isinstance(execution, dict):
+                return {"product_ids": [], "project_id": None}
+
+            # Extract product IDs
+            products_raw = execution.get("products") or []
+            product_ids: list[int] = []
+            if isinstance(products_raw, list):
+                for p in products_raw:
+                    if isinstance(p, dict):
+                        pid = p.get("id")
+                        if pid:
+                            product_ids.append(int(pid))
+                    elif p:
+                        try:
+                            product_ids.append(int(p))
+                        except (TypeError, ValueError):
+                            pass
+            elif isinstance(products_raw, dict):
+                for pid in products_raw:
+                    try:
+                        product_ids.append(int(pid))
+                    except (TypeError, ValueError):
+                        pass
+
+            # Extract project ID
+            project_raw = execution.get("project") or {}
+            project_id = None
+            if isinstance(project_raw, dict):
+                project_id = project_raw.get("id")
+            elif project_raw:
+                try:
+                    project_id = int(project_raw)
+                except (TypeError, ValueError):
+                    pass
+
+            return {"product_ids": product_ids, "project_id": project_id}
+        except Exception:
+            return {"product_ids": [], "project_id": None}
+
+    def get_create_bug_meta(self, product_id: int, execution_id: int = 0) -> dict | None:
+        """Fetch page-level JSON for the bug creation form (users, builds etc.)."""
+        path = f"bug-create-{product_id}-{execution_id}.json"
+        meta = self.get_page(path)
+        if not meta:
+            path = f"bug-create-{product_id}-0.json"
+            meta = self.get_page(path)
+        return meta
+
 
 __all__ = ["ZentaoClient", "ZentaoAPIError"]

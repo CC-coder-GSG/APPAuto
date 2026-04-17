@@ -16,6 +16,25 @@ const TAB_PERMISSION_OPTIONS = [
   { key: 'dispatch', label: 'BUG特派' },
 ];
 
+function bugZentaoMeta(b) {
+  const parts = [];
+  const statusColors = { active: '#dc2626', resolved: '#d97706', closed: '#16a34a', rejected: '#6b7280' };
+  if (b.zentao_live_status) {
+    const color = statusColors[b.zentao_live_status.toLowerCase()] || '#475569';
+    parts.push(`<span class="badge" style="background:#f8fafc; color:${color}; border:1px solid ${color}40;">${b.zentao_live_status}</span>`);
+  }
+  if (b.zentao_deleted) {
+    parts.push(`<span class="badge" style="background:#fee2e2; color:#b91c1c;">已删除</span>`);
+  }
+  if (b.zentao_closed_by_name) {
+    parts.push(`<span class="badge" style="background:#ecfdf5; color:#047857;">关闭: ${b.zentao_closed_by_name}</span>`);
+  }
+  if (b.last_zentao_synced_at) {
+    parts.push(`<span class="badge" style="background:#f8fafc; color:#94a3b8; font-size:11px;">同步 ${b.last_zentao_synced_at}</span>`);
+  }
+  return parts.length ? ` &nbsp;${parts.join('')}` : '';
+}
+
 function isMajorExpanded(majorId) {
   return state.dataTreeExpandedMajors[String(majorId)] === true;
 }
@@ -358,7 +377,7 @@ export function renderDataOverview() {
           const actions = isAdmin
             ? `<button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button>`
             : '';
-          return `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 关联 Bug: ${renderBugLink(b)} <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="openAuditTimelineModal('bug', ${b.id}, 'Bug 时间线')">🕓</button>${actions}</div>`;
+          return `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 关联 Bug: ${renderBugLink(b)}${bugZentaoMeta(b)} <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="openAuditTimelineModal('bug', ${b.id}, 'Bug 时间线')">🕓</button>${actions}</div>`;
         }).join('');
         if (!bHtml) bHtml = '<div style="margin-left:24px; color:#10b981; font-size:13px; margin-top:4px;">↳ ✓ 完美通过，无关联Bug</div>';
         const caseObj = (req.test_cases || []).find((x) => String(x.zentao_case_id) === String(cId));
@@ -368,7 +387,7 @@ export function renderDataOverview() {
         const actions = isAdmin
           ? `<button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button>`
           : '';
-        return `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 自由 Bug: ${renderBugLink(b)} <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="openAuditTimelineModal('bug', ${b.id}, 'Bug 时间线')">🕓</button>${actions}</div>`;
+        return `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 自由 Bug: ${renderBugLink(b)}${bugZentaoMeta(b)} <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="openAuditTimelineModal('bug', ${b.id}, 'Bug 时间线')">🕓</button>${actions}</div>`;
       }).join('');
       const reqActionButtons = isAdmin
         ? `

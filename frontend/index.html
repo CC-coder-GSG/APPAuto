@@ -408,6 +408,7 @@
         <label>大版本</label><select id="s5MajorSelect"></select>
         <button onclick="loadStage5()">加载全景大盘</button>
         <button class="secondary" onclick="syncStage5FromZentao({ force: true })">强制同步禅道并刷新</button>
+        <button class="secondary" onclick="openS5CreateZentaoBugModal()" style="color:#7c3aed; border-color:#c4b5fd;">➕ 新建禅道Bug</button>
       </div>
       <div class="row" style="border-top: 1px dashed #cbd5e1; padding-top: 12px;">
         <span style="font-weight: bold; color: #334155; margin-right: 8px;">🚀 回归发包环境:</span>
@@ -955,6 +956,52 @@
           </div>
         </div>
       </div>
+
+      <!-- Zentao Sync Health Panel -->
+      <div style="margin-top: 30px; border-top: 2px dashed #cbd5e1; padding-top: 20px; width: 100%;">
+        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <h3 style="color: #334155; margin:0;">🔄 禅道同步健康看板</h3>
+          <button class="secondary" onclick="loadZentaoSyncStats()">刷新同步统计</button>
+        </div>
+        <div id="zentaoSyncStatsArea">
+          <div class="metrics-grid">
+            <div class="metric-card" style="cursor:pointer;" onclick="document.getElementById('zsStaleDetail').classList.toggle('hidden')">
+              <div class="metric-title">⏰ 超60分钟未同步</div>
+              <div class="metric-value" id="zsStaleCount" style="color:#d97706;">0</div>
+            </div>
+            <div class="metric-card" style="cursor:pointer;" onclick="document.getElementById('zsZtClosedNoLocalDetail').classList.toggle('hidden')">
+              <div class="metric-title">🔒 禅道已关闭无本地闭环</div>
+              <div class="metric-value" id="zsZtClosedNoLocalCount" style="color:#dc2626;">0</div>
+            </div>
+            <div class="metric-card" style="cursor:pointer;" onclick="document.getElementById('zsLocalClosedNoZtDetail').classList.toggle('hidden')">
+              <div class="metric-title">⚠️ 本地已闭环禅道未关</div>
+              <div class="metric-value" id="zsLocalClosedNoZtCount" style="color:#ea580c;">0</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-title">🗑️ 禅道已删除记录</div>
+              <div class="metric-value" id="zsDeletedCount" style="color:#6b7280;">0</div>
+            </div>
+          </div>
+          <div id="zsStaleDetail" class="hidden" style="margin-top:12px;">
+            <div class="card" style="border:1px dashed #fcd34d; box-shadow:none;">
+              <h4 style="margin:0 0 10px; color:#92400e;">超时未同步 Bug 明细（最多50条）</h4>
+              <table><thead id="zsStaleTableHead"></thead><tbody id="zsStaleTable"></tbody></table>
+            </div>
+          </div>
+          <div id="zsZtClosedNoLocalDetail" class="hidden" style="margin-top:12px;">
+            <div class="card" style="border:1px dashed #fca5a5; box-shadow:none;">
+              <h4 style="margin:0 0 10px; color:#b91c1c;">禅道已关闭、本地无人确认闭环（最多50条）</h4>
+              <table><thead id="zsZtClosedNoLocalTableHead"></thead><tbody id="zsZtClosedNoLocalTable"></tbody></table>
+            </div>
+          </div>
+          <div id="zsLocalClosedNoZtDetail" class="hidden" style="margin-top:12px;">
+            <div class="card" style="border:1px dashed #fed7aa; box-shadow:none;">
+              <h4 style="margin:0 0 10px; color:#c2410c;">本地已确认闭环、禅道未关闭（最多50条）</h4>
+              <table><thead id="zsLocalClosedNoZtTableHead"></thead><tbody id="zsLocalClosedNoZtTable"></tbody></table>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -1264,6 +1311,54 @@
       <div style="display:flex; gap:10px; justify-content:flex-end;">
         <button class="secondary" onclick="closeS5AssignModal()">取消</button>
         <button onclick="submitS5Assign()">确认指派</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stage5 Create Zentao Bug Modal -->
+  <div id="s5CreateZentaoBugModal" class="hidden" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
+    <div style="width:min(600px, 96vw); max-height:92vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
+        <h3 style="margin:0; color:#0f172a; font-size:16px;">📝 新建禅道 Bug</h3>
+        <button class="secondary" onclick="closeS5CreateZentaoBugModal()" style="padding:4px 10px; font-size:13px;">✕ 关闭</button>
+      </div>
+      <div id="s5CreateBugMetaHint" style="font-size:12px; color:#64748b; margin-bottom:14px;"></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+        <div>
+          <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">Bug 标题 <span style="color:#ef4444">*</span></label>
+          <input id="s5CreateBugTitle" placeholder="Bug 标题（必填）" style="width:100%; box-sizing:border-box; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+        </div>
+        <div>
+          <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">指派给</label>
+          <div id="s5CreateBugUserContainer" style="min-height:36px;"><div style="color:#94a3b8; font-size:13px; padding:8px 0;">加载候选人中...</div></div>
+        </div>
+        <div>
+          <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">严重程度</label>
+          <select id="s5CreateBugSeverity" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            <option value="1">1 - 致命</option>
+            <option value="2">2 - 严重</option>
+            <option value="3" selected>3 - 一般</option>
+            <option value="4">4 - 建议</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">优先级</label>
+          <select id="s5CreateBugPri" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            <option value="1">P1 - 紧急</option>
+            <option value="2">P2 - 高</option>
+            <option value="3" selected>P3 - 中</option>
+            <option value="4">P4 - 低</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">复现步骤</label>
+        <textarea id="s5CreateBugSteps" placeholder="1. 打开...\n2. 点击...\n3. 观察结果..." style="width:100%; box-sizing:border-box; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; resize:vertical; min-height:80px;"></textarea>
+      </div>
+      <div id="s5CreateBugErrorMsg" style="color:#dc2626; font-size:13px; margin-bottom:10px; display:none;"></div>
+      <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <button class="secondary" onclick="closeS5CreateZentaoBugModal()">取消</button>
+        <button id="s5CreateBugSubmitBtn" onclick="submitS5CreateZentaoBug()">🚀 提交到禅道</button>
       </div>
     </div>
   </div>

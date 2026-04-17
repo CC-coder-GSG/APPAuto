@@ -165,6 +165,13 @@ def admin_data_overview(current_user=Depends(get_current_user), db: Session = De
                 "found_minor_version_id": b.found_minor_version_id,
                 "zentao_bug_url": b.zentao_bug_url,
                 "zentao_bug_title": b.zentao_bug_title,
+                "zentao_bug_id": b.zentao_bug_id,
+                "zentao_live_status": b.zentao_live_status or "",
+                "zentao_deleted": bool(b.zentao_deleted),
+                "zentao_closed_by_name": b.zentao_closed_by_name or "",
+                "zentao_assigned_to_name": b.zentao_assigned_to_name or "",
+                "last_zentao_synced_at": b.last_zentao_synced_at.strftime("%Y-%m-%d %H:%M") if b.last_zentao_synced_at else "",
+                "zentao_sync_status": b.zentao_sync_status or "",
             }
             for b in db.query(BugTracking).order_by(BugTracking.id.desc()).all()
         ],

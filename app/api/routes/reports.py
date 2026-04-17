@@ -63,3 +63,20 @@ def reports_governance(
         bug_overdue_days=bug_overdue_days,
         stale_bug_days=stale_bug_days,
     )
+
+
+@router.get("/reports/zentao-sync-stats")
+def reports_zentao_sync_stats(
+    major_version_id: Optional[int] = None,
+    software_id: Optional[int] = None,
+    stale_minutes: int = 60,
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return Zentao sync health statistics for governance view."""
+    service = ReportService(db)
+    return service.zentao_sync_stats(
+        major_version_id=major_version_id,
+        software_id=software_id,
+        stale_minutes=stale_minutes,
+    )

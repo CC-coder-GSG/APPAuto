@@ -853,3 +853,116 @@ class ReportService:
                 "top_assigned_no_progress": assigned_no_progress[:10],
             },
         }
+
+    def zentao_sync_stats(
+        self,
+        major_version_id: int | None = None,
+        software_id: int | None = None,
+        stale_minutes: int = 60,
+    ) -> dict:
+        """
+        Return Zentao sync health stats:
+        - stale_sync: bugs not synced for > stale_minutes
+        - zentao_closed_no_local: bugs with zentao_live_status=closed but no local closure record
+        - local_closed_no_zentao: bugs with a local closure record but zentao status != closed
+        - zentao_deleted_count: bugs soft-deleted in Zentao
+        """
+        now = datetime.utcnow()
+        stale_cutoff = now - timedelta(minutes=stale_minutes)
+
+        # Build scope filter
+        scoped_major_ids: list[int] | None = None
+        if major_version_id:
+            scoped_major_ids = [major_version_id]
+        elif software_id:
+            scoped_major_ids = [
+                v.id
+                for v in self.db.query(Version)
+                .filter(Version.version_type == VersionType.MAJOR, Version.software_id == software_id)
+                .all()
+            ]
+
+        base_q = self.db.query(BugTracking).filter(
+            BugTracking.zentao_bug_id.isnot(None),
+            BugTracking.zentao_deleted.isnot(True),
+        )
+        if scoped_major_ids is not None:
+            base_q = base_q.filter(
+                BugTracking.major_version_id.in_(scoped_major_ids if scoped_major_ids else [-1])
+            )
+
+        all_zentao_bugs = base_q.all()
+
+        # 1. Stale sync: synced but outdated
+        stale_sync = [
+            {
+                "id": b.id,
+                "bug_id": b.bug_id,
+                "zentao_bug_id": b.zentao_bug_id,
+                "title": b.zentao_bug_title or "",
+                "last_synced_at": b.last_zentao_synced_at.strftime("%Y-%m-%d %H:%M") if b.last_zentao_synced_at else "从未同步",
+                "status": b.zentao_live_status or "",
+            }
+            for b in all_zentao_bugs
+            if (b.last_zentao_synced_at is None or b.last_zentao_synced_at < stale_cutoff)
+        ]
+
+        # 2. Zentao closed but no local closure record (any user)
+        closed_zentao_ids = {b.id for b in all_zentao_bugs if (b.zentao_live_status or "").lower() == "closed"}
+        local_closure_bug_ids = {
+            r.bug_tracking_id
+            for r in self.db.query(BugStage5Record)
+            .filter(BugStage5Record.bug_tracking_id.in_(closed_zentao_ids), BugStage5Record.test_done.is_(True))
+            .all()
+        } if closed_zentao_ids else set()
+        zentao_closed_no_local = [
+            {
+                "id": b.id,
+                "bug_id": b.bug_id,
+                "zentao_bug_id": b.zentao_bug_id,
+                "title": b.zentao_bug_title or "",
+                "closed_by": b.zentao_closed_by_name or b.zentao_closed_by_account or "",
+                "close_date": b.zentao_close_date.strftime("%Y-%m-%d") if b.zentao_close_date else "",
+            }
+            for b in all_zentao_bugs
+            if b.id in closed_zentao_ids and b.id not in local_closure_bug_ids
+        ]
+
+        # 3. Local closure but Zentao not closed
+        local_closed_ids = {
+            r.bug_tracking_id
+            for r in self.db.query(BugStage5Record)
+            .filter(BugStage5Record.test_done.is_(True))
+            .all()
+        }
+        local_closed_no_zentao = [
+            {
+                "id": b.id,
+                "bug_id": b.bug_id,
+                "zentao_bug_id": b.zentao_bug_id,
+                "title": b.zentao_bug_title or "",
+                "zentao_status": b.zentao_live_status or "",
+                "last_synced_at": b.last_zentao_synced_at.strftime("%Y-%m-%d %H:%M") if b.last_zentao_synced_at else "从未同步",
+            }
+            for b in all_zentao_bugs
+            if b.id in local_closed_ids and (b.zentao_live_status or "").lower() not in ("closed", "")
+        ]
+
+        # 4. Deleted count
+        deleted_q = self.db.query(BugTracking).filter(BugTracking.zentao_deleted.is_(True))
+        if scoped_major_ids is not None:
+            deleted_q = deleted_q.filter(
+                BugTracking.major_version_id.in_(scoped_major_ids if scoped_major_ids else [-1])
+            )
+        zentao_deleted_count = deleted_q.count()
+
+        return {
+            "stale_sync_count": len(stale_sync),
+            "zentao_closed_no_local_count": len(zentao_closed_no_local),
+            "local_closed_no_zentao_count": len(local_closed_no_zentao),
+            "zentao_deleted_count": zentao_deleted_count,
+            "stale_sync": stale_sync[:50],
+            "zentao_closed_no_local": zentao_closed_no_local[:50],
+            "local_closed_no_zentao": local_closed_no_zentao[:50],
+            "stale_minutes": stale_minutes,
+        }

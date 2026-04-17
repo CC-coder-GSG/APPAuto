@@ -28,7 +28,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
-from app.models.bug import BugTracking
+from app.models.bug import BugTracking, BugSourceType
+from app.models.version import Version
+from app.models.enums import VersionType
 from app.models.user_zentao_binding import UserZentaoBinding
 from app.services.audit_service import audit
 from app.services.zentao_auth_service import get_valid_token, invalidate_token
@@ -62,9 +64,185 @@ class EditBugPayload(BaseModel):
     title: str
 
 
+class CreateBugPayload(BaseModel):
+    product_id: int
+    execution_id: Optional[int] = None
+    title: str
+    severity: int = 3
+    pri: int = 3
+    steps: str = ""
+    assigned_to: str = ""
+    opened_build: list[str] = []
+    bug_type: str = "codeerror"
+    # Local tracking context
+    major_version_id: Optional[int] = None
+    requirement_id: Optional[int] = None
+    found_minor_version_id: Optional[int] = None
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+
+@router.get("/bugs/create-meta")
+def get_create_bug_meta(
+    major_version_id: Optional[int] = None,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Return metadata needed for the Create Bug form:
+    - product_ids, execution_id (derived from the major version if given)
+    - users dict (from create-bug page JSON)
+    - builds dict
+    """
+    client = _get_client(current_user.id, db)
+    if client is None:
+        return {"product_ids": [], "execution_id": None, "users": {}, "builds": {}}
+
+    # Resolve execution from major version
+    execution_id: Optional[int] = None
+    product_ids: list[int] = []
+    if major_version_id:
+        major = db.query(Version).filter(
+            Version.id == major_version_id,
+            Version.version_type == VersionType.MAJOR,
+        ).first()
+        if major and major.zentao_execution_id:
+            execution_id = major.zentao_execution_id
+            ctx = client.get_execution_context(execution_id)
+            product_ids = ctx.get("product_ids") or []
+
+    # If we have no product yet, try to infer from an existing synced bug
+    if not product_ids and major_version_id:
+        sample = db.query(BugTracking).filter(
+            BugTracking.major_version_id == major_version_id,
+            BugTracking.zentao_product_id.isnot(None),
+        ).first()
+        if sample and sample.zentao_product_id:
+            try:
+                product_ids = [int(sample.zentao_product_id)]
+            except (TypeError, ValueError):
+                pass
+
+    # Fetch user list from create-bug page JSON for the first product
+    users: dict[str, str] = {}
+    builds: dict[str, str] = {}
+    if product_ids:
+        meta = client.get_create_bug_meta(product_ids[0], execution_id or 0)
+        if meta:
+            users_raw = meta.get("users") or {}
+            for account, display in (users_raw.items() if isinstance(users_raw, dict) else []):
+                if isinstance(display, str) and len(display) > 2 and display[1] == ":":
+                    display = display[2:]
+                users[account] = display
+            builds_raw = meta.get("builds") or {}
+            if isinstance(builds_raw, dict):
+                for bid, bval in builds_raw.items():
+                    name = bval if isinstance(bval, str) else (bval.get("name") or str(bid))
+                    builds[str(bid)] = name
+
+    return {
+        "product_ids": product_ids,
+        "execution_id": execution_id,
+        "users": users,
+        "builds": builds,
+    }
+
+
+@router.post("/bugs")
+def create_zentao_bug(
+    payload: CreateBugPayload,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Create a new bug in Zentao, then write the result back to local BugTracking.
+    """
+    client = _get_client(current_user.id, db)
+    if client is None:
+        raise HTTPException(status_code=400, detail="当前用户未配置可用的禅道绑定")
+
+    body: dict = {
+        "title": payload.title,
+        "product": payload.product_id,
+        "severity": payload.severity,
+        "pri": payload.pri,
+        "type": payload.bug_type,
+    }
+    if payload.execution_id:
+        body["execution"] = payload.execution_id
+    if payload.steps:
+        body["steps"] = payload.steps
+    if payload.assigned_to:
+        body["assignedTo"] = payload.assigned_to
+    if payload.opened_build:
+        body["openedBuild"] = payload.opened_build
+
+    try:
+        result = client.create_bug(body)
+    except ZentaoAPIError as exc:
+        if exc.status_code == 401:
+            invalidate_token(current_user.id, db)
+            client2 = _get_client(current_user.id, db)
+            if client2 is None:
+                raise HTTPException(status_code=400, detail="禅道 token 刷新失败")
+            try:
+                result = client2.create_bug(body)
+            except ZentaoAPIError as exc2:
+                raise HTTPException(status_code=exc2.status_code or 502, detail=f"禅道创建Bug失败: {exc2.message}")
+        else:
+            raise HTTPException(status_code=exc.status_code or 502, detail=f"禅道创建Bug失败: {exc.message}")
+
+    # Extract returned bug ID
+    if not result:
+        raise HTTPException(status_code=502, detail="禅道返回了空响应，Bug可能未创建成功")
+    bug_data = result.get("bug") or result
+    zentao_bug_id = str(bug_data.get("id") or "")
+    if not zentao_bug_id:
+        raise HTTPException(status_code=502, detail="禅道未返回 Bug ID，请检查禅道后台")
+
+    # Get the Zentao base URL from the user's binding
+    binding = db.query(UserZentaoBinding).filter(UserZentaoBinding.user_id == current_user.id).first()
+    base_url = (binding.base_url or "").rstrip("/") if binding else ""
+
+    # Write back to local BugTracking
+    bug_id_str = f"b#{zentao_bug_id}"
+    local_row = BugTracking(
+        major_version_id=payload.major_version_id,
+        requirement_id=payload.requirement_id,
+        source_type=BugSourceType.MANUAL,
+        bug_id=bug_id_str,
+        found_minor_version_id=payload.found_minor_version_id,
+        created_by_id=current_user.id,
+        zentao_bug_id=zentao_bug_id,
+        zentao_bug_title=payload.title,
+        zentao_bug_url=f"{base_url}/bug-view-{zentao_bug_id}.html" if base_url else None,
+        zentao_live_status="active",
+        zentao_assigned_to_account=payload.assigned_to or None,
+        zentao_assigned_to_name=payload.assigned_to or None,
+        zentao_sync_status="synced",
+        zentao_sync_message="通过测试管理系统创建",
+        last_zentao_synced_at=datetime.utcnow(),
+        last_zentao_checked_at=datetime.utcnow(),
+    )
+    db.add(local_row)
+    try:
+        db.commit()
+        db.refresh(local_row)
+    except Exception as e:
+        db.rollback()
+        logger.warning("create_zentao_bug: local write failed: %s", e)
+
+    audit(db, action="zentao_bug.create", target_type="bug", actor_id=current_user.id,
+          target_id=zentao_bug_id, detail=f"title={payload.title}")
+    return {
+        "message": "禅道Bug创建成功",
+        "zentao_bug_id": zentao_bug_id,
+        "local_id": local_row.id if local_row.id else None,
+        "bug_id": bug_id_str,
+    }
 
 @router.get("/bugs/{zt_id}/action-meta")
 def get_bug_action_meta(

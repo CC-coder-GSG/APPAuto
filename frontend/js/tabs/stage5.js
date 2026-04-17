@@ -106,10 +106,7 @@ export async function loadStage5(options = {}) {
     stage5LastDatasetKey = datasetKey;
   }
 
-  if (majorId !== 0 && syncBeforeLoad) {
-    await maybeSyncStage5BeforeLoad({ majorId, silentSync });
-  }
-
+  // Load from local DB immediately; trigger background sync after render (Task 10/11)
   const url = majorId === 0
     ? `/stage5/overview?major_version_id=0&software_id=${softwareId}`
     : `/stage5/overview?major_version_id=${majorId}`;
@@ -135,6 +132,16 @@ export async function loadStage5(options = {}) {
   deferClearOverallUnread();
   if (showSuccess) {
     window.showMessage && window.showMessage('全景大盘加载成功', 'success');
+  }
+
+  // Background sync: after rendering local data, trigger incremental sync silently
+  if (majorId !== 0 && syncBeforeLoad) {
+    maybeSyncStage5BeforeLoad({ majorId, silentSync: true }).then((result) => {
+      // If sync brought actual changes (not cached), reload silently
+      if (result && !result.cached && (result.created || result.updated)) {
+        loadStage5({ syncBeforeLoad: false, silentSync: true, showSuccess: false });
+      }
+    }).catch(() => {});
   }
 }
 
@@ -733,6 +740,143 @@ export function closeS5AssignModal() {
   if (modal) { modal.classList.add('hidden'); modal.style.display = 'none'; }
 }
 
+// ─── Create Zentao Bug ───────────────────────────────────────────────────────
+
+let _s5CreateBugMeta = null;
+
+export async function openS5CreateZentaoBugModal() {
+  const modal = document.getElementById('s5CreateZentaoBugModal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+
+  const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
+  const hintEl = document.getElementById('s5CreateBugMetaHint');
+  const userContainer = document.getElementById('s5CreateBugUserContainer');
+  const errEl = document.getElementById('s5CreateBugErrorMsg');
+  if (errEl) errEl.style.display = 'none';
+
+  // Reset fields
+  ['s5CreateBugTitle', 's5CreateBugSteps'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  document.getElementById('s5CreateBugSeverity').value = '3';
+  document.getElementById('s5CreateBugPri').value = '3';
+
+  if (!majorId) {
+    if (hintEl) hintEl.innerText = '⚠️ 请先在整体测试页选择一个具体大版本';
+    if (userContainer) userContainer.innerHTML = '<div style="color:#94a3b8; font-size:13px;">请先选择大版本</div>';
+    return;
+  }
+
+  if (hintEl) hintEl.innerText = '正在加载产品/用户信息...';
+  if (userContainer) userContainer.innerHTML = '<div style="color:#94a3b8; font-size:13px;">加载中...</div>';
+
+  try {
+    const resp = await api(`/zentao/bugs/create-meta?major_version_id=${majorId}`);
+    _s5CreateBugMeta = await resp.json();
+
+    const pid = (_s5CreateBugMeta.product_ids || [])[0];
+    const execId = _s5CreateBugMeta.execution_id;
+    if (hintEl) {
+      hintEl.innerText = pid
+        ? `产品ID: ${pid}${execId ? `  执行ID: ${execId}` : ''}`
+        : '⚠️ 未找到产品信息，请确认该大版本已配置禅道执行版本映射';
+    }
+
+    // Build user select
+    const users = _s5CreateBugMeta.users || {};
+    const userEntries = Object.entries(users);
+    if (userContainer) {
+      if (userEntries.length === 0) {
+        userContainer.innerHTML = '<div style="color:#94a3b8; font-size:13px;">未获取到候选人列表</div>';
+      } else {
+        let search = '';
+        const renderId = 'createBugUserSearch_' + Date.now();
+        userContainer.innerHTML = `
+          <input id="${renderId}" placeholder="搜索候选人（姓名/账号）..." style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px; box-sizing:border-box; margin-bottom:4px;">
+          <select id="s5CreateBugAssignTo" size="4" style="width:100%; border:1px solid #cbd5e1; border-radius:4px; font-size:13px; padding:2px;">
+            <option value="">-- 不指派 --</option>
+            ${userEntries.map(([acc, name]) => `<option value="${acc}">${name} (${acc})</option>`).join('')}
+          </select>`;
+        const searchEl = document.getElementById(renderId);
+        const selectEl = document.getElementById('s5CreateBugAssignTo');
+        if (searchEl && selectEl) {
+          searchEl.addEventListener('input', () => {
+            search = searchEl.value.toLowerCase();
+            selectEl.innerHTML = '<option value="">-- 不指派 --</option>' +
+              userEntries
+                .filter(([acc, name]) => !search || acc.toLowerCase().includes(search) || name.toLowerCase().includes(search))
+                .map(([acc, name]) => `<option value="${acc}">${name} (${acc})</option>`)
+                .join('');
+          });
+        }
+      }
+    }
+  } catch (err) {
+    if (hintEl) hintEl.innerText = `加载失败: ${err.message}`;
+    if (userContainer) userContainer.innerHTML = '<div style="color:#dc2626; font-size:13px;">获取元数据失败</div>';
+  }
+}
+
+export function closeS5CreateZentaoBugModal() {
+  const modal = document.getElementById('s5CreateZentaoBugModal');
+  if (modal) { modal.classList.add('hidden'); modal.style.display = 'none'; }
+  _s5CreateBugMeta = null;
+}
+
+export async function submitS5CreateZentaoBug() {
+  const title = (document.getElementById('s5CreateBugTitle')?.value || '').trim();
+  const steps = (document.getElementById('s5CreateBugSteps')?.value || '').trim();
+  const severity = Number(document.getElementById('s5CreateBugSeverity')?.value || 3);
+  const pri = Number(document.getElementById('s5CreateBugPri')?.value || 3);
+  const assignedTo = document.getElementById('s5CreateBugAssignTo')?.value || '';
+  const errEl = document.getElementById('s5CreateBugErrorMsg');
+
+  if (!title) {
+    if (errEl) { errEl.innerText = 'Bug 标题不能为空'; errEl.style.display = 'block'; }
+    return;
+  }
+  if (!_s5CreateBugMeta || !(_s5CreateBugMeta.product_ids || []).length) {
+    if (errEl) { errEl.innerText = '未获取到产品信息，无法创建'; errEl.style.display = 'block'; }
+    return;
+  }
+  if (errEl) errEl.style.display = 'none';
+
+  const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
+  const minorId = Number(document.getElementById('s5MinorSelect')?.value || 0);
+  const submitBtn = document.getElementById('s5CreateBugSubmitBtn');
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = '提交中...'; }
+
+  try {
+    const body = {
+      product_id: _s5CreateBugMeta.product_ids[0],
+      execution_id: _s5CreateBugMeta.execution_id || null,
+      title,
+      severity,
+      pri,
+      steps,
+      assigned_to: assignedTo,
+      bug_type: 'codeerror',
+      major_version_id: majorId || null,
+      found_minor_version_id: minorId || null,
+    };
+    const resp = await api('/zentao/bugs', { method: 'POST', body });
+    const result = await resp.json();
+    window.showMessage && window.showMessage(`禅道Bug #${result.zentao_bug_id} 创建成功`, 'success');
+    closeS5CreateZentaoBugModal();
+    // Reload stage5 to show the new bug
+    if (majorId) {
+      loadStage5({ syncBeforeLoad: false, silentSync: true, showSuccess: false });
+    }
+  } catch (err) {
+    if (errEl) { errEl.innerText = err.message || '创建失败，请稍后重试'; errEl.style.display = 'block'; }
+  } finally {
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = '🚀 提交到禅道'; }
+  }
+}
+
 window.OmniQAStage5Tab = {
   loadStage5,
   renderS5,
@@ -754,6 +898,9 @@ window.OmniQAStage5Tab = {
   submitS5Assign,
   closeS5AssignModal,
   toggleS5CloseComment,
+  openS5CreateZentaoBugModal,
+  closeS5CreateZentaoBugModal,
+  submitS5CreateZentaoBug,
 };
 window.editS5Bug = editS5Bug;
 window.editS5BugById = editS5BugById;
@@ -773,6 +920,9 @@ window.closeS5ReactivateModal = closeS5ReactivateModal;
 window.openS5AssignModal = openS5AssignModal;
 window.submitS5Assign = submitS5Assign;
 window.closeS5AssignModal = closeS5AssignModal;
+window.openS5CreateZentaoBugModal = openS5CreateZentaoBugModal;
+window.closeS5CreateZentaoBugModal = closeS5CreateZentaoBugModal;
+window.submitS5CreateZentaoBug = submitS5CreateZentaoBug;
 
 // ─── Stage5 SSE: 新 bug 底部提示 + 卡片流光 ──────────────────────────────────
 

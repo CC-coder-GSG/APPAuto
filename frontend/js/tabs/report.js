@@ -242,6 +242,9 @@ export async function queryReport() {
   if (typeof window.showMessage === 'function') {
     window.showMessage('报表查询成功', 'success');
   }
+
+  // Load Zentao sync stats alongside governance data
+  loadZentaoSyncStats().catch(() => {});
 }
 
 export function exportReportPdf() {
@@ -304,6 +307,71 @@ function bindReportSSE() {
 
 bindReportSSE();
 
-window.OmniQAReportTab = { queryReport, exportReportPdf };
+// ── Zentao Sync Stats ─────────────────────────────────────────────────────────
+
+let syncStatsCache = null;
+
+export async function loadZentaoSyncStats() {
+  const majorId = window.reportMajorFilter?.value || '';
+  const softwareId = window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || '';
+  let url = '/reports/zentao-sync-stats?stale_minutes=60';
+  if (majorId && majorId !== '0') url += `&major_version_id=${majorId}`;
+  else if (softwareId) url += `&software_id=${softwareId}`;
+
+  try {
+    const resp = await api(url);
+    const data = await resp.json();
+    syncStatsCache = data;
+    renderZentaoSyncStats(data);
+  } catch (err) {
+    const el = document.getElementById('zentaoSyncStatsArea');
+    if (el) el.innerHTML = `<div class="muted" style="padding:12px;">加载禅道同步统计失败: ${err.message || '未知错误'}</div>`;
+  }
+}
+
+function renderZentaoSyncStats(data) {
+  if (!data) return;
+  const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
+  setVal('zsStaleCount', data.stale_sync_count || 0);
+  setVal('zsZtClosedNoLocalCount', data.zentao_closed_no_local_count || 0);
+  setVal('zsLocalClosedNoZtCount', data.local_closed_no_zentao_count || 0);
+  setVal('zsDeletedCount', data.zentao_deleted_count || 0);
+
+  // Detail tables
+  renderZentaoSyncTable('zsStaleTable',
+    data.stale_sync || [],
+    ['bug_id', 'title', 'status', 'last_synced_at'],
+    ['Bug编号', '标题', '禅道状态', '上次同步']
+  );
+  renderZentaoSyncTable('zsZtClosedNoLocalTable',
+    data.zentao_closed_no_local || [],
+    ['bug_id', 'title', 'closed_by', 'close_date'],
+    ['Bug编号', '标题', '关闭人', '关闭时间']
+  );
+  renderZentaoSyncTable('zsLocalClosedNoZtTable',
+    data.local_closed_no_zentao || [],
+    ['bug_id', 'title', 'zentao_status', 'last_synced_at'],
+    ['Bug编号', '标题', '禅道状态', '上次同步']
+  );
+}
+
+function renderZentaoSyncTable(tbodyId, rows, fields, headers) {
+  const el = document.getElementById(tbodyId);
+  if (!el) return;
+  const thead = document.getElementById(tbodyId + 'Head');
+  if (thead) {
+    thead.innerHTML = `<tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr>`;
+  }
+  if (!rows || rows.length === 0) {
+    el.innerHTML = `<tr><td colspan="${fields.length}" style="text-align:center; color:#94a3b8; padding:8px;">暂无数据 ✓</td></tr>`;
+    return;
+  }
+  el.innerHTML = rows.map((row) =>
+    `<tr>${fields.map((f) => `<td style="font-size:13px; color:#475569;">${row[f] || '-'}</td>`).join('')}</tr>`
+  ).join('');
+}
+
+window.OmniQAReportTab = { queryReport, exportReportPdf, loadZentaoSyncStats };
 window.openGovernanceDetail = openGovernanceDetail;
 window.closeGovernanceDetail = closeGovernanceDetail;
+window.loadZentaoSyncStats = loadZentaoSyncStats;
