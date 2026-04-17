@@ -95,31 +95,49 @@ class CreateBugPayload(BaseModel):
 @router.get("/bugs/create-meta")
 def get_create_bug_meta(
     major_version_id: Optional[int] = None,
+    execution_id: Optional[int] = None,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Return metadata needed for the Create Bug form:
-    - product_ids, execution_id (derived from the major version if given)
-    - users dict (from create-bug page JSON)
-    - builds dict
+    Return metadata needed for the Create Bug form, including:
+    - current product_ids
+    - available executions for the mapped project
+    - users / builds / modules / stories / bug types for the selected execution
     """
     client = _get_client(current_user.id, db)
     if client is None:
-        return {"product_ids": [], "execution_id": None, "users": {}, "builds": {}}
+        return {
+            "product_ids": [],
+            "execution_id": None,
+            "selected_execution_id": None,
+            "executions": {},
+            "users": {},
+            "builds": {},
+            "modules": {},
+            "stories": {},
+            "bug_types": {},
+        }
 
-    # Resolve execution from major version
-    execution_id: Optional[int] = None
+    requested_execution_id = int(execution_id) if execution_id else None
+    selected_execution_id: Optional[int] = requested_execution_id
     product_ids: list[int] = []
+    project_id: Optional[int] = None
     if major_version_id:
         major = db.query(Version).filter(
             Version.id == major_version_id,
             Version.version_type == VersionType.MAJOR,
         ).first()
-        if major and major.zentao_execution_id:
-            execution_id = major.zentao_execution_id
-            ctx = client.get_execution_context(execution_id)
+        if major:
+            if not selected_execution_id and major.zentao_execution_id:
+                selected_execution_id = int(major.zentao_execution_id)
+            if major.zentao_project_id:
+                project_id = int(major.zentao_project_id)
+
+        if selected_execution_id:
+            ctx = client.get_execution_context(selected_execution_id)
             product_ids = ctx.get("product_ids") or []
+            project_id = ctx.get("project_id") or project_id
 
     # If we have no product yet, try to infer from an existing synced bug
     if not product_ids and major_version_id:
@@ -133,6 +151,26 @@ def get_create_bug_meta(
             except (TypeError, ValueError):
                 pass
 
+    executions: dict[str, str] = {}
+    if project_id:
+        for row in client.list_project_executions(project_id):
+            exec_id = row.get("id")
+            exec_name = str(row.get("name") or "").strip()
+            if exec_id and exec_name:
+                executions[str(exec_id)] = exec_name
+
+    if not selected_execution_id and len(executions) == 1:
+        only_exec_id = next(iter(executions.keys()), "")
+        if only_exec_id:
+            try:
+                selected_execution_id = int(only_exec_id)
+            except ValueError:
+                selected_execution_id = None
+
+    if selected_execution_id and not product_ids:
+        ctx = client.get_execution_context(selected_execution_id)
+        product_ids = ctx.get("product_ids") or product_ids
+
     # Fetch user list from create-bug page JSON for the first product
     users: dict[str, str] = {}
     builds: dict[str, str] = {}
@@ -140,7 +178,7 @@ def get_create_bug_meta(
     stories: dict[str, str] = {}
     bug_types: dict[str, str] = {}
     if product_ids:
-        meta = client.get_create_bug_meta(product_ids[0], execution_id or 0)
+        meta = client.get_create_bug_meta(product_ids[0], selected_execution_id or 0)
         if meta:
             users_raw = meta.get("users") or {}
             for account, display in (users_raw.items() if isinstance(users_raw, dict) else []):
@@ -154,7 +192,9 @@ def get_create_bug_meta(
 
     return {
         "product_ids": product_ids,
-        "execution_id": execution_id,
+        "execution_id": selected_execution_id,
+        "selected_execution_id": selected_execution_id,
+        "executions": executions,
         "users": users,
         "builds": builds,
         "modules": modules,
@@ -578,6 +618,10 @@ def assign_zentao_bug(
     client = _get_client(current_user.id, db)
     if client is None:
         raise HTTPException(status_code=400, detail="当前用户未配置可用的禅道绑定")
+
+    live_status = _fetch_live_status(client, zt_id).strip().lower()
+    if live_status == "closed":
+        raise HTTPException(status_code=422, detail="已关闭的禅道 Bug 不能再执行指派，请先重新激活。")
 
     try:
         client.assign_bug(zt_id, payload.assigned_to, payload.comment)

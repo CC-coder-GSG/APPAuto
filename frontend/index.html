@@ -1374,6 +1374,12 @@
           <div id="s5CreateBugUserContainer" style="min-height:36px;"><div style="color:#94a3b8; font-size:13px; padding:8px 0;">加载候选人中...</div></div>
         </div>
         <div>
+          <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">所属执行</label>
+          <select id="s5CreateBugExecution" onchange="onS5CreateBugExecutionChange()" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            <option value="">-- 请选择执行 --</option>
+          </select>
+        </div>
+        <div>
           <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">所属模块</label>
           <select id="s5CreateBugModule" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
             <option value="">-- 请选择模块 --</option>

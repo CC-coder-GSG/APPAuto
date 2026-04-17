@@ -173,6 +173,12 @@ class ZentaoClient:
     def get_user(self, user_id: int) -> dict | None:
         return self.get(f"users/{user_id}")
 
+    def list_project_executions(self, project_id: int, limit: int = 200) -> list[dict]:
+        """Return the execution rows visible under a Zentao project."""
+        data = self.get(f"projects/{project_id}/executions", params={"limit": limit}) or {}
+        rows = data.get("executions") if isinstance(data, dict) else []
+        return rows if isinstance(rows, list) else []
+
     # ------------------------------------------------------------------
     # Bug write actions
     # ------------------------------------------------------------------
