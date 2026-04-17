@@ -15,7 +15,7 @@ from app.services.audit_service import audit
 from app.services.sse_service import sse_publish
 from app.services.zentao_auth_service import get_valid_token
 from app.services.zentao_client_service import ZentaoClient
-from app.utils.time_utils import local_now
+from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
 
 logger = logging.getLogger(__name__)
 
@@ -636,19 +636,8 @@ class Stage5Service:
 
     @staticmethod
     def _parse_zentao_datetime(raw: str | None) -> datetime | None:
-        """Parse Zentao datetime strings like '2024-01-15 10:30:00' or ISO format."""
-        if not raw:
-            return None
-        text = str(raw).strip()
-        if not text or text == "0000-00-00 00:00:00":
-            return None
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
-            try:
-                dt = datetime.strptime(text[:19], fmt[:len(text[:19])])
-                return dt
-            except ValueError:
-                continue
-        return None
+        """Parse Zentao datetime and normalize timezone-aware values to local naive time."""
+        return parse_external_datetime_to_local_naive(raw)
 
     def _upsert_zentao_bug_summary(
         self,
