@@ -1317,8 +1317,8 @@
   </div>
 
   <!-- Zentao Bug Preview Modal -->
-  <div id="zentaoBugPreviewModal" class="hidden" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
-    <div style="width:min(860px, 96vw); max-height:92vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
+  <div id="zentaoBugPreviewModal" class="hidden" onclick="closeZentaoBugPreview()" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
+    <div onclick="event.stopPropagation()" style="width:min(860px, 96vw); max-height:92vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:18px;">
         <div>
           <div id="zentaoBugPreviewMeta" style="font-size:12px; color:#64748b; margin-bottom:6px;">Bug 详情</div>

@@ -296,14 +296,21 @@ def get_bug_preview(
     if not preview:
         raise HTTPException(status_code=502, detail="禅道 Bug 详情解析失败")
 
-    # Rewrite inline file-read URLs in steps so they load via the OmniQA proxy
-    # (Zentao's file-read-{id}.* requires a browser Cookie session, not Token)
-    if preview.get("steps"):
-        preview["steps"] = re.sub(
+    # Rewrite file-read URLs to the OmniQA proxy (cookie-only URLs won't load in browser)
+    def _rewrite(text: str) -> str:
+        return re.sub(
             r'https?://[^"\'>\s]+/file-read-(\d+)\.[a-zA-Z0-9]+',
             lambda m: f"/api/zentao/files/{m.group(1)}",
-            preview["steps"],
+            text,
         )
+
+    if preview.get("steps"):
+        preview["steps"] = _rewrite(preview["steps"])
+
+    for f in preview.get("files") or []:
+        if f.get("url"):
+            f["url"] = _rewrite(f["url"])
+
     return preview
 
 
