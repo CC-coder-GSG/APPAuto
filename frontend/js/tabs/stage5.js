@@ -832,6 +832,21 @@ function _renderPreviewActions(preview) {
   `).join('');
 }
 
+async function _loadProxyImages(containerEl) {
+  if (!containerEl) return;
+  const imgs = Array.from(containerEl.querySelectorAll('img[src^="/api/zentao/files/"]'));
+  await Promise.all(imgs.map(async (img) => {
+    const src = img.getAttribute('src');
+    try {
+      const resp = await api(src);
+      const blob = await resp.blob();
+      img.src = URL.createObjectURL(blob);
+    } catch (_e) {
+      // 保持破图状态，不干扰其他内容
+    }
+  }));
+}
+
 export async function openZentaoBugPreview(ztId, bugRow = null) {
   const modal = document.getElementById('zentaoBugPreviewModal');
   const titleEl = document.getElementById('zentaoBugPreviewTitle');
@@ -880,6 +895,7 @@ export async function openZentaoBugPreview(ztId, bugRow = null) {
         </div>
       </div>
     `;
+    await _loadProxyImages(bodyEl);
   } catch (err) {
     _setZentaoPreviewImageGallery([]);
     errorEl.innerText = err.message || '加载禅道 Bug 详情失败';
