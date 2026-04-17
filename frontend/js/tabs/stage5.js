@@ -834,7 +834,7 @@ function _renderPreviewActions(preview) {
 
 async function _loadProxyImages(containerEl) {
   if (!containerEl) return;
-  const imgs = Array.from(containerEl.querySelectorAll('img[src^="/api/zentao/files/"]'));
+  const imgs = Array.from(containerEl.querySelectorAll('img[src^="/zentao/files/"]'));
   await Promise.all(imgs.map(async (img) => {
     const src = img.getAttribute('src');
     try {

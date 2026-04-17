@@ -310,7 +310,7 @@ def get_bug_preview(
     if preview.get("steps"):
         preview["steps"] = re.sub(
             r'https?://[^"\'>\s]+/file-(?:read|download)-(\d+)\.[a-zA-Z0-9]+',
-            lambda m: f"/api/zentao/files/{m.group(1)}",
+            lambda m: f"/zentao/files/{m.group(1)}",
             preview["steps"],
         )
 
@@ -318,11 +318,11 @@ def get_bug_preview(
     for f in preview.get("files") or []:
         fid = f.get("file_id")
         if fid:
-            f["url"] = f"/api/zentao/files/{fid}"
+            f["url"] = f"/zentao/files/{fid}"
         elif f.get("url"):
             f["url"] = re.sub(
                 r'https?://[^"\'>\s]+/file-(?:read|download)-(\d+)\.[a-zA-Z0-9]+',
-                lambda m: f"/api/zentao/files/{m.group(1)}",
+                lambda m: f"/zentao/files/{m.group(1)}",
                 f["url"],
             )
 
