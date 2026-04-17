@@ -189,16 +189,17 @@ function _renderStorySlot(d) {
  *   errors — Set of id strings that had transient fetch errors (do NOT cache as null)
  *   ok     — false if the entire HTTP request failed
  */
-async function _fetchBugs(ids) {
+async function _fetchBugs(ids, signal) {
   if (!ids.length) return { data: {}, errors: new Set(), ok: true };
   try {
-    const res = await api('/zentao/hydrate/bugs?ids=' + ids.join(','));
+    const res = await api('/zentao/hydrate/bugs?ids=' + ids.join(','), { signal });
     if (!res.ok) return { data: {}, errors: new Set(ids.map(String)), ok: false };
     const json = await res.json();
     const errorIds = new Set((json.__fetch_errors__ || []).map(String));
     delete json.__fetch_errors__;
     return { data: json, errors: errorIds, ok: true };
-  } catch {
+  } catch (err) {
+    if (err.name === 'AbortError') return { data: {}, errors: new Set(), ok: true };
     return { data: {}, errors: new Set(ids.map(String)), ok: false };
   }
 }
@@ -207,16 +208,17 @@ async function _fetchBugs(ids) {
  * Fetch story data from the backend.
  * Returns { data, errors, ok } with the same semantics as _fetchBugs.
  */
-async function _fetchStories(ids) {
+async function _fetchStories(ids, signal) {
   if (!ids.length) return { data: {}, errors: new Set(), ok: true };
   try {
-    const res = await api('/zentao/hydrate/stories?ids=' + ids.join(','));
+    const res = await api('/zentao/hydrate/stories?ids=' + ids.join(','), { signal });
     if (!res.ok) return { data: {}, errors: new Set(ids.map(String)), ok: false };
     const json = await res.json();
     const errorIds = new Set((json.__fetch_errors__ || []).map(String));
     delete json.__fetch_errors__;
     return { data: json, errors: errorIds, ok: true };
-  } catch {
+  } catch (err) {
+    if (err.name === 'AbortError') return { data: {}, errors: new Set(), ok: true };
     return { data: {}, errors: new Set(ids.map(String)), ok: false };
   }
 }
@@ -224,6 +226,10 @@ async function _fetchStories(ids) {
 // ─── Concurrency guard ────────────────────────────────────────────────────────
 // Prevent overlapping fetches from the same container
 const _pendingContainers = new WeakSet();
+
+// Global abort controller — cancelled on each new hydrateContainer call so that
+// page/version switches immediately free up Zentao connections for the new data.
+let _activeAbort = null;
 
 // ─── Link upgrade helper ──────────────────────────────────────────────────────
 
@@ -270,6 +276,12 @@ async function hydrateContainer(containerEl) {
   if (!containerEl) return;
   if (_pendingContainers.has(containerEl)) return;
 
+  // Cancel any in-flight hydration (previous page/version) so Zentao connections
+  // are freed immediately for the current request.
+  if (_activeAbort) _activeAbort.abort();
+  const abort = new AbortController();
+  _activeAbort = abort;
+
   // Collect un-loaded slots
   const bugSlots   = Array.from(containerEl.querySelectorAll(
     '.zt-bug-slot[data-zt-bug-id]:not([data-zt-loaded]):not([data-zt-pending])'));
@@ -301,9 +313,12 @@ async function hydrateContainer(containerEl) {
 
   try {
     [bugResult, storyResult] = await Promise.all([
-      _fetchBugs(uncachedBugIds),
-      _fetchStories(uncachedStoryIds),
+      _fetchBugs(uncachedBugIds, abort.signal),
+      _fetchStories(uncachedStoryIds, abort.signal),
     ]);
+
+    // If this hydration was superseded by a newer one, stop filling slots
+    if (abort.signal.aborted) return;
 
     // Populate cache.
     // KEY RULE: only cache null for "confirmed not found" (id absent from data
