@@ -66,7 +66,7 @@ function updateS5PagerBar() {
 
   if (bar) bar.classList.toggle('hidden', false);
   if (summary) summary.innerText = `鍏?${total} 鏉?Bug锛屽綋鍓嶆樉绀?${start}-${end}`;
-  if (text) text.innerText = `绗?${state.stage5Page} / ${pageCount} 椤礰;
+  if (text) text.innerText = `第 ${state.stage5Page} / ${pageCount} 页`;
   if (sizeInput && String(sizeInput.value || '') !== String(state.stage5PageSize)) {
     sizeInput.value = String(state.stage5PageSize);
   }
@@ -486,7 +486,7 @@ export async function syncStage5FromZentao(options = {}) {
       window.showMessage && window.showMessage('宸插湪 5 鍒嗛挓鍐呭悓姝ヨ繃锛岃烦杩囪繙绔媺鍙栵紙浣跨敤鏈湴缂撳瓨锛?, 'info');
     } else {
       window.showMessage && window.showMessage(
-        `绂呴亾鍚屾瀹屾垚锛氳繙绔?${data.remote_total || 0} 鏉★紝鏂板 ${data.created || 0} 鏉★紝鏇存柊 ${data.updated || 0} 鏉,
+        `禅道同步完成：远端 ${data.remote_total || 0} 条，新增 ${data.created || 0} 条，更新 ${data.updated || 0} 条`,
         'success',
       );
     }
@@ -1082,7 +1082,7 @@ function _buildSearchableUserSelect(selectId, users, currentAssigned = '') {
   const entries = Object.entries(users || {}).sort((a, b) => a[1].localeCompare(b[1], 'zh-CN'));
   let currentLabel = '';
   const opts = entries.map(([account, display]) => {
-    const label = `${display}锛?{account}锛塦;
+    const label = `${display}（${account}）`;
     if (account === currentAssigned) currentLabel = label;
     return `<option value="${escapeHtml(account)}">${escapeHtml(label)}</option>`;
   }).join('');
@@ -1560,7 +1560,7 @@ function showS5BottomBanner() {
     anchorEl: tableWrap,
     position: 'bottom',
     countRef: s5NewBugCount,
-    labelFn: (n) => `猬?涓嬮潰鏈?${n} 鏉℃柊澧?Bug锛岀偣鍑诲埛鏂癭,
+    labelFn: (n) => `下面有 ${n} 条新增 Bug，点击刷新`,
     onClickScroll: () => {
       s5NewBugCount.value = 0;
       loadStage5({ syncBeforeLoad: false, showSuccess: false });
