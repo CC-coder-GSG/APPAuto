@@ -154,6 +154,7 @@ def normalize_bug_detail(raw: dict, base_url: str = "") -> dict:
         extension = str(item.get("extension") or item.get("ext") or "").strip().lower()
         files.append(
             {
+                "file_id": item.get("id"),
                 "title": file_title,
                 "url": file_url,
                 "extension": extension,

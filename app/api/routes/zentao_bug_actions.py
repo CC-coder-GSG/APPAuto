@@ -277,6 +277,7 @@ def get_bug_preview(
     binding = db.query(UserZentaoBinding).filter(UserZentaoBinding.user_id == current_user.id).first()
     base_url = (binding.base_url or "").rstrip("/") if binding else ""
 
+    raw = None
     try:
         raw = client.get_bug(zt_id)
     except ZentaoAPIError as exc:
@@ -285,31 +286,45 @@ def get_bug_preview(
             client = _get_client(current_user.id, db)
             if client is None:
                 raise HTTPException(status_code=400, detail="禅道 token 刷新失败")
-            raw = client.get_bug(zt_id)
-        else:
+            try:
+                raw = client.get_bug(zt_id)
+            except ZentaoAPIError as exc2:
+                if exc2.status_code != 500:
+                    raise HTTPException(status_code=exc2.status_code or 502, detail=f"禅道获取Bug详情失败: {exc2.message}")
+        elif exc.status_code != 500:
             raise HTTPException(status_code=exc.status_code or 502, detail=f"禅道获取Bug详情失败: {exc.message}")
 
-    if not raw:
-        raise HTTPException(status_code=404, detail="禅道中未找到该 Bug")
+    # v1 API 返回 PHP Fatal Error（如操作记录含附件时的禅道 IPD 扩展 bug）时
+    # fallback 到页面 JSON 接口，能获取基本字段但无 actions
+    if raw is None:
+        page_data = client.get_page(f"bug-view-{zt_id}.json")
+        raw = page_data.get("bug") or page_data if isinstance(page_data, dict) else None
+        if not raw:
+            raise HTTPException(status_code=502, detail="禅道 Bug 详情获取失败（v1 API 异常，页面接口也无数据）")
 
     preview = normalize_bug_detail(raw, base_url=base_url)
     if not preview:
         raise HTTPException(status_code=502, detail="禅道 Bug 详情解析失败")
 
-    # Rewrite file-read URLs to the OmniQA proxy (cookie-only URLs won't load in browser)
-    def _rewrite(text: str) -> str:
-        return re.sub(
-            r'https?://[^"\'>\s]+/file-read-(\d+)\.[a-zA-Z0-9]+',
+    # 将 steps 里的 file-read 内联图片 URL 替换为 OmniQA 代理路径
+    if preview.get("steps"):
+        preview["steps"] = re.sub(
+            r'https?://[^"\'>\s]+/file-(?:read|download)-(\d+)\.[a-zA-Z0-9]+',
             lambda m: f"/api/zentao/files/{m.group(1)}",
-            text,
+            preview["steps"],
         )
 
-    if preview.get("steps"):
-        preview["steps"] = _rewrite(preview["steps"])
-
+    # 附件图片：直接用 file_id 构建代理 URL，比正则解析 URL 更可靠
     for f in preview.get("files") or []:
-        if f.get("url"):
-            f["url"] = _rewrite(f["url"])
+        fid = f.get("file_id")
+        if fid:
+            f["url"] = f"/api/zentao/files/{fid}"
+        elif f.get("url"):
+            f["url"] = re.sub(
+                r'https?://[^"\'>\s]+/file-(?:read|download)-(\d+)\.[a-zA-Z0-9]+',
+                lambda m: f"/api/zentao/files/{m.group(1)}",
+                f["url"],
+            )
 
     return preview
 
