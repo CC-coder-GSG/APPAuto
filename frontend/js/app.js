@@ -1,4 +1,4 @@
-import './realtime/sse.js?v=20260417-2'; // 必须最先加载，确保 window.OmniQASSE 在各 tab 模块执行 bindXxxSSE() 前已就绪
+﻿import './realtime/sse.js?v=20260417-3'; // 蹇呴』鏈€鍏堝姞杞斤紝纭繚 window.OmniQASSE 鍦ㄥ悇 tab 妯″潡鎵ц bindXxxSSE() 鍓嶅凡灏辩华
 import './api.js?v=20260417-3';
 import './auth.js?v=20260417-3';
 import './zentao-binding.js?v=20260417-3';
@@ -15,7 +15,7 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'feedback', path: './tabs/feedback.js?v=20260417-3' },
   { name: 'report', path: './tabs/report.js?v=20260417-3' },
   { name: 'retest', path: './tabs/retest.js?v=20260417-3' },
-  { name: 'stage5', path: './tabs/stage5.js?v=20260417-3' },
+  { name: 'stage5', path: './tabs/stage5.js?v=20260417-4' },
   { name: 'field-test', path: './tabs/field-test.js?v=20260417-3' },
   { name: 'build-records', path: './tabs/build-records.js?v=20260417-3' },
   { name: 'zentao-sync', path: './tabs/zentao-sync.js?v=20260417-3' },
@@ -45,8 +45,9 @@ window.addEventListener('resize', () => {
 });
 
 window.addEventListener('load', () => {
-  // 页面和内联脚本加载完成后执行一次回归防线自检
+  // 椤甸潰鍜屽唴鑱旇剼鏈姞杞藉畬鎴愬悗鎵ц涓€娆″洖褰掗槻绾胯嚜妫€
   Promise.resolve(window.OmniQABootReady).finally(() => {
     runGuardrails();
   });
 });
+
