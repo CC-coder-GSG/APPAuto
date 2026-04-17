@@ -21,9 +21,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Optional
 
+import httpx as _httpx
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -292,7 +295,44 @@ def get_bug_preview(
     preview = normalize_bug_detail(raw, base_url=base_url)
     if not preview:
         raise HTTPException(status_code=502, detail="禅道 Bug 详情解析失败")
+
+    # Rewrite inline file-read URLs in steps so they load via the OmniQA proxy
+    # (Zentao's file-read-{id}.* requires a browser Cookie session, not Token)
+    if preview.get("steps"):
+        preview["steps"] = re.sub(
+            r'https?://[^"\'>\s]+/file-read-(\d+)\.[a-zA-Z0-9]+',
+            lambda m: f"/api/zentao/files/{m.group(1)}",
+            preview["steps"],
+        )
     return preview
+
+
+@router.get("/files/{file_id}")
+def proxy_zentao_file(
+    file_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Proxy a Zentao file/image through OmniQA using Token auth (v1 API)."""
+    binding = db.query(UserZentaoBinding).filter(UserZentaoBinding.user_id == current_user.id).first()
+    if not binding or not binding.base_url:
+        raise HTTPException(status_code=400, detail="未配置禅道绑定")
+    token = get_valid_token(current_user.id, db)
+    if not token:
+        raise HTTPException(status_code=400, detail="禅道 token 无效，请重新登录禅道")
+    base_url = binding.base_url.rstrip("/")
+    url = f"{base_url}/api.php/v1/files/{file_id}"
+    try:
+        resp = _httpx.get(url, headers={"Token": token}, timeout=15)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail="禅道文件获取失败")
+        content_type = resp.headers.get("content-type", "application/octet-stream")
+        return StreamingResponse(iter([resp.content]), media_type=content_type)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
 
 @router.get("/bugs/{zt_id}/action-meta")
 def get_bug_action_meta(

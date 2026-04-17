@@ -148,6 +148,7 @@ def normalize_bug_detail(raw: dict, base_url: str = "") -> dict:
             or item.get("webPath")
             or item.get("pathName")
             or item.get("pathname")
+            or _guess_file_url_from_mapping(item)
             or "",
         )
         extension = str(item.get("extension") or item.get("ext") or "").strip().lower()
@@ -343,6 +344,33 @@ def _normalize_zentao_url(base_url: str, raw_url: Any) -> str:
     if text.startswith("/"):
         return f"{base_url.rstrip('/')}{text}"
     return f"{base_url.rstrip('/')}/{text.lstrip('/')}"
+
+
+def _guess_file_url_from_mapping(value: Any) -> str:
+    for text in _iter_string_values(value):
+        lowered = text.lower()
+        if lowered.startswith(("http://", "https://", "/")):
+            return text
+        if any(token in lowered for token in ("/file-", "download", "preview", "imgproxy.php", "thumb")):
+            return text
+        if any(lowered.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg")):
+            return text
+    return ""
+
+
+def _iter_string_values(value: Any) -> list[str]:
+    results: list[str] = []
+    if isinstance(value, dict):
+        for item in value.values():
+            results.extend(_iter_string_values(item))
+    elif isinstance(value, list):
+        for item in value:
+            results.extend(_iter_string_values(item))
+    elif isinstance(value, str):
+        text = value.strip()
+        if text:
+            results.append(text)
+    return results
 
 
 def _is_image_file(name: Any, *, extension: str = "", mime: Any = None) -> bool:
