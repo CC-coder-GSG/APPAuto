@@ -7,7 +7,7 @@
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
-  <script type="module" src="/static/js/app.js?v=20260417-2"></script>
+  <script type="module" src="/static/js/app.js?v=20260417-3"></script>
   <style>
     /* Header layout */
     .app-header {
@@ -1568,6 +1568,31 @@ function getDefaultVisibleTab(){
   return ['assign','mine','feedback','retest','stage5','field-test','build-records','zentao-sync','report','activity','data','dispatch']
     .find((name)=>canAccessTab(name)) || 'mine';
 }
+function getTabNamespaceName(name){
+  return {
+    assign:'OmniQAAssignTab',
+    mine:'OmniQAMineTab',
+    feedback:'OmniQAFeedbackTab',
+    retest:'OmniQARetestTab',
+    stage5:'OmniQAStage5Tab',
+    'field-test':'OmniQAFieldTestTab',
+    'build-records':'OmniQABuildRecordsTab',
+    'zentao-sync':'OmniQAZentaoSyncTab',
+    report:'OmniQAReportTab',
+    activity:'OmniQAActivityTab',
+    data:'OmniQADataTab',
+    dispatch:'OmniQADispatchTab',
+  }[name] || '';
+}
+function isTabRuntimeReady(name){
+  const nsName = getTabNamespaceName(name);
+  if(!nsName) return true;
+  return !!window[nsName];
+}
+function getFirstRuntimeReadyTab(){
+  return ['assign','mine','feedback','retest','field-test','build-records','zentao-sync','report','activity','data','dispatch','stage5']
+    .find((tabName)=>canAccessTab(tabName) && isTabRuntimeReady(tabName)) || null;
+}
 function showTab(name){
   if(!canAccessTab(name)){
     const fallback=getDefaultVisibleTab();
@@ -1577,6 +1602,13 @@ function showTab(name){
     }else{
       return;
     }
+  }
+  if(!isTabRuntimeReady(name)){
+    const fallback = getFirstRuntimeReadyTab();
+    const nsName = getTabNamespaceName(name) || name;
+    window.showMessage&&window.showMessage(`页面模块未加载完成：${nsName}，已切换到可用页面`, 'error');
+    if(!fallback || fallback===name) return;
+    name = fallback;
   }
   ['assign','mine','feedback','retest','stage5','field-test','build-records','zentao-sync','report','activity','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
   document.getElementById('tab-'+name).classList.remove('hidden');
@@ -1661,6 +1693,9 @@ async function api(url,opt={}){
 }
 
 async function init(){
+  if(window.OmniQABootReady){
+    try{ await window.OmniQABootReady; }catch(_){}
+  }
   currentUser=await (await api('/auth/me')).json();
   window.currentUser = currentUser;
   if(window.OmniQAStateActions && typeof window.OmniQAStateActions.setCurrentUser === 'function'){
