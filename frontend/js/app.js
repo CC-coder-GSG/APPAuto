@@ -1,26 +1,26 @@
-import './realtime/sse.js'; // 必须最先加载，确保 window.OmniQASSE 在各 tab 模块执行 bindXxxSSE() 前已就绪
-import './api.js';
-import './auth.js';
-import './zentao-binding.js';
-import './zentao-hydrator.js';
-import './state.js';
-import './utils.js';
-import './components/common.js';
-import './components/modal.js';
-import { resizeAllCharts } from './components/charts.js';
-import './tabs/mine.js';
-import './tabs/feedback.js';
-import './tabs/report.js';
-import './tabs/retest.js';
-import './tabs/stage5.js';
-import './tabs/field-test.js';
-import './tabs/build-records.js';
-import './tabs/zentao-sync.js';
-import './tabs/activity.js';
-import './tabs/assign.js';
-import './tabs/dispatch.js';
-import './tabs/data.js';
-import { runGuardrails } from './guardrails.js';
+import './realtime/sse.js?v=20260417-2'; // 必须最先加载，确保 window.OmniQASSE 在各 tab 模块执行 bindXxxSSE() 前已就绪
+import './api.js?v=20260417-2';
+import './auth.js?v=20260417-2';
+import './zentao-binding.js?v=20260417-2';
+import './zentao-hydrator.js?v=20260417-2';
+import './state.js?v=20260417-2';
+import './utils.js?v=20260417-2';
+import './components/common.js?v=20260417-2';
+import './components/modal.js?v=20260417-2';
+import { resizeAllCharts } from './components/charts.js?v=20260417-2';
+import './tabs/mine.js?v=20260417-2';
+import './tabs/feedback.js?v=20260417-2';
+import './tabs/report.js?v=20260417-2';
+import './tabs/retest.js?v=20260417-2';
+import './tabs/stage5.js?v=20260417-2';
+import './tabs/field-test.js?v=20260417-2';
+import './tabs/build-records.js?v=20260417-2';
+import './tabs/zentao-sync.js?v=20260417-2';
+import './tabs/activity.js?v=20260417-2';
+import './tabs/assign.js?v=20260417-2';
+import './tabs/dispatch.js?v=20260417-2';
+import './tabs/data.js?v=20260417-2';
+import { runGuardrails } from './guardrails.js?v=20260417-2';
 
 window.addEventListener('resize', () => {
   resizeAllCharts();
