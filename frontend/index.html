@@ -2184,8 +2184,21 @@ async function revealBuildRealtimeNew(){
   return window.OmniQABuildRecordsTab.revealBuildRealtimeNew();
 }
 
+function getZentaoSyncTabOrWarn(actionName){
+  const tab = window.OmniQAZentaoSyncTab;
+  if(tab && typeof tab[actionName] === 'function'){
+    return tab;
+  }
+  const msg = '禅道同步前端模块未加载完成，请先强制刷新浏览器缓存后重试';
+  console.error('[OmniQA] ZentaoSync module missing:', actionName, window.OmniQAZentaoSyncTab);
+  window.showMessage && window.showMessage(msg, 'error');
+  return null;
+}
+
 async function loadZentaoSyncBoard(page){
-  return window.OmniQAZentaoSyncTab.loadZentaoSyncBoard(page);
+  const tab = getZentaoSyncTabOrWarn('loadZentaoSyncBoard');
+  if(!tab) return;
+  return tab.loadZentaoSyncBoard(page);
 }
 
 async function initZentaoSyncBoard(){
@@ -2196,55 +2209,81 @@ async function initZentaoSyncBoard(){
 }
 
 function toggleManualMajorSelector(){
-  return window.OmniQAZentaoSyncTab.toggleManualMajorSelector();
+  const tab = getZentaoSyncTabOrWarn('toggleManualMajorSelector');
+  if(!tab) return;
+  return tab.toggleManualMajorSelector();
 }
 
 function onZentaoManualMajorChange(){
-  return window.OmniQAZentaoSyncTab.onZentaoManualMajorChange();
+  const tab = getZentaoSyncTabOrWarn('onZentaoManualMajorChange');
+  if(!tab) return;
+  return tab.onZentaoManualMajorChange();
 }
 
 function resetZentaoManualMajor(){
-  return window.OmniQAZentaoSyncTab.resetZentaoManualMajor();
+  const tab = getZentaoSyncTabOrWarn('resetZentaoManualMajor');
+  if(!tab) return;
+  return tab.resetZentaoManualMajor();
 }
 
 function onZentaoProductChange(){
-  return window.OmniQAZentaoSyncTab.onZentaoProductChange();
+  const tab = getZentaoSyncTabOrWarn('onZentaoProductChange');
+  if(!tab) return;
+  return tab.onZentaoProductChange();
 }
 
 async function nextZentaoSyncPage(){
-  return window.OmniQAZentaoSyncTab.nextZentaoSyncPage();
+  const tab = getZentaoSyncTabOrWarn('nextZentaoSyncPage');
+  if(!tab) return;
+  return tab.nextZentaoSyncPage();
 }
 
 async function prevZentaoSyncPage(){
-  return window.OmniQAZentaoSyncTab.prevZentaoSyncPage();
+  const tab = getZentaoSyncTabOrWarn('prevZentaoSyncPage');
+  if(!tab) return;
+  return tab.prevZentaoSyncPage();
 }
 
 async function openZentaoSyncEventDetail(eventId){
-  return window.OmniQAZentaoSyncTab.openZentaoSyncEventDetail(eventId);
+  const tab = getZentaoSyncTabOrWarn('openZentaoSyncEventDetail');
+  if(!tab) return;
+  return tab.openZentaoSyncEventDetail(eventId);
 }
 
 async function saveZentaoSyncMapping(){
-  return window.OmniQAZentaoSyncTab.saveZentaoSyncMapping();
+  const tab = getZentaoSyncTabOrWarn('saveZentaoSyncMapping');
+  if(!tab) return;
+  return tab.saveZentaoSyncMapping();
 }
 
 async function applyZentaoSyncEvent(){
-  return window.OmniQAZentaoSyncTab.applyZentaoSyncEvent();
+  const tab = getZentaoSyncTabOrWarn('applyZentaoSyncEvent');
+  if(!tab) return;
+  return tab.applyZentaoSyncEvent();
 }
 
 async function deleteZentaoSyncEvent(eventId){
-  return window.OmniQAZentaoSyncTab.deleteZentaoSyncEvent(eventId);
+  const tab = getZentaoSyncTabOrWarn('deleteZentaoSyncEvent');
+  if(!tab) return;
+  return tab.deleteZentaoSyncEvent(eventId);
 }
 
 async function applyZentaoSyncBatch(){
-  return window.OmniQAZentaoSyncTab.applyZentaoSyncBatch();
+  const tab = getZentaoSyncTabOrWarn('applyZentaoSyncBatch');
+  if(!tab) return;
+  return tab.applyZentaoSyncBatch();
 }
 
 function closeZentaoSyncDetail(){
-  return window.OmniQAZentaoSyncTab.closeZentaoSyncDetail();
+  const tab = getZentaoSyncTabOrWarn('closeZentaoSyncDetail');
+  if(!tab) return;
+  return tab.closeZentaoSyncDetail();
 }
 
 function scrollZentaoSyncToTop(){
-  return window.OmniQAZentaoSyncTab.scrollZentaoSyncToTop();
+  const tab = getZentaoSyncTabOrWarn('scrollZentaoSyncToTop');
+  if(!tab) return;
+  return tab.scrollZentaoSyncToTop();
 }
 
 function setActivityRange(days){
