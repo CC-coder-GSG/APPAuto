@@ -617,12 +617,23 @@ class Stage5Service:
         # Parse remote updated-at
         remote_updated_raw = bug.get("lastEditedDate") or bug.get("editedDate") or ""
         remote_updated_at = self._parse_zentao_datetime(remote_updated_raw)
+        status = str(bug.get("status") or "").strip().lower()
+        assigned_account_lower = assigned_account.lower()
+        if (
+            status in {"delay", "resolved"}
+            and (
+                close_date is not None
+                or bool(closed_by_account)
+                or assigned_account_lower == "closed"
+            )
+        ):
+            status = "closed"
 
         return {
             "zentao_bug_id": bug_id_str,
             "bug_id": f"b#{bug_id_str}",
             "title": str(bug.get("title") or "").strip(),
-            "status": str(bug.get("status") or "").strip(),
+            "status": status,
             "opened_build_ids": opened_build_ids,
             "url": f"{base_url}/bug-view-{bug_id_str}.html",
             "closed_by_account": closed_by_account,

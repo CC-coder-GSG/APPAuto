@@ -164,6 +164,12 @@ function buildS5RowHtml(b, allVersionsMode) {
   const rowStyle = isMyClosed ? 'background: #f8fafc; color: #94a3b8; text-decoration: line-through;' : '';
   const isZentaoBug = !!b.zentao_bug_id;
   const zentaoStatus = (b.zentao_live_status || '').toLowerCase();
+  const isEffectivelyClosed = isZentaoBug && (
+    zentaoStatus === 'closed'
+    || !!b.zentao_close_date
+    || !!b.zentao_closed_by_name
+    || String(b.zentao_assigned_to_name || '').toLowerCase() === 'closed'
+  );
 
   const failBadge = b.is_retest_failed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; margin-left:4px;">🚨复测打回</span>' : '';
   const dispatchBadge = b.dispatched_to_name ? `<span class="badge" style="background:#ffedd5; color:#ea580c; border:1px solid #fdba74; margin-left:4px;">🪂特派:${b.dispatched_to_name}</span>` : '';
@@ -178,7 +184,7 @@ function buildS5RowHtml(b, allVersionsMode) {
   const bugTitle = escapeHtml(b.zentao_bug_title || b.bug_title || '');
   const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" data-zt-no-title="1" style="margin-left:4px;"></span>` : '';
   const syncMeta = b.last_zentao_synced_at ? `<span class="badge" style="background:#f8fafc; color:#64748b;">同步 ${escapeHtml(b.last_zentao_synced_at)}</span>` : '';
-  const assignedMeta = b.zentao_assigned_to_name ? `<span class="badge" style="background:#faf5ff; color:#7c3aed;">当前指派 ${escapeHtml(b.zentao_assigned_to_name)}</span>` : '';
+  const assignedMeta = b.zentao_assigned_to_name ? `<span class="badge" style="background:#faf5ff; color:#7c3aed;">当前指派 ${escapeHtml(getS5AssignedDisplayName(b.zentao_assigned_to_name))}</span>` : '';
   const closedByMeta = b.zentao_closed_by_name ? `<span class="badge" style="background:#ecfdf5; color:#047857;">禅道关闭 ${escapeHtml(b.zentao_closed_by_name)}</span>` : '';
   const closeDateMeta = b.zentao_close_date ? `<span class="badge" style="background:#f1f5f9; color:#475569;">${escapeHtml(b.zentao_close_date)}</span>` : '';
   const closeCommentPreview = (b.zentao_close_comment || '').trim();
@@ -206,7 +212,7 @@ function buildS5RowHtml(b, allVersionsMode) {
   if (isZentaoBug) {
     const assignLink = `<a href="javascript:void(0)" onclick="openS5AssignById(${b.id})" style="${linkStyle} color:#8b5cf6;">指派</a>`;
     // 重新激活占位始终存在，visibility 控制可见性，保持布局稳定
-    const reactivateVis = zentaoStatus === 'closed' ? 'visible' : 'hidden';
+    const reactivateVis = isEffectivelyClosed ? 'visible' : 'hidden';
     const reactivateLink = `<a href="javascript:void(0)" onclick="openS5ReactivateById(${b.id})" style="${linkStyle} color:#059669; font-weight:bold; visibility:${reactivateVis};">重新激活</a>`;
     actionsHtml = `
       <div style="display:flex; flex-direction:column; gap:3px;">
@@ -267,6 +273,31 @@ function getS5ResolutionLabel(value) {
   }[String(value || '')] || '-';
 }
 
+function getS5ZentaoStatusLabel(bugOrStatus) {
+  const raw = typeof bugOrStatus === 'string' ? bugOrStatus : (bugOrStatus?.zentao_live_status || '');
+  const status = String(raw || '').trim().toLowerCase();
+  if (!status) return '-';
+  const isClosedLike = typeof bugOrStatus === 'object' && bugOrStatus && (
+    status === 'closed'
+    || !!bugOrStatus.zentao_close_date
+    || !!bugOrStatus.zentao_closed_by_name
+    || String(bugOrStatus.zentao_assigned_to_name || '').toLowerCase() === 'closed'
+  );
+  if (isClosedLike) return '已关闭';
+  return {
+    active: '激活',
+    resolved: '已修复',
+    closed: '已关闭',
+    delay: '延期',
+  }[status] || status;
+}
+
+function getS5AssignedDisplayName(value) {
+  const text = String(value || '').trim();
+  if (!text) return '-';
+  return text.toLowerCase() === 'closed' ? '已关闭' : text;
+}
+
 function buildS5OtherRecordsHtml(records) {
   if (!(records && records.length > 0)) {
     return '<div style="font-size:12px; color:#94a3b8;">暂无其他测试人员闭环记录</div>';
@@ -290,10 +321,10 @@ function buildS5OtherRecordsHtml(records) {
 function buildS5DetailRowHtml(b, colSpan) {
   const statusBadges = [
     b.zentao_live_status
-      ? `<span class="badge" style="background:#f8fafc; color:#475569;">禅道状态 ${escapeHtml(b.zentao_live_status)}</span>`
+      ? `<span class="badge" style="background:#f8fafc; color:#475569;">禅道状态 ${escapeHtml(getS5ZentaoStatusLabel(b))}</span>`
       : '',
     b.zentao_assigned_to_name
-      ? `<span class="badge" style="background:#faf5ff; color:#7c3aed;">当前指派 ${escapeHtml(b.zentao_assigned_to_name)}</span>`
+      ? `<span class="badge" style="background:#faf5ff; color:#7c3aed;">当前指派 ${escapeHtml(getS5AssignedDisplayName(b.zentao_assigned_to_name))}</span>`
       : '',
     b.zentao_closed_by_name
       ? `<span class="badge" style="background:#ecfdf5; color:#047857;">关闭人 ${escapeHtml(b.zentao_closed_by_name)}</span>`
