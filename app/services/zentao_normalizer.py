@@ -129,11 +129,21 @@ def normalize_bug_detail(raw: dict, base_url: str = "") -> dict:
     for item in raw_files:
         if not isinstance(item, dict):
             continue
+        file_url = _normalize_zentao_url(
+            base_url,
+            item.get("url") or item.get("downloadUrl") or item.get("webPath") or item.get("pathname") or "",
+        )
+        extension = str(item.get("extension") or item.get("ext") or "").strip().lower()
         files.append(
             {
                 "title": item.get("title") or item.get("name") or "",
-                "url": item.get("url") or item.get("downloadUrl") or "",
-                "extension": item.get("extension") or "",
+                "url": file_url,
+                "extension": extension,
+                "is_image": _is_image_file(
+                    item.get("title") or item.get("name") or "",
+                    extension=extension,
+                    mime=item.get("mimeType") or item.get("mime"),
+                ),
             }
         )
 
@@ -303,6 +313,31 @@ def _safe_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_zentao_url(base_url: str, raw_url: Any) -> str:
+    text = str(raw_url or "").strip()
+    if not text:
+        return ""
+    if text.startswith(("http://", "https://")):
+        return text
+    if not base_url:
+        return text
+    if text.startswith("/"):
+        return f"{base_url.rstrip('/')}{text}"
+    return f"{base_url.rstrip('/')}/{text.lstrip('/')}"
+
+
+def _is_image_file(name: Any, *, extension: str = "", mime: Any = None) -> bool:
+    mime_text = str(mime or "").strip().lower()
+    if mime_text.startswith("image/"):
+        return True
+    ext = str(extension or "").strip().lower().lstrip(".")
+    if not ext:
+        text = str(name or "").strip().lower()
+        if "." in text:
+            ext = text.rsplit(".", 1)[-1]
+    return ext in {"png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"}
 
 
 __all__ = ["normalize_bug", "normalize_bug_detail", "normalize_story"]

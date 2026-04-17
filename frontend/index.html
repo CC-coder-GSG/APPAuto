@@ -1336,6 +1336,25 @@
     </div>
   </div>
 
+  <div id="zentaoBugImageLightbox" class="hidden" onclick="closeZentaoBugImageLightbox(event)" style="position:fixed; inset:0; background:rgba(2,6,23,.82); z-index:10010; display:none; align-items:center; justify-content:center; padding:24px;">
+    <div onclick="event.stopPropagation()" style="width:min(1100px, 96vw); max-height:92vh; display:flex; flex-direction:column; gap:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; color:#e2e8f0;">
+        <div style="display:flex; flex-direction:column; gap:4px; min-width:0;">
+          <div id="zentaoBugImageLightboxTitle" style="font-size:13px; line-height:1.6; word-break:break-word;">图片预览</div>
+          <div id="zentaoBugImageLightboxIndex" style="font-size:12px; color:#94a3b8;"></div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button id="zentaoBugImageLightboxPrev" class="secondary" onclick="prevZentaoBugImageLightbox()" style="padding:6px 10px; font-size:13px;">上一张</button>
+          <button id="zentaoBugImageLightboxNext" class="secondary" onclick="nextZentaoBugImageLightbox()" style="padding:6px 10px; font-size:13px;">下一张</button>
+          <button class="secondary" onclick="closeZentaoBugImageLightbox()" style="padding:6px 10px; font-size:13px;">关闭</button>
+        </div>
+      </div>
+      <div style="flex:1; min-height:0; display:flex; align-items:center; justify-content:center; background:rgba(15,23,42,.45); border:1px solid rgba(148,163,184,.28); border-radius:16px; overflow:hidden;">
+        <img id="zentaoBugImageLightboxImg" src="" alt="图片预览" style="max-width:100%; max-height:78vh; object-fit:contain; display:block;">
+      </div>
+    </div>
+  </div>
+
   <!-- Stage5 Create Zentao Bug Modal -->
   <div id="s5CreateZentaoBugModal" class="hidden" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
     <div style="width:min(760px, 96vw); max-height:92vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">

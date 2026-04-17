@@ -659,6 +659,127 @@ function _sanitizePreviewHtml(rawHtml) {
   return template.innerHTML || '<span style="color:#94a3b8;">暂无内容</span>';
 }
 
+let _zentaoPreviewImageGallery = [];
+let _zentaoPreviewImageIndex = -1;
+
+function _renderPreviewFiles(preview) {
+  const files = Array.isArray(preview.files) ? preview.files : [];
+  if (!files.length) {
+    return '<span style="color:#94a3b8; font-size:13px;">暂无附件</span>';
+  }
+
+  const imageFiles = files.filter((item) => item?.is_image && item?.url);
+  const otherFiles = files.filter((item) => !item?.is_image || !item?.url);
+
+  const imageBlock = imageFiles.length ? `
+    <div style="margin-bottom:${otherFiles.length ? '14px' : '0'};">
+      <div style="font-size:13px; font-weight:600; color:#334155; margin-bottom:8px;">图片附件</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;">
+        ${imageFiles.map((item, index) => `
+          <a href="javascript:void(0)" onclick="openZentaoBugImageLightboxByIndex(${index})" style="display:block; text-decoration:none; border:1px solid #dbeafe; border-radius:12px; overflow:hidden; background:#eff6ff;">
+            <div style="aspect-ratio:4/3; background:#dbeafe; display:flex; align-items:center; justify-content:center;">
+              <img src="${escapeHtml(item.url || '')}" alt="${escapeHtml(item.title || '图片附件')}" style="width:100%; height:100%; object-fit:cover; display:block;">
+            </div>
+            <div style="padding:10px 12px; font-size:12px; color:#1e3a8a; line-height:1.6; word-break:break-word;">${escapeHtml(item.title || '图片附件')}</div>
+          </a>
+        `).join('')}
+      </div>
+    </div>
+  ` : '';
+
+  const fileBlock = otherFiles.length ? `
+    <div>
+      <div style="font-size:13px; font-weight:600; color:#334155; margin-bottom:8px;">文件附件</div>
+      <div style="display:flex; flex-wrap:wrap; gap:8px;">
+        ${otherFiles.map((item) => item?.url ? `
+          <a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener noreferrer" class="badge" style="background:#eff6ff; color:#2563eb; text-decoration:none;">
+            ${escapeHtml(item.title || '附件')}
+          </a>
+        ` : `
+          <span class="badge" style="background:#f8fafc; color:#64748b;">
+            ${escapeHtml(item?.title || '附件')}
+          </span>
+        `).join('')}
+      </div>
+    </div>
+  ` : '';
+
+  return `${imageBlock}${fileBlock}`;
+}
+
+function _setZentaoPreviewImageGallery(files) {
+  _zentaoPreviewImageGallery = (Array.isArray(files) ? files : [])
+    .filter((item) => item?.is_image && item?.url)
+    .map((item) => ({
+      url: String(item.url || ''),
+      title: String(item.title || '图片附件'),
+    }));
+  _zentaoPreviewImageIndex = -1;
+}
+
+function _updateZentaoBugImageLightbox() {
+  const modal = document.getElementById('zentaoBugImageLightbox');
+  const img = document.getElementById('zentaoBugImageLightboxImg');
+  const titleEl = document.getElementById('zentaoBugImageLightboxTitle');
+  const indexEl = document.getElementById('zentaoBugImageLightboxIndex');
+  const prevBtn = document.getElementById('zentaoBugImageLightboxPrev');
+  const nextBtn = document.getElementById('zentaoBugImageLightboxNext');
+  const current = _zentaoPreviewImageGallery[_zentaoPreviewImageIndex];
+  if (!modal || !img || !titleEl || !current) return;
+  img.src = current.url;
+  img.alt = current.title || '图片预览';
+  titleEl.innerText = current.title || '图片预览';
+  if (indexEl) indexEl.innerText = `${_zentaoPreviewImageIndex + 1} / ${_zentaoPreviewImageGallery.length}`;
+  if (prevBtn) prevBtn.disabled = _zentaoPreviewImageIndex <= 0;
+  if (nextBtn) nextBtn.disabled = _zentaoPreviewImageIndex >= _zentaoPreviewImageGallery.length - 1;
+}
+
+export function openZentaoBugImageLightboxByIndex(index) {
+  const modal = document.getElementById('zentaoBugImageLightbox');
+  if (!modal || !_zentaoPreviewImageGallery.length) return;
+  const nextIndex = Number(index);
+  if (!Number.isInteger(nextIndex) || nextIndex < 0 || nextIndex >= _zentaoPreviewImageGallery.length) return;
+  _zentaoPreviewImageIndex = nextIndex;
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+  _updateZentaoBugImageLightbox();
+}
+
+export function openZentaoBugImageLightbox(url, title = '图片预览') {
+  _zentaoPreviewImageGallery = [{ url: String(url || ''), title: String(title || '图片预览') }];
+  _zentaoPreviewImageIndex = 0;
+  openZentaoBugImageLightboxByIndex(0);
+}
+
+export function prevZentaoBugImageLightbox() {
+  if (_zentaoPreviewImageIndex <= 0) return;
+  _zentaoPreviewImageIndex -= 1;
+  _updateZentaoBugImageLightbox();
+}
+
+export function nextZentaoBugImageLightbox() {
+  if (_zentaoPreviewImageIndex >= _zentaoPreviewImageGallery.length - 1) return;
+  _zentaoPreviewImageIndex += 1;
+  _updateZentaoBugImageLightbox();
+}
+
+export function closeZentaoBugImageLightbox(event = null) {
+  if (event?.target && event.target.id !== 'zentaoBugImageLightbox') return;
+  const modal = document.getElementById('zentaoBugImageLightbox');
+  const img = document.getElementById('zentaoBugImageLightboxImg');
+  const titleEl = document.getElementById('zentaoBugImageLightboxTitle');
+  const indexEl = document.getElementById('zentaoBugImageLightboxIndex');
+  if (!modal || !img || !titleEl) return;
+  modal.classList.add('hidden');
+  modal.style.display = 'none';
+  img.removeAttribute('src');
+  img.alt = '图片预览';
+  titleEl.innerText = '图片预览';
+  if (indexEl) indexEl.innerText = '';
+  _zentaoPreviewImageGallery = [];
+  _zentaoPreviewImageIndex = -1;
+}
+
 function _renderPreviewMetaGrid(preview) {
   const fields = [
     ['状态', preview.status_zh || preview.status || '-'],
@@ -698,7 +819,7 @@ function _renderPreviewActions(preview) {
         <span class="badge" style="background:#eff6ff; color:#2563eb;">${escapeHtml(item.actor || '系统')}</span>
         <span class="badge" style="background:#f8fafc; color:#475569;">${escapeHtml(item.action_zh || item.action || '操作')}</span>
       </div>
-      <div style="font-size:13px; color:#334155; line-height:1.7; word-break:break-word;">${escapeHtml(item.comment || '无备注')}</div>
+      <div style="font-size:13px; color:#334155; line-height:1.7; word-break:break-word;">${_sanitizePreviewHtml(item.comment || '无备注')}</div>
     </div>
   `).join('');
 }
@@ -723,6 +844,7 @@ export async function openZentaoBugPreview(ztId, bugRow = null) {
 
   try {
     const preview = await (await api(`/zentao/bugs/${Number(ztId)}/preview`)).json();
+    _setZentaoPreviewImageGallery(preview.files);
     titleEl.innerText = preview.title || bugRow?.zentao_bug_title || `Bug #${ztId}`;
     metaEl.innerText = `禅道 Bug #${ztId} · ${preview.status_zh || preview.status || '未知状态'}`;
     if (preview.zentao_url) {
@@ -741,13 +863,7 @@ export async function openZentaoBugPreview(ztId, bugRow = null) {
       </div>
       <div style="margin-bottom:16px;">
         <div style="font-size:14px; font-weight:700; color:#0f172a; margin-bottom:8px;">附件</div>
-        <div style="display:flex; flex-wrap:wrap; gap:8px;">
-          ${(preview.files || []).length ? preview.files.map((item) => `
-            <a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener noreferrer" class="badge" style="background:#eff6ff; color:#2563eb; text-decoration:none;">
-              ${escapeHtml(item.title || '附件')}
-            </a>
-          `).join('') : '<span style="color:#94a3b8; font-size:13px;">暂无附件</span>'}
-        </div>
+        <div>${_renderPreviewFiles(preview)}</div>
       </div>
       <div>
         <div style="font-size:14px; font-weight:700; color:#0f172a; margin-bottom:8px;">流转记录</div>
@@ -757,6 +873,7 @@ export async function openZentaoBugPreview(ztId, bugRow = null) {
       </div>
     `;
   } catch (err) {
+    _setZentaoPreviewImageGallery([]);
     errorEl.innerText = err.message || '加载禅道 Bug 详情失败';
     errorEl.style.display = 'block';
     bodyEl.innerHTML = '<div style="color:#94a3b8; font-size:13px;">无法获取禅道详情，请检查绑定或稍后重试。</div>';
@@ -769,6 +886,7 @@ export function closeZentaoBugPreview() {
     modal.classList.add('hidden');
     modal.style.display = 'none';
   }
+  closeZentaoBugImageLightbox();
 }
 
 export async function pushStage5() {
@@ -1245,6 +1363,11 @@ window.OmniQAStage5Tab = {
   toggleS5CloseComment,
   openZentaoBugPreview,
   closeZentaoBugPreview,
+  openZentaoBugImageLightbox,
+  openZentaoBugImageLightboxByIndex,
+  closeZentaoBugImageLightbox,
+  prevZentaoBugImageLightbox,
+  nextZentaoBugImageLightbox,
   openS5CreateZentaoBugModal,
   closeS5CreateZentaoBugModal,
   submitS5CreateZentaoBug,
@@ -1266,6 +1389,11 @@ window.toggleS5DetailRow = toggleS5DetailRow;
 window.toggleS5CloseComment = toggleS5CloseComment;
 window.openZentaoBugPreview = openZentaoBugPreview;
 window.closeZentaoBugPreview = closeZentaoBugPreview;
+window.openZentaoBugImageLightbox = openZentaoBugImageLightbox;
+window.openZentaoBugImageLightboxByIndex = openZentaoBugImageLightboxByIndex;
+window.closeZentaoBugImageLightbox = closeZentaoBugImageLightbox;
+window.prevZentaoBugImageLightbox = prevZentaoBugImageLightbox;
+window.nextZentaoBugImageLightbox = nextZentaoBugImageLightbox;
 window.openS5ReactivateModal = openS5ReactivateModal;
 window.submitS5Reactivate = submitS5Reactivate;
 window.closeS5ReactivateModal = closeS5ReactivateModal;
