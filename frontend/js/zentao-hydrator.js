@@ -417,4 +417,35 @@ async function hydrateContainer(containerEl) {
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
-window.OmniQAZentao = { hydrateContainer, invalidate };
+/**
+ * Clear cached Zentao data for the currently visible tab and re-hydrate.
+ * Callable from a header "刷新禅道" button — no page reload needed.
+ */
+function refreshVisible() {
+  const tabNames = ['assign','mine','feedback','retest','stage5','field-test',
+                    'build-records','zentao-sync','report','activity','data','dispatch'];
+  let container = null;
+  for (const name of tabNames) {
+    const panel = document.getElementById('tab-' + name);
+    if (panel && !panel.classList.contains('hidden')) { container = panel; break; }
+  }
+  if (!container) return;
+
+  // Clear loaded state + cache for all slots in this tab
+  for (const el of container.querySelectorAll('.zt-bug-slot[data-zt-bug-id]')) {
+    _bugCache.delete(el.dataset.ztBugId);
+    delete el.dataset.ztLoaded;
+    delete el.dataset.ztPending;
+    el.innerHTML = '';
+  }
+  for (const el of container.querySelectorAll('.zt-story-slot[data-zt-story-id]')) {
+    _storyCache.delete(el.dataset.ztStoryId);
+    delete el.dataset.ztLoaded;
+    delete el.dataset.ztPending;
+    el.innerHTML = '';
+  }
+
+  hydrateContainer(container);
+}
+
+window.OmniQAZentao = { hydrateContainer, invalidate, refreshVisible };

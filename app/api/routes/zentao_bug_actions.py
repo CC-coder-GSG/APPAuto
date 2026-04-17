@@ -295,10 +295,14 @@ def get_bug_preview(
             raise HTTPException(status_code=exc.status_code or 502, detail=f"禅道获取Bug详情失败: {exc.message}")
 
     # v1 API 返回 PHP Fatal Error（如操作记录含附件时的禅道 IPD 扩展 bug）时
-    # fallback 到页面 JSON 接口，能获取基本字段但无 actions
+    # fallback 到页面 JSON 接口
     if raw is None:
         page_data = client.get_page(f"bug-view-{zt_id}.json")
-        raw = page_data.get("bug") or page_data if isinstance(page_data, dict) else None
+        if isinstance(page_data, dict):
+            raw = page_data.get("bug") or page_data
+            # 页面 JSON 的 actions 在顶层，合并进 bug 给 normalizer 使用
+            if isinstance(raw, dict) and "actions" not in raw and "actions" in page_data:
+                raw["actions"] = page_data["actions"]
         if not raw:
             raise HTTPException(status_code=502, detail="禅道 Bug 详情获取失败（v1 API 异常，页面接口也无数据）")
 
@@ -306,22 +310,22 @@ def get_bug_preview(
     if not preview:
         raise HTTPException(status_code=502, detail="禅道 Bug 详情解析失败")
 
-    # 将 steps 里的 file-read 内联图片 URL 替换为 OmniQA 代理路径
+    # 将 steps 里的 file-read/file-download 内联图片 URL 替换为 OmniQA 代理路径
+    # 兼容绝对路径 (http://...) 和相对路径 (/zentao/file-read-xxx.png)
+    _FILE_URL_RE = re.compile(r'(?:https?://)?[^"\'>\s]*/file-(?:read|download)-(\d+)\.[a-zA-Z0-9]+')
     if preview.get("steps"):
-        preview["steps"] = re.sub(
-            r'https?://[^"\'>\s]+/file-(?:read|download)-(\d+)\.[a-zA-Z0-9]+',
+        preview["steps"] = _FILE_URL_RE.sub(
             lambda m: f"/zentao/files/{m.group(1)}",
             preview["steps"],
         )
 
-    # 附件图片：直接用 file_id 构建代理 URL，比正则解析 URL 更可靠
+    # 附件：直接用 file_id 构建代理 URL，比正则解析 URL 更可靠
     for f in preview.get("files") or []:
         fid = f.get("file_id")
         if fid:
             f["url"] = f"/zentao/files/{fid}"
         elif f.get("url"):
-            f["url"] = re.sub(
-                r'https?://[^"\'>\s]+/file-(?:read|download)-(\d+)\.[a-zA-Z0-9]+',
+            f["url"] = _FILE_URL_RE.sub(
                 lambda m: f"/zentao/files/{m.group(1)}",
                 f["url"],
             )
