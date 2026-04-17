@@ -62,7 +62,13 @@ class ZentaoClient:
                 return None
             if resp.status_code not in (200, 201):
                 raise ZentaoAPIError(resp.status_code, resp.text[:500])
-            return resp.json()
+            try:
+                return resp.json()
+            except Exception:
+                body = resp.text or ""
+                if "Fatal error" in body or "fatal error" in body:
+                    raise ZentaoAPIError(500, "禅道服务器内部错误（PHP Fatal Error），该 Bug 数据可能存在异常，请联系禅道管理员检查。")
+                raise ZentaoAPIError(502, f"禅道返回了非 JSON 响应: {body[:200]}")
         except ZentaoAPIError:
             raise
         except Exception as e:
