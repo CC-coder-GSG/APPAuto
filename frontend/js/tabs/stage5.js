@@ -170,11 +170,22 @@ function isS5BugEffectivelyClosed(bug) {
   );
 }
 
+function isS5BugReactivatable(bug) {
+  if (!bug?.zentao_bug_id) return false;
+  const zentaoStatus = String(bug.zentao_live_status || '').toLowerCase();
+  return isS5BugEffectivelyClosed(bug) || zentaoStatus === 'resolved';
+}
+
 function buildS5RowHtml(b, allVersionsMode) {
   const isMyClosed = b.my_test_done;
   const rowStyle = isMyClosed ? 'background: #f8fafc; color: #94a3b8;' : '';
   const isZentaoBug = !!b.zentao_bug_id;
   const isEffectivelyClosed = isS5BugEffectivelyClosed(b);
+  const canReactivate = isS5BugReactivatable(b);
+  const shouldStrikeClosed = !!(isMyClosed || isEffectivelyClosed);
+  const strikeDecoration = shouldStrikeClosed
+    ? 'text-decoration:line-through; text-decoration-thickness:1px; text-decoration-color:#94a3b8;'
+    : '';
 
   const failBadge = b.is_retest_failed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; margin-left:4px;">🚨复测打回</span>' : '';
   const dispatchBadge = b.dispatched_to_name ? `<span class="badge" style="background:#ffedd5; color:#ea580c; border:1px solid #fdba74; margin-left:4px;">🪂特派:${b.dispatched_to_name}</span>` : '';
@@ -217,7 +228,7 @@ function buildS5RowHtml(b, allVersionsMode) {
   if (isZentaoBug) {
     const assignLink = `<a href="javascript:void(0)" onclick="openS5AssignById(${b.id})" style="${linkStyle} color:#8b5cf6;">指派</a>`;
     // 重新激活占位始终存在，visibility 控制可见性，保持布局稳定
-    const reactivateVis = isEffectivelyClosed ? 'visible' : 'hidden';
+    const reactivateVis = canReactivate ? 'visible' : 'hidden';
     const reactivateLink = `<a href="javascript:void(0)" onclick="openS5ReactivateById(${b.id})" style="${linkStyle} color:#059669; font-weight:bold; visibility:${reactivateVis};">重新激活</a>`;
     actionsHtml = `
       <div style="display:flex; flex-direction:column; gap:3px;">
@@ -235,7 +246,7 @@ function buildS5RowHtml(b, allVersionsMode) {
 
   // 验证列
   const closeOnChange = isZentaoBug ? `onchange="toggleS5CloseComment(${b.id}, this.checked)"` : '';
-  const closeLabel = `<label style="color:#0f172a; font-weight:bold; display:flex; align-items:center; gap:4px; margin:0;"><input id='done_${b.id}' type='checkbox' ${isMyClosed ? 'checked' : ''} ${closeOnChange}> 我的闭环确认</label>`;
+  const closeLabel = `<label style="color:#0f172a; font-weight:bold; display:flex; align-items:center; gap:4px; margin:0; ${strikeDecoration}"><input id='done_${b.id}' type='checkbox' ${isMyClosed ? 'checked' : ''} ${closeOnChange}> 我的闭环确认</label>`;
 
   // 关闭备注默认收起，用户勾选后展开
   const closeCommentRow = isZentaoBug
@@ -251,20 +262,20 @@ function buildS5RowHtml(b, allVersionsMode) {
       ${detailMeta ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">${detailMeta}</div>` : ''}
     </td>
     <td style="vertical-align:middle; padding:6px 10px;">
-      ${bugTitle ? `<div style="max-height:60px; overflow-y:auto; font-size:13px; color:#475569; line-height:1.65; word-break:break-word;">${bugTitle}</div>` : '<span style="color:#94a3b8;">-</span>'}
+      ${bugTitle ? `<div style="max-height:60px; overflow-y:auto; font-size:13px; color:#475569; line-height:1.65; word-break:break-word; ${strikeDecoration}">${bugTitle}</div>` : '<span style="color:#94a3b8;">-</span>'}
       ${(syncMeta || assignedMeta || closedByMeta || closeDateMeta) ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">${syncMeta}${assignedMeta}${closedByMeta}${closeDateMeta}</div>` : ''}
     </td>
     <td style="vertical-align:middle; padding:6px 8px; width:120px;">${actionsHtml}</td>
     <td style="text-decoration:none; vertical-align:middle; padding:6px 10px;">
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        <select id='res_${b.id}' style="padding:2px; font-size:13px; border:1px solid #cbd5e1; border-radius:4px; color:#475569;" ${isMyClosed ? 'disabled' : ''}>
+        <select id='res_${b.id}' style="padding:2px; font-size:13px; border:1px solid #cbd5e1; border-radius:4px; color:#475569; ${strikeDecoration}" ${isMyClosed ? 'disabled' : ''}>
           <option value="fixed" ${b.my_resolution === 'fixed' ? 'selected' : ''}>✅修复通过</option>
           <option value="false_alarm" ${b.my_resolution === 'false_alarm' ? 'selected' : ''}>⚠️误报</option>
           <option value="rejected" ${b.my_resolution === 'rejected' ? 'selected' : ''}>拒绝修复</option>
         </select>
         ${closeLabel}
         ${closeCommentRow}
-        <button class="${isMyClosed ? 'secondary' : ''}" onclick='saveS5(${b.id})'>保存记录</button>
+        <button class="${isMyClosed ? 'secondary' : ''}" style="${strikeDecoration}" onclick='saveS5(${b.id})'>保存记录</button>
       </div>
     </td>
   </tr>`;
