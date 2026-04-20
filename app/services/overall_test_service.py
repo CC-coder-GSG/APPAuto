@@ -88,7 +88,7 @@ def _bug_effective_status(bug: BugTracking) -> str:
         return "closed"
     if live == "resolved":
         return "resolved"
-    return live or "active"
+    return "active"
 
 
 def _bug_matches_keyword(bug: BugTracking, keyword: str) -> bool:
@@ -185,6 +185,11 @@ class OverallTestService:
                 .all()
             )
 
+        base_total = len(bugs)
+        base_closed_count = sum(1 for bug in bugs if bug.closed)
+        base_pending_count = base_total - base_closed_count
+        base_ready_rate = 100 if base_total == 0 else round(base_closed_count * 100 / base_total)
+
         # Apply server-side filters (status + keyword) before building the payload
         if status_filter:
             bugs = [b for b in bugs if _bug_effective_status(b) in status_filter]
@@ -241,10 +246,10 @@ class OverallTestService:
 
             bug_pool.append(entry)
 
-        total = len(bug_pool)
-        closed_count = sum(1 for e in bug_pool if e["closed"])
-        pending_count = total - closed_count
-        ready_rate = 100 if total == 0 else round(closed_count * 100 / total)
+        filtered_total = len(bug_pool)
+        filtered_closed_count = sum(1 for e in bug_pool if e["closed"])
+        filtered_pending_count = filtered_total - filtered_closed_count
+        filtered_ready_rate = 100 if filtered_total == 0 else round(filtered_closed_count * 100 / filtered_total)
 
         return {
             "major_version_id": major_version_id,
@@ -261,10 +266,16 @@ class OverallTestService:
             ],
             "bug_pool": bug_pool,
             "stats": {
-                "total": total,
-                "closed": closed_count,
-                "pending": pending_count,
-                "ready_rate": ready_rate,
+                "total": base_total,
+                "closed": base_closed_count,
+                "pending": base_pending_count,
+                "ready_rate": base_ready_rate,
+            },
+            "filtered_stats": {
+                "total": filtered_total,
+                "closed": filtered_closed_count,
+                "pending": filtered_pending_count,
+                "ready_rate": filtered_ready_rate,
             },
             "filters": {
                 "statuses": status_filter,
@@ -836,13 +847,16 @@ class OverallTestService:
                 bug_row.zentao_live_status = normalized["status"]
             updated = False
 
-        if normalized.get("closed_by_account"):
-            bug_row.zentao_closed_by_account = normalized["closed_by_account"]
-            bug_row.zentao_closed_by_name = normalized["closed_by_name"] or normalized["closed_by_account"]
-        if normalized.get("close_date"):
-            bug_row.zentao_close_date = normalized["close_date"]
-        if normalized.get("close_comment"):
-            bug_row.zentao_close_comment = normalized["close_comment"]
+        if normalized.get("status") == "closed":
+            bug_row.zentao_closed_by_account = normalized.get("closed_by_account") or None
+            bug_row.zentao_closed_by_name = normalized.get("closed_by_name") or normalized.get("closed_by_account") or ""
+            bug_row.zentao_close_date = normalized.get("close_date")
+            bug_row.zentao_close_comment = normalized.get("close_comment") or ""
+        else:
+            bug_row.zentao_closed_by_account = None
+            bug_row.zentao_closed_by_name = ""
+            bug_row.zentao_close_date = None
+            bug_row.zentao_close_comment = ""
         if normalized.get("assigned_to_account"):
             bug_row.zentao_assigned_to_account = normalized["assigned_to_account"]
             bug_row.zentao_assigned_to_name = normalized["assigned_to_name"] or normalized["assigned_to_account"]

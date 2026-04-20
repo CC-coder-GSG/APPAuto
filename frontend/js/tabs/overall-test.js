@@ -143,17 +143,18 @@ export async function loadOverallTest(options = {}) {
     ? `/overall-test/overview?major_version_id=0&software_id=${softwareId}${filters.qs}`
     : `/overall-test/overview?major_version_id=${majorId}${filters.qs}`;
   const data = await (await api(url)).json();
-  if (majorId !== 0) await loadS5OptionsData(majorId);
+  if (majorId !== 0 && document.getElementById('s5BugSource')) await loadS5OptionsData(majorId);
   refreshS5EntryMode();
   toggleS5BugInputs();
   state.overallTestRows = data.bug_pool || [];
   state.overallTestAllVersionsMode = !!data.all_versions_mode;
   clampS5CurrentPage();
 
-  const total = state.overallTestRows.length;
-  const closed = state.overallTestRows.filter((b) => b.closed).length;
-  const pending = total - closed;
-  const rate = total === 0 ? 100 : Math.round((closed / total) * 100);
+  const stats = data.stats || {};
+  const total = Number(stats.total ?? state.overallTestRows.length);
+  const closed = Number(stats.closed ?? state.overallTestRows.filter((b) => b.closed).length);
+  const pending = Number(stats.pending ?? Math.max(0, total - closed));
+  const rate = Number(stats.ready_rate ?? (total === 0 ? 100 : Math.round((closed / total) * 100)));
 
   document.getElementById('overallTestPanorama')?.classList.remove('hidden');
   document.getElementById('s5TableContainer')?.classList.remove('hidden');
@@ -555,6 +556,22 @@ export async function saveS5(id) {
   const res = document.getElementById('res_' + id)?.value;
   const closeComment = isZentaoBug ? (document.getElementById('closeCommentText_' + id)?.value || '') : '';
 
+  if (isZentaoBug && done && zentaoBugId) {
+    const ztId = Number(zentaoBugId);
+    if (ztId) {
+      try {
+        await api(`/zentao/bugs/${ztId}/close`, {
+          method: 'POST',
+          headers: window.H,
+          body: { comment: closeComment },
+        });
+      } catch (err) {
+        window.showMessage && window.showMessage(err.message || '禅道关闭失败，本地未保存闭环结果', 'error');
+        return;
+      }
+    }
+  }
+
   await api(`/overall-test/bugs/${id}/result`, {
     method: 'PUT',
     headers: window.H,
@@ -565,27 +582,6 @@ export async function saveS5(id) {
       resolution: res,
     },
   });
-
-  // If Zentao bug is being closed, call Zentao close API
-  if (isZentaoBug && done && zentaoBugId) {
-    try {
-      const ztId = Number(zentaoBugId);
-      if (ztId) {
-        const closeResp = await api(`/zentao/bugs/${ztId}/close`, {
-          method: 'POST',
-          headers: window.H,
-          body: { comment: closeComment },
-        });
-        if (!closeResp.ok) {
-          const err = await closeResp.json().catch(() => ({}));
-          const detail = err.detail || '禅道关闭请求失败';
-          window.showMessage && window.showMessage(`本地记录已保存，但禅道关闭失败：${detail}`, 'info');
-        }
-      }
-    } catch (err) {
-      window.showMessage && window.showMessage(`本地记录已保存，但禅道关闭异常：${err.message}`, 'info');
-    }
-  }
 
   window.showMessage && window.showMessage('整体测试项已保存');
   await loadOverallTest({ syncBeforeLoad: false, showSuccess: false });
@@ -1124,36 +1120,88 @@ function _buildSearchableUserSelect(selectId, users, currentAssigned = '') {
   if (!container) return;
 
   const entries = Object.entries(users || {}).sort((a, b) => a[1].localeCompare(b[1], 'zh-CN'));
-  let currentLabel = '';
-  const opts = entries.map(([account, display]) => {
-    const label = `${display}（${account}）`;
-    if (account === currentAssigned) currentLabel = label;
-    return `<option value="${escapeHtml(account)}">${escapeHtml(label)}</option>`;
-  }).join('');
+  if (!entries.length) {
+    container.innerHTML = '<div style="color:#94a3b8; font-size:13px;">未获取到候选人列表</div>';
+    return;
+  }
+
+  const hiddenId = selectId;
+  const inputId = `${selectId}Input`;
+  const dropdownId = `${selectId}Dropdown`;
+  const clearId = `${selectId}ClearBtn`;
 
   container.innerHTML = `
-    <input type="text" id="${selectId}Search" placeholder="搜索姓名/账号" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px; margin-bottom:4px;" oninput="_filterS5UserSelect('${selectId}', this.value)">
-    <select id="${selectId}" size="5" style="width:100%; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;">
-      <option value="">-- 请选择 --</option>
-      ${opts}
-    </select>
-  `;
-  // Pre-select current assigned
-  if (currentAssigned) {
-    const sel = document.getElementById(selectId);
-    if (sel) sel.value = currentAssigned;
+    <div style="position:relative;" data-s5-combobox>
+      <input type="hidden" id="${hiddenId}" value="">
+      <div style="display:flex; gap:6px;">
+        <input id="${inputId}" autocomplete="off"
+          placeholder="点击选择指派人（可按姓名/账号过滤）"
+          style="flex:1; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+        <button type="button" class="secondary" id="${clearId}"
+          style="padding:6px 10px; font-size:12px;">清除</button>
+      </div>
+      <div id="${dropdownId}" style="display:none; position:absolute; left:0; right:0; top:100%; margin-top:4px; max-height:220px; overflow-y:auto; background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; box-shadow:0 4px 12px rgba(15,23,42,0.08); z-index:20;"></div>
+    </div>`;
+
+  const input = document.getElementById(inputId);
+  const hidden = document.getElementById(hiddenId);
+  const dropdown = document.getElementById(dropdownId);
+  const clearBtn = document.getElementById(clearId);
+  if (!input || !hidden || !dropdown || !clearBtn) return;
+
+  function renderOptions(filter = '') {
+    const kw = String(filter || '').toLowerCase();
+    const items = entries.filter(([acc, name]) => !kw
+      || String(acc).toLowerCase().includes(kw)
+      || String(name).toLowerCase().includes(kw));
+    if (!items.length) {
+      dropdown.innerHTML = '<div style="padding:8px 10px; color:#94a3b8; font-size:13px;">无匹配候选人</div>';
+      return;
+    }
+    dropdown.innerHTML = items.map(([acc, name]) => `
+      <div class="s5-assign-option" data-account="${escapeHtml(acc)}" data-name="${escapeHtml(name)}"
+        style="padding:8px 10px; font-size:13px; color:#0f172a; cursor:pointer; border-bottom:1px solid #f1f5f9;">
+        <span style="font-weight:600;">${escapeHtml(name)}</span>
+        <span style="color:#94a3b8; margin-left:6px; font-size:12px;">${escapeHtml(acc)}</span>
+      </div>
+    `).join('');
+    Array.from(dropdown.querySelectorAll('.s5-assign-option')).forEach((opt) => {
+      opt.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        hidden.value = opt.getAttribute('data-account') || '';
+        input.value = opt.getAttribute('data-name') || '';
+        dropdown.style.display = 'none';
+      });
+      opt.addEventListener('mouseenter', () => { opt.style.background = '#f1f5f9'; });
+      opt.addEventListener('mouseleave', () => { opt.style.background = ''; });
+    });
+  }
+
+  function openDropdown() {
+    renderOptions(input.value);
+    dropdown.style.display = 'block';
+  }
+
+  input.addEventListener('focus', openDropdown);
+  input.addEventListener('click', openDropdown);
+  input.addEventListener('input', () => {
+    hidden.value = '';
+    renderOptions(input.value);
+  });
+  input.addEventListener('blur', () => setTimeout(() => { dropdown.style.display = 'none'; }, 120));
+  clearBtn.addEventListener('click', () => {
+    hidden.value = '';
+    input.value = '';
+    renderOptions('');
+    input.focus();
+  });
+
+  if (currentAssigned && entries.some(([acc]) => acc === currentAssigned)) {
+    const found = entries.find(([acc]) => acc === currentAssigned);
+    hidden.value = currentAssigned;
+    input.value = found ? String(found[1]) : currentAssigned;
   }
 }
-
-window._filterS5UserSelect = function(selectId, keyword) {
-  const sel = document.getElementById(selectId);
-  if (!sel) return;
-  const kw = (keyword || '').toLowerCase();
-  Array.from(sel.options).forEach((opt) => {
-    if (!opt.value) { opt.style.display = ''; return; }
-    opt.style.display = (opt.text.toLowerCase().includes(kw) || opt.value.toLowerCase().includes(kw)) ? '' : 'none';
-  });
-};
 
 export function openS5ReactivateModal(bugDbId, zentaoBugId) {
   _s5ModalBugDbId = bugDbId;

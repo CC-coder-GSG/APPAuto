@@ -468,47 +468,6 @@
       <thead id="s5TableHead"><tr><th style="width:260px">Bug 编号 (来源)</th><th>Bug 标题</th><th style="width:420px">验证操作</th></tr></thead>
       <tbody id="s5Table"></tbody>
     </table>
-    <h3 id="s5LocalBugTitle">➕ 新增问题</h3>
-    <div id="s5LocalBugHint" class="muted" style="margin: 0 0 8px; font-size: 13px;"></div>
-    <div id="s5LocalBugPanel" class="row" style="margin-top: 16px; align-items: flex-end; background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px dashed #cbd5e1;">
-      <div>
-        <label style="font-weight:bold; color:#334155;">来源类型</label>
-        <select id="s5BugSource" onchange="toggleS5BugInputs()" style="padding: 6px;">
-          <option value="manual">自由问题 (不关联需求)</option>
-          <option value="requirement">需求关联</option>
-          <option value="case">测试用例关联</option>
-          <option value="legacy_bug">历史Bug关联</option>
-        </select>
-      </div>
-
-      <div id="s5WrapReq" class="hidden" style="margin-left: 12px;">
-        <label style="font-weight:bold; color:#334155;">关联需求 <span style="color:#ef4444">*必选</span></label>
-        <select id="s5ReqSelect" style="width: 300px; padding: 6px;">
-          <option value="">请选择关联需求</option>
-        </select>
-      </div>
-
-      <div id="s5WrapCase" class="hidden" style="margin-left: 12px;">
-        <label style="font-weight:bold; color:#334155;">关联用例 <span style="color:#ef4444">*必选</span></label>
-        <select id="s5CaseSelect" style="width: 260px; padding: 6px;">
-          <option value="">请选择关联用例</option>
-        </select>
-      </div>
-
-      <div id="s5WrapLegacy" class="hidden" style="margin-left: 12px;">
-        <label style="font-weight:bold; color:#334155;">关联历史Bug <span style="color:#ef4444">*必选</span></label>
-        <select id="s5LegacySelect" style="width: 260px; padding: 6px;">
-          <option value="">请选择关联历史Bug</option>
-        </select>
-      </div>
-
-      <div style="margin-left: 12px;">
-        <label style="font-weight:bold; color:#334155;">新Bug编号</label>
-        <div class="prefix-input"><span style="color:#94a3b8">b#</span><input id="s5BugId" inputmode="numeric" oninput="digitsOnly(this)" placeholder="输入数字" style="padding: 6px; width: 100px;"></div>
-      </div>
-
-      <button onclick="submitS5Bug()" style="margin-left: 12px; height: 34px;">➕ 提交新问题</button>
-    </div>
   </section>
 
   <section id="tab-field-test" class="hidden card">

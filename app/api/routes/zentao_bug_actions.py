@@ -736,6 +736,11 @@ def _update_local_live_status(db: Session, zt_id_str: str, status: str) -> None:
         rows = db.query(BugTracking).filter(BugTracking.zentao_bug_id == zt_id_str).all()
         for row in rows:
             row.zentao_live_status = status
+            if status != "closed":
+                row.zentao_closed_by_account = None
+                row.zentao_closed_by_name = ""
+                row.zentao_close_date = None
+                row.zentao_close_comment = ""
             row.updated_at = local_now()
         db.commit()
     except Exception as e:
@@ -750,6 +755,10 @@ def _reset_local_closed(db: Session, zt_id_str: str) -> None:
         for row in rows:
             row.closed = False
             row.closed_by_id = None
+            row.zentao_closed_by_account = None
+            row.zentao_closed_by_name = ""
+            row.zentao_close_date = None
+            row.zentao_close_comment = ""
             row.updated_at = local_now()
         db.commit()
     except Exception as e:
