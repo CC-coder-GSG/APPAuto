@@ -4,12 +4,16 @@ import json
 
 from app.core.exceptions import PermissionDenied
 
+# Canonical tab keys. "overall-test" is the new name for the tab
+# historically known as "stage5"; the legacy key is preserved as an
+# alias in `_TAB_KEY_ALIASES` so persisted permissions keep working
+# without a data migration.
 ALL_TAB_KEYS = [
     "assign",
     "mine",
     "feedback",
     "retest",
-    "stage5",
+    "overall-test",
     "field-test",
     "build-records",
     "zentao-sync",
@@ -23,11 +27,21 @@ DEFAULT_USER_TAB_KEYS = [
     "mine",
     "feedback",
     "retest",
-    "stage5",
+    "overall-test",
     "field-test",
     "zentao-sync",
     "report",
 ]
+
+# Legacy → canonical aliases applied when reading persisted permissions.
+_TAB_KEY_ALIASES = {
+    "stage5": "overall-test",
+}
+
+
+def _canonical_tab_key(raw: str) -> str:
+    text = str(raw or "").strip()
+    return _TAB_KEY_ALIASES.get(text, text)
 
 
 def ensure_admin(user) -> None:
@@ -46,11 +60,11 @@ def normalize_tab_permissions(tab_keys: list[str] | None) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
     for key in tab_keys:
-        text = str(key or "").strip()
-        if not text or text not in ALL_TAB_KEYS or text in seen:
+        canonical = _canonical_tab_key(key)
+        if not canonical or canonical not in ALL_TAB_KEYS or canonical in seen:
             continue
-        normalized.append(text)
-        seen.add(text)
+        normalized.append(canonical)
+        seen.add(canonical)
     return normalized
 
 
@@ -75,10 +89,9 @@ def serialize_tab_permissions(tab_keys: list[str] | None) -> str:
 
 
 def has_tab_access(user, tab_key: str) -> bool:
-    return tab_key in get_allowed_tabs(user)
+    return _canonical_tab_key(tab_key) in get_allowed_tabs(user)
 
 
 def ensure_tab_access(user, tab_key: str, message: str | None = None) -> None:
     if not has_tab_access(user, tab_key):
         raise PermissionDenied(message or "无权限访问该页面")
-

@@ -33,6 +33,14 @@ async def push_retest_result(major_version_id: int, current_user: User = Depends
     return await service.push_retest_result(major_version_id, current_user)
 
 
+@router.post("/overall-test/push-status")
+async def push_overall_test_status(major_version_id: int, minor_version_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    service = PushService(db)
+    return await service.push_stage5_status(major_version_id, minor_version_id)
+
+
+# Legacy URL kept for backward compatibility — will be removed once all
+# callers migrate to /overall-test/push-status.
 @router.post("/stage5/push-status")
 async def push_stage5_status(major_version_id: int, minor_version_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     service = PushService(db)

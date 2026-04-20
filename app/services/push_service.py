@@ -8,7 +8,7 @@ from app.integrations.wecom import send_markdown
 from app.models import BugTracking, Requirement
 from app.services.requirement_service import RequirementService
 from app.services.retest_service import RetestService
-from app.services.stage5_service import Stage5Service
+from app.services.overall_test_service import OverallTestService
 from app.utils.time_utils import local_now
 
 
@@ -34,10 +34,13 @@ class PushService:
         await self.send_markdown(md)
         return {"message": "Retest results pushed", "count": count}
 
-    async def push_stage5_status(self, major_version_id: int, minor_version_id: int) -> dict:
-        md, remaining = Stage5Service(self.db).build_stage5_push_message(major_version_id, minor_version_id)
+    async def push_overall_test_status(self, major_version_id: int, minor_version_id: int) -> dict:
+        md, remaining = OverallTestService(self.db).build_overall_test_push_message(major_version_id, minor_version_id)
         await self.send_markdown(md)
-        return {"message": "Stage5 status pushed", "remaining": remaining}
+        return {"message": "Overall-test status pushed", "remaining": remaining}
+
+    # Legacy alias — routes pinned to the old name keep working.
+    push_stage5_status = push_overall_test_status
 
     async def push_bug_dispatch_notice(self, bug_id: str, username: str) -> None:
         await self.send_markdown(f"📢 **Bug 特派专项通知**\n> 缺陷 **{bug_id}** 已被管理员特派给 @{username} 进行专项验证！请前往【我的工作台】顶部处理。")

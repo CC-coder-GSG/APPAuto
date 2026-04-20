@@ -1,7 +1,7 @@
 """
 Zentao Bug Action endpoints.
 
-Provides Stage5 with the ability to close, reactivate, reassign, edit and
+Provides Overall Test with the ability to close, reactivate, reassign, edit and
 delete Zentao bugs directly from within the OmniQA interface, using the
 calling user's stored Zentao credentials.
 
@@ -177,9 +177,11 @@ def get_create_bug_meta(
     modules: dict[str, str] = {}
     stories: dict[str, str] = {}
     bug_types: dict[str, str] = {}
+    meta_scope = "none"
     if product_ids:
         meta = client.get_create_bug_meta(product_ids[0], selected_execution_id or 0)
         if meta:
+            meta_scope = str(meta.get("__meta_scope__") or "unknown")
             users_raw = meta.get("users") or {}
             for account, display in (users_raw.items() if isinstance(users_raw, dict) else []):
                 if isinstance(display, str) and len(display) > 2 and display[1] == ":":
@@ -189,6 +191,12 @@ def get_create_bug_meta(
             modules = _normalize_meta_options(meta.get("moduleOptionMenu") or meta.get("modules") or meta.get("module"))
             stories = _normalize_meta_options(meta.get("stories") or meta.get("story"))
             bug_types = _normalize_meta_options(meta.get("typeList") or meta.get("type"))
+            if selected_execution_id and builds:
+                execution_build_ids = set(client.get_execution_build_ids(selected_execution_id))
+                if execution_build_ids:
+                    filtered_builds = {bid: name for bid, name in builds.items() if bid in execution_build_ids}
+                    if filtered_builds:
+                        builds = filtered_builds
 
     return {
         "product_ids": product_ids,
@@ -200,6 +208,7 @@ def get_create_bug_meta(
         "modules": modules,
         "stories": stories,
         "bug_types": bug_types,
+        "meta_scope": meta_scope,
     }
 
 
@@ -567,7 +576,7 @@ def active_zentao_bug(
     Reactivate a closed Zentao bug.
 
     Also resets the local BugTracking `closed` flag to False so the row
-    shows up again as pending in Stage5.
+    shows up again as pending in Overall Test.
     """
     client = _get_client(current_user.id, db)
     if client is None:
@@ -653,8 +662,8 @@ def delete_zentao_bug(
     Delete a Zentao bug (soft-delete in Zentao).
 
     The local BugTracking row is marked as `zentao_deleted=True` and hidden
-    from Stage5 — it is NOT hard-deleted from the local DB so that audit
-    records and stage5 history are preserved.
+    from Overall Test. It is NOT hard-deleted from the local DB so audit
+    records and historical verification data are preserved.
     """
     client = _get_client(current_user.id, db)
     if client is None:

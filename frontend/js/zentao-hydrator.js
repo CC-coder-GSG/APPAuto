@@ -422,7 +422,7 @@ async function hydrateContainer(containerEl) {
  * Callable from a header "刷新禅道" button — no page reload needed.
  */
 function refreshVisible() {
-  const tabNames = ['assign','mine','feedback','retest','stage5','field-test',
+  const tabNames = ['assign','mine','feedback','retest','overall-test','field-test',
                     'build-records','zentao-sync','report','activity','data','dispatch'];
   let container = null;
   for (const name of tabNames) {

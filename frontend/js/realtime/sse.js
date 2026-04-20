@@ -132,7 +132,7 @@ function updateNavBadges() {
   badge('tabMineSecondaryBadge', 'mineSecondaryBugDispatch');
   badge('tabFeedbackBadge',    'feedback');
   badge('tabRetestBadge',      'retest');
-  badge('tabStage5Badge',      'overallBug');
+  badge('tabOverallTestBadge', 'overallBug');
 }
 
 function bumpCounterByEvent() {
@@ -144,9 +144,10 @@ function bumpCounterByEvent() {
 // ─── Active tab detection ────────────────────────────────────────────────────
 
 function visibleTabName() {
-  const names = ['assign','mine','feedback','retest','stage5','field-test','build-records','zentao-sync','report','activity','data','dispatch'];
+  const names = ['assign','mine','feedback','retest','overall-test','field-test','build-records','zentao-sync','report','activity','data','dispatch'];
   return names.find((n) => {
-    const el = document.getElementById(`tab-${n}`);
+    const domId = `tab-${n}`;
+    const el = document.getElementById(domId);
     return el && !el.classList.contains('hidden');
   }) || '';
 }

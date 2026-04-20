@@ -6,7 +6,7 @@ const TAB_PERMISSION_OPTIONS = [
   { key: 'mine', label: '我的工作台' },
   { key: 'feedback', label: '反馈记录与处理' },
   { key: 'retest', label: '复测工作台' },
-  { key: 'stage5', label: '整体测试' },
+  { key: 'overall-test', label: '整体测试' },
   { key: 'field-test', label: '外业测试' },
   { key: 'build-records', label: '构建记录' },
   { key: 'zentao-sync', label: '禅道同步中心' },

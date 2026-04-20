@@ -74,7 +74,7 @@ export async function saveDispatchedBug(id) {
   const done = document.getElementById('ddone_' + id).checked;
   const n = document.getElementById('dnb_hidden_' + id).value || null;
   const res = document.getElementById('dres_' + id).value;
-  await api(`/stage5/bugs/${id}/result`, {
+  await api(`/overall-test/bugs/${id}/result`, {
     method: 'PUT', headers: window.H,
     body: ({ minor_version_id: Number(document.getElementById('mineMinorSelect')?.value || 0), test_done: done, newly_found_bug_id: n, resolution: res }),
   });

@@ -22,6 +22,39 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TIMEOUT = 15.0
 
 
+def _coerce_int_str(value: Any) -> str | None:
+    try:
+        text = str(int(value))
+    except (TypeError, ValueError):
+        text = str(value or "").strip()
+    return text or None
+
+
+def _extract_build_ids(raw: Any) -> list[str]:
+    build_ids: list[str] = []
+    if raw is None:
+        return build_ids
+    if isinstance(raw, dict):
+        if "id" in raw:
+            bid = _coerce_int_str(raw.get("id"))
+            if bid:
+                build_ids.append(bid)
+        else:
+            for key, value in raw.items():
+                key_id = _coerce_int_str(key)
+                if key_id:
+                    build_ids.append(key_id)
+                    continue
+                build_ids.extend(_extract_build_ids(value))
+        return build_ids
+    if isinstance(raw, (list, tuple, set)):
+        for item in raw:
+            build_ids.extend(_extract_build_ids(item))
+        return build_ids
+    bid = _coerce_int_str(raw)
+    return [bid] if bid else []
+
+
 class ZentaoAPIError(Exception):
     def __init__(self, status_code: int, message: str):
         self.status_code = status_code
@@ -283,13 +316,43 @@ class ZentaoClient:
         except Exception:
             return {"product_ids": [], "project_id": None}
 
+    def get_execution_build_ids(self, execution_id: int) -> list[str]:
+        """
+        Best-effort extraction of the build IDs associated with an execution.
+
+        Zentao deployments differ in how they expose builds on the execution
+        payload (`build`, `builds`, `openedBuild`, `openedBuilds`). This method
+        normalizes those shapes into a deduplicated list of build-id strings.
+        """
+        try:
+            resp = self.get(f"executions/{execution_id}")
+            if not resp:
+                return []
+            execution = resp.get("execution") or resp
+            if not isinstance(execution, dict):
+                return []
+            build_ids: list[str] = []
+            for key in ("build", "builds", "openedBuild", "openedBuilds"):
+                build_ids.extend(_extract_build_ids(execution.get(key)))
+            return list(dict.fromkeys([bid for bid in build_ids if bid]))
+        except Exception:
+            return []
+
     def get_create_bug_meta(self, product_id: int, execution_id: int = 0) -> dict | None:
         """Fetch page-level JSON for the bug creation form (users, builds etc.)."""
         path = f"bug-create-{product_id}-{execution_id}.json"
         meta = self.get_page(path)
-        if not meta:
+        if meta:
+            meta["__meta_scope__"] = "execution" if execution_id else "product"
+            meta["__meta_path__"] = path
+            return meta
+        if execution_id:
             path = f"bug-create-{product_id}-0.json"
             meta = self.get_page(path)
+            if meta:
+                meta["__meta_scope__"] = "product_fallback"
+                meta["__meta_path__"] = path
+                return meta
         return meta
 
 

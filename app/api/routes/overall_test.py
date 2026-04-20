@@ -1,9 +1,10 @@
 """
-Legacy `/stage5/*` routes — kept as a compatibility layer.
+Overall-Test API routes (canonical).
 
-These routes accept the same parameters (including the new `statuses`
-and `keyword` filters) as `/overall-test/*` and delegate to the same
-`OverallTestService`. Prefer the new URLs in new code.
+Replaces the legacy `/stage5/*` endpoints. The old routes still exist as
+thin compatibility wrappers — see `app/api/routes/stage5.py` — so any
+caller pinned to the previous URLs keeps working. New frontend code
+should use `/overall-test/*`.
 """
 from __future__ import annotations
 
@@ -24,14 +25,14 @@ router = APIRouter()
 B_PATTERN = re.compile(r"^b#\d+$")
 
 
-class Stage5ResultPayload(BaseModel):
+class OverallTestResultPayload(BaseModel):
     minor_version_id: int
     test_done: bool
     newly_found_bug_id: Optional[str] = None
     resolution: str = "fixed"
 
 
-class Stage5IssueCreatePayload(BaseModel):
+class OverallTestIssueCreatePayload(BaseModel):
     major_version_id: int
     requirement_id: Optional[int] = None
     source_type: BugSourceType = BugSourceType.MANUAL
@@ -40,17 +41,23 @@ class Stage5IssueCreatePayload(BaseModel):
     minor_version_id: Optional[int] = None
 
 
-class Stage5ZentaoSyncPayload(BaseModel):
+class OverallTestZentaoSyncPayload(BaseModel):
     major_version_id: int
     force: bool = False
 
 
-@router.get("/stage5/overview")
-def stage5_overview(
+@router.get("/overall-test/overview")
+def overall_test_overview(
     major_version_id: int,
     software_id: Optional[int] = None,
-    statuses: Optional[str] = Query(None),
-    keyword: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(
+        None,
+        description="Comma-separated subset of {active,closed,resolved,local}",
+    ),
+    keyword: Optional[str] = Query(
+        None,
+        description="Fuzzy match against bug_id / zentao_bug_id (b# prefix stripped)",
+    ),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -64,14 +71,22 @@ def stage5_overview(
     )
 
 
-@router.get("/stage5/search-options")
-def get_stage5_search_options(major_version_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.get("/overall-test/search-options")
+def get_overall_test_search_options(
+    major_version_id: int,
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     service = OverallTestService(db)
     return service.search_options(major_version_id)
 
 
-@router.post("/stage5/sync-zentao-bugs")
-def sync_stage5_zentao_bugs(payload: Stage5ZentaoSyncPayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.post("/overall-test/sync-zentao-bugs")
+def sync_overall_test_zentao_bugs(
+    payload: OverallTestZentaoSyncPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     service = OverallTestService(db)
     return service.sync_zentao_major_bugs(
         major_version_id=payload.major_version_id,
@@ -80,8 +95,13 @@ def sync_stage5_zentao_bugs(payload: Stage5ZentaoSyncPayload, current_user: User
     )
 
 
-@router.put("/stage5/bugs/{bug_track_id}/result")
-async def submit_stage5_result(bug_track_id: int, payload: Stage5ResultPayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.put("/overall-test/bugs/{bug_track_id}/result")
+async def submit_overall_test_result(
+    bug_track_id: int,
+    payload: OverallTestResultPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     service = OverallTestService(db)
     result = service.submit_result(
         bug_track_id,
@@ -96,8 +116,12 @@ async def submit_stage5_result(bug_track_id: int, payload: Stage5ResultPayload, 
     return {"message": result["message"]}
 
 
-@router.post("/stage5/issues")
-async def add_stage5_issue(payload: Stage5IssueCreatePayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@router.post("/overall-test/issues")
+async def add_overall_test_issue(
+    payload: OverallTestIssueCreatePayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     if not B_PATTERN.match(payload.bug_id):
         raise HTTPException(status_code=400, detail="bug_id must be like b#xxxx")
     service = OverallTestService(db)
