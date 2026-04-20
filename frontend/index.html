@@ -191,8 +191,6 @@
     <button id="tabAssignBtn" onclick="showTab('assign')">任务分配台</button>
     <button id="tabMineBtn" onclick="showTab('mine')">我的工作台<span id="tabMinePrimaryBadge" class="nav-badge hidden"></span><span id="tabMineSecondaryBadge" class="nav-badge nav-badge--sub hidden"></span></button>
     <button id="tabFeedbackBtn" onclick="showTab('feedback')">反馈记录与处理<span id="tabFeedbackBadge" class="nav-badge hidden"></span></button>
-    <button id="tabRetestBtn" onclick="showTab('retest')">复测工作台<span id="tabRetestBadge" class="nav-badge hidden"></span></button>
-    <button id="tabOverallTestBtn" onclick="showTab('overall-test')">整体测试<span id="tabOverallTestBadge" class="nav-badge hidden"></span></button>
     <button id="tabFieldTestBtn" onclick="showTab('field-test')">外业测试</button>
     <button id="tabBuildRecordsBtn" class="hidden" onclick="showTab('build-records')">构建记录</button>
     <button id="tabZentaoSyncBtn" class="hidden" onclick="showTab('zentao-sync')">禅道同步中心<span id="tabZentaoSyncBadge" class="nav-badge hidden"></span></button>
@@ -241,8 +239,25 @@
   </section>
 
   <section id="tab-mine" class="hidden card">
-    <h2>我的工作台</h2>
-    <div class="row" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px; align-items: center; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+    <div class="workbench-shell">
+      <div class="workbench-shell-header">
+        <div>
+          <h2 style="margin:0;">我的工作台</h2>
+          <div class="muted" style="margin-top:6px;">统一查看需求测试、复测和测试工作台</div>
+        </div>
+        <div id="workbenchSubnav" class="workbench-subnav" role="tablist" aria-label="工作台子页面">
+          <button id="workbenchDemandBtn" type="button" onclick="switchWorkbenchSubtab('demand')">需求工作台<span id="workbenchDemandBadge" class="nav-badge hidden"></span></button>
+          <button id="workbenchRetestBtn" type="button" onclick="switchWorkbenchSubtab('retest')">复测工作台<span id="workbenchRetestBadge" class="nav-badge hidden"></span></button>
+          <button id="workbenchOverallTestBtn" type="button" onclick="switchWorkbenchSubtab('overall-test')">测试工作台<span id="workbenchOverallTestBadge" class="nav-badge hidden"></span></button>
+        </div>
+      </div>
+
+      <div id="workbenchViewport" class="workbench-viewport">
+        <div id="workbenchTrack" class="workbench-track">
+          <div class="workbench-panel" data-workbench-panel="demand">
+            <div class="workbench-panel-inner">
+              <h2>需求工作台</h2>
+              <div class="row" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px; align-items: center; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
       <select id="mineDisplayMode" onchange="toggleMineMode()" style="padding: 6px; border-radius: 4px; border: 1px solid #cbd5e1; outline: none; font-weight: bold; color: #334155;">
         <option value="version">📌 按大版本查看</option>
         <option value="all_pending">🔥 查看所有待测试需求</option>
@@ -268,11 +283,22 @@
         <input id="mineSearchInput" oninput="renderMineCards()" placeholder="搜索需求编号或名称..." style="width:100%; border:none; outline:none; background:transparent;">
       </div>
       <button onclick="loadMyWorkbench()">刷新工作台</button>
+      </div>
+
+              <div id="mineSummaryText" style="margin-bottom: 16px; font-weight: bold; color: #ea580c; background: #ffedd5; padding: 10px 16px; border-radius: 6px; display: none; border-left: 4px solid #f97316;"></div>
+
+              <div id="mineCards"></div>
+            </div>
+          </div>
+          <div class="workbench-panel" data-workbench-panel="retest">
+            <div id="workbenchRetestMount" class="workbench-panel-inner"></div>
+          </div>
+          <div class="workbench-panel" data-workbench-panel="overall-test">
+            <div id="workbenchOverallTestMount" class="workbench-panel-inner"></div>
+          </div>
+        </div>
+      </div>
     </div>
-
-    <div id="mineSummaryText" style="margin-bottom: 16px; font-weight: bold; color: #ea580c; background: #ffedd5; padding: 10px 16px; border-radius: 6px; display: none; border-left: 4px solid #f97316;"></div>
-
-    <div id="mineCards"></div>
 
     <div id="mineTestExecModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
       <div style="width: min(560px, 92vw); background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px 18px 14px 18px;">
@@ -382,7 +408,7 @@
   </section>
 
   <section id="tab-retest" class="hidden card">
-    <h2>复测工作台 (交叉验证)</h2>
+    <h2>复测工作台</h2>
     <div class="row" style="margin-bottom: 16px;">
       <label>查看模式</label>
       <select id="retestDisplayMode" onchange="toggleRetestMode()">
@@ -401,7 +427,7 @@
   </section>
 
   <section id="tab-overall-test" class="hidden card">
-    <h2>整体测试阶段 (发版前回归)</h2>
+    <h2>测试工作台</h2>
 
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; margin-bottom: 16px;">
       <div class="row" style="margin-bottom: 12px;">
@@ -1526,17 +1552,162 @@ function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
 const ALL_TAB_KEYS=['assign','mine','feedback','retest','overall-test','field-test','build-records','zentao-sync','report','activity','data','dispatch'];
 const DEFAULT_ALLOWED_TABS=['mine','feedback','retest','overall-test','field-test','zentao-sync','report'];
+const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test'];
+const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test' };
+const WORKBENCH_SUBTAB_LOADERS={
+  demand: ()=>loadMyWorkbench(),
+  retest: ()=>loadRetest(),
+  'overall-test': ()=>loadOverallTest(),
+};
+const WORKBENCH_SUBTAB_ERROR_TEXT={
+  demand:'加载需求工作台失败',
+  retest:'加载复测工作台失败',
+  'overall-test':'加载测试工作台失败',
+};
+const WORKBENCH_SUBTAB_STORAGE_KEY='omniqa_workbench_subtab_v1';
+let currentWorkbenchSubtab='demand';
+let workbenchMounted=false;
+let workbenchViewportResizePending=false;
 function getAllowedTabs(){
   if(!currentUser) return new Set(DEFAULT_ALLOWED_TABS);
   if(currentUser.role==='admin') return new Set(ALL_TAB_KEYS);
   const tabs=Array.isArray(currentUser.allowed_tabs)&&currentUser.allowed_tabs.length?currentUser.allowed_tabs:DEFAULT_ALLOWED_TABS;
   return new Set(tabs);
 }
-function canAccessTab(name){return getAllowedTabs().has(name)}
+function canAccessRawTab(name){return getAllowedTabs().has(name)}
+function canAccessWorkbenchSubtab(name){
+  const accessKey=WORKBENCH_SUBTAB_ACCESS_MAP[name];
+  return !!accessKey && canAccessRawTab(accessKey);
+}
+function canAccessWorkbench(){
+  return WORKBENCH_SUBTAB_ORDER.some((name)=>canAccessWorkbenchSubtab(name));
+}
+function canAccessTab(name){
+  if(name==='mine') return canAccessWorkbench();
+  return canAccessRawTab(name);
+}
+function getDefaultWorkbenchSubtab(){
+  return WORKBENCH_SUBTAB_ORDER.find((name)=>canAccessWorkbenchSubtab(name)) || 'demand';
+}
+function readStoredWorkbenchSubtab(){
+  const saved=localStorage.getItem(WORKBENCH_SUBTAB_STORAGE_KEY);
+  return WORKBENCH_SUBTAB_ORDER.includes(saved)?saved:null;
+}
+function getResolvedWorkbenchSubtab(name){
+  if(name==='retest' || name==='overall-test') return name;
+  const saved=readStoredWorkbenchSubtab();
+  if(saved && canAccessWorkbenchSubtab(saved)) return saved;
+  return getDefaultWorkbenchSubtab();
+}
+function rememberWorkbenchSubtab(name){
+  if(!WORKBENCH_SUBTAB_ORDER.includes(name)) return;
+  localStorage.setItem(WORKBENCH_SUBTAB_STORAGE_KEY, name);
+}
+function getWorkbenchSectionForSubtab(name){
+  if(name==='retest') return document.getElementById('tab-retest');
+  if(name==='overall-test') return document.getElementById('tab-overall-test');
+  return document.querySelector('[data-workbench-panel="demand"]');
+}
+function getWorkbenchVisibleSubtab(){ return currentWorkbenchSubtab; }
+function isWorkbenchSubtabActive(name){
+  const root=document.getElementById('tab-mine');
+  return !!root && !root.classList.contains('hidden') && currentWorkbenchSubtab===name;
+}
+window.getWorkbenchVisibleSubtab = getWorkbenchVisibleSubtab;
+window.isWorkbenchSubtabActive = isWorkbenchSubtabActive;
+window.scheduleWorkbenchViewportResize = scheduleWorkbenchViewportResize;
+function mountWorkbenchSubpages(){
+  if(workbenchMounted) return;
+  const retestMount=document.getElementById('workbenchRetestMount');
+  const overallMount=document.getElementById('workbenchOverallTestMount');
+  const retestSection=document.getElementById('tab-retest');
+  const overallSection=document.getElementById('tab-overall-test');
+  if(retestMount && retestSection) retestMount.appendChild(retestSection);
+  if(overallMount && overallSection) overallMount.appendChild(overallSection);
+  workbenchMounted=true;
+}
+function scheduleWorkbenchViewportResize(){
+  if(workbenchViewportResizePending) return;
+  workbenchViewportResizePending=true;
+  requestAnimationFrame(()=>{
+    workbenchViewportResizePending=false;
+    const viewport=document.getElementById('workbenchViewport');
+    const activePanel=document.querySelector(`.workbench-panel[data-workbench-panel="${currentWorkbenchSubtab}"]`);
+    if(!viewport || !activePanel) return;
+    viewport.style.height=`${Math.ceil(activePanel.scrollHeight)}px`;
+  });
+}
+function applyWorkbenchSubtabVisibility(){
+  const buttonMap={
+    demand:'workbenchDemandBtn',
+    retest:'workbenchRetestBtn',
+    'overall-test':'workbenchOverallTestBtn',
+  };
+  WORKBENCH_SUBTAB_ORDER.forEach((name)=>{
+    const btn=document.getElementById(buttonMap[name]);
+    if(btn) btn.classList.toggle('hidden', !canAccessWorkbenchSubtab(name));
+  });
+  if(!canAccessWorkbenchSubtab(currentWorkbenchSubtab)){
+    currentWorkbenchSubtab=getDefaultWorkbenchSubtab();
+  }
+  scheduleWorkbenchViewportResize();
+}
+async function loadWorkbenchSubtab(name){
+  const loader=WORKBENCH_SUBTAB_LOADERS[name];
+  if(typeof loader!=='function') return;
+  try{
+    await loader();
+  }catch(err){
+    showMessage(err.message||WORKBENCH_SUBTAB_ERROR_TEXT[name]||'加载工作台失败','error');
+  }finally{
+    scheduleWorkbenchViewportResize();
+  }
+}
+async function switchWorkbenchSubtab(name, options={}){
+  mountWorkbenchSubpages();
+  const target=canAccessWorkbenchSubtab(name)?name:getDefaultWorkbenchSubtab();
+  currentWorkbenchSubtab=target;
+  rememberWorkbenchSubtab(target);
+
+  const track=document.getElementById('workbenchTrack');
+  if(track){
+    const index=WORKBENCH_SUBTAB_ORDER.indexOf(target);
+    track.style.transform=`translateX(-${Math.max(index,0)*100}%)`;
+  }
+
+  const buttonMap={
+    demand:'workbenchDemandBtn',
+    retest:'workbenchRetestBtn',
+    'overall-test':'workbenchOverallTestBtn',
+  };
+  WORKBENCH_SUBTAB_ORDER.forEach((key)=>{
+    const btn=document.getElementById(buttonMap[key]);
+    if(btn){
+      const active=key===target;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active?'true':'false');
+    }
+  });
+
+  const retestSection=document.getElementById('tab-retest');
+  const overallSection=document.getElementById('tab-overall-test');
+  if(retestSection) retestSection.classList.toggle('hidden', target!=='retest');
+  if(overallSection) overallSection.classList.toggle('hidden', target!=='overall-test');
+
+  if(window.OmniQASSE && typeof window.OmniQASSE.clearScopeUnread==='function'){
+    if(target==='demand') window.OmniQASSE.clearScopeUnread('mine_requirement');
+    if(target==='retest') window.OmniQASSE.clearScopeUnread('retest_requirement');
+    if(target==='overall-test') window.OmniQASSE.clearScopeUnread('overall_bug');
+  }
+
+  scheduleWorkbenchViewportResize();
+  if(options.load!==false) await loadWorkbenchSubtab(target);
+}
+window.switchWorkbenchSubtab = switchWorkbenchSubtab;
 function applyTabVisibility(){
   const buttonMap={
-    'assign':'tabAssignBtn','mine':'tabMineBtn','feedback':'tabFeedbackBtn','retest':'tabRetestBtn',
-    'overall-test':'tabOverallTestBtn','field-test':'tabFieldTestBtn','build-records':'tabBuildRecordsBtn',
+    'assign':'tabAssignBtn','mine':'tabMineBtn','feedback':'tabFeedbackBtn',
+    'field-test':'tabFieldTestBtn','build-records':'tabBuildRecordsBtn',
     'zentao-sync':'tabZentaoSyncBtn','report':'tabReportBtn','activity':'tabActivityBtn',
     'data':'tabDataBtn','dispatch':'tabDispatchBtn'
   };
@@ -1544,12 +1715,13 @@ function applyTabVisibility(){
     const btn=document.getElementById(buttonMap[name]);
     if(btn) btn.classList.toggle('hidden', !canAccessTab(name));
   });
+  applyWorkbenchSubtabVisibility();
   if(document.getElementById('reportUserWrap')){
     document.getElementById('reportUserWrap').classList.toggle('hidden', currentUser?.role!=='admin');
   }
 }
 function getDefaultVisibleTab(){
-  return ['assign','mine','feedback','retest','overall-test','field-test','build-records','zentao-sync','report','activity','data','dispatch']
+  return ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch']
     .find((name)=>canAccessTab(name)) || 'mine';
 }
 function getTabNamespaceName(name){
@@ -1574,10 +1746,13 @@ function isTabRuntimeReady(name){
   return !!window[nsName];
 }
 function getFirstRuntimeReadyTab(){
-  return ['assign','mine','feedback','retest','field-test','build-records','zentao-sync','report','activity','data','dispatch','overall-test']
+  return ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch']
     .find((tabName)=>canAccessTab(tabName) && isTabRuntimeReady(tabName)) || null;
 }
-function showTab(name){
+async function showTab(name){
+  mountWorkbenchSubpages();
+  const requestedSubtab=(name==='retest' || name==='overall-test') ? name : (name==='mine' ? getResolvedWorkbenchSubtab(name) : null);
+  if(name==='retest' || name==='overall-test') name='mine';
   if(!canAccessTab(name)){
     const fallback=getDefaultVisibleTab();
     if(name!==fallback){
@@ -1594,25 +1769,21 @@ function showTab(name){
     if(!fallback || fallback===name) return;
     name = fallback;
   }
-  ['assign','mine','feedback','retest','overall-test','field-test','build-records','zentao-sync','report','activity','data','dispatch'].forEach(x=>{
+  ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch'].forEach(x=>{
     const el=document.getElementById('tab-'+x);
     if(el) el.classList.add('hidden');
   });
   const activeEl=document.getElementById('tab-'+name);
   if(activeEl) activeEl.classList.remove('hidden');
   if(window.OmniQASSE && window.OmniQASSE.runtime && window.OmniQASSE.runtime.counters){
-    if(name === 'mine' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('mine_requirement');
     if(name === 'feedback' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('feedback_task');
-    if(name === 'retest' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('retest_requirement');
     if(name === 'dispatch' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('mine_bug_dispatch');
   }
   if(name === 'dispatch') { loadDispatchedAll(); }
   if(name === 'data' && !dataOverviewCache) { loadDataOverview().catch(err=>showMessage(err.message||'加载数据管理台失败','error')); }
   if(name === 'data') { window.loadZtProjects && window.loadZtProjects().catch(()=>{}); }
-  if(name === 'mine') { loadMyWorkbench().catch(err=>showMessage(err.message||'加载我的工作台失败','error')); }
+  if(name === 'mine') { await switchWorkbenchSubtab(requestedSubtab || getDefaultWorkbenchSubtab(), { load:true }); }
   if(name === 'feedback') { loadFeedbackBoard().catch(err=>showMessage(err.message||'加载反馈列表失败','error')); }
-  if(name === 'retest') { loadRetest().catch(err=>showMessage(err.message||'加载复测工作台失败','error')); }
-  if(name === 'overall-test') { loadOverallTest().catch(err=>showMessage(err.message||'加载整体测试大盘失败','error')); }
   if(name === 'field-test') { loadFieldTestBoard().catch(err=>showMessage(err.message||'加载外业测试失败','error')); }
   if(name === 'build-records') { loadBuildRecordsBoard().catch(err=>showMessage(err.message||'加载构建记录失败','error')); }
   if(name === 'zentao-sync') { initZentaoSyncBoard().catch(err=>showMessage(err.message||'加载禅道同步中心失败','error')); }
@@ -1703,9 +1874,12 @@ async function init(){
   await loadSoftwares();
   await loadVersions();
   await loadUsers();
+  mountWorkbenchSubpages();
+  currentWorkbenchSubtab=getResolvedWorkbenchSubtab('mine');
+  window.addEventListener('resize', scheduleWorkbenchViewportResize);
   applyTabVisibility();
   fillReportUsers();
-  showTab(getDefaultVisibleTab());
+  await showTab(getDefaultVisibleTab());
 }
 
 async function loadUsers(){
@@ -1751,15 +1925,13 @@ async function onSoftwareChange(){
   dataOverviewCache = null;
   await loadVersions();
   // 切换软件后，刷新当前页内容，确保旧软件数据不残留
-  const visible = ['assign','mine','feedback','retest','overall-test','field-test','build-records','zentao-sync','report','activity','data','dispatch'].find(x=>{
+  const visible = ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch'].find(x=>{
     const el=document.getElementById('tab-'+x);
     return el && !el.classList.contains('hidden');
   });
   if(visible){
-    if(visible==='mine') await loadMyWorkbench();
+    if(visible==='mine') await loadWorkbenchSubtab(getWorkbenchVisibleSubtab());
     if(visible==='feedback') await loadFeedbackBoard();
-    if(visible==='retest') await loadRetest();
-    if(visible==='overall-test') await loadOverallTest();
     if(visible==='report') await queryReport();
     if(visible==='activity') await loadActivityBoard();
     if(visible==='field-test') await loadFieldTestBoard();
@@ -1857,8 +2029,7 @@ function bindMajorMinorCascade(){
     majorEl.addEventListener('change',async ()=>{
       fillMinorSelectByMajor(majorId,minorId);
       if(majorId==='retestMajorSelect'){
-        const tab=document.getElementById('tab-retest');
-        if(tab && !tab.classList.contains('hidden')){
+        if(window.isWorkbenchSubtabActive?.('retest')){
           const modeEl=document.getElementById('retestDisplayMode');
           const mode=modeEl?modeEl.value:'version';
           if(mode==='version'){
@@ -1867,8 +2038,7 @@ function bindMajorMinorCascade(){
         }
       }
       if(majorId==='s5MajorSelect'){
-        const tab=document.getElementById('tab-overall-test');
-        if(tab && !tab.classList.contains('hidden')){
+        if(window.isWorkbenchSubtabActive?.('overall-test')){
           try{ await loadOverallTest(); }catch(err){ showMessage(err.message||'加载全景大盘失败','error'); }
         }
       }

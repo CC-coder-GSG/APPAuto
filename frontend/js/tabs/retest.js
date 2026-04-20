@@ -143,6 +143,7 @@ export async function loadRetest() {
         </div>
       </details>`;
   }).join('');
+  window.scheduleWorkbenchViewportResize?.();
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
     window.OmniQASSE.releaseAttention?.();
     document.querySelectorAll('.retest-req-card[data-req-id]').forEach((el) => {
@@ -225,8 +226,7 @@ function bindRetestSSE() {
     if (window._retestSSERequirementTimer) clearTimeout(window._retestSSERequirementTimer);
     window._retestSSERequirementTimer = setTimeout(async () => {
       window._retestSSERequirementTimer = null;
-      const tab = document.getElementById('tab-retest');
-      if (!tab || tab.classList.contains('hidden')) return;
+      if (!window.isWorkbenchSubtabActive?.('retest')) return;
       if (typeof window.loadRetest === 'function') await window.loadRetest();
       const el = document.querySelector(`.retest-req-card[data-req-id='${reqId}']`);
       if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'blue');

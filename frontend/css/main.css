@@ -1198,6 +1198,76 @@ details,
   z-index: 1090;
 }
 
+.workbench-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.workbench-shell-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.workbench-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.workbench-subnav button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dbe7f5;
+  background: #f8fafc;
+  color: #334155;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 700;
+}
+
+.workbench-subnav button.active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #fff;
+}
+
+.workbench-viewport {
+  overflow: hidden;
+  transition: height 240ms ease;
+}
+
+.workbench-track {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  transition: transform 240ms ease;
+  will-change: transform;
+}
+
+.workbench-panel {
+  flex: 0 0 100%;
+  min-width: 100%;
+}
+
+.workbench-panel-inner {
+  min-width: 0;
+}
+
+#tab-mine #tab-retest,
+#tab-mine #tab-overall-test {
+  margin: 0;
+  padding: 0;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
 section.card > h2 {
   margin-bottom: 18px !important;
   color: #1d1d1f !important;

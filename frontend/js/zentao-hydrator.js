@@ -225,11 +225,28 @@ async function _fetchStories(ids, signal) {
 
 // ─── Concurrency guard ────────────────────────────────────────────────────────
 // Prevent overlapping fetches from the same container
-const _pendingContainers = new WeakSet();
+const _containerAbortMap = new WeakMap();
+const _containerRequestSeq = new WeakMap();
 
 // Global abort controller — cancelled on each new hydrateContainer call so that
 // page/version switches immediately free up Zentao connections for the new data.
-let _activeAbort = null;
+function _nextContainerRequestSeq(containerEl) {
+  const next = (_containerRequestSeq.get(containerEl) || 0) + 1;
+  _containerRequestSeq.set(containerEl, next);
+  return next;
+}
+
+function _isLatestContainerRequest(containerEl, seq) {
+  return (_containerRequestSeq.get(containerEl) || 0) === seq;
+}
+
+function _replaceContainerAbort(containerEl) {
+  const prev = _containerAbortMap.get(containerEl);
+  if (prev) prev.abort();
+  const abort = new AbortController();
+  _containerAbortMap.set(containerEl, abort);
+  return abort;
+}
 
 // ─── Link upgrade helper ──────────────────────────────────────────────────────
 
@@ -274,19 +291,14 @@ function _upgradeBugIdLinks(bugSlots) {
  */
 async function hydrateContainer(containerEl) {
   if (!containerEl) return;
-  if (_pendingContainers.has(containerEl)) return;
-
-  // Cancel any in-flight hydration (previous page/version) so Zentao connections
-  // are freed immediately for the current request.
-  if (_activeAbort) _activeAbort.abort();
-  const abort = new AbortController();
-  _activeAbort = abort;
+  const requestSeq = _nextContainerRequestSeq(containerEl);
+  const abort = _replaceContainerAbort(containerEl);
 
   // Collect un-loaded slots
   const bugSlots   = Array.from(containerEl.querySelectorAll(
-    '.zt-bug-slot[data-zt-bug-id]:not([data-zt-loaded]):not([data-zt-pending])'));
+    '.zt-bug-slot[data-zt-bug-id]:not([data-zt-loaded])'));
   const storySlots = Array.from(containerEl.querySelectorAll(
-    '.zt-story-slot[data-zt-story-id]:not([data-zt-loaded]):not([data-zt-pending])'));
+    '.zt-story-slot[data-zt-story-id]:not([data-zt-loaded])'));
 
   if (!bugSlots.length && !storySlots.length) return;
 
@@ -304,7 +316,6 @@ async function hydrateContainer(containerEl) {
     storySlots.map((el) => el.dataset.ztStoryId).filter(Boolean)
   )].filter((id) => _cacheGet(_storyCache, id) === undefined);
 
-  _pendingContainers.add(containerEl);
   _setIndicator('syncing');
 
   // — Step 2: fetch concurrently from backend —
@@ -318,7 +329,7 @@ async function hydrateContainer(containerEl) {
     ]);
 
     // If this hydration was superseded by a newer one, stop filling slots
-    if (abort.signal.aborted) return;
+    if (abort.signal.aborted || !_isLatestContainerRequest(containerEl, requestSeq)) return;
 
     // Populate cache.
     // KEY RULE: only cache null for "confirmed not found" (id absent from data
@@ -348,8 +359,12 @@ async function hydrateContainer(containerEl) {
     bugResult.ok   = false;
     storyResult.ok = false;
   } finally {
-    _pendingContainers.delete(containerEl);
+    if (_containerAbortMap.get(containerEl) === abort) {
+      _containerAbortMap.delete(containerEl);
+    }
   }
+
+  if (abort.signal.aborted || !_isLatestContainerRequest(containerEl, requestSeq)) return;
 
   // — Step 3: fill bug slots —
   let anyFound = false;
@@ -422,12 +437,20 @@ async function hydrateContainer(containerEl) {
  * Callable from a header "刷新禅道" button — no page reload needed.
  */
 function refreshVisible() {
-  const tabNames = ['assign','mine','feedback','retest','overall-test','field-test',
-                    'build-records','zentao-sync','report','activity','data','dispatch'];
   let container = null;
-  for (const name of tabNames) {
-    const panel = document.getElementById('tab-' + name);
-    if (panel && !panel.classList.contains('hidden')) { container = panel; break; }
+  const minePanel = document.getElementById('tab-mine');
+  if (minePanel && !minePanel.classList.contains('hidden')) {
+    const activeWorkbench = window.getWorkbenchVisibleSubtab?.() || 'demand';
+    if (activeWorkbench === 'retest') container = document.getElementById('retestCardsArea') || document.getElementById('tab-retest');
+    else if (activeWorkbench === 'overall-test') container = document.getElementById('s5TableContainer') || document.getElementById('tab-overall-test');
+    else container = document.getElementById('mineCards') || document.querySelector('[data-workbench-panel="demand"]');
+  }
+  if (!container) {
+    const tabNames = ['assign','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch'];
+    for (const name of tabNames) {
+      const panel = document.getElementById('tab-' + name);
+      if (panel && !panel.classList.contains('hidden')) { container = panel; break; }
+    }
   }
   if (!container) return;
 

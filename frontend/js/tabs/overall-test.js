@@ -164,6 +164,7 @@ export async function loadOverallTest(options = {}) {
   document.getElementById('s5PendingBugs').innerText = pending;
   document.getElementById('s5ReadyRate').innerText = rate + '%';
   renderS5();
+  window.scheduleWorkbenchViewportResize?.();
   deferClearOverallUnread();
   if (showSuccess) {
     window.showMessage && window.showMessage('全景大盘加载成功', 'success');
@@ -184,8 +185,7 @@ function deferClearOverallUnread(ms = 1200) {
   if (overallTestUnreadClearTimer) clearTimeout(overallTestUnreadClearTimer);
   overallTestUnreadClearTimer = setTimeout(() => {
     overallTestUnreadClearTimer = null;
-    const tab = document.getElementById('tab-overall-test');
-    if (!tab || tab.classList.contains('hidden')) return;
+    if (!window.isWorkbenchSubtabActive?.('overall-test')) return;
     if (!window.OmniQASSE || typeof window.OmniQASSE.clearScopeUnread !== 'function') return;
     window.OmniQASSE.clearScopeUnread('overall_bug');
   }, ms);
@@ -1693,8 +1693,7 @@ function deferReloadOverallTest(ms = 600) {
   if (s5ReloadTimer) clearTimeout(s5ReloadTimer);
   s5ReloadTimer = setTimeout(() => {
     s5ReloadTimer = null;
-    const tab = document.getElementById('tab-overall-test');
-    if (!tab || tab.classList.contains('hidden')) return;
+    if (!window.isWorkbenchSubtabActive?.('overall-test')) return;
     const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
     const softwareId = Number(window.currentSoftwareId || 0);
     if (majorId === 0 && !softwareId) return;

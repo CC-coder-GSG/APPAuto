@@ -127,12 +127,18 @@ function updateNavBadges() {
     el.textContent = n > 0 ? String(n) : '';
     el.classList.toggle('hidden', n <= 0);
   };
+  const workbenchPrimary = (RUNTIME.counters.minePrimary || 0) + (RUNTIME.counters.retest || 0) + (RUNTIME.counters.overallBug || 0);
+  const minePrimaryEl = document.getElementById('tabMinePrimaryBadge');
+  if (minePrimaryEl) {
+    minePrimaryEl.textContent = workbenchPrimary > 0 ? String(workbenchPrimary) : '';
+    minePrimaryEl.classList.toggle('hidden', workbenchPrimary <= 0);
+  }
   badge('tabZentaoSyncBadge',  'zentaoNew');
-  badge('tabMinePrimaryBadge', 'minePrimary');
   badge('tabMineSecondaryBadge', 'mineSecondaryBugDispatch');
   badge('tabFeedbackBadge',    'feedback');
-  badge('tabRetestBadge',      'retest');
-  badge('tabOverallTestBadge', 'overallBug');
+  badge('workbenchDemandBadge', 'minePrimary');
+  badge('workbenchRetestBadge', 'retest');
+  badge('workbenchOverallTestBadge', 'overallBug');
 }
 
 function bumpCounterByEvent() {
