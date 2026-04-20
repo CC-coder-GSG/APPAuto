@@ -25,7 +25,7 @@ import re
 from typing import Optional
 
 import httpx as _httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -227,7 +227,6 @@ def create_zentao_bug(
 
     body: dict = {
         "title": payload.title,
-        "product": payload.product_id,
         "severity": payload.severity,
         "pri": payload.pri,
         "type": payload.bug_type,
@@ -246,7 +245,7 @@ def create_zentao_bug(
         body["story"] = payload.story_id
 
     try:
-        result = client.create_bug(body)
+        result = client.create_bug(payload.product_id, body)
     except ZentaoAPIError as exc:
         if exc.status_code == 401:
             invalidate_token(current_user.id, db)
@@ -254,17 +253,19 @@ def create_zentao_bug(
             if client2 is None:
                 raise HTTPException(status_code=400, detail="禅道 token 刷新失败")
             try:
-                result = client2.create_bug(body)
+                result = client2.create_bug(payload.product_id, body)
             except ZentaoAPIError as exc2:
                 raise HTTPException(status_code=exc2.status_code or 502, detail=f"禅道创建Bug失败: {exc2.message}")
         else:
             raise HTTPException(status_code=exc.status_code or 502, detail=f"禅道创建Bug失败: {exc.message}")
 
-    # Extract returned bug ID
-    if not result:
+    # Extract returned bug ID. Write responses can be {"bug":{"id":N}},
+    # {"id":N}, or {"message":"success"} when body was empty (already
+    # normalized by _parse_write_response).
+    if not isinstance(result, dict) or not result:
         raise HTTPException(status_code=502, detail="禅道返回了空响应，Bug可能未创建成功")
-    bug_data = result.get("bug") or result
-    zentao_bug_id = str(bug_data.get("id") or "")
+    bug_data = result.get("bug") if isinstance(result.get("bug"), dict) else result
+    zentao_bug_id = str(bug_data.get("id") or "").strip()
     if not zentao_bug_id:
         raise HTTPException(status_code=502, detail="禅道未返回 Bug ID，请检查禅道后台")
 
@@ -359,14 +360,20 @@ def get_bug_preview(
     if not preview:
         raise HTTPException(status_code=502, detail="禅道 Bug 详情解析失败")
 
-    # 将 steps 里的 file-read/file-download 内联图片 URL 替换为 OmniQA 代理路径
-    # 兼容绝对路径 (http://...) 和相对路径 (/zentao/file-read-xxx.png)
-    _FILE_URL_RE = re.compile(r'(?:https?://)?[^"\'>\s]*/file-(?:read|download)-(\d+)\.[a-zA-Z0-9]+')
+    # 将 steps / actions.comment / file url 里的 file-read/file-download 内联
+    # 图片 URL 替换为 OmniQA 代理路径。兼容绝对路径 (http://...) 和相对路径
+    # (/zentao/file-read-xxx.png)。
+    _FILE_URL_RE = re.compile(r'(?:https?://)?[^"\'>\s]*/file-(?:read|download|preview)-(\d+)\.[a-zA-Z0-9]+')
+
+    def _rewrite(html: str) -> str:
+        return _FILE_URL_RE.sub(lambda m: f"/zentao/files/{m.group(1)}", html)
+
     if preview.get("steps"):
-        preview["steps"] = _FILE_URL_RE.sub(
-            lambda m: f"/zentao/files/{m.group(1)}",
-            preview["steps"],
-        )
+        preview["steps"] = _rewrite(preview["steps"])
+
+    for act in preview.get("actions") or []:
+        if act.get("comment"):
+            act["comment"] = _rewrite(act["comment"])
 
     # 附件：直接用 file_id 构建代理 URL，比正则解析 URL 更可靠
     for f in preview.get("files") or []:
@@ -374,10 +381,7 @@ def get_bug_preview(
         if fid:
             f["url"] = f"/zentao/files/{fid}"
         elif f.get("url"):
-            f["url"] = _FILE_URL_RE.sub(
-                lambda m: f"/zentao/files/{m.group(1)}",
-                f["url"],
-            )
+            f["url"] = _rewrite(f["url"])
 
     return preview
 
@@ -407,6 +411,83 @@ def proxy_zentao_file(
         raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.post("/bugs/upload-inline-image")
+async def upload_inline_bug_image(
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Upload a pasted/attached inline image for a bug's reproduce-steps editor.
+
+    The image is forwarded to Zentao via the v1 files API using the
+    calling user's token. Returns the Zentao file ID plus a proxy URL
+    (`/zentao/files/{id}`) suitable for inline <img> preview, and the raw
+    Zentao URL that should be substituted into the HTML body just before
+    the bug is submitted so Zentao renders the attachment correctly.
+    """
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="未提供图片文件")
+    content_type = (file.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="仅支持上传图片文件")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="图片内容为空")
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="图片过大（最大 10MB）")
+
+    client = _get_client(current_user.id, db)
+    if client is None:
+        raise HTTPException(status_code=400, detail="当前用户未配置可用的禅道绑定")
+
+    try:
+        info = client.upload_file(
+            file_bytes=data,
+            filename=file.filename,
+            content_type=content_type or "application/octet-stream",
+            object_type="bug",
+            object_id=0,
+        )
+    except ZentaoAPIError as exc:
+        if exc.status_code == 401:
+            invalidate_token(current_user.id, db)
+            client2 = _get_client(current_user.id, db)
+            if client2 is None:
+                raise HTTPException(status_code=400, detail="禅道 token 刷新失败")
+            try:
+                info = client2.upload_file(
+                    file_bytes=data,
+                    filename=file.filename,
+                    content_type=content_type or "application/octet-stream",
+                    object_type="bug",
+                    object_id=0,
+                )
+            except ZentaoAPIError as exc2:
+                raise HTTPException(status_code=exc2.status_code or 502, detail=f"禅道图片上传失败: {exc2.message}")
+        else:
+            raise HTTPException(status_code=exc.status_code or 502, detail=f"禅道图片上传失败: {exc.message}")
+
+    binding = db.query(UserZentaoBinding).filter(UserZentaoBinding.user_id == current_user.id).first()
+    base_url = (binding.base_url or "").rstrip("/") if binding else ""
+    file_id = int(info.get("id"))
+    extension = str(info.get("extension") or "").lstrip(".").lower() or "png"
+    zentao_url = f"{base_url}/file-read-{file_id}.{extension}" if base_url else ""
+
+    audit(db, action="zentao_bug.upload_inline_image", target_type="bug",
+          actor_id=current_user.id, target_id=str(file_id),
+          detail=f"filename={file.filename}, size={len(data)}")
+
+    return {
+        "file_id": file_id,
+        "extension": extension,
+        "proxy_url": f"/zentao/files/{file_id}",
+        "zentao_url": zentao_url,
+        "title": info.get("title") or file.filename,
+    }
 
 
 @router.get("/bugs/{zt_id}/action-meta")
@@ -463,17 +544,41 @@ def get_bug_action_meta(
                 builds[str(b.get("id", ""))] = b.get("name") or str(b.get("id", ""))
 
     current_assigned = ""
+    bug_execution_id: Optional[int] = None
     if isinstance(bug_raw, dict):
         at = bug_raw.get("assignedTo")
         if isinstance(at, dict):
             current_assigned = at.get("account") or at.get("realname") or ""
         else:
             current_assigned = str(at or "")
+        execution_raw = bug_raw.get("execution")
+        if isinstance(execution_raw, dict):
+            try:
+                bug_execution_id = int(execution_raw.get("id")) if execution_raw.get("id") else None
+            except (TypeError, ValueError):
+                bug_execution_id = None
+        elif execution_raw:
+            try:
+                bug_execution_id = int(execution_raw)
+            except (TypeError, ValueError):
+                bug_execution_id = None
+
+    # Only show builds that belong to the bug's own execution. Fall back to
+    # the full list if the execution has no bound builds (older Zentao
+    # instances, or freshly created executions) so the user is never
+    # stuck with an empty dropdown.
+    if bug_execution_id and builds:
+        execution_build_ids = set(client.get_execution_build_ids(bug_execution_id))
+        if execution_build_ids:
+            filtered = {bid: name for bid, name in builds.items() if bid in execution_build_ids}
+            if filtered:
+                builds = filtered
 
     return {
         "users": users,
         "builds": builds,
         "current_assigned": current_assigned,
+        "execution_id": bug_execution_id,
     }
 
 
@@ -813,8 +918,13 @@ def _format_steps_html(text: str) -> str:
     content = (text or "").strip()
     if not content:
         return ""
-    if any(tag in content.lower() for tag in ("<p", "<br", "<div", "<ol", "<ul", "<li")):
+    if any(tag in content.lower() for tag in ("<p", "<br", "<div", "<ol", "<ul", "<li", "<img")):
         return content
+    # User already structured the text with the [步骤]/[结果]/[期望] markers
+    # (e.g. kept our pre-filled template). Preserve the structure, just
+    # convert newlines to <br> so it renders correctly in Zentao.
+    if "[步骤]" in content or "[结果]" in content or "[期望]" in content:
+        return content.replace("\r\n", "\n").replace("\n", "<br>")
     lines = [line.strip() for line in content.replace("\r\n", "\n").split("\n") if line.strip()]
     body = "<br>".join(lines)
     return f"<p>[步骤]</p><p>{body}</p><p>[结果]</p><p></p><p>[期望]</p><p></p>"

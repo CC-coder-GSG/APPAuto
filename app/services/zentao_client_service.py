@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -60,6 +61,29 @@ class ZentaoAPIError(Exception):
         self.status_code = status_code
         self.message = message
         super().__init__(f"ZentaoAPI {status_code}: {message}")
+
+
+def _parse_write_response(resp: "httpx.Response") -> dict | list:
+    """
+    Parse body of a POST/PUT response defensively.
+
+    Zentao v1 write endpoints are inconsistent: some return full JSON,
+    some return an empty body on success, some return `id=xxx` plain
+    text, and PHP warnings can leak HTML with a 200 status.
+    """
+    text = (resp.text or "").strip()
+    if not text:
+        return {"message": "success"}
+    try:
+        return resp.json()
+    except ValueError:
+        lowered = text.lower()
+        if "fatal error" in lowered:
+            raise ZentaoAPIError(500, "禅道服务器内部错误（PHP Fatal Error）")
+        m = re.search(r'(?:bugid|id)[=:"\s]*(\d+)', text, re.IGNORECASE)
+        if m:
+            return {"id": int(m.group(1))}
+        raise ZentaoAPIError(502, f"禅道返回了非 JSON 响应: {text[:200]}")
 
 
 class ZentaoClient:
@@ -115,7 +139,7 @@ class ZentaoClient:
             resp = httpx.post(url, json=body or {}, headers=self._headers(), timeout=_DEFAULT_TIMEOUT)
             if resp.status_code not in (200, 201):
                 raise ZentaoAPIError(resp.status_code, resp.text[:500])
-            return resp.json()
+            return _parse_write_response(resp)
         except ZentaoAPIError:
             raise
         except Exception as e:
@@ -129,7 +153,7 @@ class ZentaoClient:
             resp = httpx.put(url, json=body or {}, headers=self._headers(), timeout=_DEFAULT_TIMEOUT)
             if resp.status_code not in (200, 201):
                 raise ZentaoAPIError(resp.status_code, resp.text[:500])
-            return resp.json()
+            return _parse_write_response(resp)
         except ZentaoAPIError:
             raise
         except Exception as e:
@@ -263,9 +287,16 @@ class ZentaoClient:
         path = f"bug-{action}-{bug_id}.json"
         return self.get_page(path)
 
-    def create_bug(self, data: dict) -> dict | None:
-        """POST /v1/bugs — create a new bug in Zentao."""
-        return self.post("bugs", data)
+    def create_bug(self, product_id: int, data: dict) -> dict | None:
+        """
+        Create a new bug in Zentao.
+
+        Uses the product-scoped REST endpoint, which is the stable path
+        across Zentao 18.x: POST /v1/products/{productID}/bugs.
+        The 'product' key is stripped from the body since it goes in the URL.
+        """
+        body = {k: v for k, v in data.items() if k != "product"}
+        return self.post(f"products/{product_id}/bugs", body)
 
     def get_execution_context(self, execution_id: int) -> dict:
         """
@@ -318,12 +349,31 @@ class ZentaoClient:
 
     def get_execution_build_ids(self, execution_id: int) -> list[str]:
         """
-        Best-effort extraction of the build IDs associated with an execution.
+        Return the build IDs bound to a given execution.
 
-        Zentao deployments differ in how they expose builds on the execution
-        payload (`build`, `builds`, `openedBuild`, `openedBuilds`). This method
-        normalizes those shapes into a deduplicated list of build-id strings.
+        Primary source: GET /v1/executions/{id}/builds — the same endpoint
+        used by overall_test_service and zentao_version_sync_service, so
+        we know it is the reliable shape on this Zentao version.
+
+        Fallback (for older Zentao builds): inspect the execution detail
+        payload for `build/builds/openedBuild/openedBuilds` keys.
         """
+        try:
+            resp = self.get(f"executions/{execution_id}/builds", params={"limit": 500})
+            if isinstance(resp, dict):
+                rows = resp.get("builds")
+                if isinstance(rows, list):
+                    ids: list[str] = []
+                    for r in rows:
+                        if isinstance(r, dict):
+                            bid = _coerce_int_str(r.get("id"))
+                            if bid:
+                                ids.append(bid)
+                    if ids:
+                        return list(dict.fromkeys(ids))
+        except Exception:
+            pass
+
         try:
             resp = self.get(f"executions/{execution_id}")
             if not resp:
@@ -337,6 +387,76 @@ class ZentaoClient:
             return list(dict.fromkeys([bid for bid in build_ids if bid]))
         except Exception:
             return []
+
+    def upload_file(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        content_type: str = "application/octet-stream",
+        object_type: str = "bug",
+        object_id: int = 0,
+    ) -> dict:
+        """
+        Upload a file to Zentao and return metadata describing the uploaded
+        file.
+
+        Zentao v1 accepts multipart POSTs at `/v1/files` with the fields
+        `files[]`, `objectType`, `objectID`. Responses vary by version:
+
+          - {"files": [{"id": N, ...}]}
+          - {"data": [...]}  (some IPD forks)
+          - [{"id": N, ...}]  (bare list)
+          - {"id": N, ...}    (single dict when only one file was sent)
+
+        Returns a normalized dict with at least: id (int), title, pathname,
+        extension. Raises ZentaoAPIError on failure.
+        """
+        url = f"{self._api_base}/files"
+        headers = {"Token": self.token}
+        files = {"files[]": (filename, file_bytes, content_type)}
+        data = {"objectType": object_type, "objectID": str(object_id)}
+        try:
+            resp = httpx.post(url, headers=headers, files=files, data=data, timeout=30.0)
+            if resp.status_code not in (200, 201):
+                raise ZentaoAPIError(resp.status_code, resp.text[:500])
+            payload = _parse_write_response(resp)
+        except ZentaoAPIError:
+            raise
+        except Exception as e:
+            logger.warning("ZentaoClient.upload_file error: %s", e)
+            raise ZentaoAPIError(0, str(e))
+
+        entry: dict | None = None
+        if isinstance(payload, dict):
+            if isinstance(payload.get("files"), list) and payload["files"]:
+                first = payload["files"][0]
+                if isinstance(first, dict):
+                    entry = first
+            elif isinstance(payload.get("data"), list) and payload["data"]:
+                first = payload["data"][0]
+                if isinstance(first, dict):
+                    entry = first
+            elif payload.get("id"):
+                entry = payload
+        elif isinstance(payload, list) and payload:
+            first = payload[0]
+            if isinstance(first, dict):
+                entry = first
+        if not entry or not entry.get("id"):
+            raise ZentaoAPIError(502, f"禅道上传文件返回异常: {str(payload)[:200]}")
+
+        file_id = int(entry.get("id"))
+        pathname = str(entry.get("pathname") or entry.get("addedBy") or "")
+        title = str(entry.get("title") or entry.get("name") or filename)
+        extension = str(entry.get("extension") or "").lstrip(".").lower()
+        if not extension and "." in filename:
+            extension = filename.rsplit(".", 1)[-1].lower()
+        return {
+            "id": file_id,
+            "title": title,
+            "pathname": pathname,
+            "extension": extension,
+        }
 
     def get_create_bug_meta(self, product_id: int, execution_id: int = 0) -> dict | None:
         """Fetch page-level JSON for the bug creation form (users, builds etc.)."""

@@ -6,6 +6,28 @@ let overallTestSseBound = false;
 let overallTestUnreadClearTimer = null;
 let overallTestLastDatasetKey = '';
 
+// Track which Esc handler is bound so we can detach on close without collisions.
+const _modalEscHandlers = new Map();
+
+function bindModalEsc(modalId, closeFn) {
+  if (_modalEscHandlers.has(modalId)) return;
+  const handler = (ev) => {
+    if (ev.key === 'Escape' || ev.key === 'Esc') {
+      ev.preventDefault();
+      closeFn();
+    }
+  };
+  _modalEscHandlers.set(modalId, handler);
+  document.addEventListener('keydown', handler);
+}
+
+function unbindModalEsc(modalId) {
+  const handler = _modalEscHandlers.get(modalId);
+  if (!handler) return;
+  document.removeEventListener('keydown', handler);
+  _modalEscHandlers.delete(modalId);
+}
+
 // Keep the legacy storage key so existing users do not lose their page-size preference.
 const S5_PAGE_SIZE_KEY = 'omniqa_stage5_page_size_v1';
 const S5_DEFAULT_PAGE_SIZE = 20;
@@ -552,7 +574,8 @@ export async function saveS5(id) {
   const bug = state.overallTestRows.find((b) => b.id === id);
   const isZentaoBug = !!(bug?.zentao_bug_id);
   const zentaoBugId = bug?.zentao_bug_id || '';
-  const done = document.getElementById('done_' + id)?.checked;
+  const doneEl = document.getElementById('done_' + id);
+  const done = doneEl?.checked;
   const res = document.getElementById('res_' + id)?.value;
   const closeComment = isZentaoBug ? (document.getElementById('closeCommentText_' + id)?.value || '') : '';
 
@@ -567,6 +590,22 @@ export async function saveS5(id) {
         });
       } catch (err) {
         window.showMessage && window.showMessage(err.message || '禅道关闭失败，本地未保存闭环结果', 'error');
+        return;
+      }
+    }
+  }
+
+  // 取消闭环：本地之前记了 closed=true，现在用户要撤销勾选。此时禅道
+  // 通常是 closed 状态，必须先重新激活才允许让本地变回未闭环。
+  if (isZentaoBug && !done && bug?.closed && zentaoBugId) {
+    const ztId = Number(zentaoBugId);
+    if (ztId) {
+      window.showMessage && window.showMessage('取消闭环需要先在禅道重新激活该 Bug', 'info');
+      const activated = await openS5ReactivateModalAsync(id, ztId);
+      if (!activated) {
+        // 用户放弃激活 → 回滚勾选，不保存
+        if (doneEl) doneEl.checked = true;
+        window.showMessage && window.showMessage('未完成重新激活，已取消"取消闭环"操作', 'error');
         return;
       }
     }
@@ -1217,6 +1256,7 @@ export function openS5ReactivateModal(bugDbId, zentaoBugId) {
 
   modal.classList.remove('hidden');
   modal.style.display = 'flex';
+  bindModalEsc('s5ReactivateModal', closeS5ReactivateModal);
 
   // Load action meta for user list and build list
   _loadActionMeta(zentaoBugId, 'activate').then((meta) => {
@@ -1228,6 +1268,19 @@ export function openS5ReactivateModal(bugDbId, zentaoBugId) {
       buildSel.innerHTML = '<option value="">-- 选择影响版本（可选）--</option>' +
         Object.entries(builds).map(([bid, bname]) => `<option value="${escapeHtml(bid)}">${escapeHtml(String(bname))}</option>`).join('');
     }
+  });
+}
+
+// Promise-aware opener used by saveS5's "uncheck a closed bug" flow.
+// Resolves to `true` when the user successfully reactivates, `false`
+// when they cancel or the reactivation fails. Co-exists with the plain
+// openS5ReactivateModal for the existing "重新激活" button entry.
+let _s5ReactivateResolver = null;
+
+export function openS5ReactivateModalAsync(bugDbId, zentaoBugId) {
+  openS5ReactivateModal(bugDbId, zentaoBugId);
+  return new Promise((resolve) => {
+    _s5ReactivateResolver = resolve;
   });
 }
 
@@ -1248,6 +1301,13 @@ export async function submitS5Reactivate() {
       },
     });
     window.showMessage && window.showMessage('禅道 Bug 已重新激活', 'success');
+    if (_s5ReactivateResolver) {
+      const resolver = _s5ReactivateResolver;
+      _s5ReactivateResolver = null;
+      resolver(true);
+      closeS5ReactivateModal();
+      return;
+    }
     closeS5ReactivateModal();
     await loadOverallTest({ syncBeforeLoad: false, showSuccess: false });
   } catch (err) {
@@ -1258,6 +1318,12 @@ export async function submitS5Reactivate() {
 export function closeS5ReactivateModal() {
   const modal = document.getElementById('s5ReactivateModal');
   if (modal) { modal.classList.add('hidden'); modal.style.display = 'none'; }
+  unbindModalEsc('s5ReactivateModal');
+  if (_s5ReactivateResolver) {
+    const resolver = _s5ReactivateResolver;
+    _s5ReactivateResolver = null;
+    resolver(false);
+  }
 }
 
 // Assign Modal
@@ -1275,6 +1341,7 @@ export function openS5AssignModal(bugDbId, zentaoBugId) {
 
   modal.classList.remove('hidden');
   modal.style.display = 'flex';
+  bindModalEsc('s5AssignModal', closeS5AssignModal);
 
   _loadActionMeta(zentaoBugId, 'activate').then((meta) => {
     _buildSearchableUserSelect('s5AssignUserSelect', meta.users, meta.current_assigned || '');
@@ -1306,17 +1373,115 @@ export async function submitS5Assign() {
 export function closeS5AssignModal() {
   const modal = document.getElementById('s5AssignModal');
   if (modal) { modal.classList.add('hidden'); modal.style.display = 'none'; }
+  unbindModalEsc('s5AssignModal');
 }
 
 // Create Zentao Bug
 
 let _s5CreateBugMeta = null;
 
-function _resetS5CreateBugForm() {
-  ['s5CreateBugTitle', 's5CreateBugSteps'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.value = '';
+// Pre-fill template matches what Zentao's native create-bug page shows:
+// three editable sections so the reporter can fill in each part directly.
+const S5_STEPS_TEMPLATE = '[步骤]\n1. \n2. \n3. \n\n[结果]\n\n\n[期望]\n\n';
+// HTML version used for the contenteditable reproduce-steps editor. We
+// convert newlines into <br> so the template renders the same way it
+// would in a plain textarea, but still allows inline <img> nodes.
+const S5_STEPS_TEMPLATE_HTML = S5_STEPS_TEMPLATE
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/\r\n|\n/g, '<br>');
+
+// Track whether the paste handler has been bound so we don't attach it twice.
+let _s5StepsPasteHandlerBound = false;
+
+function _insertHtmlAtCaret(html) {
+  const el = document.getElementById('s5CreateBugSteps');
+  if (!el) return;
+  el.focus();
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0 && el.contains(sel.anchorNode)) {
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    const frag = range.createContextualFragment(html);
+    const lastNode = frag.lastChild;
+    range.insertNode(frag);
+    if (lastNode) {
+      const newRange = document.createRange();
+      newRange.setStartAfter(lastNode);
+      newRange.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(newRange);
+    }
+  } else {
+    el.insertAdjacentHTML('beforeend', html);
+  }
+}
+
+async function _uploadInlineStepsImage(file) {
+  const form = new FormData();
+  form.append('file', file, file.name || `paste-${Date.now()}.png`);
+  const resp = await api('/zentao/bugs/upload-inline-image', { method: 'POST', body: form });
+  return await resp.json();
+}
+
+function _bindS5StepsPasteHandler() {
+  const el = document.getElementById('s5CreateBugSteps');
+  if (!el || _s5StepsPasteHandlerBound) return;
+  el.addEventListener('paste', async (event) => {
+    const cd = event.clipboardData;
+    if (!cd) return;
+    const items = Array.from(cd.items || []);
+    const imageItems = items.filter((it) => it.kind === 'file' && (it.type || '').startsWith('image/'));
+    if (!imageItems.length) return;
+    event.preventDefault();
+    for (const item of imageItems) {
+      const file = item.getAsFile();
+      if (!file) continue;
+      const placeholderId = `s5-img-ph-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      _insertHtmlAtCaret(`<span id="${placeholderId}" style="color:#94a3b8; font-size:12px;">[上传中…]</span>`);
+      try {
+        const info = await _uploadInlineStepsImage(file);
+        const proxyUrl = info.proxy_url;
+        const zentaoUrl = info.zentao_url || '';
+        const imgHtml = `<img src="${proxyUrl}" data-zentao-url="${escapeHtml(zentaoUrl)}" data-file-id="${info.file_id}" alt="${escapeHtml(info.title || 'image')}" style="max-width:100%; margin:4px 0; border-radius:4px;"/>`;
+        const placeholder = document.getElementById(placeholderId);
+        if (placeholder) {
+          placeholder.outerHTML = imgHtml;
+        } else {
+          _insertHtmlAtCaret(imgHtml);
+        }
+      } catch (err) {
+        const placeholder = document.getElementById(placeholderId);
+        const msg = (err && err.message) ? err.message : '上传失败';
+        if (placeholder) {
+          placeholder.outerHTML = `<span style="color:#dc2626; font-size:12px;">[图片上传失败: ${escapeHtml(msg)}]</span>`;
+        }
+        window.showMessage && window.showMessage(`图片上传失败: ${msg}`, 'error');
+      }
+    }
   });
+  _s5StepsPasteHandlerBound = true;
+}
+
+function _serializeS5StepsForSubmit() {
+  const source = document.getElementById('s5CreateBugSteps');
+  if (!source) return '';
+  const clone = source.cloneNode(true);
+  clone.querySelectorAll('img[data-zentao-url]').forEach((img) => {
+    const ztUrl = img.getAttribute('data-zentao-url');
+    if (ztUrl) img.setAttribute('src', ztUrl);
+    img.removeAttribute('data-zentao-url');
+    img.removeAttribute('data-file-id');
+  });
+  return (clone.innerHTML || '').trim();
+}
+
+function _resetS5CreateBugForm() {
+  const titleEl = document.getElementById('s5CreateBugTitle');
+  if (titleEl) titleEl.value = '';
+  const stepsEl = document.getElementById('s5CreateBugSteps');
+  if (stepsEl) stepsEl.innerHTML = S5_STEPS_TEMPLATE_HTML;
   ['s5CreateBugSeverity', 's5CreateBugPri'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.value = '3';
@@ -1498,6 +1663,7 @@ export async function openS5CreateZentaoBugModal() {
   if (!modal) return;
   modal.classList.remove('hidden');
   modal.style.display = 'flex';
+  bindModalEsc('s5CreateZentaoBugModal', closeS5CreateZentaoBugModal);
 
   const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
   const hintEl = document.getElementById('s5CreateBugMetaHint');
@@ -1506,6 +1672,7 @@ export async function openS5CreateZentaoBugModal() {
   if (errEl) errEl.style.display = 'none';
 
   _resetS5CreateBugForm();
+  _bindS5StepsPasteHandler();
   _fillS5CreateBugSelect('s5CreateBugExecution', {}, '-- 请选择执行 --');
   _fillS5CreateBugSelect('s5CreateBugModule', {}, '-- 请选择模块 --');
   _fillS5CreateBugSelect('s5CreateBugBuild', {}, '-- 请选择小版本 --');
@@ -1546,11 +1713,47 @@ export function closeS5CreateZentaoBugModal() {
   const modal = document.getElementById('s5CreateZentaoBugModal');
   if (modal) { modal.classList.add('hidden'); modal.style.display = 'none'; }
   _s5CreateBugMeta = null;
+  unbindModalEsc('s5CreateZentaoBugModal');
+  // Reset the steps fullscreen state so the next open starts collapsed.
+  if (_s5StepsFullscreen) toggleS5StepsFullscreen();
+}
+
+// Track the fullscreen state of the 复现步骤 box. We toggle inline styles
+// rather than a CSS class so no stylesheet change is needed.
+let _s5StepsFullscreen = false;
+let _s5StepsOrigStyle = '';
+let _s5StepsWrapOrigStyle = '';
+
+export function toggleS5StepsFullscreen() {
+  const wrap = document.getElementById('s5CreateBugStepsWrap');
+  const editor = document.getElementById('s5CreateBugSteps');
+  const btn = document.getElementById('s5CreateBugStepsExpandBtn');
+  if (!wrap || !editor) return;
+
+  if (!_s5StepsFullscreen) {
+    _s5StepsWrapOrigStyle = wrap.getAttribute('style') || '';
+    _s5StepsOrigStyle = editor.getAttribute('style') || '';
+    wrap.setAttribute('style',
+      'position:fixed; inset:24px; z-index:10020; background:#fff; border:1px solid #cbd5e1;'
+      + ' border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:18px 20px;'
+      + ' display:flex; flex-direction:column; margin-bottom:0;');
+    editor.setAttribute('style',
+      'flex:1; width:100%; box-sizing:border-box; padding:12px; border:1px solid #cbd5e1;'
+      + ' border-radius:6px; font-size:14px; min-height:0; overflow-y:auto;'
+      + ' white-space:pre-wrap; outline:none; background:#fff; line-height:1.6;');
+    if (btn) btn.innerText = '⤢ 收起';
+    _s5StepsFullscreen = true;
+  } else {
+    wrap.setAttribute('style', _s5StepsWrapOrigStyle);
+    editor.setAttribute('style', _s5StepsOrigStyle);
+    if (btn) btn.innerText = '⛶ 放大';
+    _s5StepsFullscreen = false;
+  }
 }
 
 export async function submitS5CreateZentaoBug() {
   const title = (document.getElementById('s5CreateBugTitle')?.value || '').trim();
-  const steps = (document.getElementById('s5CreateBugSteps')?.value || '').trim();
+  const steps = _serializeS5StepsForSubmit();
   const severity = Number(document.getElementById('s5CreateBugSeverity')?.value || 3);
   const pri = Number(document.getElementById('s5CreateBugPri')?.value || 3);
   const assignedTo = document.getElementById('s5CreateBugAssignTo')?.value || '';
@@ -1628,6 +1831,7 @@ const OmniQAOverallTestTab = {
   applyS5Filters,
   resetS5Filters,
   openS5ReactivateModal,
+  openS5ReactivateModalAsync,
   submitS5Reactivate,
   closeS5ReactivateModal,
   openS5AssignModal,
@@ -1645,6 +1849,7 @@ const OmniQAOverallTestTab = {
   closeS5CreateZentaoBugModal,
   submitS5CreateZentaoBug,
   onS5CreateBugExecutionChange,
+  toggleS5StepsFullscreen,
   toggleS5DetailRow,
 };
 window.OmniQAOverallTestTab = OmniQAOverallTestTab;
@@ -1683,6 +1888,7 @@ window.openS5CreateZentaoBugModal = openS5CreateZentaoBugModal;
 window.closeS5CreateZentaoBugModal = closeS5CreateZentaoBugModal;
 window.submitS5CreateZentaoBug = submitS5CreateZentaoBug;
 window.onS5CreateBugExecutionChange = onS5CreateBugExecutionChange;
+window.toggleS5StepsFullscreen = toggleS5StepsFullscreen;
 
 // Overall-Test SSE: 新 bug 底部提示 + 卡片流光
 

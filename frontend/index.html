@@ -1274,8 +1274,8 @@
   </div>
 
   <!-- Overall Test Reactivate Bug Modal -->
-  <div id="s5ReactivateModal" class="hidden" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
-    <div style="width:min(520px, 95vw); max-height:90vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
+  <div id="s5ReactivateModal" class="hidden" onclick="closeS5ReactivateModal()" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
+    <div onclick="event.stopPropagation()" style="width:min(520px, 95vw); max-height:90vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <h3 style="margin:0; color:#0f172a; font-size:16px;">🔄 重新激活禅道 Bug</h3>
         <button class="secondary" onclick="closeS5ReactivateModal()" style="padding:4px 10px; font-size:13px;">✕ 关闭</button>
@@ -1304,8 +1304,8 @@
   </div>
 
   <!-- Overall Test Assign Bug Modal -->
-  <div id="s5AssignModal" class="hidden" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
-    <div style="width:min(480px, 95vw); max-height:90vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
+  <div id="s5AssignModal" class="hidden" onclick="closeS5AssignModal()" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
+    <div onclick="event.stopPropagation()" style="width:min(480px, 95vw); max-height:90vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <h3 style="margin:0; color:#0f172a; font-size:16px;">🙋 重新指派禅道 Bug</h3>
         <button class="secondary" onclick="closeS5AssignModal()" style="padding:4px 10px; font-size:13px;">✕ 关闭</button>
@@ -1367,8 +1367,8 @@
   </div>
 
   <!-- Overall Test Create Zentao Bug Modal -->
-  <div id="s5CreateZentaoBugModal" class="hidden" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
-    <div style="width:min(760px, 96vw); max-height:92vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
+  <div id="s5CreateZentaoBugModal" class="hidden" onclick="closeS5CreateZentaoBugModal()" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
+    <div onclick="event.stopPropagation()" style="width:min(900px, 96vw); max-height:92vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
         <h3 style="margin:0; color:#0f172a; font-size:16px;">📝 新建禅道 Bug</h3>
         <button class="secondary" onclick="closeS5CreateZentaoBugModal()" style="padding:4px 10px; font-size:13px;">✕ 关闭</button>
@@ -1432,9 +1432,14 @@
           </select>
         </div>
       </div>
-      <div style="margin-bottom:14px;">
-        <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">复现步骤</label>
-        <textarea id="s5CreateBugSteps" placeholder="1. 打开...\n2. 点击...\n3. 观察结果..." style="width:100%; box-sizing:border-box; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; resize:vertical; min-height:80px;"></textarea>
+      <div id="s5CreateBugStepsWrap" style="margin-bottom:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+          <label style="font-size:13px; font-weight:600; color:#334155;">复现步骤</label>
+          <button type="button" id="s5CreateBugStepsExpandBtn" class="secondary"
+                  onclick="toggleS5StepsFullscreen()"
+                  style="padding:2px 10px; font-size:12px;">⛶ 放大</button>
+        </div>
+        <div id="s5CreateBugSteps" contenteditable="true" data-placeholder="按模板填写，或直接粘贴图片（支持 Ctrl+V）" style="width:100%; box-sizing:border-box; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; min-height:260px; max-height:520px; overflow-y:auto; white-space:pre-wrap; outline:none; background:#fff; line-height:1.6;"></div>
       </div>
       <div id="s5CreateBugErrorMsg" style="color:#dc2626; font-size:13px; margin-bottom:10px; display:none;"></div>
       <div style="display:flex; gap:10px; justify-content:flex-end;">
