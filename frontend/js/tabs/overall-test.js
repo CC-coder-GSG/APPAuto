@@ -1851,6 +1851,10 @@ export async function submitS5CreateZentaoBug() {
     if (errEl) { errEl.innerText = '请选择执行'; errEl.style.display = 'block'; }
     return;
   }
+  if (Object.keys(_s5CreateBugMeta.builds || {}).length > 0 && !openedBuild) {
+    if (errEl) { errEl.innerText = '请选择影响版本（禅道强制要求）'; errEl.style.display = 'block'; }
+    return;
+  }
   if (errEl) errEl.style.display = 'none';
 
   const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
