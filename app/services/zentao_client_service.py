@@ -400,63 +400,130 @@ class ZentaoClient:
         Upload a file to Zentao and return metadata describing the uploaded
         file.
 
-        Zentao v1 accepts multipart POSTs at `/v1/files` with the fields
-        `files[]`, `objectType`, `objectID`. Responses vary by version:
-
-          - {"files": [{"id": N, ...}]}
-          - {"data": [...]}  (some IPD forks)
-          - [{"id": N, ...}]  (bare list)
-          - {"id": N, ...}    (single dict when only one file was sent)
+        Zentao v1 accepts multipart POSTs at `/v1/files`. The expected field
+        name varies by version (`files[]` for 18.x, `files` for 16.x, `file`
+        for some IPD forks), so we try them in order on failure.
 
         Returns a normalized dict with at least: id (int), title, pathname,
         extension. Raises ZentaoAPIError on failure.
         """
+        # Ensure filename has a recognizable extension. Zentao rejects uploads
+        # when the extension isn't in its allowed list, and some browsers /
+        # clipboards produce File objects with a bare name (e.g. "blob",
+        # "image"). Derive an extension from the MIME type if missing.
+        safe_name = self._ensure_filename_extension(filename, content_type)
+
         url = f"{self._api_base}/files"
         headers = {"Token": self.token}
-        files = {"files[]": (filename, file_bytes, content_type)}
         data = {"objectType": object_type, "objectID": str(object_id)}
-        try:
-            resp = httpx.post(url, headers=headers, files=files, data=data, timeout=30.0)
-            if resp.status_code not in (200, 201):
-                raise ZentaoAPIError(resp.status_code, resp.text[:500])
-            payload = _parse_write_response(resp)
-        except ZentaoAPIError:
-            raise
-        except Exception as e:
-            logger.warning("ZentaoClient.upload_file error: %s", e)
-            raise ZentaoAPIError(0, str(e))
 
-        entry: dict | None = None
+        last_error: Exception | None = None
+        last_body: str = ""
+        # Order matters: most modern Zentao (18.x+) requires the bracketed
+        # form, while older installs reject it.
+        field_candidates = ("files[]", "files", "file")
+        for field_name in field_candidates:
+            files = {field_name: (safe_name, file_bytes, content_type)}
+            try:
+                resp = httpx.post(url, headers=headers, files=files, data=data, timeout=30.0)
+                last_body = (resp.text or "")[:500]
+                logger.info(
+                    "ZentaoClient.upload_file field=%s filename=%s ct=%s "
+                    "status=%s body=%s",
+                    field_name, safe_name, content_type, resp.status_code, last_body,
+                )
+                if resp.status_code not in (200, 201):
+                    last_error = ZentaoAPIError(resp.status_code, last_body)
+                    continue
+                try:
+                    payload = _parse_write_response(resp)
+                except ZentaoAPIError as pe:
+                    last_error = pe
+                    continue
+
+                # Some Zentao versions return HTTP 200 with an `error` field
+                # when the file is rejected (extension check, size limit).
+                if isinstance(payload, dict) and payload.get("error"):
+                    last_error = ZentaoAPIError(400, str(payload.get("error")).strip() or last_body)
+                    continue
+
+                entry = self._extract_uploaded_entry(payload)
+                if not entry or not entry.get("id"):
+                    last_error = ZentaoAPIError(502, f"禅道上传文件返回异常: {str(payload)[:200]}")
+                    continue
+
+                file_id = int(entry.get("id"))
+                pathname = str(entry.get("pathname") or "")
+                title = str(entry.get("title") or entry.get("name") or safe_name)
+                extension = str(entry.get("extension") or "").lstrip(".").lower()
+                if not extension and "." in safe_name:
+                    extension = safe_name.rsplit(".", 1)[-1].lower()
+                return {
+                    "id": file_id,
+                    "title": title,
+                    "pathname": pathname,
+                    "extension": extension,
+                }
+            except ZentaoAPIError as e:
+                last_error = e
+            except Exception as e:
+                logger.warning("ZentaoClient.upload_file field=%s error: %s", field_name, e)
+                last_error = ZentaoAPIError(0, str(e))
+
+        if isinstance(last_error, ZentaoAPIError):
+            raise last_error
+        raise ZentaoAPIError(0, f"禅道文件上传失败（所有字段名都失败）: {last_body}")
+
+    @staticmethod
+    def _ensure_filename_extension(filename: str, content_type: str) -> str:
+        name = (filename or "").strip() or "file"
+        if "." in name and not name.endswith("."):
+            return name
+        mime_ext = {
+            "image/png": "png",
+            "image/jpeg": "jpg",
+            "image/jpg": "jpg",
+            "image/gif": "gif",
+            "image/webp": "webp",
+            "image/bmp": "bmp",
+            "image/svg+xml": "svg",
+        }
+        ext = mime_ext.get((content_type or "").lower().split(";")[0].strip(), "")
+        if ext:
+            return f"{name.rstrip('.')}.{ext}"
+        return name
+
+    @staticmethod
+    def _extract_uploaded_entry(payload: Any) -> dict | None:
+        """
+        Best-effort extraction of the first uploaded-file entry from the
+        many response shapes Zentao versions can produce.
+        """
         if isinstance(payload, dict):
             if isinstance(payload.get("files"), list) and payload["files"]:
                 first = payload["files"][0]
                 if isinstance(first, dict):
-                    entry = first
-            elif isinstance(payload.get("data"), list) and payload["data"]:
+                    return first
+            if isinstance(payload.get("files"), dict) and payload["files"]:
+                first = next(iter(payload["files"].values()), None)
+                if isinstance(first, dict):
+                    return first
+            if isinstance(payload.get("data"), list) and payload["data"]:
                 first = payload["data"][0]
                 if isinstance(first, dict):
-                    entry = first
-            elif payload.get("id"):
-                entry = payload
+                    return first
+            if isinstance(payload.get("data"), dict) and payload["data"].get("id"):
+                return payload["data"]
+            if payload.get("id"):
+                return payload
+            # Sometimes upload responses wrap under "file"
+            if isinstance(payload.get("file"), dict) and payload["file"].get("id"):
+                return payload["file"]
         elif isinstance(payload, list) and payload:
             first = payload[0]
             if isinstance(first, dict):
-                entry = first
-        if not entry or not entry.get("id"):
-            raise ZentaoAPIError(502, f"禅道上传文件返回异常: {str(payload)[:200]}")
-
-        file_id = int(entry.get("id"))
-        pathname = str(entry.get("pathname") or entry.get("addedBy") or "")
-        title = str(entry.get("title") or entry.get("name") or filename)
-        extension = str(entry.get("extension") or "").lstrip(".").lower()
-        if not extension and "." in filename:
-            extension = filename.rsplit(".", 1)[-1].lower()
-        return {
-            "id": file_id,
-            "title": title,
-            "pathname": pathname,
-            "extension": extension,
-        }
+                return first
+        return None
 
     def get_create_bug_meta(self, product_id: int, execution_id: int = 0) -> dict | None:
         """Fetch page-level JSON for the bug creation form (users, builds etc.)."""

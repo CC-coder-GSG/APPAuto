@@ -259,15 +259,42 @@ def create_zentao_bug(
         else:
             raise HTTPException(status_code=exc.status_code or 502, detail=f"禅道创建Bug失败: {exc.message}")
 
-    # Extract returned bug ID. Write responses can be {"bug":{"id":N}},
-    # {"id":N}, or {"message":"success"} when body was empty (already
-    # normalized by _parse_write_response).
+    # Extract returned bug ID. Write responses vary by Zentao version:
+    #   {"id":N, "title":..., ...}         — 18.x (bug object at root)
+    #   {"bug":{"id":N, ...}}              — some forks
+    #   {"data":{"id":N}} / {"data":{...}} — IPD forks
+    #   {"bugID":N}                        — legacy-ajax style
+    #   {"message":"success"}              — empty body, already normalized
+    #   {"error":"..."}                    — validation failure w/ HTTP 200
     if not isinstance(result, dict) or not result:
+        logger.warning("create_zentao_bug: empty response from Zentao")
         raise HTTPException(status_code=502, detail="禅道返回了空响应，Bug可能未创建成功")
-    bug_data = result.get("bug") if isinstance(result.get("bug"), dict) else result
-    zentao_bug_id = str(bug_data.get("id") or "").strip()
+    if result.get("error"):
+        err_msg = str(result.get("error")).strip() or "未知错误"
+        logger.warning("create_zentao_bug: Zentao returned error: %s", err_msg)
+        raise HTTPException(status_code=502, detail=f"禅道创建Bug失败: {err_msg}")
+
+    bug_data: dict = {}
+    for candidate in (
+        result.get("bug") if isinstance(result.get("bug"), dict) else None,
+        result.get("data") if isinstance(result.get("data"), dict) else None,
+        result,
+    ):
+        if isinstance(candidate, dict) and (candidate.get("id") or candidate.get("bugID")):
+            bug_data = candidate
+            break
+
+    zentao_bug_id = str(bug_data.get("id") or bug_data.get("bugID") or "").strip()
     if not zentao_bug_id:
-        raise HTTPException(status_code=502, detail="禅道未返回 Bug ID，请检查禅道后台")
+        # Dump the full response at warning level so the admin can inspect
+        # what Zentao actually returned. Truncated in the user-facing
+        # message to avoid leaking surprising content.
+        logger.warning("create_zentao_bug: cannot extract bug id from response: %s", result)
+        raw_preview = json.dumps(result, ensure_ascii=False)[:300]
+        raise HTTPException(
+            status_code=502,
+            detail=f"禅道未返回 Bug ID，请检查禅道后台。响应: {raw_preview}",
+        )
 
     # Get the Zentao base URL from the user's binding
     binding = db.query(UserZentaoBinding).filter(UserZentaoBinding.user_id == current_user.id).first()
