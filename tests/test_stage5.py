@@ -1,4 +1,5 @@
 ﻿from app.models import BugSourceType, BugStage5Record, BugTracking, Requirement, RequirementStatus, User, UserRole, Version, VersionType
+from app.services import overall_test_service
 from app.services.stage5_service import Stage5Service
 
 
@@ -166,6 +167,11 @@ class _FakeZentaoClient:
         return self.payload_map.get(path)
 
 
+class _Fake401ZentaoClient:
+    def get(self, path, params=None):
+        raise overall_test_service.ZentaoAPIError(401, '{"error":"Unauthorized"}')
+
+
 def test_stage5_sync_zentao_major_bugs_creates_remote_bugs(db_session):
     major = _create_major(db_session, "V4.0.3.1")
     minor = _create_minor(db_session, major.id, "4.0.3.1.260413(40311001)")
@@ -259,3 +265,35 @@ def test_stage5_sync_zentao_major_bugs_fetches_remote_execution_builds_without_l
     assert len(rows) == 1
     assert rows[0].bug_id == "b#7201"
     assert rows[0].zentao_bug_title == "仅挂在远端 build 下的 Bug"
+
+
+def test_stage5_sync_zentao_major_bugs_retries_once_when_zentao_token_expired(db_session, monkeypatch):
+    major = _create_major(db_session, "V4.0.3.1")
+    user = _create_user(db_session, "stage5_sync_user4")
+    clients = [
+        (_Fake401ZentaoClient(), "http://zentao"),
+        (_FakeZentaoClient({
+            "projects": {"projects": [{"id": 9, "name": "Survey"}]},
+            "projects/9/executions": {"executions": [{"id": 4031, "name": "s4031"}]},
+            "executions/4031/bugs": {
+                "bugs": [
+                    {"id": 7301, "title": "401 重试成功的 Bug", "openedBuild": {}},
+                ]
+            },
+            "executions/4031/builds": {"builds": []},
+        }), "http://zentao"),
+    ]
+    invalidated = []
+
+    service = Stage5Service(db_session)
+    service._get_zentao_client_ctx = lambda user_id: clients.pop(0)  # type: ignore[method-assign]
+    monkeypatch.setattr(overall_test_service, "invalidate_token", lambda user_id, db: invalidated.append(user_id))
+
+    result = service.sync_zentao_major_bugs(major_version_id=major.id, current_user=user)
+
+    rows = db_session.query(BugTracking).filter(BugTracking.major_version_id == major.id).all()
+    assert result["remote_total"] == 1
+    assert result["created"] == 1
+    assert len(rows) == 1
+    assert rows[0].bug_id == "b#7301"
+    assert invalidated == [user.id]

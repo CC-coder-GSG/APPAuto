@@ -24,8 +24,8 @@ from app.models import BugSourceType, BugStage5Record, BugTracking, Requirement,
 from app.models.user_zentao_binding import UserZentaoBinding
 from app.services.audit_service import audit
 from app.services.sse_service import sse_publish
-from app.services.zentao_auth_service import get_valid_token
-from app.services.zentao_client_service import ZentaoClient
+from app.services.zentao_auth_service import get_valid_token, invalidate_token
+from app.services.zentao_client_service import ZentaoAPIError, ZentaoClient
 from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
 
 logger = logging.getLogger(__name__)
@@ -413,11 +413,16 @@ class OverallTestService:
             raise HTTPException(status_code=400, detail="当前用户未配置可用的禅道绑定")
         client, base_url = ctx
 
-        execution_id = self._resolve_execution_id_for_major(client, major)
+        try:
+            execution_id, remote_bugs = self._resolve_and_fetch_remote_bugs_with_retry(
+                client=client,
+                major=major,
+                user_id=current_user.id,
+            )
+        except ZentaoAPIError as exc:
+            raise HTTPException(status_code=502, detail=f"禅道同步失败: {exc.message}") from exc
         if not execution_id:
             raise HTTPException(status_code=400, detail="当前大版本未识别到对应的禅道执行版本，请先同步版本或检查版本命名")
-
-        remote_bugs = self._fetch_zentao_bugs_for_major(client, major, execution_id)
         if not remote_bugs:
             _sync_cache[major_version_id] = local_now()
             return {
@@ -492,6 +497,32 @@ class OverallTestService:
             "matched_minor": matched_minor,
             "cached": False,
         }
+
+    def _resolve_and_fetch_remote_bugs_with_retry(
+        self,
+        *,
+        client: ZentaoClient,
+        major: Version,
+        user_id: int,
+    ) -> tuple[int | None, list[dict]]:
+        try:
+            execution_id = self._resolve_execution_id_for_major(client, major)
+            if not execution_id:
+                return None, []
+            return execution_id, self._fetch_zentao_bugs_for_major(client, major, execution_id)
+        except ZentaoAPIError as exc:
+            if exc.status_code != 401:
+                raise
+
+        invalidate_token(user_id, self.db)
+        refreshed_ctx = self._get_zentao_client_ctx(user_id)
+        if not refreshed_ctx:
+            raise HTTPException(status_code=400, detail="禅道 token 刷新失败，请重新绑定或稍后再试")
+        refreshed_client, _ = refreshed_ctx
+        execution_id = self._resolve_execution_id_for_major(refreshed_client, major)
+        if not execution_id:
+            return None, []
+        return execution_id, self._fetch_zentao_bugs_for_major(refreshed_client, major, execution_id)
 
     def build_overall_test_push_message(self, major_version_id: int, minor_version_id: int) -> tuple[str, int]:
         bugs = self.db.query(BugTracking).filter(BugTracking.major_version_id == major_version_id).all()
