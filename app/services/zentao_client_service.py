@@ -208,6 +208,57 @@ class ZentaoClient:
             logger.warning("ZentaoClient.get_page error path=%s: %s", path, e)
             return None
 
+    def get_page_text(self, path: str, params: dict | None = None) -> str | None:
+        """
+        Fetch raw HTML/text from a Zentao page endpoint using Token auth.
+
+        Some IPD deployments return diagnostic HTML/JS instead of JSON when the
+        token lacks page-level access. We use this as a best-effort probe when a
+        write endpoint returns an empty success response but the created object
+        cannot be found afterwards.
+        """
+        url = f"{self.base_url}/{path.lstrip('/')}"
+        headers = {
+            "Token": self.token,
+            "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+        }
+        try:
+            resp = httpx.get(url, params=params, headers=headers, timeout=_DEFAULT_TIMEOUT)
+            if resp.status_code != 200:
+                return None
+            return resp.text or ""
+        except Exception as e:
+            logger.warning("ZentaoClient.get_page_text error path=%s: %s", path, e)
+            return None
+
+    def probe_bug_create_access(self, product_id: int, execution_id: int = 0) -> dict[str, Any]:
+        """
+        Probe whether the current token can access the Zentao create-bug page.
+
+        Returns a normalized object:
+          {
+            "ok": bool | None,
+            "reason": "ok" | "access_denied" | "login_required" | "unavailable",
+            "path": "...",
+            "preview": "..."
+          }
+        """
+        candidates = [f"bug-create-{product_id}-{execution_id}.html"]
+        if execution_id:
+            candidates.append(f"bug-create-{product_id}-0.html")
+        for path in candidates:
+            text = self.get_page_text(path)
+            if text is None:
+                continue
+            normalized = text.lstrip("\ufeff").strip()
+            preview = normalized[:200]
+            if "您无权访问该产品" in normalized:
+                return {"ok": False, "reason": "access_denied", "path": path, "preview": preview}
+            if "用户登录" in normalized and "login" in normalized.lower():
+                return {"ok": False, "reason": "login_required", "path": path, "preview": preview}
+            return {"ok": True, "reason": "ok", "path": path, "preview": preview}
+        return {"ok": None, "reason": "unavailable", "path": "", "preview": ""}
+
     # ------------------------------------------------------------------
     # Convenience accessors for common objects
     # ------------------------------------------------------------------

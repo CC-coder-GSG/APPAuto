@@ -91,6 +91,20 @@ class CreateBugPayload(BaseModel):
     found_minor_version_id: Optional[int] = None
 
 
+def _create_access_message(probe: dict | None, *, binding: UserZentaoBinding | None = None, product_id: int | None = None) -> str:
+    reason = str((probe or {}).get("reason") or "").strip().lower()
+    account = (binding.zentao_account or "").strip() if binding else ""
+    account_part = f"账号 {account} " if account else ""
+    if reason == "missing_binding":
+        return "当前用户未配置禅道绑定，请先在禅道账号绑定页保存账号密码。"
+    if reason == "access_denied":
+        product_part = f"产品 {product_id}" if product_id else "当前产品"
+        return f"当前禅道{account_part}无权访问{product_part}，该实例会对创建接口返回空成功但不真正落库，请联系禅道管理员开通该产品的访问或提 Bug 权限。"
+    if reason == "login_required":
+        return "当前禅道 token 无法访问创建页，请先刷新禅道绑定后再试。"
+    return "禅道创建接口返回空成功响应，但未查询到新建 Bug。经排查该 IPD 实例的 v1 创建接口未真正落库，请联系禅道管理员检查接口配置。"
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -121,6 +135,12 @@ def get_create_bug_meta(
             "modules": {},
             "stories": {},
             "bug_types": {},
+            "binding_status": "missing",
+            "create_access": {
+                "ok": False,
+                "reason": "missing_binding",
+                "message": _create_access_message({"reason": "missing_binding"}),
+            },
         }
 
     requested_execution_id = int(execution_id) if execution_id else None
@@ -182,6 +202,7 @@ def get_create_bug_meta(
     stories: dict[str, str] = {}
     bug_types: dict[str, str] = {}
     meta_scope = "none"
+    create_access = {"ok": None, "reason": "unavailable", "message": ""}
     if product_ids:
         meta = client.get_create_bug_meta(product_ids[0], selected_execution_id or 0)
         if meta:
@@ -201,6 +222,8 @@ def get_create_bug_meta(
                     filtered_builds = {bid: name for bid, name in builds.items() if bid in execution_build_ids}
                     if filtered_builds:
                         builds = filtered_builds
+        create_access = client.probe_bug_create_access(product_ids[0], selected_execution_id or 0)
+        create_access["message"] = _create_access_message(create_access, product_id=product_ids[0])
 
     return {
         "product_ids": product_ids,
@@ -213,6 +236,8 @@ def get_create_bug_meta(
         "stories": stories,
         "bug_types": bug_types,
         "meta_scope": meta_scope,
+        "binding_status": "ok",
+        "create_access": create_access,
     }
 
 
@@ -288,20 +313,16 @@ def create_zentao_bug(
             bug_data = candidate
             break
 
+    binding = db.query(UserZentaoBinding).filter(UserZentaoBinding.user_id == current_user.id).first()
     zentao_bug_id = str(bug_data.get("id") or bug_data.get("bugID") or "").strip()
     if not zentao_bug_id:
-        # Dump the full response at warning level so the admin can inspect
-        # what Zentao actually returned. Truncated in the user-facing
-        # message to avoid leaking surprising content.
+        create_probe = client.probe_bug_create_access(payload.product_id, payload.execution_id or 0)
+        create_message = _create_access_message(create_probe, binding=binding, product_id=payload.product_id)
         logger.warning("create_zentao_bug: cannot extract bug id from response: %s", result)
         raw_preview = json.dumps(result, ensure_ascii=False)[:300]
-        raise HTTPException(
-            status_code=502,
-            detail=f"禅道未返回 Bug ID，请检查禅道后台。响应: {raw_preview}",
-        )
+        raise HTTPException(status_code=502, detail=f"{create_message} 响应: {raw_preview}")
 
     # Get the Zentao base URL from the user's binding
-    binding = db.query(UserZentaoBinding).filter(UserZentaoBinding.user_id == current_user.id).first()
     base_url = (binding.base_url or "").rstrip("/") if binding else ""
 
     # Write back to local BugTracking

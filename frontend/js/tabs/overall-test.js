@@ -1629,6 +1629,7 @@ function _applyS5CreateBugMeta(meta, previous = {}) {
   const productId = (meta.product_ids || [])[0];
   const selectedExecutionId = String(meta.selected_execution_id || meta.execution_id || '');
   const executionOptions = meta.executions || {};
+  const createAccess = meta.create_access || {};
 
   _fillS5CreateBugSelect('s5CreateBugExecution', executionOptions, '-- 请选择执行 --', previous.executionId || selectedExecutionId);
   _fillS5CreateBugSelect('s5CreateBugModule', meta.modules || {}, '-- 请选择模块 --', previous.moduleId);
@@ -1643,9 +1644,11 @@ function _applyS5CreateBugMeta(meta, previous = {}) {
   _renderS5CreateBugUserSelect(meta.users || {}, previous.assignedTo || '');
 
   if (hintEl) {
-    hintEl.innerText = productId
-      ? `产品ID: ${productId}${selectedExecutionId ? `  执行ID: ${selectedExecutionId}` : ''}`
-      : '⚠️ 未找到产品信息，请确认该大版本已配置禅道执行版本映射';
+    hintEl.innerText = (createAccess.ok === false && createAccess.message)
+      ? `⚠️ ${createAccess.message}`
+      : (productId
+        ? `产品ID: ${productId}${selectedExecutionId ? `  执行ID: ${selectedExecutionId}` : ''}`
+        : '⚠️ 未找到产品信息，请确认该大版本已配置禅道执行版本映射');
   }
 }
 
@@ -1775,6 +1778,13 @@ export async function submitS5CreateZentaoBug() {
   }
   if (!_s5CreateBugMeta || !(_s5CreateBugMeta.product_ids || []).length) {
     if (errEl) { errEl.innerText = '未获取到产品信息，无法创建'; errEl.style.display = 'block'; }
+    return;
+  }
+  if (_s5CreateBugMeta.create_access && _s5CreateBugMeta.create_access.ok === false) {
+    if (errEl) {
+      errEl.innerText = _s5CreateBugMeta.create_access.message || '当前禅道账号无法在该产品下创建Bug';
+      errEl.style.display = 'block';
+    }
     return;
   }
   if (Object.keys(_s5CreateBugMeta.executions || {}).length > 0 && !executionId) {
