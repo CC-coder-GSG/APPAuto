@@ -188,7 +188,7 @@ class ZentaoClient:
             "Accept": "application/json",
         }
         try:
-            resp = httpx.get(url, params=params, headers=headers, timeout=_DEFAULT_TIMEOUT)
+            resp = httpx.get(url, params=params, headers=headers, timeout=_DEFAULT_TIMEOUT, follow_redirects=True)
             if resp.status_code in (401, 403, 404):
                 return None
             if resp.status_code != 200:
@@ -223,7 +223,7 @@ class ZentaoClient:
             "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
         }
         try:
-            resp = httpx.get(url, params=params, headers=headers, timeout=_DEFAULT_TIMEOUT)
+            resp = httpx.get(url, params=params, headers=headers, timeout=_DEFAULT_TIMEOUT, follow_redirects=True)
             if resp.status_code != 200:
                 return None
             return resp.text or ""
