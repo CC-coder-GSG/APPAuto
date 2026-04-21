@@ -243,10 +243,22 @@ class ZentaoClient:
             "preview": "..."
           }
         """
-        candidates = [f"bug-create-{product_id}-{execution_id}.html"]
+        json_candidates = [f"bug-create-{product_id}-{execution_id}.json"]
         if execution_id:
-            candidates.append(f"bug-create-{product_id}-0.html")
-        for path in candidates:
+            json_candidates.append(f"bug-create-{product_id}-0.json")
+        for path in json_candidates:
+            payload = self.get_page(path)
+            if isinstance(payload, dict) and payload:
+                if payload.get("loginExpired") is True:
+                    return {"ok": False, "reason": "login_required", "path": path, "preview": "loginExpired"}
+                if payload.get("title") == "用户登录":
+                    return {"ok": False, "reason": "login_required", "path": path, "preview": "用户登录"}
+                return {"ok": True, "reason": "ok", "path": path, "preview": str(list(payload.keys())[:10])}
+
+        html_candidates = [f"bug-create-{product_id}-{execution_id}.html"]
+        if execution_id:
+            html_candidates.append(f"bug-create-{product_id}-0.html")
+        for path in html_candidates:
             text = self.get_page_text(path)
             if text is None:
                 continue

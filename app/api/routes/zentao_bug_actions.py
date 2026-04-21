@@ -116,6 +116,76 @@ def _find_option_by_label(options: dict[str, str], keyword: str) -> str | None:
     return None
 
 
+def _meta_requires_login(meta: dict | None) -> bool:
+    if not isinstance(meta, dict):
+        return False
+    if meta.get("loginExpired") is True:
+        return True
+    return str(meta.get("title") or "").strip() in {"用户登录", "鐢ㄦ埛鐧诲綍"}
+
+
+def _meta_is_effectively_empty(meta: dict | None) -> bool:
+    if not isinstance(meta, dict) or not meta:
+        return True
+    option_keys = (
+        "products",
+        "projects",
+        "executions",
+        "users",
+        "builds",
+        "moduleOptionMenu",
+        "modules",
+    )
+    for key in option_keys:
+        if _normalize_meta_options(meta.get(key)):
+            return False
+    return True
+
+
+def _load_create_bug_meta_with_retry(
+    client: ZentaoClient,
+    *,
+    user_id: int,
+    db: Session,
+    product_id: int,
+    execution_id: int,
+) -> tuple[ZentaoClient, dict]:
+    meta = client.get_create_bug_meta(product_id, execution_id) or {}
+    if not (_meta_requires_login(meta) or _meta_is_effectively_empty(meta)):
+        return client, meta
+
+    invalidate_token(user_id, db)
+    refreshed_client = _get_client(user_id, db)
+    if refreshed_client is None:
+        return client, meta
+
+    refreshed_meta = refreshed_client.get_create_bug_meta(product_id, execution_id) or {}
+    if _meta_requires_login(refreshed_meta) or _meta_is_effectively_empty(refreshed_meta):
+        return refreshed_client, refreshed_meta or meta
+    return refreshed_client, refreshed_meta
+
+
+def _probe_create_access_with_retry(
+    client: ZentaoClient,
+    *,
+    user_id: int,
+    db: Session,
+    product_id: int,
+    execution_id: int,
+) -> tuple[ZentaoClient, dict]:
+    probe = client.probe_bug_create_access(product_id, execution_id)
+    if str((probe or {}).get("reason") or "").strip().lower() != "login_required":
+        return client, probe
+
+    invalidate_token(user_id, db)
+    refreshed_client = _get_client(user_id, db)
+    if refreshed_client is None:
+        return client, probe
+
+    refreshed_probe = refreshed_client.probe_bug_create_access(product_id, execution_id)
+    return refreshed_client, refreshed_probe or probe
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -191,7 +261,13 @@ def get_create_bug_meta(
                 pass
 
     anchor_product_id = requested_product_id or (inferred_product_ids[0] if inferred_product_ids else None) or 15
-    anchor_meta = client.get_create_bug_meta(anchor_product_id, requested_execution_id or inferred_execution_id or 0) or {}
+    client, anchor_meta = _load_create_bug_meta_with_retry(
+        client,
+        user_id=current_user.id,
+        db=db,
+        product_id=anchor_product_id,
+        execution_id=requested_execution_id or inferred_execution_id or 0,
+    )
     all_products = _normalize_meta_options(anchor_meta.get("products"))
 
     selected_product_key = None
@@ -212,7 +288,13 @@ def get_create_bug_meta(
     selected_product_id = int(selected_product_key) if selected_product_key else None
     product_meta = anchor_meta
     if selected_product_id and selected_product_id != anchor_product_id:
-        product_meta = client.get_create_bug_meta(selected_product_id, requested_execution_id or inferred_execution_id or 0) or {}
+        client, product_meta = _load_create_bug_meta_with_retry(
+            client,
+            user_id=current_user.id,
+            db=db,
+            product_id=selected_product_id,
+            execution_id=requested_execution_id or inferred_execution_id or 0,
+        )
 
     all_projects = _normalize_meta_options(product_meta.get("projects"))
     selected_project_key = None
@@ -249,9 +331,23 @@ def get_create_bug_meta(
     selected_execution_id = int(selected_execution_key) if selected_execution_key else None
     field_meta = product_meta
     if selected_product_id and (selected_execution_id or 0) != (requested_execution_id or inferred_execution_id or 0):
-        field_meta = client.get_create_bug_meta(selected_product_id, selected_execution_id or 0) or product_meta
+        client, field_meta = _load_create_bug_meta_with_retry(
+            client,
+            user_id=current_user.id,
+            db=db,
+            product_id=selected_product_id,
+            execution_id=selected_execution_id or 0,
+        )
+        field_meta = field_meta or product_meta
     elif selected_product_id and selected_product_id != anchor_product_id:
-        field_meta = client.get_create_bug_meta(selected_product_id, selected_execution_id or 0) or product_meta
+        client, field_meta = _load_create_bug_meta_with_retry(
+            client,
+            user_id=current_user.id,
+            db=db,
+            product_id=selected_product_id,
+            execution_id=selected_execution_id or 0,
+        )
+        field_meta = field_meta or product_meta
 
     # Fetch user list / builds / modules from the selected create-bug meta
     users: dict[str, str] = {}
@@ -279,7 +375,13 @@ def get_create_bug_meta(
                     filtered_builds = {bid: name for bid, name in builds.items() if bid in execution_build_ids}
                     if filtered_builds:
                         builds = filtered_builds
-        create_access = client.probe_bug_create_access(selected_product_id, selected_execution_id or 0)
+        client, create_access = _probe_create_access_with_retry(
+            client,
+            user_id=current_user.id,
+            db=db,
+            product_id=selected_product_id,
+            execution_id=selected_execution_id or 0,
+        )
         create_access["message"] = _create_access_message(create_access, product_id=selected_product_id)
 
     return {

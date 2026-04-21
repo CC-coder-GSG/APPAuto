@@ -52,6 +52,19 @@ class _FakeZentaoClient:
         return {"message": "success"}
 
 
+class _EmptyMetaClient(_FakeZentaoClient):
+    def get_create_bug_meta(self, product_id: int, execution_id: int = 0) -> dict:
+        return {}
+
+    def probe_bug_create_access(self, product_id: int, execution_id: int = 0) -> dict:
+        return {
+            "ok": False,
+            "reason": "login_required",
+            "path": f"bug-create-{product_id}-{execution_id}.json",
+            "preview": "loginExpired",
+        }
+
+
 def _create_user(db_session) -> User:
     row = User(username="admin_bug", password_hash="x", role=UserRole.ADMIN, display_name="admin")
     db_session.add(row)
@@ -102,6 +115,33 @@ def test_create_meta_returns_access_denied_message(db_session, monkeypatch):
         assert "无权访问产品 15" in data["create_access"]["message"]
     finally:
         zentao_bug_actions.router.dependency_overrides_provider = None
+        app = client.app
+        app.dependency_overrides.clear()
+
+
+def test_create_meta_refreshes_stale_token_when_first_meta_is_empty(db_session, monkeypatch):
+    user = _create_user(db_session)
+    _bind_user(db_session, user.id)
+    client = _make_client(db_session, user)
+    clients = [_EmptyMetaClient(), _FakeZentaoClient()]
+    invalidated = []
+
+    def _fake_get_client(user_id, db):
+        assert clients
+        return clients.pop(0)
+
+    monkeypatch.setattr(zentao_bug_actions, "_get_client", _fake_get_client)
+    monkeypatch.setattr(zentao_bug_actions, "invalidate_token", lambda user_id, db: invalidated.append(user_id))
+
+    try:
+        resp = client.get("/zentao/bugs/create-meta?execution_id=1647")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["products"]["15"] == "Survey Master"
+        assert data["projects"]["134"] == "Survey Master 5.0"
+        assert data["selected_product_id"] == 15
+        assert invalidated == [user.id]
+    finally:
         app = client.app
         app.dependency_overrides.clear()
 
