@@ -1,6 +1,88 @@
 ﻿from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+# Windows + Python 3.12 ProactorEventLoop: 客户端在 AcceptEx 握手期间发 RST
+# 会导致 finish_accept 抛 OSError [WinError 64] "指定的网络名不再可用"，
+# 默认的 _start_serving 看到任意 OSError 就直接 sock.close() 把监听端口关掉，
+# 整个进程虽然还活着但已不再 accept，NSSM 也无法感知 → 服务"僵尸化"。
+# 这里把 _start_serving 换成一个对常见瞬时 winerror 只重试、不关监听的版本。
+if sys.platform == "win32":
+    from asyncio import exceptions as _aio_exc
+    from asyncio import trsock as _trsock
+    from asyncio import windows_events as _win_events
+    import logging as _logging
+
+    _win_accept_log = _logging.getLogger("uvicorn.error")
+    _TRANSIENT_WINERRS = {53, 64, 121, 1236, 10053, 10054, 10060}
+
+    def _patched_start_serving(
+        self,
+        protocol_factory,
+        sock,
+        sslcontext=None,
+        server=None,
+        backlog=100,
+        ssl_handshake_timeout=None,
+        ssl_shutdown_timeout=None,
+    ):
+        trsock_view = _trsock.TransportSocket(sock)
+
+        def accept_loop(f=None):
+            try:
+                if f is not None:
+                    conn, addr = f.result()
+                    protocol = protocol_factory()
+                    if sslcontext is not None:
+                        self._make_ssl_transport(
+                            conn,
+                            protocol,
+                            sslcontext,
+                            server_side=True,
+                            extra={"peername": addr},
+                            server=server,
+                            ssl_handshake_timeout=ssl_handshake_timeout,
+                            ssl_shutdown_timeout=ssl_shutdown_timeout,
+                        )
+                    else:
+                        self._make_socket_transport(
+                            conn,
+                            protocol,
+                            extra={"peername": addr},
+                            server=server,
+                        )
+                if self.is_closed():
+                    return
+                f = self._proactor.accept(sock)
+            except OSError as exc:
+                winerr = getattr(exc, "winerror", None)
+                if winerr in _TRANSIENT_WINERRS and sock.fileno() != -1:
+                    _win_accept_log.warning(
+                        "IOCP accept transient error (winerror=%s): %s — keeping listener alive",
+                        winerr,
+                        exc,
+                    )
+                    self.call_soon(accept_loop)
+                    return
+                if sock.fileno() != -1:
+                    self.call_exception_handler(
+                        {
+                            "message": "Accept failed on a socket",
+                            "exception": exc,
+                            "socket": trsock_view,
+                        }
+                    )
+                    sock.close()
+            except _aio_exc.CancelledError:
+                sock.close()
+            else:
+                self._accept_futures[sock.fileno()] = f
+                f.add_done_callback(accept_loop)
+
+        self.call_soon(accept_loop)
+
+    _win_events.ProactorEventLoop._start_serving = _patched_start_serving
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
