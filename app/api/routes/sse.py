@@ -50,16 +50,22 @@ async def sse_stream(
                 # This replaces the fixed 0.8s sleep and wakes up immediately on publish.
                 await sse_wait_for_events(timeout=1.0)
 
-            # 定期重查 DB 验证 session 是否仍有效（防止被踢后流继续推送）
+            # 定期重查 DB 验证 session 是否仍有效（防止被踢后流继续推送）。
+            # 这里不用 db.expire/refresh —— current_user 实例在请求返回后会被
+            # get_db 关闭 session 从而变成 detached，expire 会抛
+            # InvalidRequestError。直接用 id 重新查一次 session_token 列即可。
             session_check_ticks += 1
             if session_check_ticks >= _SESSION_CHECK_INTERVAL:
                 session_check_ticks = 0
-                db.expire(current_user)
                 try:
-                    db.refresh(current_user)
+                    current_token = (
+                        db.query(User.session_token)
+                        .filter(User.id == current_user.id)
+                        .scalar()
+                    )
                 except Exception:
                     break
-                if current_user.session_token != saved_session_token:
+                if current_token != saved_session_token:
                     break
 
     return StreamingResponse(
