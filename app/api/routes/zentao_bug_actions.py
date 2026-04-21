@@ -75,6 +75,7 @@ class EditBugPayload(BaseModel):
 
 class CreateBugPayload(BaseModel):
     product_id: int
+    project_id: Optional[int] = None
     execution_id: Optional[int] = None
     title: str
     severity: int = 3
@@ -105,6 +106,16 @@ def _create_access_message(probe: dict | None, *, binding: UserZentaoBinding | N
     return "禅道创建接口返回空成功响应，但未查询到新建 Bug。经排查该 IPD 实例的 v1 创建接口未真正落库，请联系禅道管理员检查接口配置。"
 
 
+def _find_option_by_label(options: dict[str, str], keyword: str) -> str | None:
+    target = (keyword or "").strip().lower()
+    if not target:
+        return None
+    for key, label in options.items():
+        if target in str(label or "").strip().lower():
+            return str(key)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -113,6 +124,8 @@ def _create_access_message(probe: dict | None, *, binding: UserZentaoBinding | N
 @router.get("/bugs/create-meta")
 def get_create_bug_meta(
     major_version_id: Optional[int] = None,
+    product_id: Optional[int] = None,
+    project_id: Optional[int] = None,
     execution_id: Optional[int] = None,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -143,59 +156,104 @@ def get_create_bug_meta(
             },
         }
 
+    requested_product_id = int(product_id) if product_id else None
+    requested_project_id = int(project_id) if project_id else None
     requested_execution_id = int(execution_id) if execution_id else None
-    selected_execution_id: Optional[int] = requested_execution_id
-    product_ids: list[int] = []
-    project_id: Optional[int] = None
+    inferred_execution_id: Optional[int] = requested_execution_id
+    inferred_product_ids: list[int] = []
+    inferred_project_id: Optional[int] = requested_project_id
     if major_version_id:
         major = db.query(Version).filter(
             Version.id == major_version_id,
             Version.version_type == VersionType.MAJOR,
         ).first()
         if major:
-            if not selected_execution_id and major.zentao_execution_id:
-                selected_execution_id = int(major.zentao_execution_id)
+            if not inferred_execution_id and major.zentao_execution_id:
+                inferred_execution_id = int(major.zentao_execution_id)
             if major.zentao_project_id:
-                project_id = int(major.zentao_project_id)
+                inferred_project_id = int(major.zentao_project_id)
 
-        if selected_execution_id:
-            ctx = client.get_execution_context(selected_execution_id)
-            product_ids = ctx.get("product_ids") or []
-            project_id = ctx.get("project_id") or project_id
+        if inferred_execution_id:
+            ctx = client.get_execution_context(inferred_execution_id)
+            inferred_product_ids = ctx.get("product_ids") or []
+            inferred_project_id = ctx.get("project_id") or inferred_project_id
 
     # If we have no product yet, try to infer from an existing synced bug
-    if not product_ids and major_version_id:
+    if not inferred_product_ids and major_version_id:
         sample = db.query(BugTracking).filter(
             BugTracking.major_version_id == major_version_id,
             BugTracking.zentao_product_id.isnot(None),
         ).first()
         if sample and sample.zentao_product_id:
             try:
-                product_ids = [int(sample.zentao_product_id)]
+                inferred_product_ids = [int(sample.zentao_product_id)]
             except (TypeError, ValueError):
                 pass
 
+    anchor_product_id = requested_product_id or (inferred_product_ids[0] if inferred_product_ids else None) or 15
+    anchor_meta = client.get_create_bug_meta(anchor_product_id, requested_execution_id or inferred_execution_id or 0) or {}
+    all_products = _normalize_meta_options(anchor_meta.get("products"))
+
+    selected_product_key = None
+    if requested_product_id and str(requested_product_id) in all_products:
+        selected_product_key = str(requested_product_id)
+    if not selected_product_key:
+        selected_product_key = _find_option_by_label(all_products, "survey master")
+    if not selected_product_key and inferred_product_ids:
+        for pid in inferred_product_ids:
+            if str(pid) in all_products:
+                selected_product_key = str(pid)
+                break
+    if not selected_product_key and str(anchor_product_id) in all_products:
+        selected_product_key = str(anchor_product_id)
+    if not selected_product_key and all_products:
+        selected_product_key = next(iter(all_products.keys()))
+
+    selected_product_id = int(selected_product_key) if selected_product_key else None
+    product_meta = anchor_meta
+    if selected_product_id and selected_product_id != anchor_product_id:
+        product_meta = client.get_create_bug_meta(selected_product_id, requested_execution_id or inferred_execution_id or 0) or {}
+
+    all_projects = _normalize_meta_options(product_meta.get("projects"))
+    selected_project_key = None
+    if requested_project_id and str(requested_project_id) in all_projects:
+        selected_project_key = str(requested_project_id)
+    if not selected_project_key and inferred_project_id and str(inferred_project_id) in all_projects:
+        selected_project_key = str(inferred_project_id)
+    if not selected_project_key:
+        selected_project_key = _find_option_by_label(all_projects, "survey master")
+    if not selected_project_key and len(all_projects) == 1:
+        selected_project_key = next(iter(all_projects.keys()))
+    if not selected_project_key and all_projects:
+        selected_project_key = next(iter(all_projects.keys()))
+
+    selected_project_id = int(selected_project_key) if selected_project_key else None
     executions: dict[str, str] = {}
-    if project_id:
-        for row in client.list_project_executions(project_id):
+    if selected_project_id:
+        for row in client.list_project_executions(selected_project_id):
             exec_id = row.get("id")
             exec_name = str(row.get("name") or "").strip()
             if exec_id and exec_name:
                 executions[str(exec_id)] = exec_name
+    if not executions:
+        executions = _normalize_meta_options(product_meta.get("executions"))
 
-    if not selected_execution_id and len(executions) == 1:
-        only_exec_id = next(iter(executions.keys()), "")
-        if only_exec_id:
-            try:
-                selected_execution_id = int(only_exec_id)
-            except ValueError:
-                selected_execution_id = None
+    selected_execution_key = None
+    if requested_execution_id and str(requested_execution_id) in executions:
+        selected_execution_key = str(requested_execution_id)
+    if not selected_execution_key and inferred_execution_id and str(inferred_execution_id) in executions:
+        selected_execution_key = str(inferred_execution_id)
+    if not selected_execution_key and len(executions) == 1:
+        selected_execution_key = next(iter(executions.keys()))
 
-    if selected_execution_id and not product_ids:
-        ctx = client.get_execution_context(selected_execution_id)
-        product_ids = ctx.get("product_ids") or product_ids
+    selected_execution_id = int(selected_execution_key) if selected_execution_key else None
+    field_meta = product_meta
+    if selected_product_id and (selected_execution_id or 0) != (requested_execution_id or inferred_execution_id or 0):
+        field_meta = client.get_create_bug_meta(selected_product_id, selected_execution_id or 0) or product_meta
+    elif selected_product_id and selected_product_id != anchor_product_id:
+        field_meta = client.get_create_bug_meta(selected_product_id, selected_execution_id or 0) or product_meta
 
-    # Fetch user list from create-bug page JSON for the first product
+    # Fetch user list / builds / modules from the selected create-bug meta
     users: dict[str, str] = {}
     builds: dict[str, str] = {}
     modules: dict[str, str] = {}
@@ -203,30 +261,33 @@ def get_create_bug_meta(
     bug_types: dict[str, str] = {}
     meta_scope = "none"
     create_access = {"ok": None, "reason": "unavailable", "message": ""}
-    if product_ids:
-        meta = client.get_create_bug_meta(product_ids[0], selected_execution_id or 0)
-        if meta:
-            meta_scope = str(meta.get("__meta_scope__") or "unknown")
-            users_raw = meta.get("users") or {}
+    if selected_product_id:
+        if field_meta:
+            meta_scope = str(field_meta.get("__meta_scope__") or "unknown")
+            users_raw = field_meta.get("users") or {}
             for account, display in (users_raw.items() if isinstance(users_raw, dict) else []):
                 if isinstance(display, str) and len(display) > 2 and display[1] == ":":
                     display = display[2:]
                 users[account] = display
-            builds = _normalize_meta_options(meta.get("builds"))
-            modules = _normalize_meta_options(meta.get("moduleOptionMenu") or meta.get("modules") or meta.get("module"))
-            stories = _normalize_meta_options(meta.get("stories") or meta.get("story"))
-            bug_types = _normalize_meta_options(meta.get("typeList") or meta.get("type"))
+            builds = _normalize_meta_options(field_meta.get("builds"))
+            modules = _normalize_meta_options(field_meta.get("moduleOptionMenu") or field_meta.get("modules") or field_meta.get("module"))
+            stories = _normalize_meta_options(field_meta.get("stories") or field_meta.get("story"))
+            bug_types = _normalize_meta_options(field_meta.get("typeList") or field_meta.get("type"))
             if selected_execution_id and builds:
                 execution_build_ids = set(client.get_execution_build_ids(selected_execution_id))
                 if execution_build_ids:
                     filtered_builds = {bid: name for bid, name in builds.items() if bid in execution_build_ids}
                     if filtered_builds:
                         builds = filtered_builds
-        create_access = client.probe_bug_create_access(product_ids[0], selected_execution_id or 0)
-        create_access["message"] = _create_access_message(create_access, product_id=product_ids[0])
+        create_access = client.probe_bug_create_access(selected_product_id, selected_execution_id or 0)
+        create_access["message"] = _create_access_message(create_access, product_id=selected_product_id)
 
     return {
-        "product_ids": product_ids,
+        "product_ids": [selected_product_id] if selected_product_id else [],
+        "products": all_products,
+        "projects": all_projects,
+        "selected_product_id": selected_product_id,
+        "selected_project_id": selected_project_id,
         "execution_id": selected_execution_id,
         "selected_execution_id": selected_execution_id,
         "executions": executions,
@@ -260,6 +321,8 @@ def create_zentao_bug(
         "pri": payload.pri,
         "type": payload.bug_type,
     }
+    if payload.project_id:
+        body["project"] = payload.project_id
     if payload.execution_id:
         body["execution"] = payload.execution_id
     if payload.steps:
@@ -338,6 +401,7 @@ def create_zentao_bug(
         zentao_bug_title=payload.title,
         zentao_bug_url=f"{base_url}/bug-view-{zentao_bug_id}.html" if base_url else None,
         zentao_product_id=str(payload.product_id),
+        zentao_project_id=str(payload.project_id) if payload.project_id else None,
         zentao_execution_id=str(payload.execution_id) if payload.execution_id else None,
         zentao_opened_build_ids=json.dumps(payload.opened_build or [], ensure_ascii=False),
         zentao_live_status="active",

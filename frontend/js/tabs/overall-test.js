@@ -1491,7 +1491,7 @@ function _resetS5CreateBugForm() {
     const el = document.getElementById(id);
     if (el) el.value = '3';
   });
-  ['s5CreateBugExecution', 's5CreateBugModule', 's5CreateBugBuild', 's5CreateBugStory'].forEach((id) => {
+  ['s5CreateBugProduct', 's5CreateBugProject', 's5CreateBugExecution', 's5CreateBugModule', 's5CreateBugBuild', 's5CreateBugStory'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
@@ -1532,6 +1532,8 @@ function _fillS5CreateBugSelect(selectId, options, placeholder, defaultValue = '
 
 function _collectS5CreateBugSelections() {
   return {
+    productId: document.getElementById('s5CreateBugProduct')?.value || '',
+    projectId: document.getElementById('s5CreateBugProject')?.value || '',
     assignedTo: document.getElementById('s5CreateBugAssignTo')?.value || '',
     executionId: document.getElementById('s5CreateBugExecution')?.value || '',
     moduleId: document.getElementById('s5CreateBugModule')?.value || '',
@@ -1626,11 +1628,14 @@ function _renderS5CreateBugUserSelect(users, selectedValue = '') {
 
 function _applyS5CreateBugMeta(meta, previous = {}) {
   const hintEl = document.getElementById('s5CreateBugMetaHint');
-  const productId = (meta.product_ids || [])[0];
+  const productId = String(meta.selected_product_id || (meta.product_ids || [])[0] || '');
+  const projectId = String(meta.selected_project_id || '');
   const selectedExecutionId = String(meta.selected_execution_id || meta.execution_id || '');
   const executionOptions = meta.executions || {};
   const createAccess = meta.create_access || {};
 
+  _fillS5CreateBugSelect('s5CreateBugProduct', meta.products || {}, '-- 请选择产品 --', previous.productId || productId);
+  _fillS5CreateBugSelect('s5CreateBugProject', meta.projects || {}, '-- 请选择项目 --', previous.projectId || projectId);
   _fillS5CreateBugSelect('s5CreateBugExecution', executionOptions, '-- 请选择执行 --', previous.executionId || selectedExecutionId);
   _fillS5CreateBugSelect('s5CreateBugModule', meta.modules || {}, '-- 请选择模块 --', previous.moduleId);
   _fillS5CreateBugSelect('s5CreateBugBuild', meta.builds || {}, '-- 请选择小版本 --', previous.buildId);
@@ -1647,12 +1652,12 @@ function _applyS5CreateBugMeta(meta, previous = {}) {
     hintEl.innerText = (createAccess.ok === false && createAccess.message)
       ? `⚠️ ${createAccess.message}`
       : (productId
-        ? `产品ID: ${productId}${selectedExecutionId ? `  执行ID: ${selectedExecutionId}` : ''}`
+        ? `产品ID: ${productId}${projectId ? `  项目ID: ${projectId}` : ''}${selectedExecutionId ? `  执行ID: ${selectedExecutionId}` : ''}`
         : '⚠️ 未找到产品信息，请确认该大版本已配置禅道执行版本映射');
   }
 }
 
-async function _loadS5CreateBugMeta(majorId, executionId = '', previous = {}) {
+async function _loadS5CreateBugMeta(majorId, options = {}, previous = {}) {
   const hintEl = document.getElementById('s5CreateBugMetaHint');
   const userContainer = document.getElementById('s5CreateBugUserContainer');
   const errEl = document.getElementById('s5CreateBugErrorMsg');
@@ -1660,7 +1665,11 @@ async function _loadS5CreateBugMeta(majorId, executionId = '', previous = {}) {
   if (userContainer) userContainer.innerHTML = '<div style="color:#94a3b8; font-size:13px;">加载中...</div>';
   if (errEl) errEl.style.display = 'none';
 
-  const qs = executionId ? `&execution_id=${encodeURIComponent(executionId)}` : '';
+  const parts = [];
+  if (options.productId) parts.push(`product_id=${encodeURIComponent(options.productId)}`);
+  if (options.projectId) parts.push(`project_id=${encodeURIComponent(options.projectId)}`);
+  if (options.executionId) parts.push(`execution_id=${encodeURIComponent(options.executionId)}`);
+  const qs = parts.length ? `&${parts.join('&')}` : '';
   const resp = await api(`/zentao/bugs/create-meta?major_version_id=${majorId}${qs}`);
   _s5CreateBugMeta = await resp.json();
   _applyS5CreateBugMeta(_s5CreateBugMeta, previous);
@@ -1681,6 +1690,8 @@ export async function openS5CreateZentaoBugModal() {
 
   _resetS5CreateBugForm();
   _bindS5StepsPasteHandler();
+  _fillS5CreateBugSelect('s5CreateBugProduct', {}, '-- 请选择产品 --');
+  _fillS5CreateBugSelect('s5CreateBugProject', {}, '-- 请选择项目 --');
   _fillS5CreateBugSelect('s5CreateBugExecution', {}, '-- 请选择执行 --');
   _fillS5CreateBugSelect('s5CreateBugModule', {}, '-- 请选择模块 --');
   _fillS5CreateBugSelect('s5CreateBugBuild', {}, '-- 请选择小版本 --');
@@ -1701,13 +1712,52 @@ export async function openS5CreateZentaoBugModal() {
   }
 }
 
+export async function onS5CreateBugProductChange() {
+  const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
+  if (!majorId) return;
+  const previous = _collectS5CreateBugSelections();
+  try {
+    await _loadS5CreateBugMeta(majorId, {
+      productId: previous.productId,
+      projectId: previous.projectId,
+    }, previous);
+  } catch (err) {
+    const errEl = document.getElementById('s5CreateBugErrorMsg');
+    if (errEl) {
+      errEl.innerText = err.message || '加载产品元数据失败';
+      errEl.style.display = 'block';
+    }
+  }
+}
+
+export async function onS5CreateBugProjectChange() {
+  const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
+  if (!majorId) return;
+  const previous = _collectS5CreateBugSelections();
+  try {
+    await _loadS5CreateBugMeta(majorId, {
+      productId: previous.productId,
+      projectId: previous.projectId,
+    }, previous);
+  } catch (err) {
+    const errEl = document.getElementById('s5CreateBugErrorMsg');
+    if (errEl) {
+      errEl.innerText = err.message || '加载项目元数据失败';
+      errEl.style.display = 'block';
+    }
+  }
+}
+
 export async function onS5CreateBugExecutionChange() {
   const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
   if (!majorId) return;
-  const executionId = document.getElementById('s5CreateBugExecution')?.value || '';
   const previous = _collectS5CreateBugSelections();
   try {
-    await _loadS5CreateBugMeta(majorId, executionId, previous);
+    await _loadS5CreateBugMeta(majorId, {
+      productId: previous.productId,
+      projectId: previous.projectId,
+      executionId: previous.executionId,
+    }, previous);
   } catch (err) {
     const errEl = document.getElementById('s5CreateBugErrorMsg');
     if (errEl) {
@@ -1765,6 +1815,8 @@ export async function submitS5CreateZentaoBug() {
   const severity = Number(document.getElementById('s5CreateBugSeverity')?.value || 3);
   const pri = Number(document.getElementById('s5CreateBugPri')?.value || 3);
   const assignedTo = document.getElementById('s5CreateBugAssignTo')?.value || '';
+  const productId = document.getElementById('s5CreateBugProduct')?.value || '';
+  const projectId = document.getElementById('s5CreateBugProject')?.value || '';
   const executionId = document.getElementById('s5CreateBugExecution')?.value || '';
   const moduleId = document.getElementById('s5CreateBugModule')?.value || '';
   const openedBuild = document.getElementById('s5CreateBugBuild')?.value || '';
@@ -1778,6 +1830,14 @@ export async function submitS5CreateZentaoBug() {
   }
   if (!_s5CreateBugMeta || !(_s5CreateBugMeta.product_ids || []).length) {
     if (errEl) { errEl.innerText = '未获取到产品信息，无法创建'; errEl.style.display = 'block'; }
+    return;
+  }
+  if (!productId) {
+    if (errEl) { errEl.innerText = '请选择产品'; errEl.style.display = 'block'; }
+    return;
+  }
+  if (Object.keys(_s5CreateBugMeta.projects || {}).length > 0 && !projectId) {
+    if (errEl) { errEl.innerText = '请选择项目'; errEl.style.display = 'block'; }
     return;
   }
   if (_s5CreateBugMeta.create_access && _s5CreateBugMeta.create_access.ok === false) {
@@ -1800,7 +1860,8 @@ export async function submitS5CreateZentaoBug() {
 
   try {
     const body = {
-      product_id: _s5CreateBugMeta.product_ids[0],
+      product_id: Number(productId),
+      project_id: projectId ? Number(projectId) : null,
       execution_id: executionId ? Number(executionId) : null,
       title,
       severity,
@@ -1863,6 +1924,8 @@ const OmniQAOverallTestTab = {
   openS5CreateZentaoBugModal,
   closeS5CreateZentaoBugModal,
   submitS5CreateZentaoBug,
+  onS5CreateBugProductChange,
+  onS5CreateBugProjectChange,
   onS5CreateBugExecutionChange,
   toggleS5StepsFullscreen,
   toggleS5DetailRow,
@@ -1902,6 +1965,8 @@ window.closeS5AssignModal = closeS5AssignModal;
 window.openS5CreateZentaoBugModal = openS5CreateZentaoBugModal;
 window.closeS5CreateZentaoBugModal = closeS5CreateZentaoBugModal;
 window.submitS5CreateZentaoBug = submitS5CreateZentaoBug;
+window.onS5CreateBugProductChange = onS5CreateBugProductChange;
+window.onS5CreateBugProjectChange = onS5CreateBugProjectChange;
 window.onS5CreateBugExecutionChange = onS5CreateBugExecutionChange;
 window.toggleS5StepsFullscreen = toggleS5StepsFullscreen;
 

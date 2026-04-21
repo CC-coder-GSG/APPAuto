@@ -11,14 +11,25 @@ from app.models.user_zentao_binding import UserZentaoBinding
 
 class _FakeZentaoClient:
     def get_execution_context(self, execution_id: int) -> dict:
-        return {"product_ids": [15], "project_id": None}
+        return {"product_ids": [391], "project_id": 134}
 
     def list_project_executions(self, project_id: int) -> list[dict]:
+        if project_id == 134:
+            return [
+                {"id": 1647, "name": "Survey Master 5.0/s4031"},
+                {"id": 1770, "name": "Survey Master 5.0/UniSurvey"},
+            ]
         return []
 
     def get_create_bug_meta(self, product_id: int, execution_id: int = 0) -> dict:
         return {
             "__meta_scope__": "execution",
+            "products": {"15": "Survey Master", "391": "UniSurvey"},
+            "projects": {"134": "Survey Master 5.0"},
+            "executions": {
+                "1647": "Survey Master 5.0/s4031",
+                "1770": "Survey Master 5.0/UniSurvey",
+            },
             "users": {"chenwenbo": "陈文博"},
             "builds": {"4531": "4.0.3.1.260420(40301032)"},
             "moduleOptionMenu": {"669": "/项目"},
@@ -83,6 +94,10 @@ def test_create_meta_returns_access_denied_message(db_session, monkeypatch):
         assert resp.status_code == 200
         data = resp.json()
         assert data["product_ids"] == [15]
+        assert data["selected_product_id"] == 15
+        assert data["selected_project_id"] == 134
+        assert data["products"]["15"] == "Survey Master"
+        assert data["projects"]["134"] == "Survey Master 5.0"
         assert data["create_access"]["reason"] == "access_denied"
         assert "无权访问产品 15" in data["create_access"]["message"]
     finally:
