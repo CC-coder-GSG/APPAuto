@@ -292,11 +292,94 @@ class ZentaoClient:
         Create a new bug in Zentao.
 
         Uses the product-scoped REST endpoint, which is the stable path
-        across Zentao 18.x: POST /v1/products/{productID}/bugs.
-        The 'product' key is stripped from the body since it goes in the URL.
+        across Zentao 18.x: POST /v1/products/{productID}/bugs. The
+        'product' key is stripped from the body since it goes in the URL.
+
+        Some Zentao deployments respond with HTTP 201 + empty body to bug
+        creation. When that happens we can't rely on the JSON body for the
+        new bug ID; instead we:
+          1) look at the Location header for a `/bugs/{id}` pointer, and
+          2) failing that, query the newest bugs for the product and match
+             by title to locate the row we just created.
         """
         body = {k: v for k, v in data.items() if k != "product"}
-        return self.post(f"products/{product_id}/bugs", body)
+        url = f"{self._api_base}/products/{product_id}/bugs"
+        try:
+            resp = httpx.post(url, json=body, headers=self._headers(), timeout=_DEFAULT_TIMEOUT)
+            if resp.status_code not in (200, 201):
+                raise ZentaoAPIError(resp.status_code, resp.text[:500])
+            result = _parse_write_response(resp)
+        except ZentaoAPIError:
+            raise
+        except Exception as e:
+            logger.warning("ZentaoClient.create_bug error: %s", e)
+            raise ZentaoAPIError(0, str(e))
+
+        if self._extract_bug_id_from_result(result):
+            return result
+
+        location = resp.headers.get("Location") or resp.headers.get("location") or ""
+        m = re.search(r'/bugs?/(\d+)', location)
+        if m:
+            return {"id": int(m.group(1))}
+
+        # Fallback: fetch newest bugs for this product and match title.
+        title = str(body.get("title") or "").strip()
+        if title:
+            latest = self._find_latest_bug_by_title(product_id, title)
+            if latest:
+                logger.info("ZentaoClient.create_bug: recovered id via title lookup: %s", latest.get("id"))
+                return latest
+
+        return result
+
+    @staticmethod
+    def _extract_bug_id_from_result(result: Any) -> int | None:
+        if not isinstance(result, dict):
+            return None
+        for candidate in (
+            result,
+            result.get("bug") if isinstance(result.get("bug"), dict) else None,
+            result.get("data") if isinstance(result.get("data"), dict) else None,
+        ):
+            if not isinstance(candidate, dict):
+                continue
+            for key in ("id", "bugID", "bug_id"):
+                val = candidate.get(key)
+                try:
+                    iv = int(val) if val is not None else None
+                except (TypeError, ValueError):
+                    iv = None
+                if iv:
+                    return iv
+        return None
+
+    def _find_latest_bug_by_title(self, product_id: int, title: str) -> dict | None:
+        """
+        Return the most recently created bug in the given product whose
+        title matches `title`. Used to recover the bug ID when the
+        create-bug response had an empty body.
+        """
+        try:
+            resp = self.get(f"products/{product_id}/bugs", params={"orderBy": "id_desc", "limit": 30})
+        except ZentaoAPIError:
+            return None
+        if not isinstance(resp, dict):
+            return None
+        bugs = resp.get("bugs") if isinstance(resp.get("bugs"), list) else None
+        if not bugs:
+            data = resp.get("data")
+            if isinstance(data, list):
+                bugs = data
+        if not bugs:
+            return None
+        target = title.strip()
+        for b in bugs:
+            if not isinstance(b, dict):
+                continue
+            if str(b.get("title") or "").strip() == target:
+                return b
+        return None
 
     def get_execution_context(self, execution_id: int) -> dict:
         """
@@ -419,9 +502,11 @@ class ZentaoClient:
 
         last_error: Exception | None = None
         last_body: str = ""
-        # Order matters: most modern Zentao (18.x+) requires the bracketed
-        # form, while older installs reject it.
-        field_candidates = ("files[]", "files", "file")
+        # Order matters: modern Zentao (18.x+) uses the bracketed form; some
+        # older / IPD forks use the singular forms; `imgFile` is the field
+        # name the legacy `file.ajaxUpload` module expects — some Zentao
+        # deployments route /v1/files through that handler internally.
+        field_candidates = ("files[]", "files", "file", "imgFile")
         for field_name in field_candidates:
             files = {field_name: (safe_name, file_bytes, content_type)}
             try:

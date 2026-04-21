@@ -1442,9 +1442,14 @@ function _bindS5StepsPasteHandler() {
       _insertHtmlAtCaret(`<span id="${placeholderId}" style="color:#94a3b8; font-size:12px;">[上传中…]</span>`);
       try {
         const info = await _uploadInlineStepsImage(file);
-        const proxyUrl = info.proxy_url;
-        const zentaoUrl = info.zentao_url || '';
-        const imgHtml = `<img src="${proxyUrl}" data-zentao-url="${escapeHtml(zentaoUrl)}" data-file-id="${info.file_id}" alt="${escapeHtml(info.title || 'image')}" style="max-width:100%; margin:4px 0; border-radius:4px;"/>`;
+        // Preview URL: a client-side blob URL so the image displays
+        // immediately without needing to re-fetch through our auth-
+        // protected /zentao/files proxy. Submit URL: the absolute URL we
+        // want Zentao to store (either Zentao's own file-read URL or our
+        // local inline-images URL when storage=local).
+        const previewUrl = URL.createObjectURL(file);
+        const submitUrl = info.zentao_url || info.proxy_url || '';
+        const imgHtml = `<img src="${previewUrl}" data-submit-url="${escapeHtml(submitUrl)}" data-storage="${escapeHtml(info.storage || '')}" alt="${escapeHtml(info.title || 'image')}" style="max-width:100%; margin:4px 0; border-radius:4px;"/>`;
         const placeholder = document.getElementById(placeholderId);
         if (placeholder) {
           placeholder.outerHTML = imgHtml;
@@ -1468,11 +1473,11 @@ function _serializeS5StepsForSubmit() {
   const source = document.getElementById('s5CreateBugSteps');
   if (!source) return '';
   const clone = source.cloneNode(true);
-  clone.querySelectorAll('img[data-zentao-url]').forEach((img) => {
-    const ztUrl = img.getAttribute('data-zentao-url');
-    if (ztUrl) img.setAttribute('src', ztUrl);
-    img.removeAttribute('data-zentao-url');
-    img.removeAttribute('data-file-id');
+  clone.querySelectorAll('img[data-submit-url]').forEach((img) => {
+    const submitUrl = img.getAttribute('data-submit-url');
+    if (submitUrl) img.setAttribute('src', submitUrl);
+    img.removeAttribute('data-submit-url');
+    img.removeAttribute('data-storage');
   });
   return (clone.innerHTML || '').trim();
 }

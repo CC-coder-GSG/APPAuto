@@ -21,12 +21,16 @@ from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 import re
+import uuid
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import httpx as _httpx
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -440,20 +444,63 @@ def proxy_zentao_file(
         raise HTTPException(status_code=502, detail=str(exc))
 
 
+# Directory used to persist inline images when the user's Zentao rejects our
+# upload (extension whitelist, API mismatch, etc.). We fall back to serving
+# them from OmniQA itself via the public route below, and the bug's steps
+# HTML references the full URL so Zentao's viewer can still render them.
+_INLINE_IMAGES_ROOT = Path(__file__).resolve().parents[3] / "uploads" / "inline_images"
+
+
+def _save_local_inline_image(data: bytes, extension: str) -> Path:
+    today = datetime.now().strftime("%Y%m%d")
+    target_dir = _INLINE_IMAGES_ROOT / today
+    target_dir.mkdir(parents=True, exist_ok=True)
+    uid = uuid.uuid4().hex
+    ext = (extension or "png").lstrip(".").lower() or "png"
+    path = target_dir / f"{uid}.{ext}"
+    path.write_bytes(data)
+    return path
+
+
+def _public_url_for(request: Request, relative_path: str) -> str:
+    base = str(request.base_url).rstrip("/")
+    return f"{base}{relative_path}"
+
+
+@router.get("/inline-images/{date_dir}/{filename}", include_in_schema=False)
+def serve_inline_image(date_dir: str, filename: str):
+    """
+    Publicly serve a locally-stored inline bug image.
+
+    The images are referenced by absolute URL inside bug descriptions so
+    Zentao's viewer (which cannot authenticate to OmniQA) can load them.
+    Paths are constrained to the inline_images directory.
+    """
+    if not re.fullmatch(r"\d{8}", date_dir):
+        raise HTTPException(status_code=404, detail="not found")
+    if not re.fullmatch(r"[a-f0-9]{32}\.[a-zA-Z0-9]{1,8}", filename):
+        raise HTTPException(status_code=404, detail="not found")
+    path = _INLINE_IMAGES_ROOT / date_dir / filename
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    media_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+    return FileResponse(str(path), media_type=media_type)
+
+
 @router.post("/bugs/upload-inline-image")
 async def upload_inline_bug_image(
+    request: Request,
     file: UploadFile = File(...),
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Upload a pasted/attached inline image for a bug's reproduce-steps editor.
-
-    The image is forwarded to Zentao via the v1 files API using the
-    calling user's token. Returns the Zentao file ID plus a proxy URL
-    (`/zentao/files/{id}`) suitable for inline <img> preview, and the raw
-    Zentao URL that should be substituted into the HTML body just before
-    the bug is submitted so Zentao renders the attachment correctly.
+    Upload a pasted/attached inline image for a bug's reproduce-steps
+    editor. We try uploading to Zentao first so the file is hosted there;
+    if Zentao rejects the upload (extension whitelist, version mismatch),
+    we transparently fall back to saving the image in OmniQA's local
+    `uploads/inline_images/` directory and returning an absolute OmniQA
+    URL. Either way the caller gets a usable `zentao_url` and `proxy_url`.
     """
     if not file or not file.filename:
         raise HTTPException(status_code=400, detail="未提供图片文件")
@@ -467,10 +514,17 @@ async def upload_inline_bug_image(
     if len(data) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="图片过大（最大 10MB）")
 
+    ext_from_mime = content_type.split("/")[-1].split(";")[0].strip() if content_type.startswith("image/") else ""
+    if ext_from_mime == "jpeg":
+        ext_from_mime = "jpg"
+    derived_ext = ext_from_mime or (file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "png")
+
     client = _get_client(current_user.id, db)
     if client is None:
         raise HTTPException(status_code=400, detail="当前用户未配置可用的禅道绑定")
 
+    info: dict | None = None
+    upload_error: Optional[str] = None
     try:
         info = client.upload_file(
             file_bytes=data,
@@ -483,37 +537,61 @@ async def upload_inline_bug_image(
         if exc.status_code == 401:
             invalidate_token(current_user.id, db)
             client2 = _get_client(current_user.id, db)
-            if client2 is None:
-                raise HTTPException(status_code=400, detail="禅道 token 刷新失败")
-            try:
-                info = client2.upload_file(
-                    file_bytes=data,
-                    filename=file.filename,
-                    content_type=content_type or "application/octet-stream",
-                    object_type="bug",
-                    object_id=0,
-                )
-            except ZentaoAPIError as exc2:
-                raise HTTPException(status_code=exc2.status_code or 502, detail=f"禅道图片上传失败: {exc2.message}")
+            if client2 is not None:
+                try:
+                    info = client2.upload_file(
+                        file_bytes=data,
+                        filename=file.filename,
+                        content_type=content_type or "application/octet-stream",
+                        object_type="bug",
+                        object_id=0,
+                    )
+                except ZentaoAPIError as exc2:
+                    upload_error = exc2.message
+            else:
+                upload_error = "token 刷新失败"
         else:
-            raise HTTPException(status_code=exc.status_code or 502, detail=f"禅道图片上传失败: {exc.message}")
+            upload_error = exc.message
 
-    binding = db.query(UserZentaoBinding).filter(UserZentaoBinding.user_id == current_user.id).first()
-    base_url = (binding.base_url or "").rstrip("/") if binding else ""
-    file_id = int(info.get("id"))
-    extension = str(info.get("extension") or "").lstrip(".").lower() or "png"
-    zentao_url = f"{base_url}/file-read-{file_id}.{extension}" if base_url else ""
+    if info and info.get("id"):
+        binding = db.query(UserZentaoBinding).filter(UserZentaoBinding.user_id == current_user.id).first()
+        base_url = (binding.base_url or "").rstrip("/") if binding else ""
+        file_id = int(info.get("id"))
+        extension = str(info.get("extension") or "").lstrip(".").lower() or derived_ext
+        zentao_url = f"{base_url}/file-read-{file_id}.{extension}" if base_url else ""
+        audit(db, action="zentao_bug.upload_inline_image", target_type="bug",
+              actor_id=current_user.id, target_id=str(file_id),
+              detail=f"filename={file.filename}, size={len(data)}, storage=zentao")
+        return {
+            "file_id": file_id,
+            "extension": extension,
+            "proxy_url": f"/zentao/files/{file_id}",
+            "zentao_url": zentao_url,
+            "title": info.get("title") or file.filename,
+            "storage": "zentao",
+        }
 
+    # Fallback: Zentao rejected the upload. Persist locally and expose via
+    # an absolute OmniQA URL so the image is still viewable from the Bug
+    # in Zentao (Zentao's viewer just <img src="..."> loads it).
+    logger.warning(
+        "upload_inline_bug_image: Zentao upload failed, falling back to local storage: %s",
+        upload_error,
+    )
+    path = _save_local_inline_image(data, derived_ext)
+    relative_path = f"/zentao/inline-images/{path.parent.name}/{path.name}"
+    absolute_url = _public_url_for(request, relative_path)
     audit(db, action="zentao_bug.upload_inline_image", target_type="bug",
-          actor_id=current_user.id, target_id=str(file_id),
-          detail=f"filename={file.filename}, size={len(data)}")
-
+          actor_id=current_user.id, target_id=path.name,
+          detail=f"filename={file.filename}, size={len(data)}, storage=local, zentao_err={upload_error}")
     return {
-        "file_id": file_id,
-        "extension": extension,
-        "proxy_url": f"/zentao/files/{file_id}",
-        "zentao_url": zentao_url,
-        "title": info.get("title") or file.filename,
+        "file_id": 0,
+        "extension": derived_ext,
+        "proxy_url": absolute_url,
+        "zentao_url": absolute_url,
+        "title": file.filename,
+        "storage": "local",
+        "zentao_error": upload_error or "",
     }
 
 
