@@ -170,6 +170,7 @@
         <button onclick="runOnlineApiCheck()">🌐 探测</button>
         <button onclick="runFullHealthCheck()">🧭 体检</button>
         <button onclick="changeMyPassword()">🔐 密码</button>
+        <button id="aiConfigBtn" onclick="window.OmniQAAIConfig?.open()" title="管理个人 AI（DeepSeek）API Key">🤖 AI密钥</button>
         <button id="zentaoBindingBtn" onclick="window.OmniQAZentaoBinding?.open()" title="管理禅道账号绑定">🔌 禅道<span id="ztSyncDot" data-state="none" title=""></span></button>
         <button onclick="window.OmniQAZentao?.refreshVisible()" title="刷新当前页面的禅道同步数据" style="padding:4px 8px; font-size:13px;">🔄</button>
         <button class="danger-btn" onclick="logout()">退出</button>
@@ -1568,6 +1569,71 @@
         <!-- Security note -->
         <p style="margin:12px 0 0; font-size:11px; color:#94a3b8; text-align:center;">
           密码加密存储于服务端，不会明文传输或显示
+        </p>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Personal AI Provider (DeepSeek) API Key Modal -->
+  <div id="aiConfigModal" class="hidden" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
+    <div style="width:min(520px, 95vw); max-height:90vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:0;">
+
+      <!-- Header -->
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:18px 20px 14px; border-bottom:1px solid #e2e8f0;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:22px;">🤖</span>
+          <div>
+            <h3 style="margin:0; color:#0f172a; font-size:16px;">个人 AI 密钥</h3>
+            <p style="margin:2px 0 0; font-size:12px; color:#64748b;">配置后 AI 处理将使用你自己的 DeepSeek 额度</p>
+          </div>
+        </div>
+        <button id="aiCfgCloseBtn" class="secondary" style="padding:6px 14px;">关闭</button>
+      </div>
+
+      <div style="padding:18px 20px;">
+
+        <!-- Current config status -->
+        <div style="margin-bottom:18px;">
+          <p style="margin:0 0 8px; font-size:13px; font-weight:600; color:#475569;">当前配置状态</p>
+          <div id="aiCfgStatus"></div>
+        </div>
+
+        <!-- Form -->
+        <div style="border-top:1px solid #f1f5f9; padding-top:16px;">
+          <p style="margin:0 0 12px; font-size:13px; font-weight:600; color:#475569;">密钥配置</p>
+
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <div>
+              <label style="font-size:12px; font-weight:600; color:#64748b; display:block; margin-bottom:4px;">Provider</label>
+              <select id="aiCfgProvider"
+                style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:7px; font-size:13px; color:#0f172a;">
+                <option value="deepseek">DeepSeek</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:12px; font-weight:600; color:#64748b; display:block; margin-bottom:4px;">API Key</label>
+              <input id="aiCfgApiKey" type="password" placeholder="sk-xxxxxxxxxxxxxxxx" autocomplete="off"
+                style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:7px; font-size:13px; color:#0f172a;">
+              <p id="aiCfgKeyHint" style="display:none; margin:4px 0 0; font-size:11px; color:#94a3b8;">
+                已保存密钥，留空再保存会报错；重新输入新 Key 以覆盖。
+              </p>
+            </div>
+          </div>
+
+          <!-- Validation result -->
+          <p id="aiCfgValidateResult" style="margin:10px 0 0; font-size:12px; min-height:16px;"></p>
+        </div>
+
+        <!-- Action buttons -->
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:18px; padding-top:14px; border-top:1px solid #f1f5f9;">
+          <button id="aiCfgSaveBtn" style="flex:1; min-width:100px;">保存</button>
+          <button id="aiCfgValidateBtn" class="secondary" style="flex:1; min-width:100px;">校验</button>
+        </div>
+
+        <!-- Security note -->
+        <p style="margin:12px 0 0; font-size:11px; color:#94a3b8; text-align:center;">
+          API Key 加密存储于服务端，任何界面与日志中都不会显示完整密钥
         </p>
 
       </div>

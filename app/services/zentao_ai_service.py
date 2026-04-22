@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.user_zentao_binding import UserZentaoBinding
-from app.services import story_ai_result_service
+from app.services import story_ai_result_service, user_ai_config_service
 from app.services.sse_service import sse_publish
 from app.services.zentao_auth_service import get_valid_token, invalidate_token
 from app.services.zentao_client_service import ZentaoAPIError, ZentaoClient
@@ -147,6 +147,14 @@ def prepare_batch(
     if not settings.n8n_zentao_ai_webhook_url:
         raise ZentaoAIServiceError(503, "尚未配置 N8N_ZENTAO_AI_WEBHOOK_URL，无法转发")
 
+    # n8n now calls DeepSeek directly, so each user must bring their own API key.
+    user_api_key = user_ai_config_service.get_plaintext_api_key(db, user_id, "deepseek")
+    if not user_api_key:
+        raise ZentaoAIServiceError(
+            400,
+            "请先在个人设置中配置 DeepSeek API Key（点击顶部“🤖 AI密钥”）",
+        )
+
     execution_info: dict = {}
     story_rows: list[dict] = []
 
@@ -225,6 +233,7 @@ def prepare_batch(
         "request_source": "appauto",
         "batch_id": batch_id,
         "operator": username,
+        "api_key": user_api_key,
         "execution": {"id": execution_info.get("id"), "name": execution_info.get("name")},
         "selected_story_ids": [s["id"] for s in detailed if s.get("id")],
         "select_all": select_all,

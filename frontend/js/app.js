@@ -10,6 +10,7 @@ import './utils.js?v=20260417-3';
 import './components/common.js?v=20260417-3';
 import './components/modal.js?v=20260417-3';
 import './components/ai-result-modal.js?v=20260422-2';
+import './components/ai-config-modal.js?v=20260422-3';
 import './ai-tasks.js?v=20260422-2';
 import { resizeAllCharts } from './components/charts.js?v=20260417-3';
 import { runGuardrails } from './guardrails.js?v=20260417-3';

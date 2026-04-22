@@ -15,6 +15,7 @@ from app.models.stage5 import BugStage5Record
 from app.models.story_ai_result import StoryAIResult
 from app.models.testcase import TestCase
 from app.models.user import User
+from app.models.user_ai_provider_config import UserAIProviderConfig
 from app.models.user_zentao_binding import UserZentaoBinding
 from app.models.version import Version
 
@@ -42,6 +43,7 @@ __all__ = [
     "TestExecution",
     "TestResultStatus",
     "User",
+    "UserAIProviderConfig",
     "UserRole",
     "UserZentaoBinding",
     "Version",
