@@ -4,18 +4,18 @@ import './api.js?v=20260417-3';
 import './auth.js?v=20260417-3';
 import './zentao-binding.js?v=20260417-3';
 import './zentao-hydrator.js?v=20260417-3';
-import './zentao-status-map.js?v=20260422-1';
+import './zentao-status-map.js?v=20260422-2';
 import './state.js?v=20260417-3';
 import './utils.js?v=20260417-3';
 import './components/common.js?v=20260417-3';
 import './components/modal.js?v=20260417-3';
-import './components/ai-result-modal.js?v=20260422-1';
-import './ai-tasks.js?v=20260422-1';
+import './components/ai-result-modal.js?v=20260422-2';
+import './ai-tasks.js?v=20260422-2';
 import { resizeAllCharts } from './components/charts.js?v=20260417-3';
 import { runGuardrails } from './guardrails.js?v=20260417-3';
 
 const OPTIONAL_TAB_MODULES = [
-  { name: 'mine', path: './tabs/mine.js?v=20260417-3' },
+  { name: 'mine', path: './tabs/mine.js?v=20260422-2' },
   { name: 'feedback', path: './tabs/feedback.js?v=20260417-3' },
   { name: 'report', path: './tabs/report.js?v=20260417-3' },
   { name: 'retest', path: './tabs/retest.js?v=20260417-3' },
@@ -24,10 +24,10 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'build-records', path: './tabs/build-records.js?v=20260417-3' },
   { name: 'zentao-sync', path: './tabs/zentao-sync.js?v=20260417-3' },
   { name: 'activity', path: './tabs/activity.js?v=20260417-3' },
-  { name: 'assign', path: './tabs/assign.js?v=20260417-3' },
+  { name: 'assign', path: './tabs/assign.js?v=20260422-2' },
   { name: 'dispatch', path: './tabs/dispatch.js?v=20260417-3' },
   { name: 'data', path: './tabs/data.js?v=20260417-3' },
-  { name: 'zentao-ai', path: './tabs/zentao-ai.js?v=20260422-1' },
+  { name: 'zentao-ai', path: './tabs/zentao-ai.js?v=20260422-2' },
 ];
 
 window.__omniqaOptionalModuleFailures = {};
