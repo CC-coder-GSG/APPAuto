@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     # disables the feature server-side even for permitted users.
     n8n_zentao_ai_webhook_url: str = Field(default_factory=lambda: os.getenv('APP_N8N_ZENTAO_AI_WEBHOOK_URL', os.getenv('N8N_ZENTAO_AI_WEBHOOK_URL', '')))
     n8n_zentao_ai_webhook_token: str = Field(default_factory=lambda: os.getenv('APP_N8N_ZENTAO_AI_WEBHOOK_TOKEN', os.getenv('N8N_ZENTAO_AI_WEBHOOK_TOKEN', '')))
+    # Additional allowlist on top of the "zentao-ai" tab permission. Comma-separated usernames.
+    # Empty → only tab permission gates access. Example: "陈文博,admin"
+    zentao_ai_allowed_usernames_raw: str = Field(default_factory=lambda: os.getenv('APP_ZENTAO_AI_ALLOWED_USERNAMES', os.getenv('ZENTAO_AI_ALLOWED_USERNAMES', '')))
+    # Rough AI run duration used by the frontend countdown toast. Seconds. Default 5 min.
+    zentao_ai_expected_duration_seconds: int = Field(default_factory=lambda: int(os.getenv('APP_ZENTAO_AI_EXPECTED_DURATION_SECONDS', os.getenv('ZENTAO_AI_EXPECTED_DURATION_SECONDS', '300'))))
+
+    @property
+    def zentao_ai_allowed_usernames(self) -> list[str]:
+        return _split_csv(self.zentao_ai_allowed_usernames_raw)
 
     # CORS
     cors_allowed_origins_raw: str = Field(default_factory=lambda: os.getenv('APP_CORS_ALLOWED_ORIGINS', os.getenv('CORS_ALLOWED_ORIGINS', '')))

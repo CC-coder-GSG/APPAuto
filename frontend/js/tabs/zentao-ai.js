@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { mapZentaoStatus } from '../zentao-status-map.js';
 
 const state = {
   initialized: false,
@@ -36,7 +37,8 @@ function renderExecutions() {
     return;
   }
   sel.innerHTML = state.executions.map((e) => {
-    const label = `${e.name || '(未命名)'}${e.project_name ? ` · ${e.project_name}` : ''}${e.status ? ` · ${e.status}` : ''}`;
+    const status = mapZentaoStatus(e.status);
+    const label = `${e.name || '(未命名)'}${e.project_name ? ` · ${e.project_name}` : ''}${status ? ` · ${status}` : ''}`;
     return `<option value="${e.id}">${escapeHtml(label)}</option>`;
   }).join('');
   if (prev && state.executions.some((e) => String(e.id) === String(prev))) {
@@ -53,7 +55,7 @@ function renderExecMeta() {
   if (!exec) { meta.textContent = ''; return; }
   const parts = [];
   if (exec.begin || exec.end) parts.push(`周期 ${exec.begin || '?'} → ${exec.end || '?'}`);
-  if (exec.status) parts.push(`状态 ${exec.status}`);
+  if (exec.status) parts.push(`状态 ${mapZentaoStatus(exec.status)}`);
   if (exec.project_name) parts.push(`项目 ${exec.project_name}`);
   meta.textContent = parts.join(' · ');
 }
@@ -62,11 +64,11 @@ function renderStories() {
   const tbody = $('zentaoAiStoryTbody');
   if (!tbody) return;
   if (state.loadingStories) {
-    tbody.innerHTML = '<tr><td colspan="8" class="muted" style="text-align:center; padding:18px;">加载中...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="muted" style="text-align:center; padding:18px;">加载中...</td></tr>';
     return;
   }
   if (!state.stories.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="muted" style="text-align:center; padding:18px;">该执行下暂无需求</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="muted" style="text-align:center; padding:18px;">该执行下暂无需求</td></tr>';
     updateSelectedCount();
     return;
   }
@@ -77,13 +79,17 @@ function renderStories() {
       <td>#${s.id}</td>
       <td>${escapeHtml(s.title || '')}</td>
       <td>${s.pri ?? ''}</td>
-      <td>${escapeHtml(s.status || '')}</td>
-      <td>${escapeHtml(s.stage || '')}</td>
+      <td>${escapeHtml(mapZentaoStatus(s.status))}</td>
+      <td>${escapeHtml(mapZentaoStatus(s.stage))}</td>
       <td>${escapeHtml(s.assigned_to || '')}</td>
       <td>${escapeHtml(s.product_name || '')}</td>
+      <td><span class="ai-result-slot" data-story-id="${s.id}"></span></td>
     </tr>`;
   }).join('');
   updateSelectedCount();
+  if (window.OmniQAStoryAI?.refreshSlots) {
+    window.OmniQAStoryAI.refreshSlots(tbody);
+  }
 }
 
 function updateSelectedCount() {
@@ -171,12 +177,12 @@ async function submit() {
 
   state.submitting = true;
   const submitState = $('zentaoAiSubmitState');
-  if (submitState) submitState.textContent = '正在转发到 n8n...';
+  if (submitState) submitState.textContent = '正在提交后台任务...';
   const resultWrap = $('zentaoAiResult');
   if (resultWrap) resultWrap.classList.add('hidden');
 
   try {
-    const res = await api('/zentao/ai/generate', {
+    const res = await api('/zentao/ai/generate-and-save', {
       method: 'POST',
       body: {
         execution_id: id,
@@ -186,34 +192,20 @@ async function submit() {
       },
     });
     const data = await res.json();
-    showResult(data);
-    toast(data.ok ? `已转发 ${data.forwarded_story_count} 条需求到 n8n` : `n8n 返回非 2xx（${data.n8n_status ?? '未知'}）`, data.ok ? 'success' : 'error');
+    toast(`已提交 ${data.story_ids.length} 条需求，AI 处理大约需要 ${Math.round((data.expected_duration_seconds || 300) / 60)} 分钟`, 'success');
+    if (window.OmniQAStoryAI?.startBatchWatch) {
+      window.OmniQAStoryAI.startBatchWatch({
+        batch_id: data.batch_id,
+        story_ids: data.story_ids,
+        expected_duration_seconds: data.expected_duration_seconds || 300,
+        started_at: Date.now(),
+      });
+    }
   } catch (err) {
     toast(err.message || '提交失败', 'error');
   } finally {
     state.submitting = false;
     if (submitState) submitState.textContent = '';
-  }
-}
-
-function showResult(data) {
-  const wrap = $('zentaoAiResult');
-  const summary = $('zentaoAiResultSummary');
-  const body = $('zentaoAiResultBody');
-  if (!wrap || !summary || !body) return;
-  wrap.classList.remove('hidden');
-  const bits = [
-    `状态：${data.ok ? '成功' : '失败'}`,
-    `转发需求数：${data.forwarded_story_count}`,
-    `n8n HTTP：${data.n8n_status ?? '-'}`,
-  ];
-  summary.textContent = bits.join(' · ');
-  try {
-    body.textContent = typeof data.n8n_response === 'string'
-      ? data.n8n_response
-      : JSON.stringify(data.n8n_response, null, 2);
-  } catch {
-    body.textContent = String(data.n8n_response ?? '');
   }
 }
 

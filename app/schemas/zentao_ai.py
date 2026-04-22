@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
+
+# ---------------------------------------------------------------------------
+# Inputs / list DTOs (kept from the original feature)
+# ---------------------------------------------------------------------------
 
 class ExecutionOut(BaseModel):
     id: int
@@ -33,30 +38,74 @@ class GenerateRequest(BaseModel):
     user_note: str = ""
 
 
-class StoryPayload(BaseModel):
+# ---------------------------------------------------------------------------
+# Result DTOs
+# ---------------------------------------------------------------------------
+
+class StoryAIResultOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
-    title: str = ""
-    pri: int | None = None
-    status: str = ""
-    stage: str = ""
-    product: int | None = None
-    product_name: str = ""
-    module: int | None = None
-    module_name: str = ""
-    assigned_to: str = ""
-    opened_by: str = ""
-    reviewed_by: str = ""
-    spec_html: str = ""
-    spec_text: str = ""
-    verify_html: str = ""
-    estimate: Any = None
-    consumed: Any = None
-    actions: list[dict] = Field(default_factory=list)
+    batch_id: str
+    story_id: int
+    execution_id: int | None = None
+    execution_name: str | None = None
+    title: str | None = None
+    briefing: str | None = None
+    module_name: str | None = None
+    scene_name: str | None = None
+    stage_name: str | None = None
+    case_type: str | None = None
+    priority: str | None = None
+    precondition: str | None = None
+
+    # The *_json columns are stored as text. The route hydrates these to
+    # structured Python objects before serializing.
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+    keywords: str | None = None
+    risk_points: list[Any] = Field(default_factory=list)
+    questions_to_confirm: list[Any] = Field(default_factory=list)
+    testcase_template: str | None = None
+    raw_ai_result: Any = None
+
+    ai_status: str
+    ai_error_message: str | None = None
+    created_by: int | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
-class GenerateResponse(BaseModel):
-    ok: bool
-    forwarded_story_count: int
-    payload: dict
-    n8n_status: int | None = None
-    n8n_response: Any = None
+class StoryAIResultSummary(BaseModel):
+    """Lightweight view for list pages to know 'does this story have AI output'."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    batch_id: str
+    story_id: int
+    title: str | None = None
+    ai_status: str
+    updated_at: datetime
+
+
+class GenerateAndSaveResponse(BaseModel):
+    batch_id: str
+    status: str = "pending"
+    story_ids: list[int]
+    expected_duration_seconds: int
+
+
+class BatchLatestRequest(BaseModel):
+    story_ids: list[int] = Field(default_factory=list)
+
+
+class BatchLatestResponse(BaseModel):
+    latest: dict[int, StoryAIResultSummary] = Field(default_factory=dict)
+
+
+class BatchStatusResponse(BaseModel):
+    batch_id: str
+    total: int
+    success: int
+    failed: int
+    pending: int
+    results: list[StoryAIResultSummary] = Field(default_factory=list)

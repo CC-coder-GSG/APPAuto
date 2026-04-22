@@ -415,11 +415,12 @@ export function renderMineCards() {
 
     const ztStoryId = (req.zentao_req_id || '').replace(/\D/g, '');
     const ztStorySlot = ztStoryId ? `<span class="zt-story-slot" data-zt-story-id="${ztStoryId}" style="margin-left:6px; vertical-align:middle;"></span>` : '';
+    const aiResultSlot = ztStoryId ? `<span class="ai-result-slot" data-story-id="${ztStoryId}" style="margin-left:6px; vertical-align:middle;"></span>` : '';
 
     return `
       <details class="mine-req-card" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
-          <div>${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${req.zentao_req_id} ${req.title}</span>${ztStorySlot}</div>
+          <div>${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${req.zentao_req_id} ${req.title}</span>${ztStorySlot}${aiResultSlot}</div>
           ${isFullyCompleted ? '<span style="color:#16a34a; font-size:14px; background:#f0fdf4; padding:4px 8px; border-radius:4px; border:1px solid #bbf7d0;">✅ 测试已完成</span>' : '<span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开卡片)</span>'}
         </summary>
         <div style="margin-top: 12px;">
@@ -447,6 +448,7 @@ export function renderMineCards() {
   if (mineCards) {
     mineCards.innerHTML = (state.currentFeedbackTodoHtml || '') + state.currentDispatchHtml + reqsHtml;
     window.OmniQAZentao?.hydrateContainer(mineCards);
+    window.OmniQAStoryAI?.refreshSlots?.(mineCards);
   }
   window.scheduleWorkbenchViewportResize?.();
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {

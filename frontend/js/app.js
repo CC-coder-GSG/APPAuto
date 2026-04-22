@@ -4,10 +4,13 @@ import './api.js?v=20260417-3';
 import './auth.js?v=20260417-3';
 import './zentao-binding.js?v=20260417-3';
 import './zentao-hydrator.js?v=20260417-3';
+import './zentao-status-map.js?v=20260422-1';
 import './state.js?v=20260417-3';
 import './utils.js?v=20260417-3';
 import './components/common.js?v=20260417-3';
 import './components/modal.js?v=20260417-3';
+import './components/ai-result-modal.js?v=20260422-1';
+import './ai-tasks.js?v=20260422-1';
 import { resizeAllCharts } from './components/charts.js?v=20260417-3';
 import { runGuardrails } from './guardrails.js?v=20260417-3';
 
@@ -24,7 +27,7 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'assign', path: './tabs/assign.js?v=20260417-3' },
   { name: 'dispatch', path: './tabs/dispatch.js?v=20260417-3' },
   { name: 'data', path: './tabs/data.js?v=20260417-3' },
-  { name: 'zentao-ai', path: './tabs/zentao-ai.js?v=20260421-1' },
+  { name: 'zentao-ai', path: './tabs/zentao-ai.js?v=20260422-1' },
 ];
 
 window.__omniqaOptionalModuleFailures = {};

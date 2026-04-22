@@ -85,7 +85,7 @@ function renderAssignProgress(data) {
           <tbody>${
             reqRows.map((r) => `<tr>
               <td>${r.major_version_name}</td>
-              <td>${r.zentao_req_id} ${r.title || ''}</td>
+              <td>${r.zentao_req_id} ${r.title || ''}${(() => { const sid = String(r.zentao_req_id || '').replace(/\D/g, ''); return sid ? ` <span class="ai-result-slot" data-story-id="${sid}"></span>` : ''; })()}</td>
               <td>${r.case_completed ? '✅已勾选' : '⏳未勾选'}</td>
               <td>${r.test_completed ? '✅已勾选' : '⏳未勾选'}</td>
               <td>${r.case_count || 0}</td>
@@ -152,9 +152,12 @@ export async function loadAssignBoard() {
   const assignTable = document.getElementById('assignTable');
   if (!assignTable) return;
   const users = getUsers();
-  assignTable.innerHTML = state.assignReqs.map((r) => `
+  assignTable.innerHTML = state.assignReqs.map((r) => {
+    const sid = String(r.zentao_req_id || '').replace(/\D/g, '');
+    const aiSlot = sid ? ` <span class="ai-result-slot" data-story-id="${sid}"></span>` : '';
+    return `
     <tr>
-      <td>${r.zentao_req_id} ${r.title}</td>
+      <td>${r.zentao_req_id} ${r.title}${aiSlot}</td>
       <td>
         <select id='o_${r.id}'>
           <option value=''>未分配</option>
@@ -162,7 +165,9 @@ export async function loadAssignBoard() {
           ${users.map((u) => `<option value='${u.id}' ${u.id === r.owner_id ? 'selected' : ''}>${u.display_name || u.username}</option>`).join('')}
         </select>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
+  window.OmniQAStoryAI?.refreshSlots?.(assignTable);
 
   await loadAssignProgress();
   await loadLinkCandidates();
@@ -239,18 +244,22 @@ export async function loadLinkCandidates() {
       return;
     }
 
-    area.innerHTML = data.map((r) => `
+    area.innerHTML = data.map((r) => {
+      const sid = String(r.zentao_req_id || '').replace(/\D/g, '');
+      const aiSlot = sid ? ` <span class="ai-result-slot" data-story-id="${sid}"></span>` : '';
+      return `
       <label class="row" style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px dashed #e2e8f0; padding:8px 0;">
         <span style="display:flex; align-items:flex-start; gap:8px;">
           <input type="checkbox" class="link-req-check" value="${r.id}" ${r.already_linked ? 'disabled' : ''}>
           <span>
-            <b>${r.zentao_req_id}</b> ${r.title || ''}
+            <b>${r.zentao_req_id}</b> ${r.title || ''}${aiSlot}
             <span class="muted" style="margin-left:8px;">负责人：${r.owner_name || '未分配'} ｜ 用例：${r.case_count || 0}</span>
           </span>
         </span>
         ${r.already_linked ? '<span class="badge" style="background:#ecfeff;color:#0369a1;">已在目标版本</span>' : ''}
-      </label>
-    `).join('');
+      </label>`;
+    }).join('');
+    window.OmniQAStoryAI?.refreshSlots?.(area);
   } catch (err) {
     area.innerHTML = '<div class="muted" style="color:#dc2626;">来源需求加载失败</div>';
     window.showMessage && window.showMessage(err.message || '来源需求加载失败', 'error');

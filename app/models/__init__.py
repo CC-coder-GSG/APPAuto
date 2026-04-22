@@ -12,6 +12,7 @@ from app.models.requirement import Requirement
 from app.models.requirement_status_history import RequirementStatusHistory
 from app.models.software import SoftwareProduct
 from app.models.stage5 import BugStage5Record
+from app.models.story_ai_result import StoryAIResult
 from app.models.testcase import TestCase
 from app.models.user import User
 from app.models.user_zentao_binding import UserZentaoBinding
@@ -36,6 +37,7 @@ __all__ = [
     "RequirementStatusHistory",
     "RequirementStatus",
     "SoftwareProduct",
+    "StoryAIResult",
     "TestCase",
     "TestExecution",
     "TestResultStatus",
