@@ -9,7 +9,38 @@ import { api } from './api.js';
 
 const STORAGE_KEY = 'omniqa_pending_ai_batches_v1';
 const CACHE_LATEST_KEY = 'omniqa_ai_latest_cache_v1';
-const BUTTON_CLASS = 'ai-result-btn';
+const CHIP_CLASS = 'ai-result-chip';
+
+function injectChipStyles() {
+  if (document.getElementById('aiResultChipStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'aiResultChipStyles';
+  style.textContent = `
+    .ai-result-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      margin-left: 6px;
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 1;
+      padding: 3px 8px;
+      border-radius: 999px;
+      cursor: pointer;
+      user-select: none;
+      vertical-align: middle;
+      letter-spacing: 0.2px;
+      transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
+    }
+    .ai-result-chip:hover { transform: translateY(-1px); filter: brightness(1.03); box-shadow: 0 2px 6px rgba(15,23,42,0.12); }
+    .ai-result-chip--success { background: linear-gradient(135deg, #ecfdf5, #d1fae5); color: #047857; }
+    .ai-result-chip--failed  { background: #fef2f2; color: #b91c1c; }
+    .ai-result-chip--pending { background: #f1f5f9; color: #64748b; cursor: default; }
+    .ai-result-chip--pending:hover { transform: none; filter: none; box-shadow: none; }
+    .ai-result-chip__dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .8; }
+  `;
+  document.head.appendChild(style);
+}
 
 const state = {
   batches: new Map(),       // batch_id → {story_ids, started_at, expected_seconds}
@@ -245,15 +276,19 @@ async function fetchLatestFor(storyIds) {
   }
 }
 
-function buttonHtml(storyId, cacheEntry) {
-  const hasResult = !!(cacheEntry && cacheEntry.ai_status === 'success');
-  const hasFailed = !!(cacheEntry && cacheEntry.ai_status === 'failed');
-  const unknown = cacheEntry === undefined || cacheEntry === null;
-  const bg = hasResult ? '#dcfce7' : hasFailed ? '#fef2f2' : '#f8fafc';
-  const color = hasResult ? '#166534' : hasFailed ? '#b91c1c' : '#475569';
-  const border = hasResult ? '#86efac' : hasFailed ? '#fecaca' : '#cbd5e1';
-  const label = hasResult ? 'AI结果' : hasFailed ? 'AI失败' : unknown ? 'AI结果' : '暂无AI';
-  return `<button type="button" class="${BUTTON_CLASS}" data-ai-story-id="${storyId}" style="margin-left:6px; font-size:11px; line-height:1; padding:2px 8px; border-radius:10px; border:1px solid ${border}; background:${bg}; color:${color}; cursor:pointer;">${label}</button>`;
+function chipHtml(storyId, cacheEntry) {
+  if (!cacheEntry || !cacheEntry.ai_status) return '';
+  const status = cacheEntry.ai_status;
+  if (status === 'success') {
+    return `<span class="${CHIP_CLASS} ${CHIP_CLASS}--success" data-ai-story-id="${storyId}" title="点击查看 AI 生成的测试信息"><span class="${CHIP_CLASS}__dot"></span>AI</span>`;
+  }
+  if (status === 'failed') {
+    return `<span class="${CHIP_CLASS} ${CHIP_CLASS}--failed" data-ai-story-id="${storyId}" title="点击查看失败原因"><span class="${CHIP_CLASS}__dot"></span>AI</span>`;
+  }
+  if (status === 'pending') {
+    return `<span class="${CHIP_CLASS} ${CHIP_CLASS}--pending" title="AI 处理中"><span class="${CHIP_CLASS}__dot"></span>AI</span>`;
+  }
+  return '';
 }
 
 function refreshSlots(root) {
@@ -271,16 +306,16 @@ function refreshSlots(root) {
       const sid = Number(el.dataset.storyId);
       if (!sid) return;
       const entry = state.latestCache.get(sid);
-      el.innerHTML = buttonHtml(sid, entry);
+      el.innerHTML = chipHtml(sid, entry);
     });
   });
 }
 
 function bindDelegatedClicks() {
   document.addEventListener('click', (e) => {
-    const btn = e.target && e.target.closest ? e.target.closest(`button.${BUTTON_CLASS}`) : null;
-    if (!btn) return;
-    const sid = Number(btn.getAttribute('data-ai-story-id'));
+    const el = e.target && e.target.closest ? e.target.closest(`.${CHIP_CLASS}[data-ai-story-id]`) : null;
+    if (!el) return;
+    const sid = Number(el.getAttribute('data-ai-story-id'));
     if (!sid) return;
     if (window.OmniQAStoryAI && typeof window.OmniQAStoryAI.openForStory === 'function') {
       window.OmniQAStoryAI.openForStory(sid);
@@ -327,6 +362,7 @@ async function resumePending() {
 
 // ─── Bootstrap ──────────────────────────────────────────────────────────────
 
+injectChipStyles();
 loadPersisted();
 subscribeSSE();
 bindDelegatedClicks();
