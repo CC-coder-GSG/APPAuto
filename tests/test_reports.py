@@ -1,4 +1,4 @@
-﻿from datetime import date, datetime
+﻿from datetime import date, datetime, timedelta
 
 from fastapi import HTTPException
 
@@ -166,6 +166,8 @@ def test_bug_source_distribution_includes_field_test(db_session):
     )
 
     service = ReportService(db_session)
-    result = service.summary(date(2026, 1, 1), date(2026, 1, 31), user)
+    # _attach_bugs 创建的 BugTracking.created_at = local_now()，因此查询窗口必须覆盖今天，
+    # 否则在 2026-02 之后跑这条测试就会得 0。
+    result = service.summary(date(2026, 1, 1), date.today() + timedelta(days=1), user)
     source_map = {x["source_type"]: x["count"] for x in result["bug_source_dist"]}
     assert source_map.get("field_test", 0) >= 1
