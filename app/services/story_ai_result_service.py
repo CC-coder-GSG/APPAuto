@@ -59,6 +59,23 @@ def _extract_results(n8n_response: Any) -> tuple[list[Any] | None, Any]:
     payload = _load_json_if_possible(n8n_response)
 
     if isinstance(payload, list):
+        wrapped_results: list[Any] = []
+        wrapped = True
+        for item in payload:
+            if not isinstance(item, dict):
+                wrapped = False
+                break
+            nested = _load_json_if_possible(item.get("results"))
+            if isinstance(nested, list):
+                wrapped_results.extend(nested)
+                continue
+            if isinstance(nested, dict) and _extract_story_id(nested) is not None:
+                wrapped_results.append(nested)
+                continue
+            wrapped = False
+            break
+        if wrapped and wrapped_results:
+            return wrapped_results, payload
         return payload, payload
     if not isinstance(payload, dict):
         return None, payload

@@ -84,6 +84,33 @@ def test_save_ai_results_accepts_top_level_list_payload(db_session):
     assert row.briefing == "列表形式返回也应入库"
 
 
+def test_save_ai_results_accepts_top_level_wrapper_list_payload(db_session):
+    row = _seed_pending(db_session, batch_id="batch_wrapper_list", story_id=5905)
+
+    summary = story_ai_result_service.save_ai_results(
+        db_session,
+        batch_id="batch_wrapper_list",
+        n8n_response=[
+            {
+                "execution": {"id": 1645, "name": "s40311"},
+                "results": [
+                    {
+                        "story_id": 5905,
+                        "briefing": "顶层数组包装 execution/results 也应入库",
+                        "module": "注册与激活",
+                    }
+                ],
+            }
+        ],
+    )
+
+    db_session.refresh(row)
+    assert summary == {"success": 1, "failed": 0, "per_story": {5905: "success"}}
+    assert row.ai_status == "success"
+    assert row.briefing == "顶层数组包装 execution/results 也应入库"
+    assert row.module_name == "注册与激活"
+
+
 def test_save_ai_results_infers_story_id_for_single_item_batch(db_session):
     row = _seed_pending(db_session, batch_id="batch_single", story_id=8001)
 
