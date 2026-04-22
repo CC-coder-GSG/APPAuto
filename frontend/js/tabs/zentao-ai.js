@@ -64,11 +64,11 @@ function renderStories() {
   const tbody = $('zentaoAiStoryTbody');
   if (!tbody) return;
   if (state.loadingStories) {
-    tbody.innerHTML = '<tr><td colspan="9" class="muted" style="text-align:center; padding:18px;">加载中...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="muted" style="text-align:center; padding:18px;">加载中...</td></tr>';
     return;
   }
   if (!state.stories.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="muted" style="text-align:center; padding:18px;">该执行下暂无需求</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="muted" style="text-align:center; padding:18px;">该执行下暂无需求</td></tr>';
     updateSelectedCount();
     return;
   }
@@ -77,13 +77,12 @@ function renderStories() {
     return `<tr>
       <td><input type="checkbox" data-story-id="${s.id}" ${checked} onchange="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.onStoryToggle(${s.id}, this.checked)"></td>
       <td>#${s.id}</td>
-      <td>${escapeHtml(s.title || '')}</td>
+      <td>${escapeHtml(s.title || '')}<span class="ai-result-slot" data-story-id="${s.id}"></span></td>
       <td>${s.pri ?? ''}</td>
       <td>${escapeHtml(mapZentaoStatus(s.status))}</td>
       <td>${escapeHtml(mapZentaoStatus(s.stage))}</td>
       <td>${escapeHtml(s.assigned_to || '')}</td>
       <td>${escapeHtml(s.product_name || '')}</td>
-      <td><span class="ai-result-slot" data-story-id="${s.id}"></span></td>
     </tr>`;
   }).join('');
   updateSelectedCount();
