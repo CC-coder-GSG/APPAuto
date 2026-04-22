@@ -198,6 +198,7 @@
     <button id="tabActivityBtn" class="hidden" onclick="showTab('activity')">活动中心</button>
     <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
     <button id="tabDispatchBtn" class="hidden" onclick="showTab('dispatch')">BUG特派</button>
+    <button id="tabZentaoAiBtn" class="hidden" onclick="showTab('zentao-ai')">禅道AI用例生成</button>
     <span id="sseConnectionState" class="sse-conn-badge hidden" aria-live="polite">实时连接中</span>
   </div>
 
@@ -1050,6 +1051,56 @@
     </div>
   </section>
 
+  <section id="tab-zentao-ai" class="hidden card">
+    <div class="row" style="justify-content:space-between; align-items:center;">
+      <div>
+        <h2 style="margin-bottom:6px;">禅道AI用例生成</h2>
+        <div class="muted">从禅道读取执行中的需求并转发到 n8n，由 AI 协助生成测试用例或设计评审材料。</div>
+      </div>
+      <div class="row">
+        <button class="secondary" onclick="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.reload()">刷新执行列表</button>
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+      <div>
+        <label style="display:block; font-weight:600; color:#0f172a;">执行</label>
+        <select id="zentaoAiExecutionSelect" style="min-width:360px;" onchange="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.onExecutionChange()"></select>
+      </div>
+      <div>
+        <button onclick="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.loadStories()">加载需求</button>
+      </div>
+      <div id="zentaoAiExecMeta" class="muted" style="flex:1; min-width:240px;"></div>
+    </div>
+    <div class="row" style="margin-top:12px; gap:12px; align-items:center;">
+      <label style="cursor:pointer;">
+        <input type="checkbox" id="zentaoAiSelectAll" onchange="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.toggleSelectAll(this.checked)"> 全选本执行下全部需求
+      </label>
+      <span id="zentaoAiSelectedCount" class="muted"></span>
+    </div>
+    <div style="margin-top:12px; border:1px solid #e2e8f0; border-radius:8px; max-height:360px; overflow:auto;">
+      <table class="qa-table" style="margin:0;">
+        <thead><tr><th style="width:42px;"></th><th>ID</th><th>标题</th><th>优先级</th><th>状态</th><th>阶段</th><th>指派</th><th>所属产品</th></tr></thead>
+        <tbody id="zentaoAiStoryTbody"><tr><td colspan="8" class="muted" style="text-align:center; padding:18px;">请选择执行并点击“加载需求”</td></tr></tbody>
+      </table>
+    </div>
+    <div style="margin-top:12px;">
+      <label style="display:block; font-weight:600; color:#0f172a;">额外说明（会和需求一起发给 n8n）</label>
+      <textarea id="zentaoAiUserNote" rows="3" style="width:100%; box-sizing:border-box;" placeholder="可选：写下希望 AI 关注的点，例如『只生成回归用例，忽略性能』"></textarea>
+    </div>
+    <div class="row" style="margin-top:12px; gap:12px;">
+      <button onclick="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.submit()">提交给 AI 处理</button>
+      <span id="zentaoAiSubmitState" class="muted"></span>
+    </div>
+    <div id="zentaoAiResult" class="hidden" style="margin-top:16px; padding:12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc;">
+      <div style="font-weight:600; color:#0f172a; margin-bottom:6px;">转发结果</div>
+      <div id="zentaoAiResultSummary" class="muted"></div>
+      <details style="margin-top:8px;">
+        <summary style="cursor:pointer; color:#475569;">查看 n8n 返回内容</summary>
+        <pre id="zentaoAiResultBody" style="white-space:pre-wrap; word-break:break-all; background:#0f172a; color:#e2e8f0; padding:10px; border-radius:6px; max-height:320px; overflow:auto;"></pre>
+      </details>
+    </div>
+  </section>
+
   <section id="tab-activity" class="hidden card">
     <div class="row" style="justify-content:space-between; align-items:center;">
       <div>
@@ -1567,7 +1618,7 @@ function sourceTypeZh(v){
 }
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
-const ALL_TAB_KEYS=['assign','mine','feedback','retest','overall-test','field-test','build-records','zentao-sync','report','activity','data','dispatch'];
+const ALL_TAB_KEYS=['assign','mine','feedback','retest','overall-test','field-test','build-records','zentao-sync','report','activity','data','dispatch','zentao-ai'];
 const DEFAULT_ALLOWED_TABS=['mine','feedback','retest','overall-test','field-test','zentao-sync','report'];
 const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test'];
 const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test' };
@@ -1726,7 +1777,7 @@ function applyTabVisibility(){
     'assign':'tabAssignBtn','mine':'tabMineBtn','feedback':'tabFeedbackBtn',
     'field-test':'tabFieldTestBtn','build-records':'tabBuildRecordsBtn',
     'zentao-sync':'tabZentaoSyncBtn','report':'tabReportBtn','activity':'tabActivityBtn',
-    'data':'tabDataBtn','dispatch':'tabDispatchBtn'
+    'data':'tabDataBtn','dispatch':'tabDispatchBtn','zentao-ai':'tabZentaoAiBtn'
   };
   ALL_TAB_KEYS.forEach((name)=>{
     const btn=document.getElementById(buttonMap[name]);
@@ -1738,7 +1789,7 @@ function applyTabVisibility(){
   }
 }
 function getDefaultVisibleTab(){
-  return ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch']
+  return ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch','zentao-ai']
     .find((name)=>canAccessTab(name)) || 'mine';
 }
 function getTabNamespaceName(name){
@@ -1755,6 +1806,7 @@ function getTabNamespaceName(name){
     activity:'OmniQAActivityTab',
     data:'OmniQADataTab',
     dispatch:'OmniQADispatchTab',
+    'zentao-ai':'OmniQAZentaoAiTab',
   }[name] || '';
 }
 function isTabRuntimeReady(name){
@@ -1763,7 +1815,7 @@ function isTabRuntimeReady(name){
   return !!window[nsName];
 }
 function getFirstRuntimeReadyTab(){
-  return ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch']
+  return ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch','zentao-ai']
     .find((tabName)=>canAccessTab(tabName) && isTabRuntimeReady(tabName)) || null;
 }
 async function showTab(name){
@@ -1786,7 +1838,7 @@ async function showTab(name){
     if(!fallback || fallback===name) return;
     name = fallback;
   }
-  ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch'].forEach(x=>{
+  ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch','zentao-ai'].forEach(x=>{
     const el=document.getElementById('tab-'+x);
     if(el) el.classList.add('hidden');
   });
@@ -1805,6 +1857,7 @@ async function showTab(name){
   if(name === 'build-records') { loadBuildRecordsBoard().catch(err=>showMessage(err.message||'加载构建记录失败','error')); }
   if(name === 'zentao-sync') { initZentaoSyncBoard().catch(err=>showMessage(err.message||'加载禅道同步中心失败','error')); }
   if(name === 'activity') { loadActivityBoard().catch(err=>showMessage(err.message||'加载活动中心失败','error')); }
+  if(name === 'zentao-ai') { window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.activate && window.OmniQAZentaoAiTab.activate().catch(err=>showMessage(err.message||'加载禅道AI用例生成失败','error')); }
   if(name==='report'){loadReportOnDemand()}
 }
 function isAllUsersReport(){return currentUser && currentUser.role==='admin' && reportUserSelect && reportUserSelect.value==='0'}
@@ -1942,7 +1995,7 @@ async function onSoftwareChange(){
   dataOverviewCache = null;
   await loadVersions();
   // 切换软件后，刷新当前页内容，确保旧软件数据不残留
-  const visible = ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch'].find(x=>{
+  const visible = ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch','zentao-ai'].find(x=>{
     const el=document.getElementById('tab-'+x);
     return el && !el.classList.contains('hidden');
   });

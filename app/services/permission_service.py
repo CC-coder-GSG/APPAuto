@@ -21,6 +21,7 @@ ALL_TAB_KEYS = [
     "activity",
     "data",
     "dispatch",
+    "zentao-ai",
 ]
 
 DEFAULT_USER_TAB_KEYS = [

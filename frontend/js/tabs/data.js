@@ -14,6 +14,7 @@ const TAB_PERMISSION_OPTIONS = [
   { key: 'activity', label: '活动中心' },
   { key: 'data', label: '数据管理台' },
   { key: 'dispatch', label: 'BUG特派' },
+  { key: 'zentao-ai', label: '禅道AI用例生成' },
 ];
 
 function bugZentaoMeta(b) {

@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     zentao_sync_auto_apply_testcase: bool = Field(default_factory=lambda: os.getenv('APP_ZENTAO_SYNC_AUTO_APPLY_TESTCASE', os.getenv('ZENTAO_SYNC_AUTO_APPLY_TESTCASE', 'true')).lower() == 'true')
     zentao_sync_auto_apply_bug: bool = Field(default_factory=lambda: os.getenv('APP_ZENTAO_SYNC_AUTO_APPLY_BUG', os.getenv('ZENTAO_SYNC_AUTO_APPLY_BUG', 'true')).lower() == 'true')
 
+    # Zentao → n8n AI webhook forwarder
+    # Access is gated by the "zentao-ai" tab permission (managed via the admin UI).
+    # The webhook URL is where assembled story payloads get POSTed; leaving it empty
+    # disables the feature server-side even for permitted users.
+    n8n_zentao_ai_webhook_url: str = Field(default_factory=lambda: os.getenv('APP_N8N_ZENTAO_AI_WEBHOOK_URL', os.getenv('N8N_ZENTAO_AI_WEBHOOK_URL', '')))
+    n8n_zentao_ai_webhook_token: str = Field(default_factory=lambda: os.getenv('APP_N8N_ZENTAO_AI_WEBHOOK_TOKEN', os.getenv('N8N_ZENTAO_AI_WEBHOOK_TOKEN', '')))
+
     # CORS
     cors_allowed_origins_raw: str = Field(default_factory=lambda: os.getenv('APP_CORS_ALLOWED_ORIGINS', os.getenv('CORS_ALLOWED_ORIGINS', '')))
 

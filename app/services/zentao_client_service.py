@@ -299,6 +299,18 @@ class ZentaoClient:
         rows = data.get("executions") if isinstance(data, dict) else []
         return rows if isinstance(rows, list) else []
 
+    def list_execution_stories(self, execution_id: int, limit: int = 500) -> list[dict]:
+        """Return the stories/requirements linked to an execution."""
+        data = self.get(f"executions/{execution_id}/stories", params={"limit": limit}) or {}
+        rows = data.get("stories") if isinstance(data, dict) else []
+        return rows if isinstance(rows, list) else []
+
+    def list_projects(self, limit: int = 100) -> list[dict]:
+        """Return the projects visible to the current token."""
+        data = self.get("projects", params={"limit": limit}) or {}
+        rows = data.get("projects") if isinstance(data, dict) else []
+        return rows if isinstance(rows, list) else []
+
     # ------------------------------------------------------------------
     # Bug write actions
     # ------------------------------------------------------------------
