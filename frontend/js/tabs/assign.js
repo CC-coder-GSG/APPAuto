@@ -125,6 +125,7 @@ function renderAssignProgress(data) {
     </div>
     <div style="margin-top:8px;">${ownerCards || '<div class="muted">暂无任务进行状态数据</div>'}</div>
   `;
+  window.OmniQAStoryAI?.refreshSlots?.(area);
 }
 
 export async function loadAssignBoard() {

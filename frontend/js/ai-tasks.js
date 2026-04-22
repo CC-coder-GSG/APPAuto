@@ -19,25 +19,25 @@ function injectChipStyles() {
     .ai-result-chip {
       display: inline-flex;
       align-items: center;
-      gap: 3px;
+      gap: 4px;
       margin-left: 6px;
-      font-size: 10px;
+      font-size: 11px;
       font-weight: 600;
       line-height: 1;
-      padding: 3px 8px;
+      padding: 3px 9px;
       border-radius: 999px;
       cursor: pointer;
       user-select: none;
       vertical-align: middle;
-      letter-spacing: 0.2px;
+      letter-spacing: 0.3px;
       transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
     }
-    .ai-result-chip:hover { transform: translateY(-1px); filter: brightness(1.03); box-shadow: 0 2px 6px rgba(15,23,42,0.12); }
-    .ai-result-chip--success { background: linear-gradient(135deg, #ecfdf5, #d1fae5); color: #047857; }
-    .ai-result-chip--failed  { background: #fef2f2; color: #b91c1c; }
-    .ai-result-chip--pending { background: #f1f5f9; color: #64748b; cursor: default; }
+    .ai-result-chip:hover { transform: translateY(-1px); filter: brightness(1.04); box-shadow: 0 3px 8px rgba(15,23,42,0.14); }
+    .ai-result-chip--success { background: linear-gradient(135deg, #ecfdf5, #bbf7d0); color: #047857; border: 1px solid #86efac; }
+    .ai-result-chip--failed  { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    .ai-result-chip--pending { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; cursor: default; }
     .ai-result-chip--pending:hover { transform: none; filter: none; box-shadow: none; }
-    .ai-result-chip__dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .8; }
+    .ai-result-chip__dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .85; box-shadow: 0 0 0 2px rgba(255,255,255,0.45); }
   `;
   document.head.appendChild(style);
 }
