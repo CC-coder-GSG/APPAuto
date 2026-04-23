@@ -15,6 +15,9 @@ function injectChipStyles() {
   if (document.getElementById('aiResultChipStyles')) return;
   const style = document.createElement('style');
   style.id = 'aiResultChipStyles';
+  // 注意：很多 button.* 用 !important 是为了对抗全局 style.css 里的
+  // `button { background: #0071e3 !important; color:#fff !important; ... }`，
+  // 否则 inline 样式会被覆盖，"立即查询"看起来跟另一个按钮一模一样。
   style.textContent = `
     .ai-result-chip {
       display: inline-flex;
@@ -38,17 +41,106 @@ function injectChipStyles() {
     .ai-result-chip--pending { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; cursor: default; }
     .ai-result-chip--pending:hover { transform: none; filter: none; box-shadow: none; }
     .ai-result-chip__dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .85; box-shadow: 0 0 0 2px rgba(255,255,255,0.45); }
+
+    button.aiqa-btn {
+      font-size: 12px !important;
+      font-weight: 600 !important;
+      padding: 4px 12px !important;
+      border-radius: 6px !important;
+      min-height: 0 !important;
+      box-shadow: none !important;
+      letter-spacing: 0 !important;
+      cursor: pointer;
+    }
+    button.aiqa-btn--primary {
+      background: #2563eb !important;
+      color: #ffffff !important;
+      border: 1px solid #1d4ed8 !important;
+    }
+    button.aiqa-btn--primary:hover { background: #1d4ed8 !important; }
+    button.aiqa-btn--secondary {
+      background: #ffffff !important;
+      color: #334155 !important;
+      border: 1px solid #cbd5e1 !important;
+    }
+    button.aiqa-btn--secondary:hover { background: #f1f5f9 !important; color: #1e293b !important; }
+
+    /* Android-style top toast */
+    #aiTopToastHost {
+      position: fixed;
+      top: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 2000;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      align-items: center;
+      pointer-events: none;
+      max-width: calc(100vw - 40px);
+    }
+    .aiqa-toast {
+      pointer-events: auto;
+      min-width: 280px;
+      max-width: 460px;
+      padding: 13px 18px;
+      border-radius: 999px;
+      box-shadow: 0 12px 32px rgba(15, 23, 42, 0.22);
+      font-size: 14px;
+      font-weight: 600;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      animation: aiqaToastIn 320ms cubic-bezier(.2,.9,.3,1.2);
+    }
+    .aiqa-toast.aiqa-toast--exit { animation: aiqaToastOut 240ms ease forwards; }
+    .aiqa-toast--success { background: linear-gradient(135deg, #16a34a, #15803d); }
+    .aiqa-toast--error   { background: linear-gradient(135deg, #dc2626, #b91c1c); }
+    .aiqa-toast--info    { background: linear-gradient(135deg, #2563eb, #1d4ed8); }
+    .aiqa-toast__icon {
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.22);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+    .aiqa-toast__action {
+      margin-left: 6px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #ffffff;
+      background: rgba(255,255,255,0.18);
+      border: none !important;
+      padding: 4px 12px !important;
+      border-radius: 999px !important;
+      cursor: pointer;
+      min-height: 0 !important;
+      box-shadow: none !important;
+    }
+    .aiqa-toast__action:hover { background: rgba(255,255,255,0.32) !important; }
+    @keyframes aiqaToastIn  { from { opacity:0; transform: translateY(-14px); } to { opacity:1; transform:none; } }
+    @keyframes aiqaToastOut { from { opacity:1; transform:none; } to { opacity:0; transform: translateY(-14px); } }
   `;
   document.head.appendChild(style);
 }
 
 const state = {
-  batches: new Map(),       // batch_id → {story_ids, started_at, expected_seconds}
+  batches: new Map(),       // batch_id → {story_ids, started_at, expected_seconds, last_poll_ts}
   tickHandle: null,
   hostEl: null,
+  toastHostEl: null,
   latestCache: new Map(),   // story_id → {ai_status, id, updated_at}
   lookupsInFlight: new Set(),
+  pollInFlight: new Set(),  // batch_ids currently being polled — avoid stacking
 };
+
+// Fallback polling interval (ms). 防止 SSE 事件丢失（断线重连缝隙、handler 异常等）
+// 导致倒计时永远停不下来。SSE 仍是主通道，这只是兜底。
+const FALLBACK_POLL_MS = 20000;
 
 function now() { return Date.now(); }
 
@@ -95,6 +187,48 @@ function ensureHost() {
   return el;
 }
 
+function ensureToastHost() {
+  if (state.toastHostEl && document.body.contains(state.toastHostEl)) return state.toastHostEl;
+  const el = document.createElement('div');
+  el.id = 'aiTopToastHost';
+  document.body.appendChild(el);
+  state.toastHostEl = el;
+  return el;
+}
+
+function showTopToast({ tone = 'success', message, actionLabel, onAction, durationMs = 3500 }) {
+  const host = ensureToastHost();
+  const toast = document.createElement('div');
+  toast.className = `aiqa-toast aiqa-toast--${tone}`;
+  const icon = tone === 'success' ? '✓' : tone === 'error' ? '!' : 'i';
+  toast.innerHTML = `
+    <span class="aiqa-toast__icon">${icon}</span>
+    <span class="aiqa-toast__msg"></span>
+  `;
+  toast.querySelector('.aiqa-toast__msg').textContent = String(message || '');
+  if (actionLabel && typeof onAction === 'function') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'aiqa-toast__action';
+    btn.textContent = actionLabel;
+    btn.addEventListener('click', () => {
+      try { onAction(); } catch {}
+      dismiss();
+    });
+    toast.appendChild(btn);
+  }
+  host.appendChild(toast);
+
+  let dismissed = false;
+  const dismiss = () => {
+    if (dismissed) return;
+    dismissed = true;
+    toast.classList.add('aiqa-toast--exit');
+    setTimeout(() => toast.remove(), 260);
+  };
+  setTimeout(dismiss, Math.max(1500, durationMs));
+}
+
 function fmtSeconds(sec) {
   const s = Math.max(0, Math.round(sec));
   const mm = Math.floor(s / 60);
@@ -129,9 +263,9 @@ function render() {
       <div style="margin-top:4px; font-size:12px; color:${overdue ? '#b45309' : '#475569'};">
         ${overdue ? '已超过预估时长，AI 可能仍在处理…' : `剩余约 ${fmtSeconds(remaining)}`}
       </div>
-      <div style="margin-top:6px; display:flex; gap:6px; justify-content:flex-end;">
-        <button type="button" data-ai-batch-poll="${escapeHtml(batch_id)}" style="font-size:12px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; padding:3px 10px; cursor:pointer;">立即查询</button>
-        <button type="button" data-ai-batch-dismiss="${escapeHtml(batch_id)}" style="font-size:12px; border:1px solid #cbd5e1; background:#ffffff; border-radius:6px; padding:3px 10px; cursor:pointer;">稍后再说</button>
+      <div style="margin-top:8px; display:flex; gap:8px; justify-content:flex-end;">
+        <button type="button" class="aiqa-btn aiqa-btn--secondary" data-ai-batch-dismiss="${escapeHtml(batch_id)}">稍后再说</button>
+        <button type="button" class="aiqa-btn aiqa-btn--primary" data-ai-batch-poll="${escapeHtml(batch_id)}">立即查询</button>
       </div>
     `;
     host.appendChild(card);
@@ -149,30 +283,68 @@ function startTicking() {
   state.tickHandle = setInterval(() => {
     if (state.batches.size === 0) { clearInterval(state.tickHandle); state.tickHandle = null; render(); return; }
     render();
+    fallbackPollIfStale();
   }, 2000);
 }
 
+// SSE 兜底：每 FALLBACK_POLL_MS 给每个 pending batch 主动查一次。
+// 若 SSE 在不知不觉中漏掉了 zentao_ai_batch_completed 事件，这里会补上。
+function fallbackPollIfStale() {
+  const t = now();
+  for (const [batch_id, info] of state.batches.entries()) {
+    if (state.pollInFlight.has(batch_id)) continue;
+    const last = Number(info.last_poll_ts || 0);
+    if (t - last < FALLBACK_POLL_MS) continue;
+    info.last_poll_ts = t;
+    state.pollInFlight.add(batch_id);
+    api(`/zentao/ai/batch/${batch_id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.pending === 0) {
+          finishBatch(batch_id, { success: data.success, failed: data.failed });
+        }
+      })
+      .catch(() => { /* 服务器重启等，下一轮再试 */ })
+      .finally(() => { state.pollInFlight.delete(batch_id); });
+  }
+}
+
 function showCompletionToast({ batch_id, success, failed, error }) {
-  const host = ensureHost();
-  const card = document.createElement('div');
-  const ok = !error && failed === 0;
-  card.style.cssText = `padding:12px 14px; border-radius:10px; box-shadow:0 6px 18px rgba(15,23,42,0.18); background:${ok ? '#f0fdf4' : failed > 0 ? '#fef2f2' : '#ffffff'}; border:1px solid ${ok ? '#86efac' : failed > 0 ? '#fecaca' : '#e2e8f0'};`;
-  card.innerHTML = `
-    <div style="font-size:12px; color:#64748b; margin-bottom:2px;">AI 处理完成</div>
-    <div style="font-weight:600; color:#0f172a;">成功 ${Number(success) || 0} · 失败 ${Number(failed) || 0}</div>
-    ${error ? `<div style="margin-top:4px; font-size:12px; color:#b91c1c;">${escapeHtml(error)}</div>` : ''}
-    <div style="margin-top:6px; display:flex; gap:6px; justify-content:flex-end;">
-      <button type="button" data-ai-view-batch="${escapeHtml(batch_id)}" style="font-size:12px; border:1px solid #2563eb; background:#2563eb; color:#fff; border-radius:6px; padding:3px 10px; cursor:pointer;">查看结果</button>
-      <button type="button" data-ai-dismiss-toast style="font-size:12px; border:1px solid #cbd5e1; background:#ffffff; border-radius:6px; padding:3px 10px; cursor:pointer;">关闭</button>
-    </div>
-  `;
-  host.appendChild(card);
-  card.querySelector('[data-ai-view-batch]').addEventListener('click', async () => {
-    await viewBatchResults(batch_id);
-    card.remove();
+  const successCount = Number(success) || 0;
+  const failedCount = Number(failed) || 0;
+  if (error) {
+    showTopToast({
+      tone: 'error',
+      message: `AI 处理失败：${error}`,
+      durationMs: 6000,
+    });
+    return;
+  }
+  if (successCount > 0 && failedCount === 0) {
+    showTopToast({
+      tone: 'success',
+      message: `AI 用例生成完成，成功 ${successCount} 条`,
+      actionLabel: '查看结果',
+      onAction: () => viewBatchResults(batch_id),
+      durationMs: 4500,
+    });
+    return;
+  }
+  if (successCount > 0 && failedCount > 0) {
+    showTopToast({
+      tone: 'info',
+      message: `AI 完成：成功 ${successCount} · 失败 ${failedCount}`,
+      actionLabel: '查看结果',
+      onAction: () => viewBatchResults(batch_id),
+      durationMs: 6000,
+    });
+    return;
+  }
+  showTopToast({
+    tone: 'error',
+    message: `AI 处理失败，全部 ${failedCount} 条未生成`,
+    durationMs: 6000,
   });
-  card.querySelector('[data-ai-dismiss-toast]').addEventListener('click', () => card.remove());
-  setTimeout(() => { if (card.isConnected) card.remove(); }, 60000);
 }
 
 async function viewBatchResults(batchId) {
@@ -220,10 +392,14 @@ function finishBatch(batchId, payload) {
 
 function startBatchWatch(info) {
   if (!info || !info.batch_id) return;
+  const startedAt = info.started_at || now();
   state.batches.set(info.batch_id, {
     story_ids: Array.isArray(info.story_ids) ? info.story_ids : [],
-    started_at: info.started_at || now(),
+    started_at: startedAt,
     expected_seconds: Number(info.expected_duration_seconds) || 300,
+    // 把 last_poll_ts 设到启动时间，避免刚提交就立即去 poll；
+    // 等 FALLBACK_POLL_MS (20s) 之后兜底轮询才上场。
+    last_poll_ts: startedAt,
   });
   persist();
   render();
