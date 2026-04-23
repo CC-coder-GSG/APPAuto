@@ -31,25 +31,6 @@ class ZentaoAIServiceError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Access control (tab permission + optional username allowlist)
-# ---------------------------------------------------------------------------
-
-def ensure_zentao_ai_access(user) -> None:
-    """Raise ZentaoAIServiceError(403) if this user cannot use the AI forwarder.
-
-    Layers:
-      1. The "zentao-ai" tab permission (handled by route via ensure_tab_access)
-      2. Optional username allowlist configured via APP_ZENTAO_AI_ALLOWED_USERNAMES
-    """
-    allowlist = settings.zentao_ai_allowed_usernames
-    if not allowlist:
-        return
-    username = str(getattr(user, "username", "") or "")
-    if username not in allowlist:
-        raise ZentaoAIServiceError(403, "当前账号不在禅道AI功能白名单内")
-
-
-# ---------------------------------------------------------------------------
 # Client acquisition (same pattern as other Zentao routes)
 # ---------------------------------------------------------------------------
 

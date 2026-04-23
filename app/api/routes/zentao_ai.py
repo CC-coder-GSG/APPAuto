@@ -10,7 +10,7 @@ POST /zentao/ai/story/batch-latest      Bulk-query latest results for a set of s
 
 Access control:
   - "zentao-ai" tab permission (managed in 权限管理)
-  - Optional APP_ZENTAO_AI_ALLOWED_USERNAMES allowlist (enforced in service layer)
+  - Each user must configure their own DeepSeek API Key in 个人设置 → 🤖 AI密钥
 """
 from __future__ import annotations
 
@@ -48,10 +48,6 @@ _TAB_KEY = "zentao-ai"
 
 def _gate(current_user) -> None:
     ensure_tab_access(current_user, _TAB_KEY)
-    try:
-        zentao_ai_service.ensure_zentao_ai_access(current_user)
-    except ZentaoAIServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message)
 
 
 # ---------------------------------------------------------------------------
