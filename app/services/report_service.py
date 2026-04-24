@@ -308,7 +308,21 @@ class ReportService:
         actor_scope_seed = team_ids if all_users_mode else [target_user_id]
         actor_scope_seed = [uid for uid in actor_scope_seed if uid]
         zentao_accounts_by_user: dict[int, set[str]] = {}
+        zentao_names_by_user: dict[int, set[str]] = {}
         if actor_scope_seed:
+            user_rows = (
+                self.db.query(User.id, User.username, User.display_name)
+                .filter(User.id.in_(actor_scope_seed))
+                .all()
+            )
+            for uid, username, display_name in user_rows:
+                names: set[str] = set()
+                for raw_name in (username, display_name):
+                    text = str(raw_name or "").strip().lower()
+                    if text:
+                        names.add(text)
+                zentao_names_by_user[int(uid)] = names
+
             binding_rows = (
                 self.db.query(UserZentaoBinding.user_id, UserZentaoBinding.zentao_account)
                 .filter(UserZentaoBinding.user_id.in_(actor_scope_seed))
@@ -319,6 +333,79 @@ class ReportService:
                 if not account_text:
                     continue
                 zentao_accounts_by_user.setdefault(int(uid), set()).add(account_text)
+
+        bulk_sync_message = "通过整体测试版本全量同步"
+        opened_by_account_present = func.trim(func.coalesce(BugTracking.zentao_opened_by_account, "")) != ""
+        opened_by_name_present = func.trim(func.coalesce(BugTracking.zentao_opened_by_name, "")) != ""
+        reliable_zentao_creator_absent = and_(
+            func.trim(func.coalesce(BugTracking.zentao_opened_by_account, "")) == "",
+            func.trim(func.coalesce(BugTracking.zentao_opened_by_name, "")) == "",
+        )
+
+        def apply_created_bug_actor_filter(query, actor_ids: list[int] | None):
+            """
+            Attribute bug creators using Zentao truth first, local created_by second.
+
+            Rules:
+            - If a bug has Zentao opener info (`zentao_opened_by_*`), use that.
+            - If a bug has no Zentao opener info and was not bulk-imported by the
+              overall-test full-sync path, fall back to local `created_by_id`.
+            - Bulk-imported Zentao bugs with missing opener info are left
+              unattributed rather than credited to the sync operator.
+            """
+            if actor_ids is None:
+                return query
+
+            actor_ids = [int(uid) for uid in actor_ids if uid]
+            if not actor_ids:
+                return query.filter(False)
+
+            account_pool = sorted({
+                account
+                for uid in actor_ids
+                for account in zentao_accounts_by_user.get(int(uid), set())
+            })
+            name_pool = sorted({
+                name
+                for uid in actor_ids
+                for name in zentao_names_by_user.get(int(uid), set())
+            })
+
+            actor_clauses = []
+            if account_pool or name_pool:
+                remote_clauses = []
+                if account_pool:
+                    remote_clauses.append(
+                        func.lower(func.coalesce(BugTracking.zentao_opened_by_account, "")).in_(account_pool)
+                    )
+                if name_pool:
+                    remote_clauses.append(
+                        func.lower(func.coalesce(BugTracking.zentao_opened_by_name, "")).in_(name_pool)
+                    )
+                actor_clauses.append(
+                    and_(
+                        BugTracking.zentao_bug_id.isnot(None),
+                        or_(*remote_clauses),
+                    )
+                )
+
+            actor_clauses.append(
+                and_(
+                    BugTracking.created_by_id.in_(actor_ids),
+                    or_(
+                        BugTracking.zentao_bug_id.is_(None),
+                        and_(
+                            reliable_zentao_creator_absent,
+                            or_(
+                                BugTracking.zentao_sync_message.is_(None),
+                                BugTracking.zentao_sync_message != bulk_sync_message,
+                            ),
+                        ),
+                    ),
+                )
+            )
+
+            return query.filter(or_(*actor_clauses))
 
         def closed_bug_query(actor_ids: list[int] | None, start_at: datetime, end_at: datetime):
             q = self.db.query(func.count(func.distinct(BugTracking.id))).filter(
@@ -364,7 +451,12 @@ class ReportService:
             if linked_req_ids:
                 case_count = case_count.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
             case_count = filter_by_major_ids(case_count, Requirement.major_version_id).scalar() or 0
-            bug_count = self.db.query(func.count(BugTracking.id)).filter(BugTracking.created_by_id == uid, _bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause())
+            bug_count = self.db.query(func.count(BugTracking.id)).filter(
+                _bug_time_col() >= sdt,
+                _bug_time_col() <= edt,
+                _not_deleted_clause(),
+            )
+            bug_count = apply_created_bug_actor_filter(bug_count, [uid])
             bug_count = filter_by_major_ids(bug_count, BugTracking.major_version_id).scalar() or 0
             retested_reqs = retest_transition_stats["by_actor"].get(uid, 0)
             closed_bugs = closed_bug_query([uid], sdt, edt)
@@ -399,7 +491,12 @@ class ReportService:
             )
             if linked_req_ids:
                 q_case = q_case.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
-            q_bug = self.db.query(func.count(BugTracking.id)).filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause(), BugTracking.created_by_id.in_(team_ids))
+            q_bug = self.db.query(func.count(BugTracking.id)).filter(
+                _bug_time_col() >= sdt,
+                _bug_time_col() <= edt,
+                _not_deleted_clause(),
+            )
+            q_bug = apply_created_bug_actor_filter(q_bug, team_ids)
             q_closed = closed_bug_query(team_ids, sdt, edt)
             q_fb_created = self.db.query(func.count(FeedbackRecord.id)).filter(
                 FeedbackRecord.created_at >= sdt,
@@ -437,8 +534,11 @@ class ReportService:
                 if linked_req_ids:
                     q_case = q_case.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
                 q_bug = self.db.query(func.count(BugTracking.id)).filter(
-                    _bug_time_col() >= day_s, _bug_time_col() <= day_e, _not_deleted_clause(), BugTracking.created_by_id.in_(team_ids)
+                    _bug_time_col() >= day_s,
+                    _bug_time_col() <= day_e,
+                    _not_deleted_clause(),
                 )
+                q_bug = apply_created_bug_actor_filter(q_bug, team_ids)
                 q_closed = closed_bug_query(team_ids, day_s, day_e)
                 q_fb_created = self.db.query(func.count(FeedbackRecord.id)).filter(
                     FeedbackRecord.created_at >= day_s,
@@ -466,8 +566,11 @@ class ReportService:
                 if linked_req_ids:
                     q_case = q_case.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
                 q_bug = self.db.query(func.count(BugTracking.id)).filter(
-                    BugTracking.created_by_id == target_user_id, _bug_time_col() >= day_s, _bug_time_col() <= day_e, _not_deleted_clause()
+                    _bug_time_col() >= day_s,
+                    _bug_time_col() <= day_e,
+                    _not_deleted_clause(),
                 )
+                q_bug = apply_created_bug_actor_filter(q_bug, [target_user_id])
                 q_closed = closed_bug_query([target_user_id], day_s, day_e)
                 q_fb_created = self.db.query(func.count(FeedbackRecord.id)).filter(
                     FeedbackRecord.created_at >= day_s,
@@ -493,12 +596,16 @@ class ReportService:
             })
             cur += timedelta(days=1)
 
-        bug_dist_query = self.db.query(BugTracking.source_type, func.count(BugTracking.id)).filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause())
+        bug_dist_query = self.db.query(BugTracking.source_type, func.count(BugTracking.id)).filter(
+            _bug_time_col() >= sdt,
+            _bug_time_col() <= edt,
+            _not_deleted_clause(),
+        )
         bug_dist_query = filter_by_major_ids(bug_dist_query, BugTracking.major_version_id)
         if all_users_mode:
-            bug_dist_query = bug_dist_query.filter(BugTracking.created_by_id.in_(team_ids))
+            bug_dist_query = apply_created_bug_actor_filter(bug_dist_query, team_ids)
         else:
-            bug_dist_query = bug_dist_query.filter(BugTracking.created_by_id == target_user_id)
+            bug_dist_query = apply_created_bug_actor_filter(bug_dist_query, [target_user_id])
         bug_source_dist = [{"source_type": (k.value if hasattr(k, 'value') else str(k)), "count": v} for k, v in bug_dist_query.group_by(BugTracking.source_type).all()]
 
         result = {
@@ -530,20 +637,16 @@ class ReportService:
             if nt_ids:
                 # Use a single aggregated pseudo-row so the report stays compact.
                 def _agg(uid_list):
+                    created_bug_query = self.db.query(func.count(BugTracking.id)).filter(
+                        _bug_time_col() >= sdt,
+                        _bug_time_col() <= edt,
+                        _not_deleted_clause(),
+                    )
+                    created_bug_query = apply_created_bug_actor_filter(created_bug_query, uid_list)
                     return {
                         "executed_requirements": 0,
                         "created_cases": 0,
-                        "created_bugs": (
-                            self.db.query(func.count(BugTracking.id))
-                            .filter(
-                                BugTracking.created_by_id.in_(uid_list),
-                                _bug_time_col() >= sdt,
-                                _bug_time_col() <= edt,
-                                _not_deleted_clause(),
-                            )
-                            .scalar()
-                            or 0
-                        ),
+                        "created_bugs": created_bug_query.scalar() or 0,
                         "retested_reqs": 0,
                         "closed_bugs": 0,
                         "created_feedbacks": 0,
