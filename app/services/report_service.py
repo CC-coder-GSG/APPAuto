@@ -21,6 +21,7 @@ from app.models import (
     TestExecution,
     User,
     UserRole,
+    UserZentaoBinding,
     Version,
     VersionType,
 )
@@ -42,6 +43,16 @@ def _bug_time_col():
 def _bug_time_value(bug: BugTracking) -> datetime | None:
     """Python-side equivalent of `_bug_time_col()` for in-memory rows."""
     return bug.zentao_opened_at or bug.created_at
+
+
+def _bug_close_time_col():
+    """
+    Time axis used for every "closed in date range" bug stat.
+
+    Report-center "关闭 Bug" is defined as Zentao's real closure event, so we
+    use the cached Zentao close timestamp instead of local Stage5 update time.
+    """
+    return BugTracking.zentao_close_date
 
 
 def _not_deleted_clause():
@@ -294,6 +305,50 @@ class ReportService:
                 return query.filter(False)
             return query.filter(column.in_(scoped_major_ids))
 
+        actor_scope_seed = team_ids if all_users_mode else [target_user_id]
+        actor_scope_seed = [uid for uid in actor_scope_seed if uid]
+        zentao_accounts_by_user: dict[int, set[str]] = {}
+        if actor_scope_seed:
+            binding_rows = (
+                self.db.query(UserZentaoBinding.user_id, UserZentaoBinding.zentao_account)
+                .filter(UserZentaoBinding.user_id.in_(actor_scope_seed))
+                .all()
+            )
+            for uid, account in binding_rows:
+                account_text = str(account or "").strip().lower()
+                if not account_text:
+                    continue
+                zentao_accounts_by_user.setdefault(int(uid), set()).add(account_text)
+
+        def closed_bug_query(actor_ids: list[int] | None, start_at: datetime, end_at: datetime):
+            q = self.db.query(func.count(func.distinct(BugTracking.id))).filter(
+                _not_deleted_clause(),
+                _bug_close_time_col().isnot(None),
+                _bug_close_time_col() >= start_at,
+                _bug_close_time_col() <= end_at,
+                func.lower(func.coalesce(BugTracking.zentao_live_status, "")) == "closed",
+            )
+
+            if actor_ids is None:
+                return q
+
+            actor_ids = [int(uid) for uid in actor_ids if uid]
+            account_pool = sorted({
+                account
+                for uid in actor_ids
+                for account in zentao_accounts_by_user.get(int(uid), set())
+            })
+            actor_clauses = []
+            if actor_ids:
+                actor_clauses.append(BugTracking.closed_by_id.in_(actor_ids))
+            if account_pool:
+                actor_clauses.append(
+                    func.lower(func.coalesce(BugTracking.zentao_closed_by_account, "")).in_(account_pool)
+                )
+            if actor_clauses:
+                return q.filter(or_(*actor_clauses))
+            return q.filter(False)
+
         def metrics_for_user(uid: int) -> dict:
             executed_req_count = (
                 self.db.query(func.count(func.distinct(TestExecution.requirement_id)))
@@ -312,17 +367,7 @@ class ReportService:
             bug_count = self.db.query(func.count(BugTracking.id)).filter(BugTracking.created_by_id == uid, _bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause())
             bug_count = filter_by_major_ids(bug_count, BugTracking.major_version_id).scalar() or 0
             retested_reqs = retest_transition_stats["by_actor"].get(uid, 0)
-            closed_bugs = (
-                self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
-                .join(BugTracking, BugStage5Record.bug_tracking_id == BugTracking.id)
-                .filter(
-                    BugStage5Record.user_id == uid,
-                    BugStage5Record.updated_at >= sdt,
-                    BugStage5Record.updated_at <= edt,
-                    BugStage5Record.test_done.is_(True),
-                    BugStage5Record.newly_found_bug_id.is_(None),
-                )
-            )
+            closed_bugs = closed_bug_query([uid], sdt, edt)
             closed_bugs = filter_by_major_ids(closed_bugs, BugTracking.major_version_id).scalar() or 0
             created_feedbacks = self.db.query(func.count(FeedbackRecord.id)).filter(
                 FeedbackRecord.creator_id == uid,
@@ -355,17 +400,7 @@ class ReportService:
             if linked_req_ids:
                 q_case = q_case.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
             q_bug = self.db.query(func.count(BugTracking.id)).filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause(), BugTracking.created_by_id.in_(team_ids))
-            q_closed = (
-                self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
-                .join(BugTracking, BugStage5Record.bug_tracking_id == BugTracking.id)
-                .filter(
-                    BugStage5Record.updated_at >= sdt,
-                    BugStage5Record.updated_at <= edt,
-                    BugStage5Record.user_id.in_(team_ids),
-                    BugStage5Record.test_done.is_(True),
-                    BugStage5Record.newly_found_bug_id.is_(None),
-                )
-            )
+            q_closed = closed_bug_query(team_ids, sdt, edt)
             q_fb_created = self.db.query(func.count(FeedbackRecord.id)).filter(
                 FeedbackRecord.created_at >= sdt,
                 FeedbackRecord.created_at <= edt,
@@ -404,17 +439,7 @@ class ReportService:
                 q_bug = self.db.query(func.count(BugTracking.id)).filter(
                     _bug_time_col() >= day_s, _bug_time_col() <= day_e, _not_deleted_clause(), BugTracking.created_by_id.in_(team_ids)
                 )
-                q_closed = (
-                    self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
-                    .join(BugTracking, BugStage5Record.bug_tracking_id == BugTracking.id)
-                    .filter(
-                        BugStage5Record.updated_at >= day_s,
-                        BugStage5Record.updated_at <= day_e,
-                        BugStage5Record.user_id.in_(team_ids),
-                        BugStage5Record.test_done.is_(True),
-                        BugStage5Record.newly_found_bug_id.is_(None),
-                    )
-                )
+                q_closed = closed_bug_query(team_ids, day_s, day_e)
                 q_fb_created = self.db.query(func.count(FeedbackRecord.id)).filter(
                     FeedbackRecord.created_at >= day_s,
                     FeedbackRecord.created_at <= day_e,
@@ -443,17 +468,7 @@ class ReportService:
                 q_bug = self.db.query(func.count(BugTracking.id)).filter(
                     BugTracking.created_by_id == target_user_id, _bug_time_col() >= day_s, _bug_time_col() <= day_e, _not_deleted_clause()
                 )
-                q_closed = (
-                    self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
-                    .join(BugTracking, BugStage5Record.bug_tracking_id == BugTracking.id)
-                    .filter(
-                        BugStage5Record.user_id == target_user_id,
-                        BugStage5Record.updated_at >= day_s,
-                        BugStage5Record.updated_at <= day_e,
-                        BugStage5Record.test_done.is_(True),
-                        BugStage5Record.newly_found_bug_id.is_(None),
-                    )
-                )
+                q_closed = closed_bug_query([target_user_id], day_s, day_e)
                 q_fb_created = self.db.query(func.count(FeedbackRecord.id)).filter(
                     FeedbackRecord.created_at >= day_s,
                     FeedbackRecord.created_at <= day_e,
