@@ -46,6 +46,11 @@ class OverallTestZentaoSyncPayload(BaseModel):
     force: bool = False
 
 
+class OverallTestZentaoSyncAllPayload(BaseModel):
+    software_id: int
+    force: bool = False
+
+
 @router.get("/overall-test/overview")
 def overall_test_overview(
     major_version_id: int,
@@ -90,6 +95,27 @@ def sync_overall_test_zentao_bugs(
     service = OverallTestService(db)
     return service.sync_zentao_major_bugs(
         major_version_id=payload.major_version_id,
+        current_user=current_user,
+        force=payload.force,
+    )
+
+
+@router.post("/overall-test/sync-zentao-all")
+def sync_overall_test_zentao_all(
+    payload: OverallTestZentaoSyncAllPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Pull ALL bugs (including closed/deleted) for a whole software product.
+
+    Uses /products/{id}/bugs?status=all under the hood (the previous
+    execution+build walk only returned active/resolved bugs, so the local DB
+    was missing thousands of closed entries).
+    """
+    service = OverallTestService(db)
+    return service.sync_all_zentao_bugs_by_software(
+        software_id=payload.software_id,
         current_user=current_user,
         force=payload.force,
     )

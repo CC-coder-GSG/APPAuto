@@ -82,6 +82,12 @@ class BugTracking(Base):
     zentao_assigned_to_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     # Remote last-edited timestamp from Zentao
     zentao_remote_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Remote opened timestamp (禅道真实提交时间) — used by all time-based statistics
+    # so reports reflect when a bug was actually filed in Zentao, not when it
+    # happened to land in the local DB.
+    zentao_opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    zentao_opened_by_account: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    zentao_opened_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False)
 

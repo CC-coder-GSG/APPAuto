@@ -655,6 +655,40 @@ class ZentaoSyncService:
         bug_row.zentao_sync_status = "synced"
         bug_row.zentao_sync_message = "通过禅道同步事件应用"
         bug_row.zentao_raw_payload = row.raw_payload_json
+
+        # Write real Zentao opened/assigned metadata so the report center can
+        # use them as ground truth. Browser-extension payloads sometimes omit
+        # these, so we write conservatively — existing values are kept unless
+        # the new payload actually provides something.
+        opened_at_raw = draft.get("openedDate") or payload.get("result", {}).get("openedDate")
+        if opened_at_raw:
+            from app.utils.time_utils import parse_external_datetime_to_local_naive
+            parsed = parse_external_datetime_to_local_naive(opened_at_raw)
+            if parsed and not bug_row.zentao_opened_at:
+                bug_row.zentao_opened_at = parsed
+        opened_by_account = (draft.get("openedByAccount") or draft.get("creatorAccount") or "").strip()
+        if opened_by_account and not bug_row.zentao_opened_by_account:
+            bug_row.zentao_opened_by_account = opened_by_account
+        opened_by_name = (draft.get("creatorName") or "").strip()
+        if opened_by_name and not bug_row.zentao_opened_by_name:
+            bug_row.zentao_opened_by_name = opened_by_name
+
+        # Derive local `dispatched_to_id` from Zentao assignedTo so the
+        # governance "unassigned" KPI reflects reality.
+        assigned_account = (draft.get("assignedToAccount") or draft.get("assignedTo") or "").strip()
+        if assigned_account:
+            bug_row.zentao_assigned_to_account = assigned_account
+            bug_row.zentao_assigned_to_name = draft.get("assignedToName") or bug_row.zentao_assigned_to_name or assigned_account
+            if bug_row.dispatched_to_id is None:
+                from app.models.user_zentao_binding import UserZentaoBinding
+                binding = (
+                    self.db.query(UserZentaoBinding)
+                    .filter(UserZentaoBinding.zentao_account == assigned_account)
+                    .first()
+                )
+                if binding:
+                    bug_row.dispatched_to_id = binding.user_id
+
         self.db.commit()
 
         row.applied_bug_tracking_id = bug_row.id
@@ -698,12 +732,36 @@ class ZentaoSyncService:
                 row.failure_reason = f"自动应用失败：{exc}"
 
     def _resolve_actor_for_apply(self, payload: dict[str, Any], actor_id: int | None) -> User:
+        """
+        Resolve which local User should be recorded as `created_by_id` for a
+        bug/testcase event coming from the browser extension.
+
+        Priority:
+        1. explicit actor_id (only when the caller is a logged-in user)
+        2. Zentao creator account mapped via UserZentaoBinding (preferred)
+        3. Zentao creator name matched against User.display_name/username
+        4. Dedicated `zentao_sync_bot` system user (does NOT fall back to admin)
+        """
         if actor_id:
             actor = self.db.query(User).filter(User.id == actor_id).first()
             if actor:
                 return actor
 
-        creator_name = self._clean_text(payload.get("draft", {}).get("creatorName"))
+        from app.models.user_zentao_binding import UserZentaoBinding
+        draft = payload.get("draft", {}) or {}
+        creator_account = self._clean_text(draft.get("creatorAccount") or draft.get("openedByAccount"))
+        if creator_account:
+            binding = (
+                self.db.query(UserZentaoBinding)
+                .filter(UserZentaoBinding.zentao_account == creator_account)
+                .first()
+            )
+            if binding:
+                user = self.db.query(User).filter(User.id == binding.user_id).first()
+                if user:
+                    return user
+
+        creator_name = self._clean_text(draft.get("creatorName"))
         if creator_name:
             actor = (
                 self.db.query(User)
@@ -714,9 +772,11 @@ class ZentaoSyncService:
             if actor:
                 return actor
 
-        admin = self.db.query(User).filter(User.role == UserRole.ADMIN).order_by(User.id.asc()).first()
-        if admin:
-            return admin
+        # Fallback to the dedicated bot user — NEVER silently credit admin.
+        from app.db.seed import ZENTAO_SYNC_BOT_USERNAME
+        bot = self.db.query(User).filter(User.username == ZENTAO_SYNC_BOT_USERNAME).first()
+        if bot:
+            return bot
 
         any_user = self.db.query(User).order_by(User.id.asc()).first()
         if any_user:

@@ -957,6 +957,7 @@ def close_zentao_bug(
                 raise HTTPException(status_code=exc.status_code or 502, detail=f"禅道关闭失败: {exc.message}")
 
     _update_local_live_status(db, str(zt_id), "closed")
+    _apply_local_close_side_effects(db, str(zt_id), current_user, comment=payload.comment)
     audit(db, action="zentao_bug.close", target_type="bug", actor_id=current_user.id,
           target_id=str(zt_id), detail=f"comment={payload.comment[:100]}")
     return {"message": "禅道 Bug 已关闭", "already_closed": already_closed}
@@ -1160,6 +1161,63 @@ def _reset_local_closed(db: Session, zt_id_str: str) -> None:
         db.commit()
     except Exception as e:
         logger.warning("_reset_local_closed: %s", e)
+        db.rollback()
+
+
+def _apply_local_close_side_effects(db: Session, zt_id_str: str, current_user, *, comment: str = "") -> None:
+    """
+    When a bug is closed via the single-action Zentao route, keep local state
+    aligned so the report center does not need another full sync to reflect
+    the closure:
+    - BugTracking.closed = True
+    - BugTracking.closed_by_id = current user
+    - BugTracking.zentao_live_status already set to "closed" by caller
+    - BugStage5Record auto-created (source="zentao_sync") so closed_bugs
+      counters on the report summary tick up immediately.
+    """
+    from app.models.stage5 import BugStage5Record
+    try:
+        rows = db.query(BugTracking).filter(BugTracking.zentao_bug_id == zt_id_str).all()
+        for row in rows:
+            row.closed = True
+            if row.closed_by_id is None:
+                row.closed_by_id = current_user.id
+            if not row.zentao_close_date:
+                row.zentao_close_date = local_now()
+            if comment and not row.zentao_close_comment:
+                row.zentao_close_comment = comment
+            row.updated_at = local_now()
+
+            # Upsert Stage5 record for the closing user so reports count it.
+            existing = (
+                db.query(BugStage5Record)
+                .filter(
+                    BugStage5Record.bug_tracking_id == row.id,
+                    BugStage5Record.user_id == current_user.id,
+                )
+                .first()
+            )
+            if existing:
+                if not existing.test_done:
+                    existing.test_done = True
+                    existing.source = existing.source or "zentao_sync"
+                    existing.resolution = existing.resolution or "fixed"
+                    existing.updated_at = local_now()
+                if comment and not existing.comment:
+                    existing.comment = comment
+            else:
+                db.add(BugStage5Record(
+                    bug_tracking_id=row.id,
+                    user_id=current_user.id,
+                    minor_version_id=row.found_minor_version_id,
+                    test_done=True,
+                    resolution="fixed",
+                    source="zentao_sync",
+                    comment=comment or "",
+                ))
+        db.commit()
+    except Exception as e:
+        logger.warning("_apply_local_close_side_effects: %s", e)
         db.rollback()
 
 

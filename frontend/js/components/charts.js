@@ -157,6 +157,12 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
     series: [{ name: 'Bug数量', type: 'bar', data: advancedData.top_reqs.map((r) => r.count).reverse(), label: { show: true, position: 'right' }, itemStyle: { color: '#ef4444', borderRadius: [0, 4, 4, 0] } }],
   });
 
+  // 漏测率分母=需求/用例创建的 bug，MANUAL 不计入（多为禅道整体测试场景）
+  const leakageCase = Number(advancedData.leakage.case ?? 0);
+  const leakageReq = Number(advancedData.leakage.requirement ?? 0);
+  const leakageManual = Number(advancedData.leakage.manual ?? 0);
+  const leakageNormal = Number(advancedData.leakage.normal ?? (leakageCase + leakageReq));
+  const leakageRetest = Number(advancedData.leakage.retest || 0);
   initChart('leakageChart', 'leakageChart')?.setOption({
     title: { text: '交叉复测漏测率', left: 'center', textStyle: { fontSize: 15 } },
     tooltip: { trigger: 'item', formatter: '{b}: {c}个 ({d}%)' },
@@ -164,23 +170,40 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
     series: [{
       type: 'pie', radius: ['40%', '65%'], center: ['50%', '50%'],
       data: [
-        { name: '原测发现 (正常)', value: advancedData.leakage.normal, itemStyle: { color: '#3b82f6' } },
-        { name: '复测新增 (漏测)', value: advancedData.leakage.retest, itemStyle: { color: '#f97316' } },
+        { name: '原测发现 (正常)', value: leakageNormal, itemStyle: { color: '#3b82f6' } },
+        { name: '复测新增 (漏测)', value: leakageRetest, itemStyle: { color: '#f97316' } },
+        { name: '整体测试 (手工)', value: leakageManual, itemStyle: { color: '#94a3b8' } },
       ],
     }],
   });
 
+  // 4-level funnel: 发现 → 开发已解决 → 禅道已关闭 → 本地验收闭环
+  // resolved = live_status ∈ {resolved,closed}, closed = live_status==closed,
+  // verified = 本地 BugTracking.closed=True（Stage5 验收完成）
+  const funnel = advancedData.funnel || {};
+  const funnelTotal = Number(funnel.total || 0);
+  const funnelResolved = Number(funnel.resolved ?? funnel.fixed ?? 0);
+  const funnelClosed = Number(funnel.closed || 0);
+  const funnelVerified = Number(funnel.verified || 0);
   initChart('funnelChart', 'funnelChart')?.setOption({
-    title: { text: '缺陷闭环转化漏斗', left: 'center', textStyle: { fontSize: 15 } },
+    title: {
+      text: '缺陷闭环转化漏斗',
+      subtext: '发现 → 开发已解决 → 禅道已关闭 → 本地验收',
+      left: 'center',
+      textStyle: { fontSize: 15 },
+      subtextStyle: { fontSize: 11, color: '#94a3b8' },
+    },
     tooltip: { trigger: 'item', formatter: '{b}: {c}' },
     series: [{
-      type: 'funnel', left: '10%', top: 50, bottom: 50, width: '80%', min: 0, max: Math.max(advancedData.funnel.total, 1), minSize: '10%', maxSize: '100%', sort: 'descending', gap: 2,
+      type: 'funnel', left: '10%', top: 60, bottom: 20, width: '80%',
+      min: 0, max: Math.max(funnelTotal, 1), minSize: '10%', maxSize: '100%', sort: 'descending', gap: 2,
       label: { show: true, position: 'inside', formatter: '{b}: {c}' },
       itemStyle: { borderColor: '#fff', borderWidth: 1 },
       data: [
-        { name: '发现Bug总数', value: advancedData.funnel.total, itemStyle: { color: '#ef4444' } },
-        { name: '开发处理完毕', value: advancedData.funnel.fixed, itemStyle: { color: '#eab308' } },
-        { name: '验证彻底闭环', value: advancedData.funnel.closed, itemStyle: { color: '#22c55e' } },
+        { name: '发现Bug总数', value: funnelTotal, itemStyle: { color: '#ef4444' } },
+        { name: '开发已解决', value: funnelResolved, itemStyle: { color: '#f97316' } },
+        { name: '禅道已关闭', value: funnelClosed, itemStyle: { color: '#eab308' } },
+        { name: '本地验收闭环', value: funnelVerified, itemStyle: { color: '#22c55e' } },
       ],
     }],
   });

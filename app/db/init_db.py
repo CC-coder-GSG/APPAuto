@@ -11,6 +11,7 @@ from app.db.seed import (
     ensure_stage5_schema_compat,
     ensure_testcase_schema_compat,
     ensure_user_schema_compat,
+    ensure_zentao_sync_bot,
 )
 from app.db.session import SessionLocal, engine
 from app.models import (
@@ -47,6 +48,7 @@ def init_db() -> None:
         ensure_browser_sync_schema_compat(db)
         Base.metadata.create_all(bind=engine)
         ensure_default_admin(db)
+        ensure_zentao_sync_bot(db)
         ensure_default_software_and_backfill(db)
     finally:
         db.close()

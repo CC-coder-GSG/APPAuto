@@ -535,11 +535,44 @@ export function applyS5PageSize() {
 export async function syncOverallTestFromZentao(options = {}) {
   const { silent = false, reloadAfter = true, force = true } = options;
   const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
-  if (!majorId) {
-    if (!silent) {
-      window.showMessage && window.showMessage('请选择具体大版本后再从禅道同步', 'error');
+  const softwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+
+  // 全部版本模式：调用新的按产品全量同步接口
+  if (majorId === 0) {
+    if (!softwareId) {
+      if (!silent) {
+        window.showMessage && window.showMessage('请先选择产品后再同步禅道全部版本', 'error');
+      }
+      return null;
     }
-    return null;
+    let data;
+    try {
+      data = await (await api('/overall-test/sync-zentao-all', {
+        method: 'POST',
+        headers: window.H,
+        body: { software_id: softwareId, force },
+      })).json();
+    } catch (err) {
+      if (!silent) {
+        window.showMessage && window.showMessage(err.message || '禅道全量同步失败', 'error');
+      }
+      return null;
+    }
+    if (!silent) {
+      if (data.cached) {
+        window.showMessage && window.showMessage('15分钟内已全量同步过，已使用缓存，如需强制请重试', 'info');
+      } else {
+        const prodCnt = Array.isArray(data.zentao_products) ? data.zentao_products.length : 0;
+        window.showMessage && window.showMessage(
+          `禅道全量同步完成：${prodCnt} 个产品，远端 ${data.remote_total || 0} 条，新增 ${data.created || 0}，更新 ${data.updated || 0}，未归类 ${data.unclassified || 0}（耗时 ${data.elapsed_seconds || 0}s）`,
+          'success',
+        );
+      }
+    }
+    if (reloadAfter) {
+      await loadOverallTest({ syncBeforeLoad: false, showSuccess: false });
+    }
+    return data;
   }
 
   const data = await (await api('/overall-test/sync-zentao-bugs', {

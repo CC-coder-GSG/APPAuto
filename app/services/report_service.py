@@ -3,7 +3,7 @@
 from datetime import date, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import case, func
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -25,6 +25,32 @@ from app.models import (
     VersionType,
 )
 from app.utils.time_utils import local_now
+
+
+def _bug_time_col():
+    """
+    Time axis used for every "created in date range" bug stat.
+
+    Prefers the real Zentao openedDate (`zentao_opened_at`) and falls back to
+    the local insert time only when Zentao data is missing. Before this
+    change, bulk-syncing a year of Zentao bugs would stack them all on the
+    sync day in reports; now they land in the right buckets.
+    """
+    return func.coalesce(BugTracking.zentao_opened_at, BugTracking.created_at)
+
+
+def _bug_time_value(bug: BugTracking) -> datetime | None:
+    """Python-side equivalent of `_bug_time_col()` for in-memory rows."""
+    return bug.zentao_opened_at or bug.created_at
+
+
+def _not_deleted_clause():
+    """
+    SQLAlchemy expression excluding Zentao-tombstoned rows from any bug query.
+    Deleted bugs were previously counted in summary / advanced / governance
+    but hidden in the overall-test list, producing mismatched totals.
+    """
+    return or_(BugTracking.zentao_deleted.is_(False), BugTracking.zentao_deleted.is_(None))
 
 
 class ReportService:
@@ -283,7 +309,7 @@ class ReportService:
             if linked_req_ids:
                 case_count = case_count.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
             case_count = filter_by_major_ids(case_count, Requirement.major_version_id).scalar() or 0
-            bug_count = self.db.query(func.count(BugTracking.id)).filter(BugTracking.created_by_id == uid, BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
+            bug_count = self.db.query(func.count(BugTracking.id)).filter(BugTracking.created_by_id == uid, _bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause())
             bug_count = filter_by_major_ids(bug_count, BugTracking.major_version_id).scalar() or 0
             retested_reqs = retest_transition_stats["by_actor"].get(uid, 0)
             closed_bugs = (
@@ -328,7 +354,7 @@ class ReportService:
             )
             if linked_req_ids:
                 q_case = q_case.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
-            q_bug = self.db.query(func.count(BugTracking.id)).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt, BugTracking.created_by_id.in_(team_ids))
+            q_bug = self.db.query(func.count(BugTracking.id)).filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause(), BugTracking.created_by_id.in_(team_ids))
             q_closed = (
                 self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
                 .join(BugTracking, BugStage5Record.bug_tracking_id == BugTracking.id)
@@ -376,7 +402,7 @@ class ReportService:
                 if linked_req_ids:
                     q_case = q_case.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
                 q_bug = self.db.query(func.count(BugTracking.id)).filter(
-                    BugTracking.created_at >= day_s, BugTracking.created_at <= day_e, BugTracking.created_by_id.in_(team_ids)
+                    _bug_time_col() >= day_s, _bug_time_col() <= day_e, _not_deleted_clause(), BugTracking.created_by_id.in_(team_ids)
                 )
                 q_closed = (
                     self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
@@ -415,7 +441,7 @@ class ReportService:
                 if linked_req_ids:
                     q_case = q_case.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
                 q_bug = self.db.query(func.count(BugTracking.id)).filter(
-                    BugTracking.created_by_id == target_user_id, BugTracking.created_at >= day_s, BugTracking.created_at <= day_e
+                    BugTracking.created_by_id == target_user_id, _bug_time_col() >= day_s, _bug_time_col() <= day_e, _not_deleted_clause()
                 )
                 q_closed = (
                     self.db.query(func.count(func.distinct(BugStage5Record.bug_tracking_id)))
@@ -452,7 +478,7 @@ class ReportService:
             })
             cur += timedelta(days=1)
 
-        bug_dist_query = self.db.query(BugTracking.source_type, func.count(BugTracking.id)).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
+        bug_dist_query = self.db.query(BugTracking.source_type, func.count(BugTracking.id)).filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause())
         bug_dist_query = filter_by_major_ids(bug_dist_query, BugTracking.major_version_id)
         if all_users_mode:
             bug_dist_query = bug_dist_query.filter(BugTracking.created_by_id.in_(team_ids))
@@ -472,6 +498,47 @@ class ReportService:
             for u in all_users:
                 m = metrics_for_user(u.id)
                 team.append({"user_id": u.id, "username": u.shown_name, **m})
+
+            # Aggregate row for bugs owned by zentao_sync_bot or any other
+            # non-team-member account (mostly from historical Zentao data
+            # whose opener cannot be mapped to a local user).
+            from app.db.seed import ZENTAO_SYNC_BOT_USERNAME
+            non_team_users = (
+                self.db.query(User)
+                .filter(
+                    or_(User.is_team_member.is_(False), User.is_team_member.is_(None)),
+                    User.username != "admin",
+                )
+                .all()
+            )
+            nt_ids = [u.id for u in non_team_users]
+            if nt_ids:
+                # Use a single aggregated pseudo-row so the report stays compact.
+                def _agg(uid_list):
+                    return {
+                        "executed_requirements": 0,
+                        "created_cases": 0,
+                        "created_bugs": (
+                            self.db.query(func.count(BugTracking.id))
+                            .filter(
+                                BugTracking.created_by_id.in_(uid_list),
+                                _bug_time_col() >= sdt,
+                                _bug_time_col() <= edt,
+                                _not_deleted_clause(),
+                            )
+                            .scalar()
+                            or 0
+                        ),
+                        "retested_reqs": 0,
+                        "closed_bugs": 0,
+                        "created_feedbacks": 0,
+                        "processed_feedbacks": 0,
+                    }
+                team.append({
+                    "user_id": 0,
+                    "username": "未归属 / 禅道同步",
+                    **_agg(nt_ids),
+                })
             result["team_comparison"] = team
         return result
 
@@ -480,25 +547,40 @@ class ReportService:
         edt = datetime.combine(end_date, datetime.max.time())
         req_bugs_query = self.db.query(Requirement.zentao_req_id, Requirement.title, func.count(BugTracking.id).label("bug_count")) \
             .join(BugTracking, BugTracking.requirement_id == Requirement.id) \
-            .filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
+            .filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause())
         if major_version_id:
             req_bugs_query = req_bugs_query.filter(Requirement.major_version_id == major_version_id)
         elif software_id:
             req_bugs_query = req_bugs_query.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
         req_bugs = req_bugs_query.group_by(Requirement.id).order_by(func.count(BugTracking.id).desc()).limit(7).all()
         top_reqs = [{"req_id": r[0], "title": r[1], "count": r[2]} for r in req_bugs]
-        bug_base_query = self.db.query(BugTracking).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
+        bug_base_query = self.db.query(BugTracking).filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause())
         if major_version_id:
             bug_base_query = bug_base_query.filter(BugTracking.major_version_id == major_version_id)
         elif software_id:
             major_ids = [m.id for m in self.db.query(Version).filter(Version.version_type == VersionType.MAJOR, Version.software_id == software_id).all()]
             bug_base_query = bug_base_query.filter(BugTracking.major_version_id.in_(major_ids if major_ids else [-1]))
+        # Leakage (漏测率): 原测发现 vs 复测新增。分母只算归属到需求/用例的
+        # bug，MANUAL (多数来自禅道全量同步的未挂需求 bug) 不参与，避免稀释。
         retest_bugs = bug_base_query.filter(BugTracking.source_type == BugSourceType.RETEST).count() or 0
-        normal_bugs = bug_base_query.filter(BugTracking.source_type.in_([BugSourceType.CASE, BugSourceType.MANUAL])).count() or 0
+        case_bugs = bug_base_query.filter(BugTracking.source_type == BugSourceType.CASE).count() or 0
+        requirement_bugs = bug_base_query.filter(BugTracking.source_type == BugSourceType.REQUIREMENT).count() or 0
+        normal_bugs = case_bugs + requirement_bugs
+        manual_bugs = bug_base_query.filter(BugTracking.source_type == BugSourceType.MANUAL).count() or 0
         total_bugs = bug_base_query.count() or 0
-        # 方案A：以“已写入解决版本”作为开发处理完毕的判定标准。
-        fixed_bugs = bug_base_query.filter(BugTracking.fixed_minor_version_id.isnot(None)).count() or 0
-        closed_bugs = bug_base_query.filter(BugTracking.closed.is_(True)).count() or 0
+
+        # 4-级漏斗（取代原来的 total/fixed/closed 三级）：
+        # total    = 发现 Bug 总数（期间内所有未删除 bug）
+        # resolved = 开发侧已解决（禅道 live_status ∈ {resolved, closed}）
+        # closed   = 禅道已关闭（live_status == closed）
+        # verified = 本地 Stage5 完成验收（closed=True）
+        resolved_bugs = bug_base_query.filter(
+            func.lower(func.coalesce(BugTracking.zentao_live_status, "")).in_(["resolved", "closed"])
+        ).count() or 0
+        closed_bugs = bug_base_query.filter(
+            func.lower(func.coalesce(BugTracking.zentao_live_status, "")) == "closed"
+        ).count() or 0
+        verified_bugs = bug_base_query.filter(BugTracking.closed.is_(True)).count() or 0
 
         exec_query = self.db.query(TestExecution.result_status, func.count(TestExecution.id)).filter(TestExecution.executed_at >= sdt, TestExecution.executed_at <= edt)
         if major_version_id:
@@ -509,8 +591,21 @@ class ReportService:
         executions = [{"status": r[0], "count": r[1]} for r in exec_results]
         return {
             "top_reqs": top_reqs,
-            "leakage": {"retest": retest_bugs, "normal": normal_bugs},
-            "funnel": {"total": total_bugs, "fixed": fixed_bugs, "closed": closed_bugs},
+            "leakage": {
+                "retest": retest_bugs,
+                "normal": normal_bugs,
+                "case": case_bugs,
+                "requirement": requirement_bugs,
+                "manual": manual_bugs,
+            },
+            "funnel": {
+                "total": total_bugs,
+                "resolved": resolved_bugs,
+                "closed": closed_bugs,
+                "verified": verified_bugs,
+                # Backward-compat keys for any old frontend still reading these
+                "fixed": resolved_bugs,
+            },
             "executions": executions,
         }
 
@@ -702,36 +797,66 @@ class ReportService:
                 "undone": max(0, total - done),
             })
 
-        bug_query = self.db.query(BugTracking).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
+        bug_query = self.db.query(BugTracking).filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause())
         if scoped_major_ids is not None:
             bug_query = bug_query.filter(BugTracking.major_version_id.in_(scoped_major_ids if scoped_major_ids else [-1]))
         bug_rows = bug_query.all()
+
+        def _is_open(bug: BugTracking) -> bool:
+            """
+            A bug is "open" (subject to overdue/stale/unassigned checks)
+            only if it is neither locally verified nor closed on Zentao.
+            """
+            if bug.closed:
+                return False
+            live = (bug.zentao_live_status or "").strip().lower()
+            if live == "closed":
+                return False
+            return True
+
+        def _is_unassigned(bug: BugTracking) -> bool:
+            """
+            Both the local dispatched_to and the cached Zentao assignee must
+            be empty for "无人处理". Previously only the local field was
+            checked, flagging every Zentao-synced bug as unassigned.
+            """
+            if bug.dispatched_to_id is not None:
+                return False
+            zt_account = (bug.zentao_assigned_to_account or "").strip()
+            return not zt_account or zt_account.lower() == "closed"
 
         unassigned_bugs = []
         overdue_bugs = []
         stale_bugs = []
         assigned_no_progress = []
         for b in bug_rows:
+            open_time = _bug_time_value(b) or b.created_at
+            update_time = b.zentao_remote_updated_at or b.updated_at
             b_item = {
                 "id": b.id,
                 "bug_id": b.bug_id,
                 "zentao_bug_url": b.zentao_bug_url,
                 "zentao_bug_title": b.zentao_bug_title,
                 "major_version_no": majors.get(b.major_version_id, "未知"),
-                "status": "closed" if b.closed else "open",
-                "dispatched_to_name": users.get(b.dispatched_to_id, "未指派"),
-                "created_at": b.created_at.isoformat(),
-                "updated_at": b.updated_at.isoformat() if b.updated_at else None,
-                "age_days": _days_since(b.created_at),
-                "stale_days": _days_since(b.updated_at),
+                "status": "closed" if (b.closed or (b.zentao_live_status or "").lower() == "closed") else "open",
+                "dispatched_to_name": (
+                    users.get(b.dispatched_to_id)
+                    or b.zentao_assigned_to_name
+                    or "未指派"
+                ),
+                "created_at": (open_time or b.created_at).isoformat(),
+                "updated_at": update_time.isoformat() if update_time else None,
+                "age_days": _days_since(open_time),
+                "stale_days": _days_since(update_time),
             }
-            if (not b.closed) and (b.dispatched_to_id is None):
+            open_flag = _is_open(b)
+            if open_flag and _is_unassigned(b):
                 unassigned_bugs.append(b_item)
-            if (not b.closed) and b.created_at <= bug_overdue_dt:
+            if open_flag and open_time and open_time <= bug_overdue_dt:
                 overdue_bugs.append(b_item)
-            if (not b.closed) and b.updated_at and b.updated_at <= stale_bug_dt:
+            if open_flag and update_time and update_time <= stale_bug_dt:
                 stale_bugs.append(b_item)
-            if (not b.closed) and b.dispatched_to_id is not None and b.updated_at and b.updated_at <= bug_overdue_dt:
+            if open_flag and (not _is_unassigned(b)) and update_time and update_time <= bug_overdue_dt:
                 assigned_no_progress.append(b_item)
 
         unassigned_bugs.sort(key=lambda x: x["age_days"], reverse=True)
@@ -739,10 +864,18 @@ class ReportService:
         stale_bugs.sort(key=lambda x: x["stale_days"], reverse=True)
         assigned_no_progress.sort(key=lambda x: x["stale_days"], reverse=True)
 
+        # Close aging now uses real Zentao close_date - opened_at when
+        # available, so a bug that was filed 90d ago in Zentao and synced
+        # yesterday no longer shows as "closed in 0 days".
         bug_closed_days = []
         for b in bug_rows:
-            if b.closed and b.updated_at:
-                bug_closed_days.append(max(0, (b.updated_at - b.created_at).days))
+            is_closed = b.closed or (b.zentao_live_status or "").lower() == "closed"
+            if not is_closed:
+                continue
+            close_dt = b.zentao_close_date or b.updated_at
+            open_dt = b.zentao_opened_at or b.created_at
+            if close_dt and open_dt:
+                bug_closed_days.append(max(0, (close_dt - open_dt).days))
 
         req_bug_top_query = self.db.query(
             Requirement.id,
@@ -751,7 +884,7 @@ class ReportService:
             Requirement.major_version_id,
             Requirement.status,
             func.count(BugTracking.id).label("bug_count"),
-        ).join(BugTracking, BugTracking.requirement_id == Requirement.id).filter(BugTracking.created_at >= sdt, BugTracking.created_at <= edt)
+        ).join(BugTracking, BugTracking.requirement_id == Requirement.id).filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause())
         if scoped_major_ids is not None:
             req_bug_top_query = req_bug_top_query.filter(Requirement.major_version_id.in_(scoped_major_ids if scoped_major_ids else [-1]))
         req_bug_top = []

@@ -12,6 +12,11 @@ from app.models import SoftwareProduct, User, UserRole, Version, VersionType
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "admin"
 DEFAULT_SOFTWARE_NAME = "Survey Master"
+# System account that owns bugs synced from Zentao when the opener cannot be
+# mapped to a real local user. Keeps admin's personal stats clean.
+ZENTAO_SYNC_BOT_USERNAME = "zentao_sync_bot"
+ZENTAO_SYNC_BOT_DISPLAY_NAME = "禅道同步"
+UNCLASSIFIED_MAJOR_VERSION_NO = "V0.0.0-unclassified"
 logger = logging.getLogger(__name__)
 
 
@@ -28,6 +33,31 @@ def ensure_default_admin(db: Session) -> None:
         )
     )
     db.commit()
+
+
+def ensure_zentao_sync_bot(db: Session) -> User:
+    """
+    Make sure a dedicated system user exists for bugs synced from Zentao whose
+    opener cannot be mapped to a real local account. Using a separate user
+    prevents admin (or whoever clicks the sync button) from being credited with
+    thousands of bugs they didn't actually create.
+    """
+    bot = db.query(User).filter(User.username == ZENTAO_SYNC_BOT_USERNAME).first()
+    if bot:
+        return bot
+    from app.core.security import hash_password as _hash
+    bot = User(
+        username=ZENTAO_SYNC_BOT_USERNAME,
+        password_hash=_hash("!locked-no-login!"),
+        role=UserRole.USER,
+        display_name=ZENTAO_SYNC_BOT_DISPLAY_NAME,
+        is_team_member=False,
+    )
+    db.add(bot)
+    db.commit()
+    db.refresh(bot)
+    logger.info("Seeded zentao_sync_bot user id=%s", bot.id)
+    return bot
 
 
 def ensure_software_schema_compat(db: Session) -> None:
@@ -246,6 +276,10 @@ def ensure_bug_schema_compat(db: Session) -> None:
         "zentao_close_comment": "TEXT",
         "zentao_assigned_to_account": "VARCHAR(100)",
         "zentao_assigned_to_name": "VARCHAR(100)",
+        "zentao_remote_updated_at": "DATETIME",
+        "zentao_opened_at": "DATETIME",
+        "zentao_opened_by_account": "VARCHAR(100)",
+        "zentao_opened_by_name": "VARCHAR(100)",
     }
     for col, sql_type in column_defs.items():
         if col not in cols:
@@ -254,6 +288,7 @@ def ensure_bug_schema_compat(db: Session) -> None:
     try:
         db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_bug_tracking_zentao_bug_id ON bug_tracking (zentao_bug_id)"))
         db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_bug_tracking_zentao_client_record_id ON bug_tracking (zentao_client_record_id)"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_bug_tracking_zentao_opened_at ON bug_tracking (zentao_opened_at)"))
         db.commit()
     except Exception:
         db.rollback()

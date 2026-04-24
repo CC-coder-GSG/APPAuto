@@ -884,11 +884,11 @@
 
     <div id="reportContent" class="card">
       <div class="metrics-grid">
-        <div class="metric-card"><div class="metric-title">执行/测试过需求总数</div><div class="metric-value" id="mReq">0</div></div>
-        <div class="metric-card"><div class="metric-title">创建用例总数</div><div class="metric-value" id="mCase">0</div></div>
-        <div class="metric-card"><div class="metric-title">创建Bug总数</div><div class="metric-value" id="mBug">0</div></div>
-        <div class="metric-card"><div class="metric-title">复测需求数</div><div class="metric-value" id="mRetest">0</div></div>
-        <div class="metric-card"><div class="metric-title">关闭Bug数</div><div class="metric-value" id="mClosed">0</div></div>
+        <div class="metric-card" title="在所选时间段内执行过测试的不同需求数（按 TestExecution 去重）"><div class="metric-title">执行/测试过需求总数</div><div class="metric-value" id="mReq">0</div></div>
+        <div class="metric-card" title="在所选时间段内新增的本地测试用例数"><div class="metric-title">创建用例总数</div><div class="metric-value" id="mCase">0</div></div>
+        <div class="metric-card" title="按禅道真实 openedDate 过滤的新建 Bug 数（已排除禅道删除）"><div class="metric-title">创建Bug总数</div><div class="metric-value" id="mBug">0</div></div>
+        <div class="metric-card" title="需求复测结论变化的次数（以审计 retest.submit 为准）"><div class="metric-title">复测需求数</div><div class="metric-value" id="mRetest">0</div></div>
+        <div class="metric-card" title="本地 Stage5 验收完成 或 禅道单条关闭联动产生的 Stage5 记录"><div class="metric-title">关闭Bug数</div><div class="metric-value" id="mClosed">0</div></div>
       </div>
       <div class="chart-grid">
         <div id="trendChart" class="chart-box"></div>
