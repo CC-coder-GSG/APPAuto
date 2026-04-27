@@ -36,6 +36,18 @@ class Settings(BaseSettings):
     zentao_sync_auto_map_testcase: bool = Field(default_factory=lambda: os.getenv('APP_ZENTAO_SYNC_AUTO_MAP_TESTCASE', os.getenv('ZENTAO_SYNC_AUTO_MAP_TESTCASE', 'true')).lower() == 'true')
     zentao_sync_auto_apply_testcase: bool = Field(default_factory=lambda: os.getenv('APP_ZENTAO_SYNC_AUTO_APPLY_TESTCASE', os.getenv('ZENTAO_SYNC_AUTO_APPLY_TESTCASE', 'true')).lower() == 'true')
     zentao_sync_auto_apply_bug: bool = Field(default_factory=lambda: os.getenv('APP_ZENTAO_SYNC_AUTO_APPLY_BUG', os.getenv('ZENTAO_SYNC_AUTO_APPLY_BUG', 'true')).lower() == 'true')
+    zentao_background_sync_enabled: bool = Field(default_factory=lambda: os.getenv('APP_ZENTAO_BACKGROUND_SYNC_ENABLED', os.getenv('ZENTAO_BACKGROUND_SYNC_ENABLED', 'true')).lower() == 'true')
+    zentao_background_sync_username: str = Field(default_factory=lambda: os.getenv('APP_ZENTAO_BACKGROUND_SYNC_USERNAME', os.getenv('ZENTAO_BACKGROUND_SYNC_USERNAME', '')).strip())
+    zentao_workbench_recent_sync_interval_minutes: int = Field(default_factory=lambda: int(os.getenv('APP_ZENTAO_WORKBENCH_RECENT_SYNC_INTERVAL_MINUTES', os.getenv('ZENTAO_WORKBENCH_RECENT_SYNC_INTERVAL_MINUTES', '10'))))
+    # On-enter freshness thresholds. If the local mirror has not been touched
+    # within this window when a workbench page opens, a lightweight pull is
+    # triggered before the page renders. Bug data changes more often than
+    # testcase data, so they get separate knobs.
+    zentao_workbench_bug_recent_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv('APP_ZENTAO_WORKBENCH_BUG_RECENT_TTL_SECONDS', os.getenv('ZENTAO_WORKBENCH_BUG_RECENT_TTL_SECONDS', '180'))))
+    zentao_workbench_testcase_recent_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv('APP_ZENTAO_WORKBENCH_TESTCASE_RECENT_TTL_SECONDS', os.getenv('ZENTAO_WORKBENCH_TESTCASE_RECENT_TTL_SECONDS', '300'))))
+    zentao_testcase_detail_refresh_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv('APP_ZENTAO_TESTCASE_DETAIL_REFRESH_TTL_SECONDS', os.getenv('ZENTAO_TESTCASE_DETAIL_REFRESH_TTL_SECONDS', '600'))))
+    zentao_nightly_full_sync_hour: int = Field(default_factory=lambda: int(os.getenv('APP_ZENTAO_NIGHTLY_FULL_SYNC_HOUR', os.getenv('ZENTAO_NIGHTLY_FULL_SYNC_HOUR', '2'))))
+    zentao_nightly_full_sync_minute: int = Field(default_factory=lambda: int(os.getenv('APP_ZENTAO_NIGHTLY_FULL_SYNC_MINUTE', os.getenv('ZENTAO_NIGHTLY_FULL_SYNC_MINUTE', '20'))))
 
     # Zentao → n8n AI webhook forwarder
     # Access is gated by the "zentao-ai" tab permission (managed via the admin UI).

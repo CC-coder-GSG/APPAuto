@@ -61,6 +61,11 @@ class BugTracking(Base):
     zentao_creator_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     zentao_sync_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     zentao_sync_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Where this row was last touched from. Allowed values:
+    # browser_event / scheduled_pull / on_enter_refresh / nightly_reconcile /
+    # manual_sync. Lets the workbench tell "still waiting on a periodic pull"
+    # apart from "just refreshed because user opened the page".
+    zentao_sync_source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     zentao_raw_payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Zentao anchor fields — supplemental linkage for API hydration
     zentao_story_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)

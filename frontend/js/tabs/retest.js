@@ -2,9 +2,46 @@
 import { state } from '../state.js';
 import { withPrefix, renderBugLink, renderCaseLink } from '../utils.js';
 let retestSseBound = false;
+let retestPreflightPromise = null;
+let retestPreflightKey = '';
+let retestPreflightAt = 0;
 
 function getRetestMode() {
   return document.getElementById('retestDisplayMode')?.value || 'version';
+}
+
+function renderAutoLinkedBadge(label = '自动归集') {
+  return `<span class="badge" style="background:#ecfeff; color:#0f766e; border:1px solid #99f6e4; margin-left:6px; padding:1px 6px;">${label}</span>`;
+}
+
+async function preflightRetestData(softwareId) {
+  if (!softwareId) return;
+  const key = String(softwareId);
+  const now = Date.now();
+  if (retestPreflightPromise && retestPreflightKey === key) {
+    return retestPreflightPromise;
+  }
+  if (retestPreflightKey === key && now - retestPreflightAt < 30000) {
+    return;
+  }
+  retestPreflightKey = key;
+  retestPreflightPromise = api('/workbench/preflight-refresh', {
+    method: 'POST',
+    headers: window.H,
+    body: {
+      software_id: softwareId,
+      include_bugs: true,
+      include_testcases: true,
+      force: false,
+    },
+  }).then(() => {
+    retestPreflightAt = Date.now();
+  }).catch((err) => {
+    console.warn('retest preflight refresh failed', err);
+  }).finally(() => {
+    retestPreflightPromise = null;
+  });
+  return retestPreflightPromise;
 }
 
 function syncRetestMinorOptionsByMode() {
@@ -47,7 +84,10 @@ export async function loadRetest() {
     return;
   }
   const sid = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
-  let url = '/retest/workbench?mode=' + mode;
+  if (sid) {
+    await preflightRetestData(sid);
+  }
+  let url = '/workbench/retest?mode=' + mode;
   if (mode === 'version' && majorId) url += '&major_version_id=' + majorId;
   if (sid) url += '&software_id=' + sid;
 
@@ -68,13 +108,14 @@ export async function loadRetest() {
         if (b.is_retest_failed) evidenceCount++;
         const ztBugId = (b.bug_id || '').replace(/\D/g, '');
         const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
+        const linkedBadge = b.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
         return `<div style="margin-top:4px;">
-          <span class="badge" style="background:#fef2f2; color:#dc2626; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>
+          <span class="badge" style="background:#fef2f2; color:#dc2626; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${linkedBadge}
           <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
         </div>`;
       }).join('');
       return `<div style="margin-bottom: 10px; padding-left: 12px; border-left: 3px solid #cbd5e1;">
-        <div style="font-weight: bold; color: #475569;">🧪 用例 [${renderCaseLink(c)}]</div>
+        <div style="font-weight: bold; color: #475569;">🧪 用例 [${renderCaseLink(c)}]${c.auto_linked ? renderAutoLinkedBadge('自动归集用例') : ''}</div>
         <div style="margin-top: 4px;">${bugs || '<span class="muted" style="font-size:12px;">✓ 完美通过，无关联Bug</span>'}</div>
       </div>`;
     }).join('');
@@ -83,8 +124,9 @@ export async function loadRetest() {
       if (b.is_retest_failed) evidenceCount++;
       const ztBugId = (b.bug_id || '').replace(/\D/g, '');
       const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
+      const linkedBadge = b.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
       return `<div style="margin-bottom:6px;">
-      <span class="badge" style="background:#fff7ed; color:#ea580c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>
+      <span class="badge" style="background:#fff7ed; color:#ea580c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${linkedBadge}
       <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
     </div>`;
     }).join('');
@@ -101,6 +143,19 @@ export async function loadRetest() {
     </div>`;
     }).join('');
 
+    const evidenceBugs = req.retest_evidence_bugs || [];
+    if (evidenceBugs.length > 0) evidenceCount += evidenceBugs.length;
+    const evidenceBugHtml = evidenceBugs.map((b) => {
+      const ztBugId = (b.bug_id || '').replace(/\D/g, '');
+      const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
+      const closedTag = b.closed
+        ? '<span class="badge" style="background:#dcfce7; color:#166534; margin-left:6px; padding:1px 6px;">✅已闭环</span>'
+        : '<span class="badge" style="background:#fef9c3; color:#854d0e; margin-left:6px; padding:1px 6px;">⏳未闭环</span>';
+      return `<div style="margin-bottom:6px;">
+      <span class="badge" style="background:#fff7ed; color:#c2410c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(测后自动归集)</span></span>${closedTag}${renderAutoLinkedBadge('自动归集Bug')}
+    </div>`;
+    }).join('');
+
     const hasEvidence = evidenceCount > 0;
     const isCompleted = req.retest_completed;
     const statusTag = isCompleted
@@ -114,6 +169,7 @@ export async function loadRetest() {
             <span style="font-size: 16px; font-weight: bold; color: ${isCompleted ? '#94a3b8; text-decoration:line-through;' : '#0f172a'};">📄 ${req.zentao_req_id} ${req.title}</span>
             ${mode === 'all_pending' ? `<span class="badge" style="margin-left:8px; background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd;">🏷️${req.major_version_name || '未知版本'}</span>` : ''}
             <span class="badge" style="margin-left: 12px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;">👤 原测试人: ${req.owner || '未知'}</span>
+            ${req.auto_linked_case_count > 0 ? renderAutoLinkedBadge(`自动归集用例 ${req.auto_linked_case_count}`) : ''}
             <span style="margin-left:8px;">${statusTag}</span>
           </div>
           <div onclick="event.stopPropagation()"><button style="background:#16a34a;" onclick='setRetest(${req.id}, true, ${hasEvidence})'>✅通过</button>
@@ -132,11 +188,17 @@ export async function loadRetest() {
               <div>${freeBugHtml || '<div class="muted">暂无自由Bug</div>'}</div>
             </div>
           </div>
+          ${evidenceBugs.length > 0 ? `
+          <div style="margin-top:12px; border-top:1px dashed #e2e8f0; padding-top:12px; background:#fffbeb; padding:10px; border-radius:6px;">
+            <div style="font-weight:bold; color:#c2410c; margin-bottom:8px;">【系统归集：测试完成后新增 Bug 候选】</div>
+            <div class="muted" style="font-size:12px; margin-bottom:6px;">${req.test_completed_at ? `测试完成时间：${new Date(req.test_completed_at).toLocaleString()}` : '该需求暂无测试完成时间，归集结果可能不完整'}</div>
+            <div>${evidenceBugHtml}</div>
+          </div>` : ''}
           <div style="margin-top:12px; border-top:1px dashed #e2e8f0; padding-top:12px;">
-            <div style="font-weight:bold; color:#b91c1c; margin-bottom:8px;">【复测新增漏测 Bug】</div>
+            <div style="font-weight:bold; color:#b91c1c; margin-bottom:8px;">【复测新增漏测 Bug】（兜底入口）</div>
             <div>${retestBugHtml || '<div class="muted">暂无复测新增Bug</div>'}</div>
             <div class="row" style="margin-top:8px;">
-              <div class="prefix-input"><span>b#</span><input id="rb_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增漏测Bug编号"></div>
+              <div class="prefix-input"><span>b#</span><input id="rb_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增漏测Bug编号（系统未自动归集到时使用）"></div>
               <button onclick="addRetestBug(${req.id})">➕新增漏测Bug</button>
             </div>
           </div>

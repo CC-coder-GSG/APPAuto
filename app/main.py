@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -86,6 +87,7 @@ if sys.platform == "win32":
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -97,9 +99,11 @@ from app.core.exceptions import AppError
 from app.db.session import SessionLocal
 from app.db.init_db import init_db
 from app.services.push_service import PushService
+from app.services.zentao_background_sync_service import ZentaoBackgroundSyncService
 
 app = FastAPI(title="APPAuto", version="0.3.0")
-scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
+scheduler = BackgroundScheduler(timezone=settings.scheduler_timezone)
+logger = logging.getLogger("uvicorn.error")
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 _cors_origins = settings.cors_allowed_origins
@@ -151,11 +155,64 @@ def _push_daily_report() -> None:
         db.close()
 
 
+def _run_recent_zentao_sync() -> None:
+    db = SessionLocal()
+    try:
+        result = ZentaoBackgroundSyncService(db).run_recent_sync_for_all_software()
+        logger.info(
+            "background recent zentao sync finished | total=%s success=%s failed=%s",
+            result.get("total"),
+            result.get("success"),
+            result.get("failed"),
+        )
+    finally:
+        db.close()
+
+
+def _run_nightly_full_zentao_sync() -> None:
+    db = SessionLocal()
+    try:
+        result = ZentaoBackgroundSyncService(db).run_nightly_full_sync_for_all_software()
+        logger.info(
+            "background nightly zentao sync finished | total=%s success=%s failed=%s",
+            result.get("total"),
+            result.get("success"),
+            result.get("failed"),
+        )
+    finally:
+        db.close()
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
     if not scheduler.running:
         scheduler.add_job(_push_daily_report, CronTrigger(hour=18, minute=0), id="daily_report", replace_existing=True)
+        if settings.zentao_background_sync_enabled:
+            if settings.zentao_workbench_recent_sync_interval_minutes > 0:
+                # IntervalTrigger keeps a clean N-minute cadence regardless of
+                # whether N divides 60. CronTrigger("*/N") would only fire
+                # at minute marks divisible by N, which silently drops to
+                # once-per-hour for values like 7 or 13.
+                scheduler.add_job(
+                    _run_recent_zentao_sync,
+                    IntervalTrigger(minutes=settings.zentao_workbench_recent_sync_interval_minutes),
+                    id="zentao_recent_sync",
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                )
+            scheduler.add_job(
+                _run_nightly_full_zentao_sync,
+                CronTrigger(
+                    hour=settings.zentao_nightly_full_sync_hour,
+                    minute=settings.zentao_nightly_full_sync_minute,
+                ),
+                id="zentao_nightly_full_sync",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
         scheduler.start()
 
 

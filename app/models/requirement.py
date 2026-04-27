@@ -24,6 +24,7 @@ class Requirement(Base):
 
     case_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     test_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    test_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
     retest_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     retested_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     retested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

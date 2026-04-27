@@ -16,6 +16,7 @@ ALL_TAB_KEYS = [
     "overall-test",
     "field-test",
     "build-records",
+    "testcase-center",
     "zentao-sync",
     "report",
     "activity",
@@ -30,6 +31,7 @@ DEFAULT_USER_TAB_KEYS = [
     "retest",
     "overall-test",
     "field-test",
+    "testcase-center",
     "zentao-sync",
     "report",
 ]

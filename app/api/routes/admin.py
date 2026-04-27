@@ -147,6 +147,7 @@ def admin_data_overview(current_user=Depends(get_current_user), db: Session = De
                 "zentao_req_id": r.zentao_req_id,
                 "title": r.title,
                 "major_version_id": r.major_version_id,
+                "zentao_story_id": r.zentao_story_id,
                 "case_ids": [c.zentao_case_id for c in r.test_cases],
                 "test_cases": [{"id": c.id, "zentao_case_id": c.zentao_case_id, "zentao_case_url": c.zentao_case_url} for c in r.test_cases],
                 "test_notes": r.test_notes,

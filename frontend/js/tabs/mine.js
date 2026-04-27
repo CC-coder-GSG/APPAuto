@@ -20,6 +20,9 @@ const notesModalState = {
   reqId: null,
 };
 let mineSseBound = false;
+let minePreflightPromise = null;
+let minePreflightKey = '';
+let minePreflightAt = 0;
 
 function getFoldStorageKey() {
   const uid = state.currentUser?.id || window.currentUser?.id || 'anonymous';
@@ -51,7 +54,42 @@ function getMinorText(minorId) {
   return opt?.text || String(minorId || '未选择');
 }
 
+function renderAutoLinkedBadge(label = '自动归集') {
+  return `<span class="badge" style="background:#ecfeff; color:#0f766e; border:1px solid #99f6e4; margin-left:8px; padding:2px 6px;">${label}</span>`;
+}
+
+async function preflightWorkbenchData(softwareId) {
+  if (!softwareId) return;
+  const key = String(softwareId);
+  const now = Date.now();
+  if (minePreflightPromise && minePreflightKey === key) {
+    return minePreflightPromise;
+  }
+  if (minePreflightKey === key && now - minePreflightAt < 30000) {
+    return;
+  }
+  minePreflightKey = key;
+  minePreflightPromise = api('/workbench/preflight-refresh', {
+    method: 'POST',
+    headers: window.H,
+    body: {
+      software_id: softwareId,
+      include_bugs: true,
+      include_testcases: true,
+      force: false,
+    },
+  }).then(() => {
+    minePreflightAt = Date.now();
+  }).catch((err) => {
+    console.warn('workbench preflight refresh failed', err);
+  }).finally(() => {
+    minePreflightPromise = null;
+  });
+  return minePreflightPromise;
+}
+
 function renderBugChip(req, bug) {
+  const immutable = req.test_completed || bug.auto_linked;
   const dBadge = bug.dispatched_to_name
     ? `<span style="color:#ea580c; background:#ffedd5; padding:1px 4px; border-radius:4px; font-size:11px; margin-left:6px;">🪂已特派给:${bug.dispatched_to_name}</span>`
     : '';
@@ -60,11 +98,12 @@ function renderBugChip(req, bug) {
     : `<span style="color:#94a3b8; font-size:11px; margin-left:4px;">(发现于: 🏷️${bug.found_minor_version_no || '未知'})</span>`;
   const ztBugId = (bug.bug_id || '').replace(/\D/g, '');
   const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:4px;"></span>` : '';
+  const autoBadge = bug.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
 
   return `<span class="badge" style="background:#f1f5f9; border:1px solid #cbd5e1; padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
-      ${renderBugLink(bug)} ${ztSlot} ${verText} ${dBadge}
-      <a href="javascript:void(0)" title="编辑" onclick="${req.test_completed ? 'return false;' : `editWorkbenchBug(${bug.id}, '${bug.bug_id}')`}" style="color:${req.test_completed ? '#94a3b8' : '#3b82f6'}; margin-left:4px; text-decoration:none;">✎</a>
-      <a href="javascript:void(0)" title="删除" onclick="${req.test_completed ? 'return false;' : `removeWorkbenchBug(${bug.id})`}" style="color:${req.test_completed ? '#94a3b8' : '#ef4444'}; margin-left:2px; text-decoration:none;">×</a>
+      ${renderBugLink(bug)} ${ztSlot} ${verText} ${dBadge} ${autoBadge}
+      <a href="javascript:void(0)" title="编辑" onclick="${immutable ? 'return false;' : `editWorkbenchBug(${bug.id}, '${bug.bug_id}')`}" style="color:${immutable ? '#94a3b8' : '#3b82f6'}; margin-left:4px; text-decoration:none;">✎</a>
+      <a href="javascript:void(0)" title="删除" onclick="${immutable ? 'return false;' : `removeWorkbenchBug(${bug.id})`}" style="color:${immutable ? '#94a3b8' : '#ef4444'}; margin-left:2px; text-decoration:none;">×</a>
   </span>`;
 }
 
@@ -313,10 +352,13 @@ export async function loadMyWorkbench() {
   refreshMineMinorSelectByMode();
   const mode = getMode();
   const majorId = Number(document.getElementById('mineMajorSelect')?.value || 0);
-  let url = '/requirements/my-workbench?mode=' + mode;
+  let url = '/workbench/mine?mode=' + mode;
   if (mode === 'version' && majorId) url += '&major_version_id=' + majorId;
   const currentSoftwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
   if (currentSoftwareId) url += `&software_id=${currentSoftwareId}`;
+  if (currentSoftwareId) {
+    await preflightWorkbenchData(currentSoftwareId);
+  }
 
   state.currentFeedbackTodoHtml = '';
   if (window.OmniQAFeedbackTab && typeof window.OmniQAFeedbackTab.loadFeedbackTodoOnMine === 'function') {
@@ -392,6 +434,8 @@ export function renderMineCards() {
   const reqsHtml = filteredData.map((req) => {
     const caseDisabled = req.case_completed ? 'disabled' : '';
     const testDisabled = req.test_completed ? 'disabled' : '';
+    const autoModeForCases = Boolean(req.zentao_story_id) || (req.auto_linked_case_count || 0) > 0;
+    const addCaseDisabled = (req.case_completed || autoModeForCases) ? 'disabled' : '';
     const casePrefixColor = req.case_completed ? 'color:#94a3b8;' : '';
     const testPrefixColor = req.test_completed ? 'color:#94a3b8;' : '';
     const isFullyCompleted = req.test_completed && req.case_completed;
@@ -399,17 +443,31 @@ export function renderMineCards() {
     const vTag = mode === 'all_pending' && req.major_version_name
       ? `<span class="badge" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; margin-right:8px; padding:2px 6px;">🏷️${req.major_version_name}</span>`
       : '';
+    const syncSummary = [
+      req.auto_linked_case_count > 0 ? renderAutoLinkedBadge(`自动归集用例 ${req.auto_linked_case_count}`) : '',
+      req.auto_linked_bug_count > 0 ? renderAutoLinkedBadge(`自动归集Bug ${req.auto_linked_bug_count}`) : '',
+    ].join('');
 
-    const caseHtml = (req.test_cases || []).map((c) => `
+    const caseHtml = (req.test_cases || []).map((c) => {
+      const lockedByCase = Boolean(caseDisabled) || Boolean(c.auto_linked);
+      const lockedByTest = Boolean(testDisabled) || Boolean(c.auto_linked);
+      const editAttr = lockedByCase ? 'disabled' : '';
+      const linkAttr = lockedByTest ? 'disabled' : '';
+      const delAttr = lockedByCase ? 'disabled' : '';
+      const editClick = c.auto_linked ? 'return false;' : `editWorkbenchCase(${c.id}, '${c.zentao_case_id}')`;
+      const linkClick = c.auto_linked ? 'return false;' : `promptCaseBug(${req.id},${c.id})`;
+      const delClick = c.auto_linked ? 'return false;' : `deleteCase(${c.id})`;
+      return `
       <div class="case-item">
         <div class="row">
-          ${renderCaseLink(c)}
-          <button class="secondary" style="padding:2px 8px; font-size:12px; margin-left:8px;" ${caseDisabled} onclick="editWorkbenchCase(${c.id}, '${c.zentao_case_id}')">编辑编号</button>
-          <button ${testDisabled} onclick="promptCaseBug(${req.id},${c.id})">添加关联Bug</button>
-          <button class="danger" ${caseDisabled} onclick="deleteCase(${c.id})">删除用例</button>
+          ${renderCaseLink(c)}${c.auto_linked ? renderAutoLinkedBadge() : ''}
+          <button class="secondary" style="padding:2px 8px; font-size:12px; margin-left:8px;" ${editAttr} onclick="${editClick}">编辑编号</button>
+          <button ${linkAttr} onclick="${linkClick}">添加关联Bug</button>
+          <button class="danger" ${delAttr} onclick="${delClick}">删除用例</button>
         </div>
         <div class="case-bugs" style="margin-top:6px;">${(c.bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无关联Bug</span>'}</div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
 
     const freeBugHtml = (req.free_bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无自由Bug</span>';
 
@@ -431,15 +489,17 @@ export function renderMineCards() {
               测试要点：${req.test_notes ? '已填写' : '未填写'}
             </span>
             <button class="secondary" style="padding:2px 8px; font-size:12px;" onclick="openReqTestNotesModal(${req.id})">${req.test_notes ? '查看/编辑测试要点' : '填写测试要点'}</button>
+            ${syncSummary}
           </div>
           <div>${caseHtml}</div>
           <div class="free-bug-box"><div><b>自由Bug</b></div><div style="margin-top:6px;">${freeBugHtml}</div></div>
           <div class="row" style="margin-top:8px">
-            <div class="prefix-input"><span style="${casePrefixColor}">u#</span><input id="new_case_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增用例编号" ${caseDisabled}></div>
-            <button ${caseDisabled} onclick="addCase(${req.id})">逐个添加用例</button>
+            <div class="prefix-input"><span style="${casePrefixColor}">u#</span><input id="new_case_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="${req.zentao_story_id ? '已改为自动归集用例' : '新增用例编号'}" ${addCaseDisabled}></div>
+            <button ${addCaseDisabled} onclick="addCase(${req.id})">逐个添加用例</button>
             <div class="prefix-input"><span style="${testPrefixColor}">b#</span><input id="new_free_bug_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增自由Bug" ${testDisabled}></div>
             <button ${testDisabled} onclick="addFreeBug(${req.id})">添加自由Bug</button>
           </div>
+          ${req.zentao_story_id ? '<div class="muted" style="margin-top:8px; font-size:12px;">该需求已关联禅道需求，工作台用例改为按禅道 story 自动归集，不再要求手工录入用例编号。</div>' : ''}
         </div>
       </details>`;
   }).join('');

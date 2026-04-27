@@ -70,6 +70,10 @@ class ReqTestNotesPayload(BaseModel):
     test_notes: Optional[str] = None
 
 
+class RequirementStoryBindingPayload(BaseModel):
+    zentao_story_id: Optional[int] = None
+
+
 def _parse_multiple_ids(raw_ids: list[str], pattern: re.Pattern[str], label: str) -> list[str]:
     clean = []
     for item in raw_ids:
@@ -421,6 +425,32 @@ def update_requirement(requirement_id: int, payload: RequirementCreatePayload, c
     ensure_admin(current_user)
     service = RequirementService(db)
     return service.update_requirement(requirement_id, payload.zentao_req_id, payload.title, payload.major_version_id, actor_id=current_user.id)
+
+
+@router.get("/requirements/{requirement_id}/story-binding-preview")
+def preview_requirement_story_binding(
+    requirement_id: int,
+    story_id: Optional[int] = None,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_admin(current_user)
+    return RequirementService(db).preview_story_binding(requirement_id, story_id=story_id)
+
+
+@router.put("/requirements/{requirement_id}/story-binding")
+def update_requirement_story_binding(
+    requirement_id: int,
+    payload: RequirementStoryBindingPayload,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_admin(current_user)
+    return RequirementService(db).update_story_binding(
+        requirement_id,
+        story_id=payload.zentao_story_id,
+        actor_id=current_user.id,
+    )
 
 
 @router.delete("/requirements/{requirement_id}")

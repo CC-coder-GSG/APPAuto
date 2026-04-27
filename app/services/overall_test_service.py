@@ -20,10 +20,12 @@ from datetime import datetime, timedelta
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.config import settings
 from app.models import BugSourceType, BugStage5Record, BugTracking, Requirement, TestCase, User, Version, VersionType
 from app.models.user_zentao_binding import UserZentaoBinding
 from app.services.audit_service import audit
 from app.services.sse_service import sse_publish
+from app.services.sync_lock_service import acquire_sync_lock, release_sync_lock
 from app.services.zentao_auth_service import get_valid_token, invalidate_token
 from app.services.zentao_client_service import ZentaoAPIError, ZentaoClient
 from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
@@ -37,12 +39,18 @@ _sync_cache: dict[int, datetime] = {}
 _SYNC_CACHE_TTL = timedelta(minutes=5)
 _BUILD_FETCH_CONCURRENCY = 6
 
-# Module-level in-flight guard for per-software full sync jobs so a double
-# click does not kick off two concurrent full pulls against Zentao.
-_sync_all_in_progress: set[int] = set()
+# Per-software full-sync de-dupe cache. The mutual-exclusion side has been
+# moved to the DB-backed sync_locks table (see sync_lock_service) so
+# multi-worker deployments stay safe; the in-memory dict only avoids burning
+# the same cache window twice in a row inside a single worker.
 _sync_all_cache: dict[int, datetime] = {}
 _SYNC_ALL_CACHE_TTL = timedelta(minutes=15)
 _PRODUCT_FETCH_CONCURRENCY = 6
+_sync_recent_cache: dict[int, datetime] = {}
+
+
+def _bug_recent_cache_ttl() -> timedelta:
+    return timedelta(seconds=max(30, settings.zentao_workbench_bug_recent_ttl_seconds))
 
 
 def _coerce_str_id(value) -> str | None:
@@ -521,6 +529,7 @@ class OverallTestService:
         software_id: int,
         current_user: User,
         force: bool = False,
+        sync_source: str = "nightly_reconcile",
     ) -> dict:
         """
         Pull **all** bugs (including closed/deleted) from every Zentao product
@@ -559,10 +568,10 @@ class OverallTestService:
                     "cached": True,
                 }
 
-        if software_id in _sync_all_in_progress:
+        lock_key = f"bug_full:{software_id}"
+        if not acquire_sync_lock(self.db, lock_key, ttl_seconds=3600):
             raise HTTPException(status_code=409, detail="该软件正在同步禅道全量 Bug，请稍后再试")
 
-        _sync_all_in_progress.add(software_id)
         started = local_now()
         try:
             ctx = self._get_zentao_client_ctx(current_user.id)
@@ -644,6 +653,7 @@ class OverallTestService:
                         minor_version_id=minor_id,
                         fallback_actor=current_user,
                         existing_by_zentao_id=existing_by_zentao_id,
+                        sync_source=sync_source,
                     )
                     created += int(created_now)
                     updated += int(updated_now)
@@ -678,9 +688,166 @@ class OverallTestService:
                 "matched_minor": matched_minor,
                 "elapsed_seconds": round(elapsed, 1),
                 "cached": False,
+                "sync_source": sync_source,
             }
         finally:
-            _sync_all_in_progress.discard(software_id)
+            release_sync_lock(self.db, lock_key)
+
+    def sync_recent_zentao_bugs_by_software(
+        self,
+        *,
+        software_id: int,
+        current_user: User,
+        force: bool = False,
+        max_pages_per_product: int = 2,
+        limit: int = 100,
+        sync_source: str = "scheduled_pull",
+    ) -> dict:
+        """
+        Lightweight software-level bug refresh for workbench entry.
+
+        Unlike the full sync, this only pulls the most recently edited bug
+        pages for each Zentao product so the workbench can pick up newly
+        filed / reassigned / closed items quickly without paying the cost of
+        a full historical walk on every page entry.
+        """
+        from app.models import SoftwareProduct
+
+        software = self.db.query(SoftwareProduct).filter(SoftwareProduct.id == software_id).first()
+        if not software:
+            raise HTTPException(status_code=404, detail="软件产品不存在")
+
+        if not force:
+            last = _sync_recent_cache.get(software_id)
+            if last and (local_now() - last) < _bug_recent_cache_ttl():
+                return {
+                    "software_id": software_id,
+                    "software_name": software.name,
+                    "zentao_products": [],
+                    "remote_total": 0,
+                    "created": 0,
+                    "updated": 0,
+                    "unclassified": 0,
+                    "matched_minor": 0,
+                    "elapsed_seconds": 0.0,
+                    "cached": True,
+                    "sync_mode": "recent",
+                    "sync_source": sync_source,
+                }
+
+        lock_key = f"bug_recent:{software_id}"
+        if not acquire_sync_lock(self.db, lock_key, ttl_seconds=600):
+            raise HTTPException(status_code=409, detail="该软件正在进行轻量禅道 Bug 刷新，请稍后再试")
+
+        started = local_now()
+        try:
+            ctx = self._get_zentao_client_ctx(current_user.id)
+            if not ctx:
+                raise HTTPException(status_code=400, detail="当前用户未配置可用的禅道绑定")
+            client, base_url = ctx
+
+            product_ids = self._collect_zentao_product_ids_for_software(software_id, software)
+            if not product_ids:
+                raise HTTPException(status_code=400, detail="该软件下未找到禅道产品映射，请先配置 zentao_product_id")
+
+            remote_bugs_by_product: dict[int, list[dict]] = {}
+            with ThreadPoolExecutor(max_workers=min(_PRODUCT_FETCH_CONCURRENCY, max(1, len(product_ids)))) as executor:
+                future_to_pid = {
+                    executor.submit(
+                        self._fetch_recent_product_bugs_with_retry,
+                        client,
+                        pid,
+                        current_user.id,
+                        limit,
+                        max_pages_per_product,
+                    ): pid
+                    for pid in product_ids
+                }
+                for future in as_completed(future_to_pid):
+                    pid = future_to_pid[future]
+                    try:
+                        remote_bugs_by_product[pid] = future.result() or []
+                    except Exception as exc:
+                        logger.warning("sync_recent_zentao_bugs: product %s failed: %s", pid, exc)
+                        remote_bugs_by_product[pid] = []
+
+            total_raw = sum(len(rows) for rows in remote_bugs_by_product.values())
+
+            all_zentao_ids: list[str] = []
+            normalized_by_pid: dict[int, list[dict]] = {}
+            for pid, raw_list in remote_bugs_by_product.items():
+                normalized_rows: list[dict] = []
+                for raw in raw_list:
+                    normalized = self._normalize_zentao_bug_summary(raw, base_url)
+                    if not normalized:
+                        continue
+                    normalized_rows.append(normalized)
+                    all_zentao_ids.append(normalized["zentao_bug_id"])
+                normalized_by_pid[pid] = normalized_rows
+
+            existing_by_zentao_id: dict[str, BugTracking] = {}
+            if all_zentao_ids:
+                for row in (
+                    self.db.query(BugTracking)
+                    .filter(BugTracking.zentao_bug_id.in_(list(dict.fromkeys(all_zentao_ids))))
+                    .all()
+                ):
+                    if row.zentao_bug_id:
+                        existing_by_zentao_id[str(row.zentao_bug_id)] = row
+
+            created = 0
+            updated = 0
+            unclassified = 0
+            matched_minor = 0
+            bugs_to_auto_close: list[tuple[BugTracking, dict]] = []
+            unclassified_major = self._get_or_create_unclassified_major(software_id)
+
+            for _, normalized_list in normalized_by_pid.items():
+                for normalized in normalized_list:
+                    major_id, minor_id = self._resolve_major_minor_for_bug(normalized, unclassified_major)
+                    if major_id == unclassified_major.id:
+                        unclassified += 1
+                    if minor_id:
+                        matched_minor += 1
+
+                    bug_row, created_now, updated_now = self._upsert_bug_by_product(
+                        normalized=normalized,
+                        major_version_id=major_id,
+                        minor_version_id=minor_id,
+                        fallback_actor=current_user,
+                        existing_by_zentao_id=existing_by_zentao_id,
+                        sync_source=sync_source,
+                    )
+                    created += int(created_now)
+                    updated += int(updated_now)
+
+                    if normalized.get("status") == "closed" and normalized.get("closed_by_account"):
+                        bugs_to_auto_close.append((bug_row, normalized))
+
+            if bugs_to_auto_close:
+                self.db.flush()
+                for bug_row, normalized in bugs_to_auto_close:
+                    self._auto_create_zentao_close_record(bug_row, normalized)
+
+            self.db.commit()
+            _sync_recent_cache[software_id] = local_now()
+            elapsed = (local_now() - started).total_seconds()
+            return {
+                "software_id": software_id,
+                "software_name": software.name,
+                "zentao_products": product_ids,
+                "remote_total": total_raw,
+                "created": created,
+                "updated": updated,
+                "unclassified": unclassified,
+                "matched_minor": matched_minor,
+                "elapsed_seconds": elapsed,
+                "cached": False,
+                "sync_mode": "recent",
+                "sync_source": sync_source,
+            }
+        finally:
+            release_sync_lock(self.db, lock_key)
 
     def _collect_zentao_product_ids_for_software(
         self, software_id: int, software
@@ -746,6 +913,36 @@ class OverallTestService:
         refreshed_client, _ = refreshed_ctx
         return self._fetch_bug_collection(
             refreshed_client, f"products/{product_id}/bugs", limit=500, max_pages=50
+        )
+
+    def _fetch_recent_product_bugs_with_retry(
+        self,
+        client: ZentaoClient,
+        product_id: int,
+        user_id: int,
+        limit: int,
+        max_pages: int,
+    ) -> list[dict]:
+        try:
+            return self._fetch_recent_bug_collection(
+                client,
+                f"products/{product_id}/bugs",
+                limit=limit,
+                max_pages=max_pages,
+            )
+        except ZentaoAPIError as exc:
+            if exc.status_code != 401:
+                raise
+        invalidate_token(user_id, self.db)
+        refreshed_ctx = self._get_zentao_client_ctx(user_id)
+        if not refreshed_ctx:
+            raise HTTPException(status_code=400, detail="禅道 token 刷新失败")
+        refreshed_client, _ = refreshed_ctx
+        return self._fetch_recent_bug_collection(
+            refreshed_client,
+            f"products/{product_id}/bugs",
+            limit=limit,
+            max_pages=max_pages,
         )
 
     def _resolve_major_minor_for_bug(
@@ -846,6 +1043,7 @@ class OverallTestService:
         minor_version_id: int | None,
         fallback_actor: User,
         existing_by_zentao_id: dict[str, BugTracking],
+        sync_source: str | None = None,
     ) -> tuple[BugTracking, bool, bool]:
         bug_row = existing_by_zentao_id.get(normalized["zentao_bug_id"])
         if bug_row is None:
@@ -888,6 +1086,7 @@ class OverallTestService:
             execution_name=None,
             sync_message="通过禅道全量同步",
             touched_if_existing=not created,
+            sync_source=sync_source,
         )
         return bug_row, created, updated and not created
 
@@ -1066,6 +1265,60 @@ class OverallTestService:
             if new_count == 0 or len(page_rows) < limit:
                 break
 
+        return rows
+
+    def _fetch_recent_bug_collection(
+        self,
+        client: ZentaoClient,
+        path: str,
+        *,
+        limit: int = 100,
+        max_pages: int = 2,
+    ) -> list[dict]:
+        """
+        Fetch only the most recently edited pages from a Zentao bug collection.
+
+        Used by workbench preflight to pick up fresh bug changes quickly
+        without scanning the entire product history.
+        """
+        rows: list[dict] = []
+        seen_ids: set[str] = set()
+        order_candidates = ("editedDate_desc", "id_desc", None)
+        last_error: ZentaoAPIError | None = None
+
+        for order_by in order_candidates:
+            rows.clear()
+            seen_ids.clear()
+            try:
+                for page in range(1, max_pages + 1):
+                    params: dict[str, object] = {"status": "all", "limit": limit, "page": page}
+                    if order_by:
+                        params["orderBy"] = order_by
+                    data = client.get(path, params=params)
+                    page_rows = self._extract_bug_rows(data)
+                    if not page_rows:
+                        break
+
+                    new_count = 0
+                    for row in page_rows:
+                        bug_id = str((row or {}).get("id") or "")
+                        if bug_id and bug_id not in seen_ids:
+                            seen_ids.add(bug_id)
+                            rows.append(row)
+                            new_count += 1
+                        elif not bug_id:
+                            rows.append(row)
+                            new_count += 1
+
+                    if new_count == 0 or len(page_rows) < limit:
+                        break
+                return list(rows)
+            except ZentaoAPIError as exc:
+                last_error = exc
+                continue
+
+        if last_error:
+            raise last_error
         return rows
 
     def _extract_bug_rows(self, data: object) -> list[dict]:
@@ -1370,6 +1623,7 @@ class OverallTestService:
         execution_name: str | None,
         sync_message: str,
         touched_if_existing: bool,
+        sync_source: str | None = None,
     ) -> bool:
         """
         Apply normalized bug fields onto a BugTracking row. Returns True if
@@ -1409,6 +1663,8 @@ class OverallTestService:
             bug_row.zentao_story_id = normalized["story_ref_id"]
         bug_row.zentao_sync_status = "synced"
         bug_row.zentao_sync_message = sync_message
+        if sync_source:
+            bug_row.zentao_sync_source = sync_source
         bug_row.last_zentao_synced_at = local_now()
         if bug_row.zentao_display_bucket is None:
             bug_row.zentao_display_bucket = "overall"

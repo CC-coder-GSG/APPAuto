@@ -194,6 +194,7 @@
     <button id="tabFeedbackBtn" onclick="showTab('feedback')">反馈记录与处理<span id="tabFeedbackBadge" class="nav-badge hidden"></span></button>
     <button id="tabFieldTestBtn" onclick="showTab('field-test')">外业测试</button>
     <button id="tabBuildRecordsBtn" class="hidden" onclick="showTab('build-records')">构建记录</button>
+    <button id="tabTestcaseCenterBtn" class="hidden" onclick="showTab('testcase-center')">用例中心</button>
     <button id="tabZentaoSyncBtn" class="hidden" onclick="showTab('zentao-sync')">禅道同步中心<span id="tabZentaoSyncBadge" class="nav-badge hidden"></span></button>
     <button id="tabReportBtn" onclick="showTab('report')">报表中心</button>
     <button id="tabActivityBtn" class="hidden" onclick="showTab('activity')">活动中心</button>
@@ -406,6 +407,71 @@
 
     <div id="feedbackDetailPanel" class="hidden" style="margin-top: 16px;">
       <div id="feedbackDetailBody"></div>
+    </div>
+  </section>
+
+  <section id="tab-testcase-center" class="hidden card">
+    <h2>用例中心</h2>
+    <div class="row" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px; align-items: center; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+      <span class="badge" style="background:#eff6ff; color:#1d4ed8;">当前软件范围</span>
+      <label>状态</label>
+      <select id="testcaseCenterStatus" onchange="loadTestcaseCenter()">
+        <option value="">全部</option>
+        <option value="normal">normal</option>
+        <option value="wait">wait</option>
+        <option value="blocked">blocked</option>
+        <option value="done">done</option>
+      </select>
+      <label>模块</label>
+      <select id="testcaseCenterModule" onchange="loadTestcaseCenter()">
+        <option value="">全部模块</option>
+      </select>
+      <div class="prefix-input" style="flex:1; min-width:220px; background:#fff;">
+        <span>🔍</span>
+        <input id="testcaseCenterKeyword" onkeydown="if(event.key==='Enter') loadTestcaseCenter()" placeholder="搜索用例编号或标题..." style="width:100%; border:none; outline:none; background:transparent;">
+      </div>
+      <button onclick="loadTestcaseCenter()">查询</button>
+      <button class="secondary" onclick="syncTestcaseCenter()">同步禅道用例</button>
+    </div>
+    <div id="testcaseCenterMeta" class="muted" style="margin-bottom: 12px;"></div>
+    <table>
+      <thead>
+        <tr>
+          <th>用例</th>
+          <th>标题</th>
+          <th>需求归属</th>
+          <th>状态/阶段</th>
+          <th>最近执行</th>
+          <th>同步</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="testcaseCenterTableBody"></tbody>
+    </table>
+    <div class="row" style="justify-content: flex-end; margin-top: 12px;">
+      <button class="secondary" onclick="prevTestcaseCenterPage()">上一页</button>
+      <span id="testcaseCenterPagerText" class="muted" style="min-width: 120px; text-align: center;">第 1 页</span>
+      <button class="secondary" onclick="nextTestcaseCenterPage()">下一页</button>
+    </div>
+
+    <div id="testcaseCenterDetailModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
+      <div style="width: min(860px, 94vw); background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px 18px 14px 18px;">
+        <h3 id="testcaseCenterDetailTitle" style="margin: 0 0 12px 0; color:#0f172a;">用例详情</h3>
+        <div id="testcaseCenterDetailMeta" class="muted" style="margin-bottom: 10px;"></div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+          <div style="border:1px solid #e2e8f0; border-radius:8px; padding:12px; background:#f8fafc;">
+            <div style="font-weight:700; margin-bottom:6px;">前置条件</div>
+            <div id="testcaseCenterPrecondition" style="white-space: pre-wrap; color:#334155;"></div>
+          </div>
+          <div style="border:1px solid #e2e8f0; border-radius:8px; padding:12px; background:#f8fafc;">
+            <div style="font-weight:700; margin-bottom:6px;">步骤摘要</div>
+            <div id="testcaseCenterSteps" style="white-space: pre-wrap; color:#334155; max-height: 320px; overflow:auto;"></div>
+          </div>
+        </div>
+        <div class="row" style="justify-content: flex-end; gap: 8px;">
+          <button class="secondary" onclick="closeTestcaseCenterDetail()">关闭</button>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -1210,9 +1276,9 @@
       </div>
     </div>
 
-    <div class="card">
-      <h3>从禅道同步版本</h3>
-      <div class="row" style="align-items: flex-end; flex-wrap: wrap; gap: 8px;">
+      <div class="card">
+        <h3>从禅道同步版本</h3>
+        <div class="row" style="align-items: flex-end; flex-wrap: wrap; gap: 8px;">
         <div>
           <label style="font-size:12px; color:#64748b; display:block; margin-bottom:4px;">禅道项目</label>
           <select id="ztProjectSelect" style="min-width:180px;"><option value="">-- 加载中... --</option></select>
@@ -1223,13 +1289,24 @@
         </div>
         <button id="ztLoadProjectsBtn" class="secondary" onclick="loadZtProjects()">刷新项目列表</button>
         <button id="ztSyncVersionsBtn" onclick="syncZtVersions()">开始同步</button>
+        </div>
+        <div id="ztSyncResult" style="margin-top:10px; font-size:13px; color:#475569; display:none;"></div>
       </div>
-      <div id="ztSyncResult" style="margin-top:10px; font-size:13px; color:#475569; display:none;"></div>
-    </div>
 
-    <div class="card">
-      <h3>新增用户</h3>
-      <div class="row">
+      <div class="card">
+        <h3>禅道后台同步任务</h3>
+        <div class="muted" style="margin-bottom:10px;">用于验证定时任务链路。最近同步会拉取最近变更的 Bug 和用例；夜间全量对账会跑整软件全量 Bug 与 testcase 同步。</div>
+        <div class="row" style="align-items:flex-start; flex-wrap:wrap; gap:10px;">
+          <button id="ztRunRecentSyncBtn" class="secondary" onclick="runZentaoRecentSync()">手动执行最近同步</button>
+          <button id="ztRunNightlyFullSyncBtn" onclick="runZentaoNightlyFullSync()">手动执行夜间全量对账</button>
+        </div>
+        <div id="ztBackgroundSyncResult" style="margin-top:10px; font-size:13px; color:#475569; display:none;"></div>
+        <pre id="ztBackgroundSyncDetail" style="display:none; margin-top:10px; max-height:260px; overflow:auto; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px; white-space:pre-wrap; word-break:break-word;"></pre>
+      </div>
+
+      <div class="card">
+        <h3>新增用户</h3>
+        <div class="row">
         <input id="createUsername" placeholder="用户名">
         <input id="createPassword" type="password" placeholder="密码">
         <select id="createUserRole"><option value="user">普通用户</option><option value="admin">管理员</option></select>
@@ -1676,8 +1753,8 @@ function sourceTypeZh(v){
 }
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
-const ALL_TAB_KEYS=['assign','mine','feedback','retest','overall-test','field-test','build-records','zentao-sync','report','activity','data','dispatch','zentao-ai'];
-const DEFAULT_ALLOWED_TABS=['mine','feedback','retest','overall-test','field-test','zentao-sync','report'];
+const ALL_TAB_KEYS=['assign','mine','feedback','retest','overall-test','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai'];
+const DEFAULT_ALLOWED_TABS=['mine','feedback','retest','overall-test','field-test','testcase-center','zentao-sync','report'];
 const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test'];
 const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test' };
 const WORKBENCH_SUBTAB_LOADERS={
@@ -1833,7 +1910,7 @@ window.switchWorkbenchSubtab = switchWorkbenchSubtab;
 function applyTabVisibility(){
   const buttonMap={
     'assign':'tabAssignBtn','mine':'tabMineBtn','feedback':'tabFeedbackBtn',
-    'field-test':'tabFieldTestBtn','build-records':'tabBuildRecordsBtn',
+    'field-test':'tabFieldTestBtn','build-records':'tabBuildRecordsBtn','testcase-center':'tabTestcaseCenterBtn',
     'zentao-sync':'tabZentaoSyncBtn','report':'tabReportBtn','activity':'tabActivityBtn',
     'data':'tabDataBtn','dispatch':'tabDispatchBtn','zentao-ai':'tabZentaoAiBtn'
   };
@@ -1847,7 +1924,7 @@ function applyTabVisibility(){
   }
 }
 function getDefaultVisibleTab(){
-  return ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch','zentao-ai']
+  return ['assign','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai']
     .find((name)=>canAccessTab(name)) || 'mine';
 }
 function getTabNamespaceName(name){
@@ -1859,6 +1936,7 @@ function getTabNamespaceName(name){
     'overall-test':'OmniQAOverallTestTab',
     'field-test':'OmniQAFieldTestTab',
     'build-records':'OmniQABuildRecordsTab',
+    'testcase-center':'OmniQATestcaseCenterTab',
     'zentao-sync':'OmniQAZentaoSyncTab',
     report:'OmniQAReportTab',
     activity:'OmniQAActivityTab',
@@ -1873,7 +1951,7 @@ function isTabRuntimeReady(name){
   return !!window[nsName];
 }
 function getFirstRuntimeReadyTab(){
-  return ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch','zentao-ai']
+  return ['assign','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai']
     .find((tabName)=>canAccessTab(tabName) && isTabRuntimeReady(tabName)) || null;
 }
 async function showTab(name){
@@ -1896,7 +1974,7 @@ async function showTab(name){
     if(!fallback || fallback===name) return;
     name = fallback;
   }
-  ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch','zentao-ai'].forEach(x=>{
+  ['assign','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai'].forEach(x=>{
     const el=document.getElementById('tab-'+x);
     if(el) el.classList.add('hidden');
   });
@@ -1913,6 +1991,7 @@ async function showTab(name){
   if(name === 'feedback') { loadFeedbackBoard().catch(err=>showMessage(err.message||'加载反馈列表失败','error')); }
   if(name === 'field-test') { loadFieldTestBoard().catch(err=>showMessage(err.message||'加载外业测试失败','error')); }
   if(name === 'build-records') { loadBuildRecordsBoard().catch(err=>showMessage(err.message||'加载构建记录失败','error')); }
+  if(name === 'testcase-center') { loadTestcaseCenter().catch(err=>showMessage(err.message||'加载用例中心失败','error')); }
   if(name === 'zentao-sync') { initZentaoSyncBoard().catch(err=>showMessage(err.message||'加载禅道同步中心失败','error')); }
   if(name === 'activity') { loadActivityBoard().catch(err=>showMessage(err.message||'加载活动中心失败','error')); }
   if(name === 'zentao-ai') { window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.activate && window.OmniQAZentaoAiTab.activate().catch(err=>showMessage(err.message||'加载禅道AI用例生成失败','error')); }
@@ -2053,7 +2132,7 @@ async function onSoftwareChange(){
   dataOverviewCache = null;
   await loadVersions();
   // 切换软件后，刷新当前页内容，确保旧软件数据不残留
-  const visible = ['assign','mine','feedback','field-test','build-records','zentao-sync','report','activity','data','dispatch','zentao-ai'].find(x=>{
+  const visible = ['assign','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai'].find(x=>{
     const el=document.getElementById('tab-'+x);
     return el && !el.classList.contains('hidden');
   });

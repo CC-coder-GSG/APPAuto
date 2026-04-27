@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import hash_password
@@ -12,8 +12,6 @@ from app.models import SoftwareProduct, User, UserRole, Version, VersionType
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "admin"
 DEFAULT_SOFTWARE_NAME = "Survey Master"
-# System account that owns bugs synced from Zentao when the opener cannot be
-# mapped to a real local user. Keeps admin's personal stats clean.
 ZENTAO_SYNC_BOT_USERNAME = "zentao_sync_bot"
 ZENTAO_SYNC_BOT_DISPLAY_NAME = "禅道同步"
 UNCLASSIFIED_MAJOR_VERSION_NO = "V0.0.0-unclassified"
@@ -38,14 +36,14 @@ def ensure_default_admin(db: Session) -> None:
 def ensure_zentao_sync_bot(db: Session) -> User:
     """
     Make sure a dedicated system user exists for bugs synced from Zentao whose
-    opener cannot be mapped to a real local account. Using a separate user
-    prevents admin (or whoever clicks the sync button) from being credited with
-    thousands of bugs they didn't actually create.
+    opener cannot be mapped to a real local account.
     """
     bot = db.query(User).filter(User.username == ZENTAO_SYNC_BOT_USERNAME).first()
     if bot:
         return bot
+
     from app.core.security import hash_password as _hash
+
     bot = User(
         username=ZENTAO_SYNC_BOT_USERNAME,
         password_hash=_hash("!locked-no-login!"),
@@ -61,7 +59,6 @@ def ensure_zentao_sync_bot(db: Session) -> User:
 
 
 def ensure_software_schema_compat(db: Session) -> None:
-    # 兼容历史 SQLite：为 versions 增加 software_id 列，避免要求手工迁移
     rows = db.execute(text("PRAGMA table_info(versions)")).fetchall()
     cols = {r[1] for r in rows}
     if "software_id" not in cols:
@@ -78,7 +75,6 @@ def ensure_user_schema_compat(db: Session) -> None:
     if "tab_permissions" not in cols:
         db.execute(text("ALTER TABLE users ADD COLUMN tab_permissions TEXT"))
         db.commit()
-    # 历史用户默认显示名回填为账号名
     db.execute(text("UPDATE users SET display_name = username WHERE display_name IS NULL OR TRIM(display_name) = ''"))
     db.commit()
 
@@ -91,7 +87,6 @@ def ensure_default_software_and_backfill(db: Session) -> None:
         db.commit()
         db.refresh(software)
 
-    # 历史大版本默认归档到 Survey Master
     db.execute(
         text(
             "UPDATE versions SET software_id = :sid "
@@ -99,7 +94,6 @@ def ensure_default_software_and_backfill(db: Session) -> None:
         ),
         {"sid": software.id, "major": VersionType.MAJOR.value},
     )
-    # 子版本继承父大版本的软件归属
     db.execute(
         text(
             "UPDATE versions SET software_id = ("
@@ -114,10 +108,10 @@ def ensure_default_software_and_backfill(db: Session) -> None:
 
 def ensure_requirement_schema_compat(db: Session) -> None:
     """
-    兼容历史 SQLite：
-    - 旧结构为 zentao_req_id 全局唯一
-    - 新结构调整为 (major_version_id, zentao_req_id) 组合唯一
-    该迁移为轻量自动迁移，启动时自动执行，无需手工改库。
+    Keep historical SQLite databases compatible:
+    - add incremental columns
+    - rebuild the table only when the old global unique constraint on
+      zentao_req_id still exists
     """
     req_cols_rows = db.execute(text("PRAGMA table_info(requirements)")).fetchall()
     req_cols = {r[1] for r in req_cols_rows}
@@ -139,14 +133,18 @@ def ensure_requirement_schema_compat(db: Session) -> None:
     if "zentao_plan_title_cache" not in req_cols:
         db.execute(text("ALTER TABLE requirements ADD COLUMN zentao_plan_title_cache VARCHAR(255)"))
         db.commit()
+    if "test_completed_at" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN test_completed_at DATETIME"))
+        # Backfill existing test_completed=True rows with their updated_at as a
+        # best-effort cutoff; the retest evidence collector tolerates a missing
+        # value but a coarse anchor is much better than nothing.
+        db.execute(text("UPDATE requirements SET test_completed_at = updated_at WHERE test_completed = 1 AND test_completed_at IS NULL"))
+        db.commit()
 
     idx_rows = db.execute(text("PRAGMA index_list(requirements)")).fetchall()
-    need_rebuild = False
     has_target_unique = False
     has_global_unique = False
-
     for r in idx_rows:
-        # PRAGMA index_list: seq, name, unique, origin, partial
         idx_name = r[1]
         is_unique = bool(r[2])
         cols_rows = db.execute(text(f"PRAGMA index_info('{idx_name}')")).fetchall()
@@ -156,12 +154,7 @@ def ensure_requirement_schema_compat(db: Session) -> None:
         if is_unique and cols == ["zentao_req_id"]:
             has_global_unique = True
 
-    if has_target_unique:
-        return
-    if has_global_unique:
-        need_rebuild = True
-
-    if not need_rebuild:
+    if has_target_unique or not has_global_unique:
         return
 
     db.execute(text("PRAGMA foreign_keys=OFF"))
@@ -205,13 +198,15 @@ def ensure_requirement_schema_compat(db: Session) -> None:
                 INSERT INTO requirements (
                     id, zentao_req_id, title, major_version_id, owner_id,
                     case_completed, test_completed, retest_completed,
-                    retested_by_id, retested_at, retest_minor_version_id, retest_passed, test_notes, test_notes_updated_at, test_notes_updated_by_id,
+                    retested_by_id, retested_at, retest_minor_version_id, retest_passed,
+                    test_notes, test_notes_updated_at, test_notes_updated_by_id,
                     status, created_at, updated_at
                 )
                 SELECT
                     id, zentao_req_id, title, major_version_id, owner_id,
                     case_completed, test_completed, retest_completed,
-                    retested_by_id, retested_at, retest_minor_version_id, retest_passed, test_notes, test_notes_updated_at, test_notes_updated_by_id,
+                    retested_by_id, retested_at, retest_minor_version_id, retest_passed,
+                    test_notes, test_notes_updated_at, test_notes_updated_by_id,
                     status, created_at, updated_at
                 FROM requirements_old
                 """
@@ -266,6 +261,7 @@ def ensure_bug_schema_compat(db: Session) -> None:
         "zentao_creator_name": "VARCHAR(100)",
         "zentao_sync_status": "VARCHAR(40)",
         "zentao_sync_message": "TEXT",
+        "zentao_sync_source": "VARCHAR(40)",
         "zentao_raw_payload": "TEXT",
         "last_zentao_synced_at": "DATETIME",
         "zentao_live_status": "VARCHAR(40)",
@@ -285,6 +281,7 @@ def ensure_bug_schema_compat(db: Session) -> None:
         if col not in cols:
             db.execute(text(f"ALTER TABLE bug_tracking ADD COLUMN {col} {sql_type}"))
             db.commit()
+
     try:
         db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_bug_tracking_zentao_bug_id ON bug_tracking (zentao_bug_id)"))
         db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_bug_tracking_zentao_client_record_id ON bug_tracking (zentao_client_record_id)"))
@@ -292,28 +289,31 @@ def ensure_bug_schema_compat(db: Session) -> None:
         db.commit()
     except Exception:
         db.rollback()
-        logger.warning("bug_tracking 禅道唯一索引创建失败，已跳过。请检查历史重复数据。", exc_info=True)
+        logger.warning("bug_tracking unique index creation failed; skipped.", exc_info=True)
 
-    # 回填：source_type=CASE 但 source_ref 为空的历史记录，通过关联的同步事件补全 source_ref
-    result = db.execute(text("""
-        UPDATE bug_tracking
-        SET source_ref = CAST((
-            SELECT bse.mapped_test_case_id
-            FROM browser_sync_events bse
-            WHERE bse.client_record_id = bug_tracking.zentao_client_record_id
-              AND bse.mapped_test_case_id IS NOT NULL
-        ) AS TEXT)
-        WHERE source_type = 'CASE'
-          AND (source_ref IS NULL OR source_ref = '')
-          AND EXISTS (
-              SELECT 1 FROM browser_sync_events bse
-              WHERE bse.client_record_id = bug_tracking.zentao_client_record_id
-                AND bse.mapped_test_case_id IS NOT NULL
-          )
-    """))
+    result = db.execute(
+        text(
+            """
+            UPDATE bug_tracking
+            SET source_ref = CAST((
+                SELECT bse.mapped_test_case_id
+                FROM browser_sync_events bse
+                WHERE bse.client_record_id = bug_tracking.zentao_client_record_id
+                  AND bse.mapped_test_case_id IS NOT NULL
+            ) AS TEXT)
+            WHERE source_type = 'CASE'
+              AND (source_ref IS NULL OR source_ref = '')
+              AND EXISTS (
+                  SELECT 1 FROM browser_sync_events bse
+                  WHERE bse.client_record_id = bug_tracking.zentao_client_record_id
+                    AND bse.mapped_test_case_id IS NOT NULL
+              )
+            """
+        )
+    )
     if result.rowcount:
         db.commit()
-        logger.info("bug_tracking source_ref 回填完成，修复记录数：%d", result.rowcount)
+        logger.info("Backfilled bug_tracking.source_ref rows=%s", result.rowcount)
 
 
 def ensure_testcase_schema_compat(db: Session) -> None:
@@ -339,17 +339,105 @@ def ensure_testcase_schema_compat(db: Session) -> None:
         if col not in cols:
             db.execute(text(f"ALTER TABLE test_cases ADD COLUMN {col} {sql_type}"))
             db.commit()
+
     try:
         db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_test_cases_zentao_client_record_id ON test_cases (zentao_client_record_id)"))
         db.commit()
     except Exception:
         db.rollback()
-        logger.warning("test_cases 禅道唯一索引创建失败，已跳过。请检查历史重复数据。", exc_info=True)
+        logger.warning("test_cases unique index creation failed; skipped.", exc_info=True)
+
+
+def ensure_zentao_testcase_mirror_schema_compat(db: Session) -> None:
+    rows = db.execute(text("PRAGMA table_info(zentao_testcase_mirror)")).fetchall()
+    cols = {r[1] for r in rows}
+    if not cols:
+        return
+
+    column_defs = {
+        "zentao_case_id": "VARCHAR(30)",
+        "zentao_case_numeric_id": "INTEGER",
+        "zentao_product_id": "INTEGER",
+        "zentao_product_name": "VARCHAR(255)",
+        "zentao_module_id": "INTEGER",
+        "zentao_module_name": "VARCHAR(255)",
+        "zentao_story_id": "INTEGER",
+        "zentao_execution_id": "INTEGER",
+        "title": "TEXT",
+        "case_type": "VARCHAR(40)",
+        "stage": "VARCHAR(40)",
+        "status": "VARCHAR(40)",
+        "pri": "INTEGER",
+        "precondition": "TEXT",
+        "steps_digest": "TEXT",
+        "last_runner_account": "VARCHAR(100)",
+        "last_runner_name": "VARCHAR(100)",
+        "last_run_date": "DATETIME",
+        "last_run_result": "VARCHAR(40)",
+        "bugs_count": "INTEGER",
+        "zentao_case_url": "TEXT",
+        "deleted": "BOOLEAN NOT NULL DEFAULT 0",
+        "remote_opened_at": "DATETIME",
+        "remote_updated_at": "DATETIME",
+        "last_zentao_synced_at": "DATETIME",
+        "sync_source": "VARCHAR(40)",
+        "raw_payload": "TEXT",
+        "created_at": "DATETIME",
+        "updated_at": "DATETIME",
+    }
+    for col, sql_type in column_defs.items():
+        if col not in cols:
+            db.execute(text(f"ALTER TABLE zentao_testcase_mirror ADD COLUMN {col} {sql_type}"))
+            db.commit()
+
+    try:
+        db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_zentao_testcase_mirror_case_numeric_id ON zentao_testcase_mirror (zentao_case_numeric_id)"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_zentao_testcase_mirror_product_id ON zentao_testcase_mirror (zentao_product_id)"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_zentao_testcase_mirror_story_id ON zentao_testcase_mirror (zentao_story_id)"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_zentao_testcase_mirror_status ON zentao_testcase_mirror (status)"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_zentao_testcase_mirror_remote_updated_at ON zentao_testcase_mirror (remote_updated_at)"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_zentao_testcase_mirror_last_synced_at ON zentao_testcase_mirror (last_zentao_synced_at)"))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.warning("zentao_testcase_mirror index creation failed; skipped.", exc_info=True)
+
+
+def ensure_sync_lock_schema_compat(db: Session) -> None:
+    """
+    Make sure the sync_locks table exists. Creating it via Base.metadata is
+    enough on a fresh DB; this helper just adds a safety net for older
+    databases that booted before this table was introduced.
+    """
+    rows = db.execute(text("PRAGMA table_info(sync_locks)")).fetchall()
+    cols = {r[1] for r in rows}
+    if cols:
+        return
+    try:
+        db.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS sync_locks (
+                    key VARCHAR(120) NOT NULL PRIMARY KEY,
+                    holder VARCHAR(120),
+                    acquired_at DATETIME NOT NULL,
+                    ttl_seconds INTEGER NOT NULL DEFAULT 600
+                )
+                """
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.warning("sync_locks table creation failed; skipped.", exc_info=True)
+
+
 def ensure_browser_sync_schema_compat(db: Session) -> None:
     rows = db.execute(text("PRAGMA table_info(browser_sync_events)")).fetchall()
     cols = {r[1] for r in rows}
     if not cols:
         return
+
     column_defs = {
         "page_type": "VARCHAR(60)",
         "zentao_requirement_name": "TEXT",
@@ -372,5 +460,6 @@ def ensure_browser_sync_schema_compat(db: Session) -> None:
         if col not in cols:
             db.execute(text(f"ALTER TABLE browser_sync_events ADD COLUMN {col} {sql_type}"))
             db.commit()
+
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_browser_sync_events_display_bucket ON browser_sync_events (display_bucket)"))
     db.commit()

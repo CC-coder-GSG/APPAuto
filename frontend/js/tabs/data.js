@@ -9,6 +9,7 @@ const TAB_PERMISSION_OPTIONS = [
   { key: 'overall-test', label: '整体测试' },
   { key: 'field-test', label: '外业测试' },
   { key: 'build-records', label: '构建记录' },
+  { key: 'testcase-center', label: '用例中心' },
   { key: 'zentao-sync', label: '禅道同步中心' },
   { key: 'report', label: '报表中心' },
   { key: 'activity', label: '活动中心' },
@@ -365,6 +366,8 @@ export function renderDataOverview() {
     }).join('');
     if (!minorHtml) minorHtml = '<span class="muted" style="font-size:13px;">暂无发包记录</span>';
     let reqHtml = reqs.map((req) => {
+      const safeReqNo = String(req.zentao_req_id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const safeReqTitle = String(req.title || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       const reqBugs = (data.bugs || []).filter((b) => b.requirement_id === req.id);
       const freeBugs = reqBugs.filter((b) => b.source_type === 'manual');
       const caseBugs = reqBugs.filter((b) => b.source_type === 'case');
@@ -372,6 +375,9 @@ export function renderDataOverview() {
       const notesMeta = req.test_notes_updated_at
         ? `最后更新：${req.test_notes_updated_by_name || '未知'} ${new Date(req.test_notes_updated_at).toLocaleString()}`
         : '';
+      const storyBadge = req.zentao_story_id
+        ? `<span class="badge" style="background:#ecfeff; color:#0f766e; margin-left:8px;">Story ${req.zentao_story_id}</span>`
+        : `<span class="badge" style="background:#f8fafc; color:#94a3b8; margin-left:8px;">未绑定 Story</span>`;
       const casesListHtml = (req.case_ids || []).map((cId) => {
         const relatedBugs = caseBugs.filter((b) => b.source_ref === cId);
         let bHtml = relatedBugs.map((b) => {
@@ -392,6 +398,7 @@ export function renderDataOverview() {
       }).join('');
       const reqActionButtons = isAdmin
         ? `
+            <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); openRequirementStoryBindingModal(${req.id}, '${safeReqNo}', '${safeReqTitle}', ${req.zentao_story_id || 'null'})">修正自动归集</button>
             <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); editReq(${req.id},'${req.zentao_req_id}','${req.title}',${major.id})">编辑</button>
             <button class="danger" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); removeReq(${req.id})">删除</button>
           `
@@ -399,7 +406,7 @@ export function renderDataOverview() {
       return `
       <div style="border:1px solid #e2e8f0; border-radius:6px; margin-bottom:12px; background:#fff;">
         <div style="padding:10px 12px; cursor:pointer; background:#f8fafc; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;" onclick="document.getElementById('req_body_${req.id}').classList.toggle('hidden')">
-          <span style="font-size:14px;">📄 <b>${req.zentao_req_id}</b> ${req.title}</span>
+          <span style="font-size:14px;">📄 <b>${req.zentao_req_id}</b> ${req.title}${storyBadge}</span>
           <span>
             <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); openAuditTimelineModal('requirement', ${req.id}, '需求时间线')">时间线</button>
             ${reqActionButtons}
@@ -566,6 +573,144 @@ export function closeUserTabPermissionModal() {
   modal.style.display = 'none';
 }
 
+function ensureRequirementStoryBindingModal() {
+  let modal = document.getElementById('requirementStoryBindingModal');
+  if (modal) return modal;
+  modal = document.createElement('div');
+  modal.id = 'requirementStoryBindingModal';
+  modal.className = 'hidden';
+  modal.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;';
+  modal.innerHTML = `
+    <div style="width:min(720px, 94vw); max-height:90vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:22px;">
+      <div class="row" style="justify-content:space-between; align-items:center; margin:0 0 12px;">
+        <h3 id="requirementStoryBindingTitle" style="margin:0; color:#0f172a;">修正自动归集</h3>
+        <button class="secondary" onclick="closeRequirementStoryBindingModal()">关闭</button>
+      </div>
+      <div class="muted" style="margin-bottom:12px;">修正的是需求的禅道 story 绑定。保存后，工作台中的自动归集用例和 story 级 Bug 都会随之变化。</div>
+      <div class="row" style="align-items:flex-end; gap:10px; flex-wrap:wrap;">
+        <div>
+          <label style="font-size:12px; color:#64748b; display:block; margin-bottom:4px;">禅道 Story ID</label>
+          <input id="requirementStoryBindingInput" inputmode="numeric" placeholder="留空表示清除绑定" oninput="digitsOnly(this)" style="min-width:220px;">
+        </div>
+        <button class="secondary" onclick="previewRequirementStoryBinding()">预览自动归集结果</button>
+      </div>
+      <div id="requirementStoryBindingPreview" style="margin-top:14px; padding:12px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; min-height:120px;"></div>
+      <div class="row" style="justify-content:flex-end; gap:8px; margin:18px 0 0;">
+        <button class="secondary" onclick="clearRequirementStoryBinding()">清除绑定</button>
+        <button class="secondary" onclick="closeRequirementStoryBindingModal()">取消</button>
+        <button onclick="saveRequirementStoryBinding()">保存绑定</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  return modal;
+}
+
+export function openRequirementStoryBindingModal(requirementId, reqNo, title, currentStoryId) {
+  const modal = ensureRequirementStoryBindingModal();
+  modal.dataset.requirementId = String(requirementId);
+  const titleEl = document.getElementById('requirementStoryBindingTitle');
+  const input = document.getElementById('requirementStoryBindingInput');
+  const preview = document.getElementById('requirementStoryBindingPreview');
+  if (titleEl) titleEl.innerText = `修正自动归集：${reqNo} ${title}`;
+  if (input) input.value = currentStoryId ? String(currentStoryId) : '';
+  if (preview) {
+    preview.innerHTML = currentStoryId
+      ? `<div class="muted">当前已绑定 Story ${currentStoryId}。点击“预览自动归集结果”可查看会归集到多少用例和 Bug。</div>`
+      : '<div class="muted">当前未绑定 Story。输入 Story ID 后可预览自动归集结果。</div>';
+  }
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+}
+
+export function closeRequirementStoryBindingModal() {
+  const modal = document.getElementById('requirementStoryBindingModal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.style.display = 'none';
+}
+
+function renderRequirementStoryBindingPreview(data) {
+  const preview = document.getElementById('requirementStoryBindingPreview');
+  if (!preview) return;
+  const storyId = data?.preview_story_id;
+  if (!storyId) {
+    preview.innerHTML = '<div class="muted">当前预览为空绑定。保存后该需求将不再按禅道 story 自动归集用例和 story 级 Bug。</div>';
+    return;
+  }
+  const testcaseLines = (data.sample_testcases || []).map((row) => `<div>• ${row.zentao_case_id || '-'} ${row.title || ''}</div>`).join('');
+  const bugLines = (data.sample_bugs || []).map((row) => `<div>• ${row.bug_id || '-'} ${row.title || ''}</div>`).join('');
+  const duplicateLines = (data.duplicate_requirements || []).map((row) => `<div>• ${row.zentao_req_id || '-'} ${row.title || ''} <span class="muted">(${row.major_version_name || '-'})</span></div>`).join('');
+  preview.innerHTML = `
+    <div class="row" style="gap:12px; flex-wrap:wrap; margin-bottom:10px;">
+      <span class="badge" style="background:#eef6ff; color:#1d4ed8;">Story ${storyId}</span>
+      <span class="badge" style="background:#ecfeff; color:#0f766e;">自动归集用例 ${Number(data?.testcase_total || 0)}</span>
+      <span class="badge" style="background:#fff7ed; color:#c2410c;">自动归集Bug ${Number(data?.bug_total || 0)}</span>
+    </div>
+    <div style="margin-bottom:10px;">
+      <div style="font-weight:600; color:#334155; margin-bottom:4px;">用例样本</div>
+      ${testcaseLines || '<div class="muted">没有匹配到 testcase 镜像</div>'}
+    </div>
+    <div style="margin-bottom:10px;">
+      <div style="font-weight:600; color:#334155; margin-bottom:4px;">Bug 样本</div>
+      ${bugLines || '<div class="muted">当前大版本下没有匹配到 story 级 Bug</div>'}
+    </div>
+    <div>
+      <div style="font-weight:600; color:#334155; margin-bottom:4px;">其他已绑定到同一 Story 的需求</div>
+      ${duplicateLines || '<div class="muted">没有其他需求绑定到这个 Story</div>'}
+    </div>`;
+}
+
+export async function previewRequirementStoryBinding() {
+  const modal = document.getElementById('requirementStoryBindingModal');
+  const input = document.getElementById('requirementStoryBindingInput');
+  if (!modal || !input) return;
+  const requirementId = Number(modal.dataset.requirementId || 0);
+  if (!requirementId) return;
+  const storyIdText = String(input.value || '').trim();
+  const url = storyIdText
+    ? `/requirements/${requirementId}/story-binding-preview?story_id=${encodeURIComponent(storyIdText)}`
+    : `/requirements/${requirementId}/story-binding-preview`;
+  try {
+    const data = await (await api(url)).json();
+    renderRequirementStoryBindingPreview(data);
+  } catch (err) {
+    const preview = document.getElementById('requirementStoryBindingPreview');
+    if (preview) preview.innerHTML = `<div style="color:#dc2626;">预览失败：${err.message || '未知错误'}</div>`;
+    window.showMessage && window.showMessage(err.message || '预览自动归集结果失败', 'error');
+  }
+}
+
+export function clearRequirementStoryBinding() {
+  const input = document.getElementById('requirementStoryBindingInput');
+  if (input) input.value = '';
+  const preview = document.getElementById('requirementStoryBindingPreview');
+  if (preview) {
+    preview.innerHTML = '<div class="muted">当前将保存为空绑定。保存后该需求不再自动归集 story 级 testcase 和 Bug。</div>';
+  }
+}
+
+export async function saveRequirementStoryBinding() {
+  const modal = document.getElementById('requirementStoryBindingModal');
+  const input = document.getElementById('requirementStoryBindingInput');
+  if (!modal || !input) return;
+  const requirementId = Number(modal.dataset.requirementId || 0);
+  if (!requirementId) return;
+  const storyIdText = String(input.value || '').trim();
+  const payload = { zentao_story_id: storyIdText ? Number(storyIdText) : null };
+  try {
+    await api(`/requirements/${requirementId}/story-binding`, {
+      method: 'PUT',
+      headers: window.H,
+      body: payload,
+    });
+    window.showMessage && window.showMessage('Story 绑定已更新', 'success');
+    closeRequirementStoryBindingModal();
+    await loadDataOverview();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || 'Story 绑定更新失败', 'error');
+  }
+}
+
 export async function saveUserTabPermissions() {
   const modal = document.getElementById('userTabPermissionModal');
   if (!modal) return;
@@ -715,6 +860,87 @@ export async function syncZtVersions() {
   }
 }
 
+function renderZentaoBackgroundSyncResult(data) {
+  const resultEl = document.getElementById('ztBackgroundSyncResult');
+  const detailEl = document.getElementById('ztBackgroundSyncDetail');
+  if (!resultEl || !detailEl) return;
+
+  const total = Number(data?.total || 0);
+  const success = Number(data?.success || 0);
+  const failed = Number(data?.failed || 0);
+  const modeText = data?.mode === 'nightly_full' ? '夜间全量对账' : '最近同步';
+  resultEl.style.display = 'block';
+  resultEl.innerHTML = failed > 0
+    ? `<span style="color:#d97706; font-weight:bold;">⚠ ${modeText}已完成</span>　共 ${total} 个软件，成功 ${success}，失败 ${failed}`
+    : `<span style="color:#16a34a; font-weight:bold;">✅ ${modeText}已完成</span>　共 ${total} 个软件，成功 ${success}，失败 ${failed}`;
+
+  const items = Array.isArray(data?.items) ? data.items : [];
+  const lines = items.map((item) => {
+    if (!item?.ok) {
+      return `- ${item.software_name || item.software_id}: 失败 - ${item.error || '未知错误'}`;
+    }
+    if (data?.mode === 'nightly_full') {
+      const bugs = item.bugs || {};
+      const cases = item.testcases || {};
+      return `- ${item.software_name || item.software_id}: Bug远端 ${bugs.remote_total || 0} / 新增 ${bugs.created || 0} / 更新 ${bugs.updated || 0}；用例远端 ${cases.remote_total || 0} / 新增 ${cases.created || 0} / 更新 ${cases.updated || 0}`;
+    }
+    const bugs = item.result?.bugs || {};
+    const cases = item.result?.testcases || {};
+    return `- ${item.software_name || item.software_id}: 最近Bug ${bugs.remote_total || 0} / 新增 ${bugs.created || 0} / 更新 ${bugs.updated || 0}；最近用例 ${cases.remote_total || 0} / 新增 ${cases.created || 0} / 更新 ${cases.updated || 0}`;
+  });
+
+  detailEl.style.display = 'block';
+  detailEl.textContent = lines.join('\n') || '本次没有返回明细。';
+}
+
+async function runZentaoBackgroundSync(url, buttonId) {
+  const btn = document.getElementById(buttonId);
+  const resultEl = document.getElementById('ztBackgroundSyncResult');
+  const detailEl = document.getElementById('ztBackgroundSyncDetail');
+  const originalText = btn?.textContent || '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '执行中...';
+  }
+  if (resultEl) {
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<span style="color:#2563eb;">正在执行后台同步任务...</span>';
+  }
+  if (detailEl) {
+    detailEl.style.display = 'none';
+    detailEl.textContent = '';
+  }
+  try {
+    const response = await api(url, { method: 'POST', headers: window.H });
+    const data = await response.json();
+    renderZentaoBackgroundSyncResult(data);
+    window.showMessage && window.showMessage('后台同步任务执行完成', 'success');
+  } catch (err) {
+    if (resultEl) {
+      resultEl.style.display = 'block';
+      resultEl.innerHTML = `<span style="color:#dc2626;">❌ 执行失败：${err.message || '未知错误'}</span>`;
+    }
+    if (detailEl) {
+      detailEl.style.display = 'none';
+      detailEl.textContent = '';
+    }
+    window.showMessage && window.showMessage(err.message || '后台同步任务执行失败', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
+}
+
+export async function runZentaoRecentSync() {
+  return runZentaoBackgroundSync('/workbench/admin/run-recent-sync', 'ztRunRecentSyncBtn');
+}
+
+export async function runZentaoNightlyFullSync() {
+  return runZentaoBackgroundSync('/workbench/admin/run-nightly-full-sync', 'ztRunNightlyFullSyncBtn');
+}
+
 window.OmniQADataTab = {
   createSoftware,
   createVersion,
@@ -743,6 +969,13 @@ window.OmniQADataTab = {
   toggleMajorBody,
   loadZtProjects,
   syncZtVersions,
+  runZentaoRecentSync,
+  runZentaoNightlyFullSync,
+  openRequirementStoryBindingModal,
+  closeRequirementStoryBindingModal,
+  previewRequirementStoryBinding,
+  clearRequirementStoryBinding,
+  saveRequirementStoryBinding,
   openUserTabPermissionModal,
   closeUserTabPermissionModal,
   saveUserTabPermissions,
@@ -751,6 +984,13 @@ window.OmniQADataTab = {
 window.toggleMajorBody = toggleMajorBody;
 window.loadZtProjects = loadZtProjects;
 window.syncZtVersions = syncZtVersions;
+window.runZentaoRecentSync = runZentaoRecentSync;
+window.runZentaoNightlyFullSync = runZentaoNightlyFullSync;
+window.openRequirementStoryBindingModal = openRequirementStoryBindingModal;
+window.closeRequirementStoryBindingModal = closeRequirementStoryBindingModal;
+window.previewRequirementStoryBinding = previewRequirementStoryBinding;
+window.clearRequirementStoryBinding = clearRequirementStoryBinding;
+window.saveRequirementStoryBinding = saveRequirementStoryBinding;
 window.openUserTabPermissionModal = openUserTabPermissionModal;
 window.closeUserTabPermissionModal = closeUserTabPermissionModal;
 window.saveUserTabPermissions = saveUserTabPermissions;

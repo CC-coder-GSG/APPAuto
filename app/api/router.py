@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.routes import admin, auth, bugs, executions, export, feedback, field_test, overall_test, push, reports, requirements, retest, software, sse, stage5 as overall_test_legacy, user_ai_config, users, versions, zentao_ai, zentao_binding, zentao_bug_actions, zentao_hydrate, zentao_sync, zentao_version
+from app.api.routes import admin, auth, bugs, executions, export, feedback, field_test, overall_test, push, reports, requirements, retest, software, sse, stage5 as overall_test_legacy, user_ai_config, users, versions, workbench, zentao_ai, zentao_binding, zentao_bug_actions, zentao_hydrate, zentao_sync, zentao_testcases, zentao_version
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
@@ -8,6 +8,7 @@ api_router.include_router(users.router)
 api_router.include_router(versions.router)
 api_router.include_router(software.router)
 api_router.include_router(requirements.router)
+api_router.include_router(workbench.router)
 api_router.include_router(executions.router)
 api_router.include_router(bugs.router)
 api_router.include_router(admin.router)
@@ -20,6 +21,7 @@ api_router.include_router(export.router)
 api_router.include_router(feedback.router)
 api_router.include_router(field_test.router)
 api_router.include_router(zentao_sync.router)
+api_router.include_router(zentao_testcases.router)
 api_router.include_router(zentao_binding.router)
 api_router.include_router(zentao_hydrate.router)
 api_router.include_router(zentao_bug_actions.router)

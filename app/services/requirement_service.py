@@ -7,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Requirement, RequirementStatus, RequirementStatusHistory, TestCase, TestExecution, TestResultStatus, User, UserRole, Version, VersionType
+from app.models import BugSourceType, BugTracking, Requirement, RequirementStatus, RequirementStatusHistory, TestCase, TestExecution, TestResultStatus, User, UserRole, Version, VersionType, ZentaoTestCaseMirror
 from app.models.user_zentao_binding import UserZentaoBinding
 from app.services.audit_service import audit
 from app.services.sse_service import sse_publish
@@ -404,6 +404,22 @@ class RequirementService:
             "conflict_count": conflict_count,
         }
 
+    def _mark_test_completed_transition(self, requirement: Requirement, test_completed: bool) -> None:
+        """
+        Set test_completed plus its timestamp anchor.
+
+        The cutoff is what build_retest_evidence uses to tell "Bug filed
+        before this requirement was finished" apart from "Bug filed during
+        retest" — without it the auto-collected evidence would silently fall
+        back to the legacy "no candidates" behavior.
+        """
+        was_completed = bool(requirement.test_completed)
+        requirement.test_completed = bool(test_completed)
+        if test_completed and not was_completed:
+            requirement.test_completed_at = local_now()
+        elif not test_completed and was_completed:
+            requirement.test_completed_at = None
+
     def recalculate_requirement_status(self, requirement: Requirement, actor_id: int | None = None) -> Requirement:
         old_status_obj = requirement.status
         current_status = old_status_obj.value if hasattr(old_status_obj, "value") else str(old_status_obj)
@@ -515,6 +531,136 @@ class RequirementService:
         audit(self.db, action="requirement.update", target_type="requirement", actor_id=actor_id, target_id=str(req.id), detail=req.zentao_req_id)
         return {"message": "Requirement updated"}
 
+    def preview_story_binding(self, requirement_id: int, story_id: int | None = None) -> dict:
+        req = (
+            self.db.query(Requirement)
+            .options(joinedload(Requirement.major_version))
+            .filter(Requirement.id == requirement_id)
+            .first()
+        )
+        if not req:
+            raise HTTPException(status_code=404, detail="Requirement not found")
+
+        effective_story_id = story_id if story_id is not None else req.zentao_story_id
+        testcase_rows = []
+        bug_rows = []
+        duplicate_requirements = []
+        if effective_story_id:
+            testcase_rows = (
+                self.db.query(ZentaoTestCaseMirror)
+                .filter(
+                    ZentaoTestCaseMirror.zentao_story_id == effective_story_id,
+                    ZentaoTestCaseMirror.deleted.isnot(True),
+                )
+                .order_by(ZentaoTestCaseMirror.zentao_case_numeric_id.asc())
+                .limit(10)
+                .all()
+            )
+            bug_rows = (
+                self.db.query(BugTracking)
+                .filter(
+                    BugTracking.zentao_story_id == effective_story_id,
+                    BugTracking.major_version_id == req.major_version_id,
+                    BugTracking.zentao_deleted.isnot(True),
+                    BugTracking.source_type.in_([BugSourceType.MANUAL, BugSourceType.REQUIREMENT]),
+                )
+                .order_by(BugTracking.id.desc())
+                .limit(10)
+                .all()
+            )
+            duplicate_requirements = (
+                self.db.query(Requirement)
+                .options(joinedload(Requirement.major_version))
+                .filter(
+                    Requirement.zentao_story_id == effective_story_id,
+                    Requirement.id != req.id,
+                )
+                .order_by(Requirement.id.asc())
+                .limit(10)
+                .all()
+            )
+
+        testcase_total = (
+            self.db.query(func.count(ZentaoTestCaseMirror.id))
+            .filter(
+                ZentaoTestCaseMirror.zentao_story_id == effective_story_id,
+                ZentaoTestCaseMirror.deleted.isnot(True),
+            )
+            .scalar()
+            if effective_story_id
+            else 0
+        ) or 0
+        bug_total = (
+            self.db.query(func.count(BugTracking.id))
+            .filter(
+                BugTracking.zentao_story_id == effective_story_id,
+                BugTracking.major_version_id == req.major_version_id,
+                BugTracking.zentao_deleted.isnot(True),
+                BugTracking.source_type.in_([BugSourceType.MANUAL, BugSourceType.REQUIREMENT]),
+            )
+            .scalar()
+            if effective_story_id
+            else 0
+        ) or 0
+
+        return {
+            "requirement_id": req.id,
+            "zentao_req_id": req.zentao_req_id,
+            "title": req.title,
+            "major_version_id": req.major_version_id,
+            "major_version_name": req.major_version.version_no if req.major_version else "",
+            "current_story_id": req.zentao_story_id,
+            "preview_story_id": effective_story_id,
+            "testcase_total": int(testcase_total),
+            "bug_total": int(bug_total),
+            "sample_testcases": [
+                {
+                    "zentao_case_id": row.zentao_case_id,
+                    "title": row.title,
+                }
+                for row in testcase_rows
+            ],
+            "sample_bugs": [
+                {
+                    "bug_id": row.bug_id,
+                    "title": row.zentao_bug_title,
+                }
+                for row in bug_rows
+            ],
+            "duplicate_requirements": [
+                {
+                    "id": row.id,
+                    "zentao_req_id": row.zentao_req_id,
+                    "title": row.title,
+                    "major_version_name": row.major_version.version_no if row.major_version else "",
+                }
+                for row in duplicate_requirements
+            ],
+        }
+
+    def update_story_binding(self, requirement_id: int, story_id: int | None, actor_id: int | None = None) -> dict:
+        req = self.db.query(Requirement).filter(Requirement.id == requirement_id).first()
+        if not req:
+            raise HTTPException(status_code=404, detail="Requirement not found")
+
+        old_story_id = req.zentao_story_id
+        req.zentao_story_id = story_id
+        self.db.commit()
+        audit(
+            self.db,
+            action="requirement.update_story_binding",
+            target_type="requirement",
+            actor_id=actor_id,
+            target_id=str(req.id),
+            detail=f"{old_story_id or ''}->{story_id or ''}",
+        )
+        return {
+            "message": "Requirement story binding updated",
+            "requirement_id": req.id,
+            "old_story_id": old_story_id,
+            "zentao_story_id": req.zentao_story_id,
+        }
+
     def delete_requirement(self, requirement_id: int, actor_id: int | None = None) -> dict:
         req = self.db.query(Requirement).filter(Requirement.id == requirement_id).first()
         if not req:
@@ -580,7 +726,7 @@ class RequirementService:
         if case_completed is not None:
             requirement.case_completed = case_completed
         if test_completed is not None:
-            requirement.test_completed = test_completed
+            self._mark_test_completed_transition(requirement, test_completed)
 
         self.recalculate_requirement_status(requirement, actor_id=current_user.id)
         self.db.commit()
@@ -623,7 +769,7 @@ class RequirementService:
         requirement = self.db.query(Requirement).filter(Requirement.id == requirement_id).first()
         if not requirement:
             raise HTTPException(status_code=404, detail="Requirement not found")
-        requirement.test_completed = test_completed
+        self._mark_test_completed_transition(requirement, test_completed)
         self.recalculate_requirement_status(requirement, actor_id=actor_id)
         self.db.commit()
         audit(
@@ -753,7 +899,7 @@ class RequirementService:
         execution.notes = notes
         execution.executed_by_id = actor_id
         execution.executed_at = local_now()
-        requirement.test_completed = test_completed
+        self._mark_test_completed_transition(requirement, test_completed)
         self.recalculate_requirement_status(requirement, actor_id=actor_id)
         self.db.commit()
         self.db.refresh(execution)
