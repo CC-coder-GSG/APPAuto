@@ -434,10 +434,6 @@ export function renderMineCards() {
   const reqsHtml = filteredData.map((req) => {
     const caseDisabled = req.case_completed ? 'disabled' : '';
     const testDisabled = req.test_completed ? 'disabled' : '';
-    const autoModeForCases = Boolean(req.zentao_story_id) || (req.auto_linked_case_count || 0) > 0;
-    const addCaseDisabled = (req.case_completed || autoModeForCases) ? 'disabled' : '';
-    const casePrefixColor = req.case_completed ? 'color:#94a3b8;' : '';
-    const testPrefixColor = req.test_completed ? 'color:#94a3b8;' : '';
     const isFullyCompleted = req.test_completed && req.case_completed;
     const isOpen = Object.prototype.hasOwnProperty.call(foldStateMap, String(req.id)) ? !!foldStateMap[String(req.id)] : !isFullyCompleted;
     const vTag = mode === 'all_pending' && req.major_version_name
@@ -493,13 +489,9 @@ export function renderMineCards() {
           </div>
           <div>${caseHtml}</div>
           <div class="free-bug-box"><div><b>自由Bug</b></div><div style="margin-top:6px;">${freeBugHtml}</div></div>
-          <div class="row" style="margin-top:8px">
-            <div class="prefix-input"><span style="${casePrefixColor}">u#</span><input id="new_case_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="${req.zentao_story_id ? '已改为自动归集用例' : '新增用例编号'}" ${addCaseDisabled}></div>
-            <button ${addCaseDisabled} onclick="addCase(${req.id})">逐个添加用例</button>
-            <div class="prefix-input"><span style="${testPrefixColor}">b#</span><input id="new_free_bug_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增自由Bug" ${testDisabled}></div>
-            <button ${testDisabled} onclick="addFreeBug(${req.id})">添加自由Bug</button>
+          <div class="muted" style="margin-top:10px; font-size:12px; padding:6px 10px; background:#f8fafc; border-left:3px solid #94a3b8; border-radius:4px;">
+            用例与 Bug 已改为按禅道 story / testcase 自动归集，不再需要手工录入。如需补救异常归属，请到“同步中心”由管理员处理。
           </div>
-          ${req.zentao_story_id ? '<div class="muted" style="margin-top:8px; font-size:12px;">该需求已关联禅道需求，工作台用例改为按禅道 story 自动归集，不再要求手工录入用例编号。</div>' : ''}
         </div>
       </details>`;
   }).join('');

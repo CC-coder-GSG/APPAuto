@@ -56,6 +56,48 @@ function linkedReqHtml(row) {
   }).join('');
 }
 
+const STATUS_ZH = {
+  normal: '正常',
+  wait: '待评审',
+  blocked: '已阻塞',
+  done: '已完成',
+  closed: '已关闭',
+  draft: '草稿',
+};
+
+const STAGE_ZH = {
+  unittest: '单元测试',
+  feature: '功能测试',
+  integration: '集成测试',
+  system: '系统测试',
+  smoke: '冒烟测试',
+  bvt: 'BVT',
+  design: '设计阶段',
+};
+
+const RUN_RESULT_ZH = {
+  pass: '通过',
+  fail: '失败',
+  blocked: '阻塞',
+  n_a: '未涉及',
+  skipped: '跳过',
+};
+
+function localizeStatus(value) {
+  const key = String(value || '').toLowerCase();
+  return STATUS_ZH[key] || value || '-';
+}
+
+function localizeStage(value) {
+  const key = String(value || '').toLowerCase();
+  return STAGE_ZH[key] || value || '-';
+}
+
+function localizeRunResult(value) {
+  const key = String(value || '').toLowerCase();
+  return RUN_RESULT_ZH[key] || value || '-';
+}
+
 function syncText(row) {
   const source = escapeHtml(row.sync_source || '-');
   const time = row.last_zentao_synced_at ? new Date(row.last_zentao_synced_at).toLocaleString() : '从未同步';
@@ -74,10 +116,10 @@ function renderRows() {
     tbody.innerHTML = testcaseCenterState.items.map((row) => {
       const caseLink = renderCaseLink(row);
       const title = escapeHtml(row.title || '-');
-      const status = escapeHtml(row.status || '-');
-      const stage = escapeHtml(row.stage || '-');
+      const status = escapeHtml(localizeStatus(row.status));
+      const stage = escapeHtml(localizeStage(row.stage));
       const lastRunDate = row.last_run_date ? new Date(row.last_run_date).toLocaleString() : '未执行';
-      const lastRunResult = escapeHtml(row.last_run_result || '-');
+      const lastRunResult = escapeHtml(localizeRunResult(row.last_run_result));
       const deletedBadge = row.deleted ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; margin-left:6px;">已删除</span>' : '';
       return `<tr>
         <td>${caseLink}${deletedBadge}</td>
@@ -154,7 +196,7 @@ export async function openTestcaseCenterDetail(caseNumericId) {
   if (!modal || !titleEl || !metaEl || !preEl || !stepsEl) return;
 
   titleEl.innerText = `${detail.zentao_case_id || '-'} ${detail.title || ''}`;
-  metaEl.innerText = `产品：${detail.zentao_product_name || '-'} | 模块：${detail.zentao_module_name || '-'} | 状态：${detail.status || '-'} | 阶段：${detail.stage || '-'} | 最近同步：${detail.last_zentao_synced_at ? new Date(detail.last_zentao_synced_at).toLocaleString() : '从未同步'}`;
+  metaEl.innerText = `产品：${detail.zentao_product_name || '-'} | 模块：${detail.zentao_module_name || '-'} | 状态：${localizeStatus(detail.status)} | 阶段：${localizeStage(detail.stage)} | 最近同步：${detail.last_zentao_synced_at ? new Date(detail.last_zentao_synced_at).toLocaleString() : '从未同步'}`;
   preEl.innerText = detail.precondition || '无';
   stepsEl.innerText = detail.steps_digest || '无';
   modal.style.display = 'flex';

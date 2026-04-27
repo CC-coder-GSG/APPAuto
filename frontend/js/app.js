@@ -16,14 +16,14 @@ import { resizeAllCharts } from './components/charts.js?v=20260417-3';
 import { runGuardrails } from './guardrails.js?v=20260417-3';
 
 const OPTIONAL_TAB_MODULES = [
-  { name: 'mine', path: './tabs/mine.js?v=20260427-1' },
+  { name: 'mine', path: './tabs/mine.js?v=20260427-2' },
   { name: 'feedback', path: './tabs/feedback.js?v=20260417-3' },
   { name: 'report', path: './tabs/report.js?v=20260417-3' },
   { name: 'retest', path: './tabs/retest.js?v=20260427-1' },
   { name: 'overall-test', path: './tabs/overall-test.js?v=20260420-2' },
   { name: 'field-test', path: './tabs/field-test.js?v=20260417-3' },
   { name: 'build-records', path: './tabs/build-records.js?v=20260417-3' },
-  { name: 'testcase-center', path: './tabs/testcase-center.js?v=20260427-1' },
+  { name: 'testcase-center', path: './tabs/testcase-center.js?v=20260427-2' },
   { name: 'zentao-sync', path: './tabs/zentao-sync.js?v=20260417-3' },
   { name: 'activity', path: './tabs/activity.js?v=20260417-3' },
   { name: 'assign', path: './tabs/assign.js?v=20260422-2' },

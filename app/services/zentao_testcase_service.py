@@ -64,13 +64,45 @@ def _extract_account(value: Any) -> str | None:
     return text or None
 
 
+def _extract_case_id(case: dict[str, Any]) -> int | None:
+    """
+    Pull the numeric Zentao case id from a raw testcase payload.
+
+    v1 returns the canonical numeric id under `caseID`; the top-level `id`
+    field is a Zentao record reference like `"case_21555"` and cannot be
+    parsed as an int directly. Fall back to stripping that prefix when
+    `caseID` is missing for forward-compat with older Zentao versions.
+    """
+    for key in ("caseID", "case_id"):
+        value = case.get(key)
+        try:
+            iv = int(value) if value is not None and str(value).strip() else None
+        except (TypeError, ValueError):
+            iv = None
+        if iv:
+            return iv
+
+    raw_id = case.get("id")
+    if isinstance(raw_id, (int, float)):
+        return int(raw_id) or None
+    if isinstance(raw_id, str):
+        text = raw_id.strip()
+        if text.lower().startswith("case_"):
+            text = text[5:]
+        try:
+            return int(text) or None
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def _extract_case_payload(data: Any) -> dict[str, Any] | None:
     if isinstance(data, dict):
         for key in ("testcase", "case", "data"):
             bucket = data.get(key)
-            if isinstance(bucket, dict) and bucket.get("id"):
+            if isinstance(bucket, dict) and (bucket.get("id") or bucket.get("caseID")):
                 return bucket
-        if data.get("id"):
+        if data.get("id") or data.get("caseID"):
             return data
     return None
 
@@ -124,7 +156,12 @@ class ZentaoTestCaseService:
         rows: list[dict[str, Any]] = []
         seen_ids: set[int] = set()
         for page in range(1, max_pages + 1):
-            data = client.get(f"products/{product_id}/testcases", params={"limit": limit, "page": page})
+            data = client.get(
+                f"products/{product_id}/testcases",
+                # status=all so wait/blocked/done cases come along too — without
+                # it Zentao silently filters to status=normal on some 18.x deployments.
+                params={"limit": limit, "page": page, "status": "all"},
+            )
             page_rows = self._extract_testcase_rows(data)
             if not page_rows:
                 break
@@ -132,7 +169,7 @@ class ZentaoTestCaseService:
             new_count = 0
             for row in page_rows:
                 case_payload = _extract_case_payload(row) or row
-                case_id = _coerce_int(case_payload.get("id"))
+                case_id = _extract_case_id(case_payload) if isinstance(case_payload, dict) else None
                 if case_id is None:
                     rows.append(row)
                     new_count += 1
@@ -235,7 +272,7 @@ class ZentaoTestCaseService:
         if not isinstance(case, dict):
             return None
 
-        case_numeric_id = _coerce_int(case.get("id"))
+        case_numeric_id = _extract_case_id(case)
         if not case_numeric_id:
             return None
 
@@ -377,7 +414,14 @@ class ZentaoTestCaseService:
             remote_total = 0
             created = 0
             updated = 0
+            skipped_invalid = 0
             detail_refreshed = 0
+            # Cap follow-up detail fetches per sync. The list endpoint already
+            # carries everything we display in the case center; deferring
+            # detail enrichment to on-demand opens or the next scheduled sync
+            # avoids running thousands of HTTP calls during the first
+            # full-load (e.g. product 15 has ~4k cases).
+            detail_refresh_budget = 30
 
             for product_id in product_ids:
                 try:
@@ -393,9 +437,11 @@ class ZentaoTestCaseService:
                     remote_rows = self._fetch_product_testcases(client, product_id)
 
                 remote_total += len(remote_rows)
+                product_batch_count = 0
                 for raw in remote_rows:
                     normalized = self._normalize_testcase(raw, base_url=base_url)
                     if not normalized:
+                        skipped_invalid += 1
                         continue
                     existing = (
                         self.db.query(ZentaoTestCaseMirror)
@@ -405,12 +451,22 @@ class ZentaoTestCaseService:
                     row, created_now, updated_now = self._upsert_case(normalized, sync_source=sync_source)
                     created += int(created_now)
                     updated += int((not created_now) and updated_now)
-                    if self._needs_detail_refresh(existing or row, normalized, created_now):
+                    if detail_refresh_budget > 0 and self._needs_detail_refresh(existing or row, normalized, created_now):
                         detail_raw = self._fetch_case_detail_with_retry(case_numeric_id=row.zentao_case_numeric_id, current_user=current_user)
                         self._enrich_case_detail(row, detail_raw, base_url=base_url)
                         row.last_zentao_synced_at = local_now()
                         row.sync_source = sync_source
                         detail_refreshed += 1
+                        detail_refresh_budget -= 1
+
+                    # Commit in batches so a 4k-row first-sync doesn't hold
+                    # one giant transaction open for minutes.
+                    product_batch_count += 1
+                    if product_batch_count >= 200:
+                        self.db.commit()
+                        product_batch_count = 0
+                if product_batch_count:
+                    self.db.commit()
 
             self.db.commit()
             _sync_case_cache[software_id] = local_now()
@@ -421,6 +477,7 @@ class ZentaoTestCaseService:
                 "remote_total": remote_total,
                 "created": created,
                 "updated": updated,
+                "skipped_invalid": skipped_invalid,
                 "detail_refreshed": detail_refreshed,
                 "cached": False,
                 "sync_source": sync_source,
