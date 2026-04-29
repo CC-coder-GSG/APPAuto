@@ -658,10 +658,93 @@ class ZentaoTestCaseService:
             {
                 "precondition": row.precondition,
                 "steps_digest": row.steps_digest,
-                "raw_payload": row.raw_payload,
+                "steps_structured": self._extract_structured_steps(row.raw_payload),
+                "linked_bugs": self._collect_linked_bugs(row),
             }
         )
         return data
+
+    def _extract_structured_steps(self, raw_payload: str | None) -> list[dict[str, Any]]:
+        if not raw_payload:
+            return []
+        try:
+            data = json.loads(raw_payload)
+        except (TypeError, ValueError):
+            return []
+        case = _extract_case_payload(data) or data
+        if not isinstance(case, dict):
+            return []
+        steps = case.get("steps")
+        if isinstance(steps, dict):
+            steps = list(steps.values())
+        if not isinstance(steps, list):
+            return []
+
+        result: list[dict[str, Any]] = []
+
+        def _walk(items: list[Any], parent_no: str = "") -> None:
+            for idx, item in enumerate(items, start=1):
+                if not isinstance(item, dict):
+                    text = str(item or "").strip()
+                    if text:
+                        no = f"{parent_no}{idx}" if parent_no else str(idx)
+                        result.append({"no": no, "is_group": False, "step": text, "expect": ""})
+                    continue
+                step_text = str(item.get("desc") or item.get("step") or "").strip()
+                expect_text = str(item.get("expect") or "").strip()
+                step_type = str(item.get("type") or "").strip().lower()
+                children = item.get("children") or item.get("steps") or []
+                no_val = str(item.get("id") or item.get("order") or "").strip()
+                no = no_val or (f"{parent_no}{idx}" if parent_no else str(idx))
+                if step_type == "group" or (children and not step_text and not expect_text):
+                    result.append({"no": no, "is_group": True, "step": step_text or "分组", "expect": ""})
+                    if isinstance(children, list):
+                        _walk(children, parent_no=f"{no}.")
+                    continue
+                if step_text or expect_text:
+                    result.append({"no": no, "is_group": False, "step": step_text, "expect": expect_text})
+                if isinstance(children, list) and children:
+                    _walk(children, parent_no=f"{no}.")
+
+        _walk(steps)
+        return result
+
+    def _collect_linked_bugs(self, row: ZentaoTestCaseMirror) -> list[dict[str, Any]]:
+        case_key = str(row.zentao_case_id or "").strip().lower()
+        numeric = row.zentao_case_numeric_id
+        keys: set[str] = set()
+        if case_key:
+            keys.add(case_key)
+        if numeric:
+            keys.add(str(numeric))
+            keys.add(f"u#{numeric}")
+        if not keys:
+            return []
+        rows = (
+            self.db.query(BugTracking)
+            .filter(
+                func.lower(func.coalesce(BugTracking.zentao_linked_case_id, "")).in_([k.lower() for k in keys]),
+                BugTracking.zentao_deleted.isnot(True),
+            )
+            .order_by(BugTracking.zentao_opened_at.desc(), BugTracking.id.desc())
+            .all()
+        )
+        result: list[dict[str, Any]] = []
+        for bug in rows:
+            result.append(
+                {
+                    "id": bug.id,
+                    "bug_id": bug.bug_id,
+                    "zentao_bug_url": bug.zentao_bug_url,
+                    "zentao_bug_title": bug.zentao_bug_title,
+                    "zentao_live_status": bug.zentao_live_status,
+                    "closed": bool(bug.closed),
+                    "zentao_opened_at": bug.zentao_opened_at.isoformat() if bug.zentao_opened_at else None,
+                    "zentao_opened_by_name": bug.zentao_opened_by_name,
+                    "zentao_assigned_to_name": bug.zentao_assigned_to_name,
+                }
+            )
+        return result
 
     def list_modules(self, *, software_id: int | None = None) -> list[dict[str, Any]]:
         """

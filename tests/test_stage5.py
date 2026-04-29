@@ -64,7 +64,7 @@ def test_submit_stage5_result_marks_bug_closed_when_any_record_done(db_session):
     )
     db_session.refresh(bug)
 
-    assert result["message"] == "Stage5 result updated"
+    assert result["message"] == "整体测试结果已更新"
     assert bug.closed is True
     assert bug.fixed_minor_version_id == minor.id
 

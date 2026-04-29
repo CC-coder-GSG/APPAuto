@@ -29,6 +29,8 @@ def db_session():
     Base.metadata.create_all(bind=engine)
     session = TestingSessionLocal()
     try:
+        from app.db.seed import ensure_zentao_sync_bot
+        ensure_zentao_sync_bot(session)
         yield session
     finally:
         session.close()

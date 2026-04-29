@@ -445,21 +445,10 @@ export function renderMineCards() {
     ].join('');
 
     const caseHtml = (req.test_cases || []).map((c) => {
-      const lockedByCase = Boolean(caseDisabled) || Boolean(c.auto_linked);
-      const lockedByTest = Boolean(testDisabled) || Boolean(c.auto_linked);
-      const editAttr = lockedByCase ? 'disabled' : '';
-      const linkAttr = lockedByTest ? 'disabled' : '';
-      const delAttr = lockedByCase ? 'disabled' : '';
-      const editClick = c.auto_linked ? 'return false;' : `editWorkbenchCase(${c.id}, '${c.zentao_case_id}')`;
-      const linkClick = c.auto_linked ? 'return false;' : `promptCaseBug(${req.id},${c.id})`;
-      const delClick = c.auto_linked ? 'return false;' : `deleteCase(${c.id})`;
       return `
       <div class="case-item">
         <div class="row">
           ${renderCaseLink(c)}${c.auto_linked ? renderAutoLinkedBadge() : ''}
-          <button class="secondary" style="padding:2px 8px; font-size:12px; margin-left:8px;" ${editAttr} onclick="${editClick}">编辑编号</button>
-          <button ${linkAttr} onclick="${linkClick}">添加关联Bug</button>
-          <button class="danger" ${delAttr} onclick="${delClick}">删除用例</button>
         </div>
         <div class="case-bugs" style="margin-top:6px;">${(c.bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无关联Bug</span>'}</div>
       </div>`;

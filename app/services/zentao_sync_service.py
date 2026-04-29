@@ -384,9 +384,9 @@ class ZentaoSyncService:
     def legacy_sync(self, payload: ZentaoBrowserSyncPayload) -> dict[str, Any]:
         result = self.receive_event(payload)
         mode = "insert"
-        if result.get("status") == "duplicate":
+        if result.get("duplicate_of") or result.get("status") == "duplicate":
             mode = "duplicate"
-        elif result.get("status") in {"pending_mapping", "ready_to_apply", "received"}:
+        elif result.get("status") in {"pending_mapping", "ready_to_apply", "received", "applied", "failed"}:
             mode = "update"
         return {
             "success": bool(result.get("ok")),

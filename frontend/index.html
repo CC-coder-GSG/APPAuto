@@ -454,22 +454,31 @@
       <button class="secondary" onclick="nextTestcaseCenterPage()">下一页</button>
     </div>
 
-    <div id="testcaseCenterDetailModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
-      <div style="width: min(860px, 94vw); background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px 18px 14px 18px;">
-        <h3 id="testcaseCenterDetailTitle" style="margin: 0 0 12px 0; color:#0f172a;">用例详情</h3>
-        <div id="testcaseCenterDetailMeta" class="muted" style="margin-bottom: 10px;"></div>
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-          <div style="border:1px solid #e2e8f0; border-radius:8px; padding:12px; background:#f8fafc;">
-            <div style="font-weight:700; margin-bottom:6px;">前置条件</div>
-            <div id="testcaseCenterPrecondition" style="white-space: pre-wrap; color:#334155;"></div>
-          </div>
-          <div style="border:1px solid #e2e8f0; border-radius:8px; padding:12px; background:#f8fafc;">
-            <div style="font-weight:700; margin-bottom:6px;">步骤摘要</div>
-            <div id="testcaseCenterSteps" style="white-space: pre-wrap; color:#334155; max-height: 320px; overflow:auto;"></div>
-          </div>
+    <div id="testcaseCenterDetailModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: flex-start; justify-content: center; padding: 32px 16px; overflow:auto;">
+      <div id="testcaseCenterDetailCard" style="width: min(960px, 96vw); background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 20px 20px 16px 20px;">
+        <div class="row" style="justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px;">
+          <h3 id="testcaseCenterDetailTitle" style="margin: 0; color:#0f172a; flex:1; min-width:0; word-break: break-word;">用例详情</h3>
+          <button class="secondary" onclick="closeTestcaseCenterDetail()" style="flex:0 0 auto;">关闭</button>
         </div>
-        <div class="row" style="justify-content: flex-end; gap: 8px;">
-          <button class="secondary" onclick="closeTestcaseCenterDetail()">关闭</button>
+        <div id="testcaseCenterDetailBadges" style="margin-bottom: 12px; display:flex; flex-wrap:wrap; gap:6px;"></div>
+        <div id="testcaseCenterDetailMeta" class="muted" style="margin-bottom: 14px; font-size:13px; line-height:1.7;"></div>
+
+        <div style="margin-bottom:14px;">
+          <div style="font-weight:700; color:#0f172a; margin-bottom:6px;">前置条件</div>
+          <div id="testcaseCenterPrecondition" style="white-space: pre-wrap; color:#334155; border:1px solid #e2e8f0; background:#f8fafc; border-radius:8px; padding:10px 12px;"></div>
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <div style="font-weight:700; color:#0f172a; margin-bottom:6px; display:flex; align-items:center; gap:8px;">
+            <span>用例步骤</span>
+            <span class="badge" style="background:#10b981; color:#fff;">📋</span>
+          </div>
+          <div id="testcaseCenterStepsWrap"></div>
+        </div>
+
+        <div style="margin-bottom:6px;">
+          <div style="font-weight:700; color:#0f172a; margin-bottom:6px;">关联 Bug</div>
+          <div id="testcaseCenterLinkedBugs"></div>
         </div>
       </div>
     </div>

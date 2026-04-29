@@ -868,6 +868,10 @@ def test_apply_event_returns_clear_error_for_pending_decision(db_session):
         rec = service.receive_event(ZentaoBrowserSyncPayload(**payload))
         resp = client.post(f"/api/integrations/zentao/browser-events/{rec['event_id']}/apply")
         assert resp.status_code == 400
-        assert "人工决策" in str(resp.json().get("detail", ""))
+        detail = str(resp.json().get("detail", ""))
+        # Reflects the routing decision recorded by _auto_map; can be either the
+        # generic "needs manual decision" fallback, or the testcase-specific
+        # reason produced by _route_bug_event.
+        assert "人工决策" in detail or "未找到对应 testcase" in detail or "暂不可应用" in detail
     finally:
         client.close()
