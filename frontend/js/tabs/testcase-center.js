@@ -185,6 +185,31 @@ export async function syncTestcaseCenter() {
   await loadTestcaseCenter(1);
 }
 
+export async function syncTestcaseCenterRecent() {
+  const softwareId = currentSoftwareId();
+  if (!softwareId) {
+    window.showMessage && window.showMessage('请先选择软件', 'error');
+    return;
+  }
+  let data;
+  try {
+    const res = await api('/zentao/testcases/sync-recent', {
+      method: 'POST',
+      headers: window.H,
+      body: { software_id: softwareId, force: true },
+    });
+    data = await res.json();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '增量同步失败', 'error');
+    return;
+  }
+  window.showMessage && window.showMessage(
+    `增量同步完成：扫描 ${data.remote_total || 0}，新增 ${data.created || 0}，更新 ${data.updated || 0}，详情补拉 ${data.detail_refreshed || 0}（耗时 ${data.elapsed_seconds || 0}s）`,
+    'success',
+  );
+  await loadTestcaseCenter(1);
+}
+
 function renderStepsTable(detail) {
   const structured = Array.isArray(detail.steps_structured) ? detail.steps_structured : [];
   if (structured.length) {
@@ -328,6 +353,7 @@ export async function prevTestcaseCenterPage() {
 window.OmniQATestcaseCenterTab = {
   loadTestcaseCenter,
   syncTestcaseCenter,
+  syncTestcaseCenterRecent,
   openTestcaseCenterDetail,
   closeTestcaseCenterDetail,
   nextTestcaseCenterPage,
@@ -336,6 +362,7 @@ window.OmniQATestcaseCenterTab = {
 
 window.loadTestcaseCenter = loadTestcaseCenter;
 window.syncTestcaseCenter = syncTestcaseCenter;
+window.syncTestcaseCenterRecent = syncTestcaseCenterRecent;
 window.openTestcaseCenterDetail = openTestcaseCenterDetail;
 window.closeTestcaseCenterDetail = closeTestcaseCenterDetail;
 window.nextTestcaseCenterPage = nextTestcaseCenterPage;

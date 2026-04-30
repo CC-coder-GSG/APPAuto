@@ -431,6 +431,7 @@
         <input id="testcaseCenterKeyword" onkeydown="if(event.key==='Enter') loadTestcaseCenter()" placeholder="搜索用例编号或标题..." style="width:100%; border:none; outline:none; background:transparent;">
       </div>
       <button onclick="loadTestcaseCenter()">查询</button>
+      <button class="secondary" onclick="syncTestcaseCenterRecent()" style="color:#0d9488; border-color:#5eead4;">增量同步</button>
       <button class="secondary" onclick="syncTestcaseCenter()">同步禅道用例</button>
     </div>
     <div id="testcaseCenterMeta" class="muted" style="margin-bottom: 12px;"></div>
@@ -511,6 +512,7 @@
         <span style="font-weight: bold; color: #334155; margin-right: 8px;">🎯 提取Bug池:</span>
         <label>大版本</label><select id="s5MajorSelect" onchange="window.OmniQAOverallTestTab?.refreshS5EntryMode?.()"></select>
         <button onclick="loadOverallTest()">加载全景大盘</button>
+        <button class="secondary" onclick="syncOverallTestRecentFromZentao()" style="color:#0d9488; border-color:#5eead4;">增量同步</button>
         <button class="secondary" onclick="syncOverallTestFromZentao({ force: true })">强制同步禅道并刷新</button>
         <button class="secondary" onclick="openS5CreateZentaoBugModal()" style="color:#7c3aed; border-color:#c4b5fd;">➕ 新建禅道Bug</button>
       </div>

@@ -152,6 +152,69 @@ class ZentaoTestCaseService:
 
         return ids
 
+    def _fetch_recent_product_testcases(
+        self,
+        client: ZentaoClient,
+        product_id: int,
+        *,
+        limit: int = 100,
+        max_pages: int = 2,
+    ) -> list[dict[str, Any]]:
+        """
+        Pull only the most recently edited testcase pages for a product.
+
+        Tries `lastEditedDate_desc` first (the column the case-list view
+        sorts by), falling back to `id_desc` and finally unsorted if the
+        Zentao deployment rejects the orderBy parameter. Mirrors the
+        bug-side `_fetch_recent_bug_collection` strategy so newly created
+        or re-edited cases bubble to the top within the first page.
+        """
+        order_candidates = ("lastEditedDate_desc", "id_desc", None)
+        last_error: ZentaoAPIError | None = None
+        rows: list[dict[str, Any]] = []
+        seen_ids: set[int] = set()
+
+        for order_by in order_candidates:
+            rows.clear()
+            seen_ids.clear()
+            try:
+                for page in range(1, max_pages + 1):
+                    params: dict[str, Any] = {"limit": limit, "page": page, "status": "all"}
+                    if order_by:
+                        params["orderBy"] = order_by
+                    data = client.get(f"products/{product_id}/testcases", params=params)
+                    page_rows = self._extract_testcase_rows(data)
+                    if not page_rows:
+                        break
+
+                    new_count = 0
+                    for row in page_rows:
+                        case_payload = _extract_case_payload(row) or row
+                        case_id = _extract_case_id(case_payload) if isinstance(case_payload, dict) else None
+                        if case_id is None:
+                            rows.append(row)
+                            new_count += 1
+                            continue
+                        if case_id in seen_ids:
+                            continue
+                        seen_ids.add(case_id)
+                        rows.append(row)
+                        new_count += 1
+
+                    if new_count == 0 or len(page_rows) < limit:
+                        break
+                return rows
+            except ZentaoAPIError as exc:
+                last_error = exc
+                # 400/422 likely from an unrecognized orderBy → try next candidate
+                if exc.status_code in (400, 422):
+                    continue
+                raise
+
+        if last_error:
+            raise last_error
+        return rows
+
     def _fetch_product_testcases(self, client: ZentaoClient, product_id: int, *, limit: int = 200, max_pages: int = 50) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         seen_ids: set[int] = set()
@@ -480,6 +543,109 @@ class ZentaoTestCaseService:
                 "skipped_invalid": skipped_invalid,
                 "detail_refreshed": detail_refreshed,
                 "cached": False,
+                "sync_source": sync_source,
+            }
+        finally:
+            release_sync_lock(self.db, lock_key)
+
+    def sync_recent_software_testcases(
+        self,
+        *,
+        software_id: int,
+        current_user: User,
+        force: bool = True,
+        sync_source: str = "manual_incremental",
+        limit: int = 100,
+        max_pages_per_product: int = 2,
+    ) -> dict[str, Any]:
+        """
+        Lightweight incremental sync: pulls only the most recently edited
+        testcase pages per Zentao product instead of walking the entire
+        backlog. Suitable for the manual "增量同步" button — newly created
+        or re-edited cases land within seconds.
+
+        Does NOT detect long-untouched deletions; rely on the full
+        `sync_software_testcases` path for that.
+        """
+        software = self.db.query(SoftwareProduct).filter(SoftwareProduct.id == software_id).first()
+        if not software:
+            raise HTTPException(status_code=404, detail="软件不存在")
+
+        lock_key = f"testcase_recent:{software_id}"
+        if not acquire_sync_lock(self.db, lock_key, ttl_seconds=600):
+            raise HTTPException(status_code=409, detail="该软件正在执行用例增量同步，请稍后再试")
+
+        started = local_now()
+        try:
+            ctx = self._get_client_ctx(current_user.id)
+            if not ctx:
+                raise HTTPException(status_code=400, detail="当前用户未配置可用的禅道绑定")
+            client, base_url = ctx
+
+            product_ids = self._collect_zentao_product_ids_for_software(software_id, software)
+            if not product_ids:
+                raise HTTPException(status_code=400, detail="该软件下未找到禅道产品映射，请先配置 zentao_product_id")
+
+            remote_total = 0
+            created = 0
+            updated = 0
+            skipped_invalid = 0
+            detail_refreshed = 0
+            detail_refresh_budget = 20
+
+            for product_id in product_ids:
+                try:
+                    remote_rows = self._fetch_recent_product_testcases(
+                        client, product_id, limit=limit, max_pages=max_pages_per_product
+                    )
+                except ZentaoAPIError as exc:
+                    if exc.status_code != 401:
+                        raise
+                    invalidate_token(current_user.id, self.db)
+                    ctx = self._get_client_ctx(current_user.id)
+                    if not ctx:
+                        raise HTTPException(status_code=400, detail="禅道 token 刷新失败")
+                    client, base_url = ctx
+                    remote_rows = self._fetch_recent_product_testcases(
+                        client, product_id, limit=limit, max_pages=max_pages_per_product
+                    )
+
+                remote_total += len(remote_rows)
+                for raw in remote_rows:
+                    normalized = self._normalize_testcase(raw, base_url=base_url)
+                    if not normalized:
+                        skipped_invalid += 1
+                        continue
+                    existing = (
+                        self.db.query(ZentaoTestCaseMirror)
+                        .filter(ZentaoTestCaseMirror.zentao_case_numeric_id == normalized["zentao_case_numeric_id"])
+                        .first()
+                    )
+                    row, created_now, updated_now = self._upsert_case(normalized, sync_source=sync_source)
+                    created += int(created_now)
+                    updated += int((not created_now) and updated_now)
+                    if detail_refresh_budget > 0 and self._needs_detail_refresh(existing or row, normalized, created_now):
+                        detail_raw = self._fetch_case_detail_with_retry(case_numeric_id=row.zentao_case_numeric_id, current_user=current_user)
+                        self._enrich_case_detail(row, detail_raw, base_url=base_url)
+                        row.last_zentao_synced_at = local_now()
+                        row.sync_source = sync_source
+                        detail_refreshed += 1
+                        detail_refresh_budget -= 1
+
+            self.db.commit()
+            elapsed = (local_now() - started).total_seconds()
+            return {
+                "software_id": software_id,
+                "software_name": software.name,
+                "zentao_products": product_ids,
+                "remote_total": remote_total,
+                "created": created,
+                "updated": updated,
+                "skipped_invalid": skipped_invalid,
+                "detail_refreshed": detail_refreshed,
+                "elapsed_seconds": elapsed,
+                "cached": False,
+                "sync_mode": "recent",
                 "sync_source": sync_source,
             }
         finally:

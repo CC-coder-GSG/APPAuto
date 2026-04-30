@@ -34,6 +34,22 @@ def sync_zentao_testcases(
     )
 
 
+@router.post("/sync-recent")
+def sync_zentao_testcases_recent(
+    payload: ZentaoTestCaseSyncPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Incremental sync: pulls only the most recently edited cases."""
+    ensure_tab_access(current_user, "zentao-sync")
+    return ZentaoTestCaseService(db).sync_recent_software_testcases(
+        software_id=payload.software_id,
+        current_user=current_user,
+        force=payload.force,
+        sync_source="manual_incremental",
+    )
+
+
 @router.get("")
 def list_zentao_testcases(
     software_id: Optional[int] = None,

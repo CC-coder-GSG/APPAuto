@@ -51,6 +51,11 @@ class OverallTestZentaoSyncAllPayload(BaseModel):
     force: bool = False
 
 
+class OverallTestZentaoSyncRecentPayload(BaseModel):
+    software_id: int
+    force: bool = True
+
+
 @router.get("/overall-test/overview")
 def overall_test_overview(
     major_version_id: int,
@@ -118,6 +123,29 @@ def sync_overall_test_zentao_all(
         software_id=payload.software_id,
         current_user=current_user,
         force=payload.force,
+    )
+
+
+@router.post("/overall-test/sync-zentao-recent")
+def sync_overall_test_zentao_recent(
+    payload: OverallTestZentaoSyncRecentPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Incremental Zentao bug refresh: pulls only the most recently edited
+    bug pages per Zentao product (orderBy=editedDate_desc, ~2 × 100).
+    Cheap enough to be the manual "fetch new items" button.
+
+    Does not detect long-untouched closures/deletions — that still needs
+    the full sync or the nightly scheduled reconcile.
+    """
+    service = OverallTestService(db)
+    return service.sync_recent_zentao_bugs_by_software(
+        software_id=payload.software_id,
+        current_user=current_user,
+        force=payload.force,
+        sync_source="manual_incremental",
     )
 
 

@@ -597,6 +597,41 @@ export async function syncOverallTestFromZentao(options = {}) {
   return data;
 }
 
+export async function syncOverallTestRecentFromZentao(options = {}) {
+  const { silent = false, reloadAfter = true } = options;
+  const softwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+  if (!softwareId) {
+    if (!silent) {
+      window.showMessage && window.showMessage('请先选择产品后再增量同步', 'error');
+    }
+    return null;
+  }
+  let data;
+  try {
+    data = await (await api('/overall-test/sync-zentao-recent', {
+      method: 'POST',
+      headers: window.H,
+      body: { software_id: softwareId, force: true },
+    })).json();
+  } catch (err) {
+    if (!silent) {
+      window.showMessage && window.showMessage(err.message || '禅道增量同步失败', 'error');
+    }
+    return null;
+  }
+  if (!silent) {
+    const prodCnt = Array.isArray(data.zentao_products) ? data.zentao_products.length : 0;
+    window.showMessage && window.showMessage(
+      `禅道增量同步完成：${prodCnt} 个产品，扫描 ${data.remote_total || 0} 条，新增 ${data.created || 0}，更新 ${data.updated || 0}（耗时 ${data.elapsed_seconds || 0}s）`,
+      'success',
+    );
+  }
+  if (reloadAfter) {
+    await loadOverallTest({ syncBeforeLoad: false, showSuccess: false });
+  }
+  return data;
+}
+
 // Toggle the close comment textarea when the close checkbox is ticked
 export function toggleS5CloseComment(bugId, checked) {
   const wrap = document.getElementById('closeComment_' + bugId);
@@ -1938,6 +1973,7 @@ const OmniQAOverallTestTab = {
   loadS5OptionsData,
   submitS5Bug,
   syncOverallTestFromZentao,
+  syncOverallTestRecentFromZentao,
   prevS5Page,
   nextS5Page,
   applyS5PageSize,
@@ -1971,6 +2007,7 @@ window.OmniQAOverallTestTab = OmniQAOverallTestTab;
 window.loadOverallTest = loadOverallTest;
 window.pushOverallTest = pushOverallTest;
 window.syncOverallTestFromZentao = syncOverallTestFromZentao;
+window.syncOverallTestRecentFromZentao = syncOverallTestRecentFromZentao;
 window.editS5Bug = editS5Bug;
 window.editS5BugById = editS5BugById;
 window.removeS5Bug = removeS5Bug;
