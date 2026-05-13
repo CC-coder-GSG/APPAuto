@@ -367,6 +367,13 @@ class ZentaoVersionSyncService:
         if v is not None:
             v.zentao_build_id = zentao_build_id
             v.zentao_build_name_cache = zentao_build_name_cache
+            # 跟随禅道侧的归属：build 在禅道被搬到另一个执行后，本地 parent 也要跟着搬。
+            # 否则按 zentao_build_id 命中后只更新名字，version 永远卡在旧 major 下，
+            # 新 major 的对账永远显示"本地无"。
+            if v.parent_id != parent_id:
+                v.parent_id = parent_id
+            if software_id and v.software_id != software_id:
+                v.software_id = software_id
             result.updated_minor.append(version_no)
             return v
 

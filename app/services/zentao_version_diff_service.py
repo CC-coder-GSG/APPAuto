@@ -239,7 +239,9 @@ def apply_version_diff(db: Session, major_version_id: int, actions: list[dict]) 
                 continue
             version_no = normalize_version_name(name) or name
 
-            # 全局去重（uq_version_no_type）：同名 minor 已存在就只回填关系，不再插入
+            # 全局去重（uq_version_no_type）：同名 minor 已存在就把它搬到当前 major 下。
+            # 用户从某个 major 的对账页点了"补到本地"，意图就是要这条 build 在这个 major 下，
+            # 必须真正改 parent_id，否则下次刷新对账还是显示"本地无"。
             existing = (
                 db.query(Version)
                 .filter(Version.version_no == version_no, Version.version_type == VersionType.MINOR)
@@ -249,9 +251,11 @@ def apply_version_diff(db: Session, major_version_id: int, actions: list[dict]) 
                 existing.zentao_build_id = bid
                 existing.zentao_build_name_cache = name
                 if existing.parent_id != major.id:
-                    # 已经挂在别的大版本下 — 不强搬，只记日志
+                    old_parent_id = existing.parent_id
+                    existing.parent_id = major.id
+                    existing.software_id = major.software_id
                     res.errors.append(
-                        f"小版本 {version_no} 已存在于大版本 id={existing.parent_id}，仅回填禅道关联"
+                        f"小版本 {version_no} 已从大版本 id={old_parent_id} 搬到 id={major.id}"
                     )
                 res.imported_local.append(existing.id)
                 continue
