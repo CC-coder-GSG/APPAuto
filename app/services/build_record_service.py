@@ -8,6 +8,10 @@ from sqlalchemy.orm import Session
 from app.models import BuildRecord, Version
 from app.models.enums import VersionType
 from app.services.sse_service import sse_publish
+from app.services.zentao_build_push_service import (
+    apply_push_result_to_record,
+    push_build_to_zentao,
+)
 from app.services.zentao_utils import normalize_version_name, parse_job_name_to_major_version_no
 
 logger = logging.getLogger(__name__)
@@ -56,6 +60,19 @@ class BuildRecordService:
             record.auto_archive_message = archive_message
             self.db.commit()
             self.db.refresh(record)
+
+        # 自动把 build 写回禅道（占位重命名 + 新占位 / 多执行）
+        try:
+            push = push_build_to_zentao(self.db, record)
+            apply_push_result_to_record(record, push)
+            self.db.commit()
+            self.db.refresh(record)
+        except Exception as exc:
+            # 极少数情况下 push 自身崩溃 — 不要让 Jenkins 接口 500
+            logger.exception("push_build_to_zentao crashed | record_id=%s err=%s", record.id, exc)
+            record.zentao_push_status = "error"
+            record.zentao_push_message = f"推送禅道异常：{exc}"[:480]
+            self.db.commit()
 
         sse_publish(
             "build_record_created" if action == "created" else "build_record_updated",
@@ -219,6 +236,9 @@ class BuildRecordService:
             "auto_archive_status": row.auto_archive_status,
             "auto_archive_minor_version_id": row.auto_archive_minor_version_id,
             "auto_archive_message": row.auto_archive_message,
+            "zentao_push_status": row.zentao_push_status,
+            "zentao_push_message": row.zentao_push_message,
+            "zentao_pushed_at": row.zentao_pushed_at.isoformat() if row.zentao_pushed_at else None,
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }

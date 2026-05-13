@@ -1305,6 +1305,19 @@
       </div>
 
       <div class="card">
+        <h3>本地 vs 禅道 小版本对账</h3>
+        <div class="muted" style="margin-bottom:10px;">选一个本地大版本，比对该大版本绑定的禅道执行下小版本是否一致。差异行可一键修复。</div>
+        <div class="row" style="align-items:flex-end; flex-wrap:wrap; gap:8px;">
+          <div>
+            <label style="font-size:12px; color:#64748b; display:block; margin-bottom:4px;">本地大版本</label>
+            <select id="ztVersionDiffMajorSelect" style="min-width:220px;"><option value="">请选择</option></select>
+          </div>
+          <button class="secondary" onclick="openVersionDiffModal()">开始对账</button>
+        </div>
+        <div id="ztVersionDiffArea" style="margin-top:14px;"></div>
+      </div>
+
+      <div class="card">
         <h3>禅道后台同步任务</h3>
         <div class="muted" style="margin-bottom:10px;">用于验证定时任务链路。最近同步会拉取最近变更的 Bug 和用例；夜间全量对账会跑整软件全量 Bug 与 testcase 同步。</div>
         <div class="row" style="align-items:flex-start; flex-wrap:wrap; gap:10px;">
@@ -2178,7 +2191,7 @@ async function loadVersions(){
 }
 function fillVersionSelects(){
   const majors=versions.filter(v=>v.version_type==='major');
-  ['mineMajorSelect','retestMajorSelect','createReqMajorSelect'].forEach(id=>fillSelect(id,majors));
+  ['mineMajorSelect','retestMajorSelect','createReqMajorSelect','ztVersionDiffMajorSelect'].forEach(id=>fillSelect(id,majors));
   const s5MajorEl=document.getElementById('s5MajorSelect');
   if(s5MajorEl){
     s5MajorEl.innerHTML = majors.length

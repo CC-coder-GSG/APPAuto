@@ -124,17 +124,21 @@ class ZentaoVersionSyncService:
             return result
 
         # ── Step 1: fetch executions ──────────────────────────────────────
+        # 用客户端的 list_project_executions（status=all + 分页）拉全部执行，
+        # 否则禅道默认会丢掉 closed/suspended 状态的执行（s4031定制 就因此漏拉）。
         try:
-            data = await asyncio.to_thread(
-                client.get,
-                f'projects/{zentao_project_id}/executions',
-                {'limit': 100},
+            executions = await asyncio.to_thread(
+                client.list_project_executions,
+                zentao_project_id,
+                200,
+                'all',
             )
         except ZentaoAPIError as exc:
             logger.warning('sync_versions: fetch executions failed: %s', exc)
             return result
-
-        executions = (data or {}).get('executions', [])
+        except Exception as exc:
+            logger.warning('sync_versions: fetch executions failed: %s', exc)
+            return result
 
         # ── Step 2: upsert major versions ─────────────────────────────────
         exec_id_to_major: dict[int, Version] = {}

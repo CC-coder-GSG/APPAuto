@@ -67,4 +67,40 @@ def normalize_version_name(version_name: str) -> str:
     return name
 
 
-__all__ = ["parse_job_name_to_major_version_no", "normalize_version_name"]
+# 占位符识别 / 生成：把版本号里所有长度 >=4 的连续数字段的最后 4 位换成 'xxxx'。
+#
+# 4.0.3.1.260513(40301044)         -> 4.0.3.1.26xxxx(4030xxxx)
+# 4.0.3.1.260513_BD(40301043)      -> 4.0.3.1.26xxxx_BD(4030xxxx)
+# 4.0.3.0.260513_GALAIESSURVEY_free.95(40300129)
+#   -> 4.0.3.0.26xxxx_GALAIESSURVEY_free.95(4030xxxx)
+#
+# 注意：4.0.3 这些前缀里的单/双位数字段不会被改（要求长度 >= 4）。
+_DIGIT_RUN_4PLUS = re.compile(r'\d{4,}')
+
+
+def make_placeholder_name(real_name: str) -> str:
+    """Turn a real version name into the matching placeholder name."""
+    text = (real_name or '').strip()
+    if not text:
+        return ''
+
+    def _repl(m: re.Match[str]) -> str:
+        digits = m.group(0)
+        if len(digits) <= 4:
+            return 'xxxx'
+        return digits[:-4] + 'xxxx'
+
+    return _DIGIT_RUN_4PLUS.sub(_repl, text)
+
+
+def is_placeholder_name(name: str) -> bool:
+    """A name is a placeholder if it contains an 'xxxx' marker (case-insensitive)."""
+    return 'xxxx' in (name or '').lower()
+
+
+__all__ = [
+    "parse_job_name_to_major_version_no",
+    "normalize_version_name",
+    "make_placeholder_name",
+    "is_placeholder_name",
+]

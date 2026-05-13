@@ -1,0 +1,392 @@
+"""
+本地小版本 ↔ 禅道 build 对账 & 切换归属。
+
+提供：
+  - compare_local_vs_zentao(db, major_version_id) — 拉本地 minor + 禅道 builds，给前端做 diff 展示
+  - apply_version_diff(db, major_version_id, actions) — 执行 diff 修复（删本地 / 从禅道补到本地）
+  - build_record_reassign_major(db, build_record_id, target_major_id, retain_original_zentao_build)
+        — 把一条构建记录指向的小版本搬到另一个大版本下；禅道侧也跟着搬
+
+注意：所有禅道侧改动都走 get_system_zentao_client（优先 chenwenbo）。
+任何禅道调用失败都返回 partial 结果 + 错误描述，不抛异常给路由。
+"""
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Optional
+
+from sqlalchemy.orm import Session
+
+from app.models import BuildRecord, Version
+from app.models.enums import VersionType
+from app.services.zentao_client_service import ZentaoClient
+from app.services.zentao_system_client import get_system_zentao_client
+from app.services.zentao_utils import is_placeholder_name, normalize_version_name
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Q3: compare
+# ---------------------------------------------------------------------------
+
+def compare_local_vs_zentao(db: Session, major_version_id: int) -> dict:
+    """
+    返回一个 dict，前端可以直接渲染：
+    {
+      "major": {...},
+      "execution": {"id": ..., "name": ...} | None,
+      "local": [{id, version_no, zentao_build_id, ...}],
+      "remote": [{id, name, normalized_name, is_placeholder}],
+      "diff": {
+        "only_local": [...local rows...],     # 本地有禅道无
+        "only_remote": [...remote rows...],   # 禅道有本地无（前端可点"补到本地"）
+        "matched": [...{local, remote}...],   # 已对齐
+        "remote_placeholders": [...],         # 占位 build（不计入差异，单独展示）
+      },
+      "errors": [...]
+    }
+    """
+    out: dict = {
+        "major": None,
+        "execution": None,
+        "local": [],
+        "remote": [],
+        "diff": {"only_local": [], "only_remote": [], "matched": [], "remote_placeholders": []},
+        "errors": [],
+    }
+
+    major = db.query(Version).filter(Version.id == major_version_id, Version.version_type == VersionType.MAJOR).first()
+    if not major:
+        out["errors"].append("大版本不存在")
+        return out
+    out["major"] = {
+        "id": major.id,
+        "version_no": major.version_no,
+        "software_id": major.software_id,
+        "zentao_execution_id": major.zentao_execution_id,
+        "zentao_execution_name": major.zentao_execution_name_cache,
+    }
+    if major.zentao_execution_id:
+        out["execution"] = {
+            "id": major.zentao_execution_id,
+            "name": major.zentao_execution_name_cache or "",
+        }
+
+    local_minors = (
+        db.query(Version)
+        .filter(Version.parent_id == major.id, Version.version_type == VersionType.MINOR)
+        .order_by(Version.created_at.desc(), Version.id.desc())
+        .all()
+    )
+    out["local"] = [
+        {
+            "id": m.id,
+            "version_no": m.version_no,
+            "zentao_build_id": m.zentao_build_id,
+            "zentao_build_name_cache": m.zentao_build_name_cache,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        }
+        for m in local_minors
+    ]
+
+    if not major.zentao_execution_id:
+        out["errors"].append("该大版本未绑定禅道执行，无法对账")
+        out["diff"]["only_local"] = list(out["local"])
+        return out
+
+    client = get_system_zentao_client(db)
+    if not client:
+        out["errors"].append("找不到可用的禅道账号绑定")
+        return out
+
+    try:
+        remote_rows = client.list_execution_builds(int(major.zentao_execution_id), limit=500) or []
+    except Exception as exc:
+        logger.warning("list_execution_builds(%s) failed: %s", major.zentao_execution_id, exc)
+        out["errors"].append(f"拉取禅道 build 列表失败：{exc}")
+        return out
+
+    remote_norm: list[dict] = []
+    for b in remote_rows:
+        bid = _coerce_int(b.get("id"))
+        name = str(b.get("name") or "").strip()
+        if not bid or not name:
+            continue
+        remote_norm.append({
+            "id": bid,
+            "name": name,
+            "normalized_name": normalize_version_name(name) or name,
+            "is_placeholder": is_placeholder_name(name),
+        })
+    out["remote"] = remote_norm
+
+    remote_by_id = {r["id"]: r for r in remote_norm if not r["is_placeholder"]}
+    remote_by_name = {r["normalized_name"]: r for r in remote_norm if not r["is_placeholder"]}
+    out["diff"]["remote_placeholders"] = [r for r in remote_norm if r["is_placeholder"]]
+
+    matched_remote_ids: set[int] = set()
+
+    for m in local_minors:
+        local_row = {
+            "id": m.id,
+            "version_no": m.version_no,
+            "zentao_build_id": m.zentao_build_id,
+        }
+        match: Optional[dict] = None
+        if m.zentao_build_id and m.zentao_build_id in remote_by_id:
+            match = remote_by_id[m.zentao_build_id]
+        else:
+            match = remote_by_name.get(m.version_no)
+        if match is not None:
+            matched_remote_ids.add(match["id"])
+            out["diff"]["matched"].append({
+                "local": local_row,
+                "remote": match,
+                "name_mismatch": match["normalized_name"] != m.version_no,
+            })
+        else:
+            out["diff"]["only_local"].append(local_row)
+
+    for r in remote_norm:
+        if r["is_placeholder"]:
+            continue
+        if r["id"] in matched_remote_ids:
+            continue
+        out["diff"]["only_remote"].append(r)
+
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Q3: apply
+# ---------------------------------------------------------------------------
+
+@dataclass
+class DiffApplyResult:
+    deleted_local: list[int]
+    imported_local: list[int]
+    errors: list[str]
+
+    def as_dict(self) -> dict:
+        return {
+            "deleted_local": self.deleted_local,
+            "imported_local": self.imported_local,
+            "errors": self.errors,
+        }
+
+
+def apply_version_diff(db: Session, major_version_id: int, actions: list[dict]) -> dict:
+    """
+    actions 每条 = {"action": "delete_local", "version_id": int}
+                 或 {"action": "import_from_zentao", "zentao_build_id": int}
+    """
+    res = DiffApplyResult(deleted_local=[], imported_local=[], errors=[])
+
+    major = db.query(Version).filter(Version.id == major_version_id, Version.version_type == VersionType.MAJOR).first()
+    if not major:
+        res.errors.append("大版本不存在")
+        return res.as_dict()
+
+    # import_from_zentao 需要禅道 build 列表
+    needs_remote = any(a.get("action") == "import_from_zentao" for a in actions)
+    remote_map: dict[int, dict] = {}
+    if needs_remote:
+        if not major.zentao_execution_id:
+            res.errors.append("该大版本未绑定禅道执行")
+            return res.as_dict()
+        client = get_system_zentao_client(db)
+        if not client:
+            res.errors.append("找不到可用的禅道账号绑定")
+            return res.as_dict()
+        try:
+            rows = client.list_execution_builds(int(major.zentao_execution_id), limit=500) or []
+            for b in rows:
+                bid = _coerce_int(b.get("id"))
+                if bid:
+                    remote_map[bid] = b
+        except Exception as exc:
+            res.errors.append(f"拉取禅道 build 失败：{exc}")
+            return res.as_dict()
+
+    for action in actions:
+        kind = (action or {}).get("action")
+        if kind == "delete_local":
+            vid = _coerce_int(action.get("version_id"))
+            if not vid:
+                res.errors.append("delete_local 缺少 version_id")
+                continue
+            row = (
+                db.query(Version)
+                .filter(Version.id == vid, Version.parent_id == major.id, Version.version_type == VersionType.MINOR)
+                .first()
+            )
+            if not row:
+                res.errors.append(f"小版本 {vid} 不在该大版本下，跳过")
+                continue
+            db.delete(row)
+            res.deleted_local.append(vid)
+        elif kind == "import_from_zentao":
+            bid = _coerce_int(action.get("zentao_build_id"))
+            if not bid or bid not in remote_map:
+                res.errors.append(f"禅道 build {bid} 不存在，跳过")
+                continue
+            b = remote_map[bid]
+            name = str(b.get("name") or "").strip()
+            if not name:
+                res.errors.append(f"禅道 build {bid} 名字为空，跳过")
+                continue
+            version_no = normalize_version_name(name) or name
+
+            # 全局去重（uq_version_no_type）：同名 minor 已存在就只回填关系，不再插入
+            existing = (
+                db.query(Version)
+                .filter(Version.version_no == version_no, Version.version_type == VersionType.MINOR)
+                .first()
+            )
+            if existing:
+                existing.zentao_build_id = bid
+                existing.zentao_build_name_cache = name
+                if existing.parent_id != major.id:
+                    # 已经挂在别的大版本下 — 不强搬，只记日志
+                    res.errors.append(
+                        f"小版本 {version_no} 已存在于大版本 id={existing.parent_id}，仅回填禅道关联"
+                    )
+                res.imported_local.append(existing.id)
+                continue
+
+            new_minor = Version(
+                version_no=version_no,
+                version_type=VersionType.MINOR,
+                parent_id=major.id,
+                software_id=major.software_id,
+                zentao_build_id=bid,
+                zentao_build_name_cache=name,
+            )
+            db.add(new_minor)
+            db.flush()
+            res.imported_local.append(new_minor.id)
+        else:
+            res.errors.append(f"未知 action：{kind}")
+
+    db.commit()
+    return res.as_dict()
+
+
+# ---------------------------------------------------------------------------
+# Q2e: reassign major
+# ---------------------------------------------------------------------------
+
+def build_record_reassign_major(
+    db: Session,
+    build_record_id: int,
+    target_major_id: int,
+    *,
+    retain_original_zentao_build: bool,
+) -> dict:
+    """
+    把一条 BuildRecord 对应的本地小版本（auto_archive_minor_version_id）切到 target_major_id 下。
+    并尝试同步到禅道：在新执行下新建一条同名 build；retain=False 时删除原执行下那条。
+
+    返回 {ok, message, local_minor_id, new_zentao_build_id, removed_zentao_build_id, errors}
+    """
+    out: dict = {
+        "ok": False,
+        "message": "",
+        "local_minor_id": None,
+        "new_zentao_build_id": None,
+        "removed_zentao_build_id": None,
+        "errors": [],
+    }
+
+    record = db.query(BuildRecord).filter(BuildRecord.id == build_record_id).first()
+    if not record:
+        out["errors"].append("构建记录不存在")
+        return out
+
+    minor_id = record.auto_archive_minor_version_id
+    if not minor_id:
+        out["errors"].append("该构建记录尚未归档到本地小版本，无法切换归属")
+        return out
+    minor = db.query(Version).filter(Version.id == minor_id, Version.version_type == VersionType.MINOR).first()
+    if not minor:
+        out["errors"].append("本地小版本不存在")
+        return out
+
+    target_major = (
+        db.query(Version)
+        .filter(Version.id == target_major_id, Version.version_type == VersionType.MAJOR)
+        .first()
+    )
+    if not target_major:
+        out["errors"].append("目标大版本不存在")
+        return out
+    if target_major.id == minor.parent_id:
+        out["errors"].append("目标大版本就是当前大版本，无需切换")
+        return out
+
+    old_major = db.query(Version).filter(Version.id == minor.parent_id).first()
+    old_zentao_build_id = minor.zentao_build_id
+    version_name = minor.version_no
+    out["local_minor_id"] = minor.id
+
+    # ── 禅道侧操作 ──
+    client = get_system_zentao_client(db)
+    if not client:
+        out["errors"].append("找不到可用的禅道账号绑定，仅修改本地归属")
+    else:
+        # 1. 在 target_major 对应执行下新建 build（如目标已绑定执行）
+        if target_major.zentao_execution_id:
+            try:
+                created = client.create_execution_build(int(target_major.zentao_execution_id), version_name) or {}
+                new_bid = _coerce_int(created.get("id"))
+                if new_bid:
+                    minor.zentao_build_id = new_bid
+                    minor.zentao_build_name_cache = version_name
+                    out["new_zentao_build_id"] = new_bid
+            except Exception as exc:
+                logger.warning("create build in target execution failed: %s", exc)
+                out["errors"].append(f"在目标执行创建 build 失败：{exc}")
+        else:
+            out["errors"].append("目标大版本未绑定禅道执行，仅修改本地归属")
+
+        # 2. 如果用户选择不保留原执行下的 build，且原 build 存在，则删除
+        if not retain_original_zentao_build and old_zentao_build_id:
+            try:
+                client.delete_build(int(old_zentao_build_id))
+                out["removed_zentao_build_id"] = int(old_zentao_build_id)
+            except Exception as exc:
+                logger.warning("delete original zentao build failed: %s", exc)
+                out["errors"].append(f"删除原执行下的 build 失败：{exc}")
+
+    # ── 本地切归属 ──
+    minor.parent_id = target_major.id
+    minor.software_id = target_major.software_id
+    db.commit()
+    db.refresh(minor)
+
+    out["ok"] = True
+    parts = [f"已切到大版本 {target_major.version_no}"]
+    if old_major:
+        parts.insert(0, f"原大版本 {old_major.version_no}")
+    if out["new_zentao_build_id"]:
+        parts.append(f"禅道新 build id={out['new_zentao_build_id']}")
+    if out["removed_zentao_build_id"]:
+        parts.append(f"已删除原 build id={out['removed_zentao_build_id']}")
+    out["message"] = "；".join(parts)
+    return out
+
+
+def _coerce_int(value) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+__all__ = [
+    "compare_local_vs_zentao",
+    "apply_version_diff",
+    "build_record_reassign_major",
+]

@@ -941,6 +941,177 @@ export async function runZentaoNightlyFullSync() {
   return runZentaoBackgroundSync('/workbench/admin/run-nightly-full-sync', 'ztRunNightlyFullSyncBtn');
 }
 
+function escapeHtmlData(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+const versionDiffState = {
+  majorId: 0,
+  data: null,
+  selectedActions: new Map(), // key → action object
+};
+
+function fillVersionDiffMajorSelect() {
+  const sel = document.getElementById('ztVersionDiffMajorSelect');
+  if (!sel) return;
+  const prev = sel.value || '';
+  const majors = (window.versions || []).filter((v) => v.version_type === 'major');
+  if (!majors.length) {
+    sel.innerHTML = '<option value="">暂无大版本</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">请选择</option>' + majors.map((m) => `<option value="${m.id}">${escapeHtmlData(m.version_no)}</option>`).join('');
+  if (prev && majors.some((m) => String(m.id) === prev)) sel.value = prev;
+}
+
+export async function openVersionDiffModal() {
+  fillVersionDiffMajorSelect();
+  const sel = document.getElementById('ztVersionDiffMajorSelect');
+  const majorId = Number(sel?.value || 0);
+  if (!majorId) {
+    window.showMessage && window.showMessage('请先选择本地大版本', 'error');
+    return;
+  }
+  versionDiffState.majorId = majorId;
+  versionDiffState.data = null;
+  versionDiffState.selectedActions = new Map();
+  const area = document.getElementById('ztVersionDiffArea');
+  if (area) area.innerHTML = '<div class="muted">对账中...</div>';
+  try {
+    const res = await api(`/api/admin/versions/compare?major_version_id=${majorId}`);
+    const data = await res.json();
+    versionDiffState.data = data;
+    renderVersionDiff();
+  } catch (err) {
+    if (area) area.innerHTML = `<div style="color:#dc2626;">对账失败：${escapeHtmlData(err.message || '未知错误')}</div>`;
+  }
+}
+
+function renderVersionDiff() {
+  const area = document.getElementById('ztVersionDiffArea');
+  if (!area) return;
+  const data = versionDiffState.data;
+  if (!data) { area.innerHTML = ''; return; }
+
+  const headerBits = [];
+  if (data.major) headerBits.push(`大版本 <b>${escapeHtmlData(data.major.version_no)}</b>`);
+  if (data.execution) headerBits.push(`禅道执行 <b>${escapeHtmlData(data.execution.name || data.execution.id)}</b>`);
+  const errors = Array.isArray(data.errors) ? data.errors : [];
+  const errorHtml = errors.length ? `<div style="color:#b45309; margin-bottom:8px;">⚠ ${errors.map(escapeHtmlData).join('；')}</div>` : '';
+
+  const diff = data.diff || {};
+  const onlyLocal = diff.only_local || [];
+  const onlyRemote = diff.only_remote || [];
+  const matched = diff.matched || [];
+  const placeholders = diff.remote_placeholders || [];
+
+  const localList = onlyLocal.map((row) => {
+    const key = `del:${row.id}`;
+    const checked = versionDiffState.selectedActions.has(key) ? 'checked' : '';
+    return `
+      <tr>
+        <td><input type="checkbox" data-action-key="${key}" data-action-kind="delete_local" data-version-id="${row.id}" ${checked}></td>
+        <td>${escapeHtmlData(row.version_no)}</td>
+        <td class="muted">${row.zentao_build_id || '-'}</td>
+      </tr>`;
+  }).join('');
+
+  const remoteList = onlyRemote.map((row) => {
+    const key = `imp:${row.id}`;
+    const checked = versionDiffState.selectedActions.has(key) ? 'checked' : '';
+    return `
+      <tr>
+        <td><input type="checkbox" data-action-key="${key}" data-action-kind="import_from_zentao" data-build-id="${row.id}" ${checked}></td>
+        <td>${escapeHtmlData(row.normalized_name)}</td>
+        <td class="muted">${row.id}</td>
+      </tr>`;
+  }).join('');
+
+  const matchedList = matched.map((p) => {
+    const tone = p.name_mismatch ? '#d97706' : '#16a34a';
+    const label = p.name_mismatch ? '名字差异' : '一致';
+    return `<tr>
+      <td>${escapeHtmlData(p.local.version_no)}</td>
+      <td>${escapeHtmlData(p.remote.normalized_name)}</td>
+      <td style="color:${tone};">${label}</td>
+    </tr>`;
+  }).join('');
+
+  area.innerHTML = `
+    ${errorHtml}
+    <div style="font-size:13px; color:#475569; margin-bottom:10px;">${headerBits.join(' · ')}</div>
+    <div class="row" style="gap:16px; flex-wrap:wrap;">
+      <div style="flex:1; min-width:280px;">
+        <div style="font-weight:600; margin-bottom:6px;">本地有 / 禅道无（建议删除本地）</div>
+        ${onlyLocal.length ? `<table style="width:100%; font-size:13px;"><thead><tr><th></th><th>本地版本号</th><th>build_id</th></tr></thead><tbody>${localList}</tbody></table>` : '<div class="muted">无差异</div>'}
+      </div>
+      <div style="flex:1; min-width:280px;">
+        <div style="font-weight:600; margin-bottom:6px;">禅道有 / 本地无（建议补到本地）</div>
+        ${onlyRemote.length ? `<table style="width:100%; font-size:13px;"><thead><tr><th></th><th>禅道 build 名</th><th>build_id</th></tr></thead><tbody>${remoteList}</tbody></table>` : '<div class="muted">无差异</div>'}
+      </div>
+    </div>
+    <div style="margin-top:14px;">
+      <details>
+        <summary style="cursor:pointer; color:#475569;">已对齐（${matched.length}）${placeholders.length ? ` · 占位 build ${placeholders.length}` : ''}</summary>
+        ${matched.length ? `<table style="width:100%; font-size:12px; margin-top:6px;"><thead><tr><th>本地</th><th>禅道</th><th>状态</th></tr></thead><tbody>${matchedList}</tbody></table>` : '<div class="muted" style="margin-top:6px;">暂无</div>'}
+      </details>
+    </div>
+    <div class="row" style="justify-content:flex-end; gap:8px; margin-top:14px;">
+      <button class="secondary" onclick="openVersionDiffModal()">刷新对账</button>
+      <button onclick="applyVersionDiff()">应用选中差异</button>
+    </div>
+  `;
+
+  area.querySelectorAll('input[type=checkbox][data-action-key]').forEach((el) => {
+    el.addEventListener('change', () => {
+      const key = el.getAttribute('data-action-key');
+      const kind = el.getAttribute('data-action-kind');
+      if (el.checked) {
+        const action = kind === 'delete_local'
+          ? { action: 'delete_local', version_id: Number(el.getAttribute('data-version-id')) }
+          : { action: 'import_from_zentao', zentao_build_id: Number(el.getAttribute('data-build-id')) };
+        versionDiffState.selectedActions.set(key, action);
+      } else {
+        versionDiffState.selectedActions.delete(key);
+      }
+    });
+  });
+}
+
+export async function applyVersionDiff() {
+  const actions = Array.from(versionDiffState.selectedActions.values());
+  if (!actions.length) {
+    window.showMessage && window.showMessage('请先勾选要应用的差异', 'error');
+    return;
+  }
+  if (!confirm(`将应用 ${actions.length} 条修复，确认？`)) return;
+  try {
+    const res = await api(`/api/admin/versions/apply-diff?major_version_id=${versionDiffState.majorId}`, {
+      method: 'POST',
+      headers: window.H,
+      body: { actions },
+    });
+    const data = await res.json();
+    const bits = [
+      `删除本地 ${data.deleted_local?.length || 0}`,
+      `补录本地 ${data.imported_local?.length || 0}`,
+    ];
+    if (data.errors?.length) bits.push(`告警 ${data.errors.length}`);
+    window.showMessage && window.showMessage('对账完成：' + bits.join('，'), data.errors?.length ? 'info' : 'success');
+    versionDiffState.selectedActions = new Map();
+    await window.loadVersions();
+    await loadDataOverview();
+    await openVersionDiffModal();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '应用差异失败', 'error');
+  }
+}
+
 window.OmniQADataTab = {
   createSoftware,
   createVersion,
@@ -979,6 +1150,9 @@ window.OmniQADataTab = {
   openUserTabPermissionModal,
   closeUserTabPermissionModal,
   saveUserTabPermissions,
+  openVersionDiffModal,
+  applyVersionDiff,
+  fillVersionDiffMajorSelect,
 };
 
 window.toggleMajorBody = toggleMajorBody;
@@ -994,3 +1168,5 @@ window.saveRequirementStoryBinding = saveRequirementStoryBinding;
 window.openUserTabPermissionModal = openUserTabPermissionModal;
 window.closeUserTabPermissionModal = closeUserTabPermissionModal;
 window.saveUserTabPermissions = saveUserTabPermissions;
+window.openVersionDiffModal = openVersionDiffModal;
+window.applyVersionDiff = applyVersionDiff;

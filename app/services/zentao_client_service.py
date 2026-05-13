@@ -293,11 +293,44 @@ class ZentaoClient:
     def get_user(self, user_id: int) -> dict | None:
         return self.get(f"users/{user_id}")
 
-    def list_project_executions(self, project_id: int, limit: int = 200) -> list[dict]:
-        """Return the execution rows visible under a Zentao project."""
-        data = self.get(f"projects/{project_id}/executions", params={"limit": limit}) or {}
-        rows = data.get("executions") if isinstance(data, dict) else []
-        return rows if isinstance(rows, list) else []
+    def list_project_executions(self, project_id: int, limit: int = 200, status: str = "all") -> list[dict]:
+        """
+        Return the execution rows visible under a Zentao project.
+
+        禅道默认会过滤掉非 doing/wait 状态的执行（closed/suspended），
+        而我们这边手动同步是要 *所有* 状态都拿到，所以传 status=all。
+        同时翻页直到响应不再带满 limit 为止，避免 100 截断丢数据。
+        """
+        page = 1
+        all_rows: list[dict] = []
+        seen_ids: set[int] = set()
+        while True:
+            params: dict[str, Any] = {"limit": limit, "page": page}
+            if status:
+                params["status"] = status
+            data = self.get(f"projects/{project_id}/executions", params=params) or {}
+            rows = data.get("executions") if isinstance(data, dict) else None
+            if not isinstance(rows, list) or not rows:
+                break
+            added = 0
+            for row in rows:
+                rid = row.get("id") if isinstance(row, dict) else None
+                try:
+                    rid_int = int(rid) if rid is not None else None
+                except (TypeError, ValueError):
+                    rid_int = None
+                if rid_int is None or rid_int in seen_ids:
+                    continue
+                seen_ids.add(rid_int)
+                all_rows.append(row)
+                added += 1
+            # 没新增 = 已经翻完，跳出
+            if added == 0 or len(rows) < limit:
+                break
+            page += 1
+            if page > 50:  # safety cap
+                break
+        return all_rows
 
     def list_execution_stories(self, execution_id: int, limit: int = 500) -> list[dict]:
         """Return the stories/requirements linked to an execution."""
@@ -310,6 +343,68 @@ class ZentaoClient:
         data = self.get("projects", params={"limit": limit}) or {}
         rows = data.get("projects") if isinstance(data, dict) else []
         return rows if isinstance(rows, list) else []
+
+    def list_execution_builds(self, execution_id: int, limit: int = 500) -> list[dict]:
+        """Return all builds bound to an execution (raw rows, ordered as returned by 禅道)."""
+        data = self.get(f"executions/{execution_id}/builds", params={"limit": limit}) or {}
+        rows = data.get("builds") if isinstance(data, dict) else []
+        return rows if isinstance(rows, list) else []
+
+    # ------------------------------------------------------------------
+    # Build write actions
+    # ------------------------------------------------------------------
+
+    def create_execution_build(
+        self,
+        execution_id: int,
+        name: str,
+        *,
+        product_id: int | None = None,
+        builder: str | None = None,
+        date: str | None = None,
+        desc: str | None = None,
+    ) -> dict | None:
+        """
+        POST /v1/executions/{id}/builds
+        Create a build under the given execution.
+        """
+        body: dict[str, Any] = {"name": name}
+        if product_id is not None:
+            body["product"] = product_id
+        if builder:
+            body["builder"] = builder
+        if date:
+            body["date"] = date
+        if desc is not None:
+            body["desc"] = desc
+        return self.post(f"executions/{execution_id}/builds", body)
+
+    def update_build(
+        self,
+        build_id: int,
+        *,
+        name: str | None = None,
+        execution_id: int | None = None,
+        product_id: int | None = None,
+        desc: str | None = None,
+    ) -> dict | None:
+        """PUT /v1/builds/{id}"""
+        body: dict[str, Any] = {}
+        if name is not None:
+            body["name"] = name
+        if execution_id is not None:
+            body["execution"] = execution_id
+        if product_id is not None:
+            body["product"] = product_id
+        if desc is not None:
+            body["desc"] = desc
+        if not body:
+            return None
+        return self.put(f"builds/{build_id}", body)
+
+    def delete_build(self, build_id: int) -> dict | None:
+        """DELETE /v1/builds/{id}"""
+        return self.delete(f"builds/{build_id}")
 
     # ------------------------------------------------------------------
     # Bug write actions

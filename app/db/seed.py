@@ -463,3 +463,19 @@ def ensure_browser_sync_schema_compat(db: Session) -> None:
 
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_browser_sync_events_display_bucket ON browser_sync_events (display_bucket)"))
     db.commit()
+
+
+def ensure_build_record_schema_compat(db: Session) -> None:
+    rows = db.execute(text("PRAGMA table_info(build_records)")).fetchall()
+    cols = {r[1] for r in rows}
+    if not cols:
+        return
+    column_defs = {
+        "zentao_push_status": "VARCHAR(30)",
+        "zentao_push_message": "VARCHAR(500)",
+        "zentao_pushed_at": "DATETIME",
+    }
+    for col, sql_type in column_defs.items():
+        if col not in cols:
+            db.execute(text(f"ALTER TABLE build_records ADD COLUMN {col} {sql_type}"))
+            db.commit()

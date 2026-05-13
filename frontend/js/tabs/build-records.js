@@ -151,6 +151,15 @@ const ARCHIVE_STATUS_META = {
   error:              { icon: '❌', color: '#dc2626', label: '归档异常' },
 };
 
+const ZENTAO_PUSH_META = {
+  ok:                 { icon: '☁️', color: '#16a34a', label: '已写入禅道' },
+  no_binding:         { icon: '🔒', color: '#d97706', label: '禅道无可用绑定' },
+  no_execution:       { icon: '🔍', color: '#d97706', label: '本地大版本未绑定执行' },
+  not_success:        { icon: '⚫', color: '#94a3b8', label: '非 SUCCESS，未推送' },
+  empty_version_name: { icon: '⚠️', color: '#d97706', label: '版本名为空，未推送' },
+  error:              { icon: '❌', color: '#dc2626', label: '推送禅道异常' },
+};
+
 function buildArchiveStatusHtml(row) {
   if (!row.auto_archive_status) return '';
   const meta = ARCHIVE_STATUS_META[row.auto_archive_status] || { icon: '❓', color: '#64748b', label: row.auto_archive_status };
@@ -160,6 +169,20 @@ function buildArchiveStatusHtml(row) {
       <span style="font-size:14px; line-height:1.5;">${meta.icon}</span>
       <div style="font-size:12px; color:#334155; line-height:1.5;">
         <span style="font-weight:600; color:${meta.color};">小版本归档：${escapeHtml(meta.label)}</span>
+        ${msg ? `<span class="muted" style="margin-left:6px;">${escapeHtml(msg)}</span>` : ''}
+      </div>
+    </div>`;
+}
+
+function buildZentaoPushStatusHtml(row) {
+  if (!row.zentao_push_status) return '';
+  const meta = ZENTAO_PUSH_META[row.zentao_push_status] || { icon: '❓', color: '#64748b', label: row.zentao_push_status };
+  const msg = row.zentao_push_message || '';
+  return `
+    <div style="margin-top:6px; display:flex; align-items:flex-start; gap:8px; padding:8px 12px; background:#f8fafc; border-left:3px solid ${meta.color}; border-radius:0 6px 6px 0;">
+      <span style="font-size:14px; line-height:1.5;">${meta.icon}</span>
+      <div style="font-size:12px; color:#334155; line-height:1.5;">
+        <span style="font-weight:600; color:${meta.color};">禅道写回：${escapeHtml(meta.label)}</span>
         ${msg ? `<span class="muted" style="margin-left:6px;">${escapeHtml(msg)}</span>` : ''}
       </div>
     </div>`;
@@ -193,7 +216,11 @@ function buildCardHtml(row) {
       </div>
       <div style="margin-top:12px;"><div class="muted" style="font-size:12px;">变更日志</div><div title="${escapeHtml(summary || '暂无变更日志')}" style="margin-top:6px; color:#334155; line-height:1.65; background:#f8fafc; border-radius:10px; padding:10px 12px;">${escapeHtml(summaryText)}</div></div>
       ${buildArchiveStatusHtml(row)}
-      <div class="row" style="justify-content:flex-end; margin-top:12px;"><button class="secondary" onclick="openBuildRecordLogModal(${row.id})">查看日志</button></div>
+      ${buildZentaoPushStatusHtml(row)}
+      <div class="row" style="justify-content:flex-end; margin-top:12px; gap:8px;">
+        ${row.auto_archive_minor_version_id ? `<button class="secondary" onclick="openBuildRecordReassignModal(${row.id})">切换归属</button>` : ''}
+        <button class="secondary" onclick="openBuildRecordLogModal(${row.id})">查看日志</button>
+      </div>
     </div>
   `;
 }
@@ -413,6 +440,109 @@ export function revealBuildRealtimeNew() {
   }
 }
 
+function ensureReassignModal() {
+  let modal = document.getElementById('buildRecordReassignModal');
+  if (modal) return modal;
+  modal = document.createElement('div');
+  modal.id = 'buildRecordReassignModal';
+  modal.className = 'hidden';
+  modal.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;';
+  modal.innerHTML = `
+    <div style="width:min(560px, 94vw); max-height:90vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:22px;">
+      <div class="row" style="justify-content:space-between; align-items:center; margin:0 0 14px;">
+        <h3 style="margin:0; color:#0f172a;">切换归属</h3>
+        <button class="secondary" onclick="closeBuildRecordReassignModal()">关闭</button>
+      </div>
+      <div class="muted" id="buildRecordReassignMeta" style="margin-bottom:12px;"></div>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px; color:#64748b; display:block; margin-bottom:6px;">目标大版本（仅同一软件下）</label>
+        <select id="buildRecordReassignSelect" style="width:100%; padding:8px 10px;"></select>
+      </div>
+      <label style="display:flex; align-items:center; gap:8px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc;">
+        <input type="checkbox" id="buildRecordReassignRetain">
+        <span style="font-size:13px;">同时保留原执行下的禅道 build（不删除原 build）</span>
+      </label>
+      <div class="row" style="justify-content:flex-end; gap:8px; margin:18px 0 0;">
+        <button class="secondary" onclick="closeBuildRecordReassignModal()">取消</button>
+        <button onclick="submitBuildRecordReassign()">确认切换</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  return modal;
+}
+
+export async function openBuildRecordReassignModal(recordId) {
+  const row = state.records.find((r) => Number(r.id) === Number(recordId));
+  if (!row) {
+    window.showMessage && window.showMessage('记录不存在', 'error');
+    return;
+  }
+  if (!row.auto_archive_minor_version_id) {
+    window.showMessage && window.showMessage('该记录尚未归档到本地小版本，无法切换', 'error');
+    return;
+  }
+  const modal = ensureReassignModal();
+  modal.dataset.recordId = String(recordId);
+  const meta = document.getElementById('buildRecordReassignMeta');
+  if (meta) {
+    meta.innerHTML = `
+      <div>构建：<b>${escapeHtml(jobNameToMajorLabel(row.job_name))}</b> / ${escapeHtml(row.version_name || '-')}</div>
+      <div style="margin-top:4px; font-size:12px;">原大版本 = 当前归属，禅道侧会跟着搬到目标执行下。</div>
+    `;
+  }
+  const select = document.getElementById('buildRecordReassignSelect');
+  if (select) {
+    select.innerHTML = '<option value="">加载中...</option>';
+    try {
+      const versions = window.versions || [];
+      const majors = versions.filter((v) => v.version_type === 'major');
+      if (!majors.length) {
+        select.innerHTML = '<option value="">暂无大版本</option>';
+      } else {
+        select.innerHTML = majors.map((m) => `<option value="${m.id}">${escapeHtml(m.version_no)}</option>`).join('');
+      }
+    } catch (err) {
+      select.innerHTML = '<option value="">加载失败</option>';
+    }
+  }
+  const retain = document.getElementById('buildRecordReassignRetain');
+  if (retain) retain.checked = false;
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+}
+
+export function closeBuildRecordReassignModal() {
+  const modal = document.getElementById('buildRecordReassignModal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.style.display = 'none';
+}
+
+export async function submitBuildRecordReassign() {
+  const modal = document.getElementById('buildRecordReassignModal');
+  if (!modal) return;
+  const recordId = Number(modal.dataset.recordId || 0);
+  const targetMajorId = Number(document.getElementById('buildRecordReassignSelect')?.value || 0);
+  const retain = !!document.getElementById('buildRecordReassignRetain')?.checked;
+  if (!recordId || !targetMajorId) {
+    window.showMessage && window.showMessage('请选择目标大版本', 'error');
+    return;
+  }
+  try {
+    const res = await api(`/api/admin/build-records/${recordId}/reassign-major`, {
+      method: 'POST',
+      headers: window.H,
+      body: { target_major_id: targetMajorId, retain_original_zentao_build: retain },
+    });
+    const data = await res.json();
+    window.showMessage && window.showMessage(data.message || '切换成功', 'success');
+    closeBuildRecordReassignModal();
+    await loadBuildRecordsBoard();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '切换失败', 'error');
+  }
+}
+
 window.OmniQABuildRecordsTab = {
   loadBuildRecordsBoard,
   onBuildRecordsMajorFilterChange,
@@ -423,7 +553,14 @@ window.OmniQABuildRecordsTab = {
   closeBuildRecordLogModal,
   revealBuildRealtimeNew,
   jobNameToMajorLabel,
+  openBuildRecordReassignModal,
+  closeBuildRecordReassignModal,
+  submitBuildRecordReassign,
 };
+
+window.openBuildRecordReassignModal = openBuildRecordReassignModal;
+window.closeBuildRecordReassignModal = closeBuildRecordReassignModal;
+window.submitBuildRecordReassign = submitBuildRecordReassign;
 
 function bindBuildRecordSSE() {
   if (buildSseBound) return;

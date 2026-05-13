@@ -34,5 +34,11 @@ class BuildRecord(Base):
     auto_archive_minor_version_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     auto_archive_message: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
+    # 禅道写回状态：Jenkins 推送后尝试在禅道对应执行下重命名占位/创建新 build
+    # Values: "ok" | "no_execution" | "no_binding" | "not_success" | "empty_version_name" | "error"
+    zentao_push_status: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    zentao_push_message: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    zentao_pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
 
 __all__ = ["BuildRecord"]

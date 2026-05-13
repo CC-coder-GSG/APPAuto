@@ -17,6 +17,11 @@ from app.services.activity_service import ActivityService
 from app.services.build_record_service import BuildRecordService
 from app.services.permission_service import ensure_admin, ensure_tab_access, get_allowed_tabs
 from app.services.push_service import PushService
+from app.services.zentao_version_diff_service import (
+    apply_version_diff,
+    build_record_reassign_major,
+    compare_local_vs_zentao,
+)
 from app.utils.time_utils import local_now
 
 router = APIRouter()
@@ -385,3 +390,59 @@ def admin_build_record_detail(
     if not row:
         raise HTTPException(status_code=404, detail="构建记录不存在")
     return row
+
+
+class BuildRecordReassignPayload(BaseModel):
+    target_major_id: int
+    retain_original_zentao_build: bool = False
+
+
+@router.post("/admin/build-records/{record_id}/reassign-major")
+@router.post("/api/admin/build-records/{record_id}/reassign-major")
+def admin_build_record_reassign_major(
+    record_id: int,
+    payload: BuildRecordReassignPayload,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_tab_access(current_user, "build-records")
+    ensure_admin(current_user)
+    result = build_record_reassign_major(
+        db,
+        record_id,
+        payload.target_major_id,
+        retain_original_zentao_build=payload.retain_original_zentao_build,
+    )
+    if not result.get("ok"):
+        # 把 errors 拼成 HTTP 400 提示给前端
+        msg = "；".join(result.get("errors") or []) or "切换归属失败"
+        raise HTTPException(status_code=400, detail=msg)
+    return result
+
+
+class VersionDiffActionsPayload(BaseModel):
+    actions: list[dict]
+
+
+@router.get("/admin/versions/compare")
+@router.get("/api/admin/versions/compare")
+def admin_versions_compare(
+    major_version_id: int = Query(..., ge=1),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_tab_access(current_user, "data")
+    return compare_local_vs_zentao(db, major_version_id)
+
+
+@router.post("/admin/versions/apply-diff")
+@router.post("/api/admin/versions/apply-diff")
+def admin_versions_apply_diff(
+    payload: VersionDiffActionsPayload,
+    major_version_id: int = Query(..., ge=1),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_tab_access(current_user, "data")
+    ensure_admin(current_user)
+    return apply_version_diff(db, major_version_id, payload.actions or [])
