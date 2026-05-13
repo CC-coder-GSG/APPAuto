@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -119,6 +120,82 @@ def push_build_to_zentao(db: Session, record: BuildRecord) -> PushResult:
     return out
 
 
+def _resolve_execution_product(client: ZentaoClient, exec_id: int) -> tuple[int | None, str | None]:
+    """
+    禅道 v1 `POST /executions/{id}/builds` 实际要求 body 带 `product`，否则会
+    返回 200 但什么都不写（看起来"成功"但禅道侧空）。这里抓一次 execution
+    detail 把 product id 拿出来。返回 (product_id, builder_account)。
+    """
+    try:
+        detail = client.get(f"executions/{exec_id}")
+    except Exception as exc:
+        logger.warning("get execution(%s) failed: %s", exec_id, exc)
+        return None, None
+    if not isinstance(detail, dict):
+        return None, None
+    exec_obj = detail.get("execution") if isinstance(detail.get("execution"), dict) else detail
+
+    pid = None
+    raw_product = exec_obj.get("product")
+    if isinstance(raw_product, dict):
+        pid = _coerce_int(raw_product.get("id"))
+    elif isinstance(raw_product, list) and raw_product:
+        first = raw_product[0]
+        pid = _coerce_int(first.get("id")) if isinstance(first, dict) else _coerce_int(first)
+    else:
+        pid = _coerce_int(raw_product)
+
+    builder = None
+    raw_builder = exec_obj.get("PM") or exec_obj.get("openedBy")
+    if isinstance(raw_builder, dict):
+        builder = raw_builder.get("account") or raw_builder.get("realname")
+    elif isinstance(raw_builder, str):
+        builder = raw_builder
+    return pid, builder
+
+
+def _safe_create_build(
+    client: ZentaoClient,
+    exec_id: int,
+    name: str,
+    *,
+    product_id: int | None,
+    builder: str | None,
+) -> tuple[int | None, str | None]:
+    """
+    创建 build 后做"二次验证"：调一次 list_execution_builds 用 name 精确匹配
+    把真实的 build id 找回来。这样：
+      - 禅道写接口返回体不带 id（v1 部分版本如此）也能拿到 id
+      - 静默失败（缺 product 等）会被识别为"name 不在 list 里 → 失败"
+
+    返回 (new_build_id, error)。
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    try:
+        client.create_execution_build(
+            exec_id,
+            name,
+            product_id=product_id,
+            builder=builder,
+            date=today,
+        )
+    except Exception as exc:
+        logger.warning("create build under exec=%s name=%s failed: %s", exec_id, name, exc)
+        return None, f"create_execution_build 抛错：{exc}"
+
+    # Re-list 验证是否真的写进去了
+    try:
+        builds = client.list_execution_builds(exec_id, limit=500) or []
+    except Exception as exc:
+        logger.warning("re-list builds(%s) after create failed: %s", exec_id, exc)
+        return None, f"创建后回查 build 列表失败：{exc}"
+
+    match = next((b for b in builds if str(b.get("name") or "").strip() == name), None)
+    if match is None:
+        return None, f"禅道未真正创建 build（name='{name}'，可能缺 product 或权限）"
+    return _coerce_int(match.get("id")), None
+
+
 def _push_one_execution(client: ZentaoClient, major: Version, version_name: str) -> PushExecutionResult:
     exec_id = int(major.zentao_execution_id or 0)
     result = PushExecutionResult(execution_id=exec_id, major_version_no=major.version_no)
@@ -132,6 +209,9 @@ def _push_one_execution(client: ZentaoClient, major: Version, version_name: str)
         logger.warning("list_execution_builds(%s) failed: %s", exec_id, exc)
         result.error = f"读取禅道 build 列表失败：{exc}"
         return result
+
+    # 预取 execution 的 product / builder，给所有后续 create 用
+    product_id, builder = _resolve_execution_product(client, exec_id)
 
     # 判重：禅道里如果已经有同名 build，跳过 rename/create，但仍尝试补一个占位
     for b in builds:
@@ -153,28 +233,31 @@ def _push_one_execution(client: ZentaoClient, major: Version, version_name: str)
                 result.error = f"重命名占位 build 失败：{exc}"
                 return result
         else:
-            try:
-                created = client.create_execution_build(exec_id, version_name) or {}
-                result.created_build_id = _coerce_int(created.get("id"))
-            except Exception as exc:
-                logger.warning("create build under execution %s failed: %s", exec_id, exc)
-                result.error = f"创建 build 失败：{exc}"
+            new_id, err = _safe_create_build(
+                client, exec_id, version_name,
+                product_id=product_id, builder=builder,
+            )
+            if err:
+                result.error = f"创建 build 失败：{err}"
                 return result
+            result.created_build_id = new_id
 
     # 创建新占位（仅当当前列表里还没有占位、或者刚把唯一占位重命名了）
     refreshed_placeholder = None
     if placeholder is None or result.renamed_build_id is not None:
-        try:
-            new_name = make_placeholder_name(version_name)
-            if new_name and new_name != version_name:
-                created = client.create_execution_build(exec_id, new_name) or {}
-                result.new_placeholder_build_id = _coerce_int(created.get("id"))
+        new_name = make_placeholder_name(version_name)
+        if new_name and new_name != version_name:
+            new_id, err = _safe_create_build(
+                client, exec_id, new_name,
+                product_id=product_id, builder=builder,
+            )
+            if err:
+                # 不视为致命 — 真实版本已经写进去了
+                existing = result.error or ""
+                result.error = (existing + "；" if existing else "") + f"补占位 build 失败：{err}"
+            else:
+                result.new_placeholder_build_id = new_id
                 refreshed_placeholder = new_name
-        except Exception as exc:
-            logger.warning("create new placeholder build under execution %s failed: %s", exec_id, exc)
-            # 不视为致命 — 真实版本已经写进去了
-            existing = result.error or ""
-            result.error = (existing + "；" if existing else "") + f"补占位 build 失败：{exc}"
 
     if refreshed_placeholder:
         logger.info(
