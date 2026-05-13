@@ -4,6 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
@@ -50,19 +51,25 @@ def create_version(payload: VersionCreatePayload, _: object = Depends(get_curren
     if payload.version_type == VersionType.MAJOR:
         exists = db.query(Version).filter(
             Version.version_type == VersionType.MAJOR,
-            Version.software_id == resolved_software_id,
             Version.version_no == version_no,
         ).first()
         if exists:
             raise HTTPException(status_code=400, detail=f'大版本重复：{version_no} 已存在')
     else:
+        # 唯一约束是 (version_no, version_type) 全局，必须做全局判重；
+        # 否则手动新增的小版本号若与禅道同步进来的其他父下同名，会 IntegrityError → 500。
         exists = db.query(Version).filter(
             Version.version_type == VersionType.MINOR,
-            Version.parent_id == payload.parent_id,
             Version.version_no == version_no,
         ).first()
         if exists:
-            raise HTTPException(status_code=400, detail=f'子版本重复：{version_no} 已存在')
+            parent_no = exists.parent.version_no if exists.parent else None
+            detail = (
+                f'子版本重复：{version_no} 已存在（归属于大版本 {parent_no}）'
+                if parent_no
+                else f'子版本重复：{version_no} 已存在'
+            )
+            raise HTTPException(status_code=400, detail=detail)
 
     version = Version(
         version_no=version_no,
@@ -71,7 +78,11 @@ def create_version(payload: VersionCreatePayload, _: object = Depends(get_curren
         software_id=resolved_software_id,
     )
     db.add(version)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f'版本号冲突：{version_no} 已存在')
     db.refresh(version)
     return {
         'id': version.id,
@@ -110,7 +121,6 @@ def update_version(version_id: int, payload: VersionCreatePayload, current_user=
         exists = db.query(Version).filter(
             Version.id != version_id,
             Version.version_type == VersionType.MAJOR,
-            Version.software_id == resolved_software_id,
             Version.version_no == version_no,
         ).first()
         if exists:
@@ -119,18 +129,27 @@ def update_version(version_id: int, payload: VersionCreatePayload, current_user=
         exists = db.query(Version).filter(
             Version.id != version_id,
             Version.version_type == VersionType.MINOR,
-            Version.parent_id == payload.parent_id,
             Version.version_no == version_no,
         ).first()
         if exists:
-            raise HTTPException(status_code=400, detail=f'子版本重复：{version_no} 已存在')
+            parent_no = exists.parent.version_no if exists.parent else None
+            detail = (
+                f'子版本重复：{version_no} 已存在（归属于大版本 {parent_no}）'
+                if parent_no
+                else f'子版本重复：{version_no} 已存在'
+            )
+            raise HTTPException(status_code=400, detail=detail)
 
     v.version_no = version_no
     v.version_type = payload.version_type
     v.parent_id = payload.parent_id
     v.software_id = resolved_software_id
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f'版本号冲突：{version_no} 已存在')
     return {'message': '版本更新成功'}
 
 

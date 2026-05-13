@@ -378,12 +378,17 @@ async function pollBatch(batchId) {
   }
 }
 
-function finishBatch(batchId, payload) {
+function finishBatch(batchId, payload, { silent = false } = {}) {
   const info = state.batches.get(batchId);
+  // 没有本地 info 说明这个批次本会话从未被跟踪（多半是上一次会话遗留 / SSE 重放），
+  // 此时不要再弹"AI 用例生成完成"toast，避免每次开页都重播上一次的提示。
+  if (!info && !payload?.error) silent = true;
   state.batches.delete(batchId);
   persist();
   render();
-  showCompletionToast({ batch_id: batchId, success: payload.success, failed: payload.failed, error: payload.error });
+  if (!silent) {
+    showCompletionToast({ batch_id: batchId, success: payload.success, failed: payload.failed, error: payload.error });
+  }
   if (info && Array.isArray(info.story_ids)) {
     invalidateLatestCache(info.story_ids);
     refreshSlots();
@@ -520,11 +525,23 @@ function installMutationObserver() {
 
 async function resumePending() {
   const entries = Array.from(state.batches.entries());
+  const tNow = now();
   for (const [batchId, info] of entries) {
+    // 跨会话兜底：批次开始时间已远超预期（>3 倍预估 且 至少 30 分钟），
+    // 视为遗留卡死状态，直接丢弃，避免每次打开页面都重播提示气泡。
+    const startedAt = Number(info?.started_at) || 0;
+    const expectedMs = Math.max(60, Number(info?.expected_seconds) || 300) * 1000;
+    const elapsed = startedAt ? tNow - startedAt : 0;
+    if (startedAt && elapsed > Math.max(expectedMs * 3, 30 * 60 * 1000)) {
+      state.batches.delete(batchId);
+      persist();
+      continue;
+    }
     try {
       const res = await api(`/zentao/ai/batch/${batchId}`);
       const data = await res.json();
       if (data && data.pending === 0) {
+        // silent: 上一次会话遗留，不再重播完成 toast
         finishBatch(batchId, { success: data.success, failed: data.failed });
       }
     } catch {
