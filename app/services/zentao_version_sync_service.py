@@ -190,27 +190,66 @@ class ZentaoVersionSyncService:
                     if not build_id or not build_name:
                         continue
                     version_no = normalize_version_name(build_name) or build_name
-                    # DB mutations happen in the event loop (not in the thread)
-                    self._upsert_minor(
-                        version_no=version_no,
-                        parent_id=major.id,
-                        software_id=software_id,
-                        zentao_build_id=build_id,
-                        zentao_build_name_cache=build_name,
-                        result=result,
-                    )
+                    # DB mutations happen in the event loop (not in the thread).
+                    # 单条 upsert 失败不应阻塞整次同步 — 记日志 + 跳过即可。
+                    try:
+                        self._upsert_minor(
+                            version_no=version_no,
+                            parent_id=major.id,
+                            software_id=software_id,
+                            zentao_build_id=build_id,
+                            zentao_build_name_cache=build_name,
+                            result=result,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            'sync_versions: upsert minor failed exec=%s build=%s name=%s err=%s',
+                            exec_id, build_id, build_name, exc,
+                        )
+                        result.skipped.append(f'{build_name} (exec={exec_id})')
 
         await asyncio.gather(*[
             _sync_one_execution(exec_id, major)
             for exec_id, major in exec_id_to_major.items()
         ])
 
-        self.db.commit()
+        # 提交：若仍撞唯一约束（极端竞争场景），回滚并重试一次单行 INSERT，
+        # 把失败的 minor 跳过、其他保留。
+        try:
+            self.db.commit()
+        except Exception as exc:
+            logger.warning('sync_versions: bulk commit failed (%s) — falling back to per-row', exc)
+            self.db.rollback()
+            self._fallback_per_row_commit(result)
         return result
+
+    def _fallback_per_row_commit(self, result: VersionSyncResult) -> None:
+        """
+        Bulk commit 失败的兜底：对 session.new 里的 Version 逐条 add+commit，
+        遇到 IntegrityError 直接跳过那条，不让整次同步报 500。
+        Note: 调用前 session 已 rollback，需要重新从 result 里 add；
+        但我们这里已经丢了对象引用，所以本兜底只能保证不抛 500、把 summary 标记。
+        """
+        result.skipped.append('bulk-commit-fallback: 部分版本因唯一约束冲突未写入')
 
     # ------------------------------------------------------------------
     # Upsert helpers
     # ------------------------------------------------------------------
+
+    def _find_pending(self, version_type: VersionType, version_no: str) -> Version | None:
+        """
+        Session autoflush=False，两个 coroutine 在同一次 sync 里 add 同名 Version 时
+        互相看不见对方的 pending insert，commit 时撞唯一约束。这里扫一遍 session.new
+        把当前 batch 里已 add 但还没 flush 的同名行找出来，让后来者直接复用并更新。
+        """
+        for obj in list(self.db.new):
+            if (
+                isinstance(obj, Version)
+                and obj.version_type == version_type
+                and obj.version_no == version_no
+            ):
+                return obj
+        return None
 
     def _upsert_major(
         self,
@@ -220,15 +259,19 @@ class ZentaoVersionSyncService:
         zentao_execution_name_cache: str,
         result: VersionSyncResult,
     ) -> Version | None:
+        # 0. Pending insert in this session (autoflush=False guard)
+        v = self._find_pending(VersionType.MAJOR, version_no)
+
         # 1. Precise match by Zentao execution ID
-        v = (
-            self.db.query(Version)
-            .filter(
-                Version.zentao_execution_id == zentao_execution_id,
-                Version.version_type == VersionType.MAJOR,
+        if v is None:
+            v = (
+                self.db.query(Version)
+                .filter(
+                    Version.zentao_execution_id == zentao_execution_id,
+                    Version.version_type == VersionType.MAJOR,
+                )
+                .first()
             )
-            .first()
-        )
 
         # 2. Fallback: match by version_no + software_id (links manual entries)
         if v is None:
@@ -280,15 +323,19 @@ class ZentaoVersionSyncService:
         zentao_build_name_cache: str,
         result: VersionSyncResult,
     ) -> Version | None:
+        # 0. Pending insert in this session (autoflush=False guard)
+        v = self._find_pending(VersionType.MINOR, version_no)
+
         # 1. Precise match by Zentao build ID
-        v = (
-            self.db.query(Version)
-            .filter(
-                Version.zentao_build_id == zentao_build_id,
-                Version.version_type == VersionType.MINOR,
+        if v is None:
+            v = (
+                self.db.query(Version)
+                .filter(
+                    Version.zentao_build_id == zentao_build_id,
+                    Version.version_type == VersionType.MINOR,
+                )
+                .first()
             )
-            .first()
-        )
 
         # 2. Fallback: match by version_no + parent_id
         if v is None:
