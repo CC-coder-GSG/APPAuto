@@ -67,23 +67,39 @@ def normalize_version_name(version_name: str) -> str:
     return name
 
 
-# 占位符识别 / 生成：把版本号里所有长度 >=4 的连续数字段的最后 4 位换成 'xxxx'。
+# 占位符识别 / 生成：把版本号"规范化"成一个共享占位 —— 同一大版本下，
+# 不管是普通版、_BD、_mfield、_Gnss7 等任何变体进来，都 rename 同一个占位。
 #
-# 4.0.3.1.260513(40301044)         -> 4.0.3.1.26xxxx(4030xxxx)
-# 4.0.3.1.260513_BD(40301043)      -> 4.0.3.1.26xxxx_BD(4030xxxx)
-# 4.0.3.0.260513_GALAIESSURVEY_free.95(40300129)
-#   -> 4.0.3.0.26xxxx_GALAIESSURVEY_free.95(4030xxxx)
+# 处理步骤：
+#   1) 去掉 (64-bit) / (32-bit) 平台后缀
+#   2) 去掉 "日期数字 与 ( 之间" 的变体后缀（_BD / _mfield / _alpha.3 / _GALAIESSURVEY_free.95 …）
+#   3) 把所有长度 >=4 的连续数字段的最后 4 位换成 'xxxx'
 #
-# 注意：4.0.3 这些前缀里的单/双位数字段不会被改（要求长度 >= 4）。
+# 4.0.3.1.260513(40301044)                            -> 4.0.3.1.26xxxx(4030xxxx)
+# 4.0.3.1.260513_BD(40301043)                         -> 4.0.3.1.26xxxx(4030xxxx)
+# 4.0.3.1.260513_BD(40301048)(64-bit)                 -> 4.0.3.1.26xxxx(4030xxxx)
+# 4.0.3.20.260513_JFJ_alpha.3(40320003)               -> 4.0.3.20.26xxxx(4032xxxx)
+# 4.0.3.0.260513_GALAIESSURVEY_free.95(40300129)      -> 4.0.3.0.26xxxx(4030xxxx)
+#
+# 之前的逻辑会把 _BD / _Gnss7 等保留进占位名，导致每个变体维护一个占位、且
+# 这种"带 _BD(xxxx)"的名字禅道 POST /executions/{id}/builds 会静默拒绝。
+# 现在统一回归"无后缀"的规范占位，匹配禅道历史上能成功创建的格式。
 _DIGIT_RUN_4PLUS = re.compile(r'\d{4,}')
+_VARIANT_SUFFIX_PATTERN = re.compile(r'(\d)_[^()]*(\()')
 
 
 def make_placeholder_name(real_name: str) -> str:
-    """Turn a real version name into the matching placeholder name."""
+    """Turn a real version name into the canonical (variant-stripped) placeholder name."""
     text = (real_name or '').strip()
     if not text:
         return ''
 
+    # 1) 去平台后缀 (64-bit) / (32-bit)
+    text = _PLATFORM_SUFFIX_PATTERN.sub('', text).strip()
+    # 2) 去变体后缀：日期数字 与 ( 之间的 _xxx 段
+    text = _VARIANT_SUFFIX_PATTERN.sub(r'\1\2', text)
+
+    # 3) 数字段尾部替换为 xxxx
     def _repl(m: re.Match[str]) -> str:
         digits = m.group(0)
         if len(digits) <= 4:
