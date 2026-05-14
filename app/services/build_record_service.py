@@ -189,6 +189,41 @@ class BuildRecordService:
         row = self.db.query(BuildRecord).filter(BuildRecord.id == record_id).first()
         return self.serialize(row) if row else None
 
+    def retry_zentao_push(self, record_id: int) -> tuple[dict, str]:
+        """
+        手动重试一条 BuildRecord 的禅道写回。返回 (serialized_record, push_status)。
+
+        Raises ValueError when the record does not exist; raises RuntimeError
+        when the push itself crashes (route layer 转 500，前端展示原因)。
+        """
+        record = self.db.query(BuildRecord).filter(BuildRecord.id == record_id).first()
+        if not record:
+            raise ValueError("构建记录不存在")
+
+        try:
+            push = push_build_to_zentao(self.db, record)
+            apply_push_result_to_record(record, push)
+            self.db.commit()
+            self.db.refresh(record)
+        except Exception as exc:
+            logger.exception(
+                "retry push_build_to_zentao crashed | record_id=%s err=%s",
+                record.id,
+                exc,
+            )
+            record.zentao_push_status = "error"
+            record.zentao_push_message = f"重试推送禅道异常：{exc}"[:480]
+            self.db.commit()
+            self.db.refresh(record)
+
+        serialized = self.serialize(record)
+        sse_publish(
+            "build_record_updated",
+            {"item": serialized, "action": "updated"},
+            channels=["global"],
+        )
+        return serialized, record.zentao_push_status or "unknown"
+
     def get_major_log(self, job_name: str) -> dict:
         job_name_text = (job_name or "").strip()
         rows = (

@@ -160,6 +160,9 @@ const ZENTAO_PUSH_META = {
   error:              { icon: '❌', color: '#dc2626', label: '推送禅道异常' },
 };
 
+// 哪些状态允许"重试写入禅道"。ok 不需要，not_success/empty_version_name 是结构性原因，重试也没意义。
+const ZENTAO_PUSH_RETRYABLE = new Set(['error', 'no_binding', 'no_execution']);
+
 function buildArchiveStatusHtml(row) {
   if (!row.auto_archive_status) return '';
   const meta = ARCHIVE_STATUS_META[row.auto_archive_status] || { icon: '❓', color: '#64748b', label: row.auto_archive_status };
@@ -178,12 +181,20 @@ function buildZentaoPushStatusHtml(row) {
   if (!row.zentao_push_status) return '';
   const meta = ZENTAO_PUSH_META[row.zentao_push_status] || { icon: '❓', color: '#64748b', label: row.zentao_push_status };
   const msg = row.zentao_push_message || '';
+  const canRetry = ZENTAO_PUSH_RETRYABLE.has(row.zentao_push_status);
+  const retryBtn = canRetry
+    ? `<button class="secondary"
+              data-zentao-retry-btn="${Number(row.id)}"
+              onclick="retryZentaoPush(${Number(row.id)}, this)"
+              style="margin-left:8px; padding:2px 10px; font-size:12px;">重试写入禅道</button>`
+    : '';
   return `
     <div style="margin-top:6px; display:flex; align-items:flex-start; gap:8px; padding:8px 12px; background:#f8fafc; border-left:3px solid ${meta.color}; border-radius:0 6px 6px 0;">
       <span style="font-size:14px; line-height:1.5;">${meta.icon}</span>
-      <div style="font-size:12px; color:#334155; line-height:1.5;">
+      <div style="font-size:12px; color:#334155; line-height:1.5; flex:1;">
         <span style="font-weight:600; color:${meta.color};">禅道写回：${escapeHtml(meta.label)}</span>
         ${msg ? `<span class="muted" style="margin-left:6px;">${escapeHtml(msg)}</span>` : ''}
+        ${retryBtn}
       </div>
     </div>`;
 }
@@ -518,6 +529,39 @@ export function closeBuildRecordReassignModal() {
   modal.style.display = 'none';
 }
 
+export async function retryZentaoPush(recordId, btnEl) {
+  const id = Number(recordId);
+  if (!id) return;
+  const button = btnEl || document.querySelector(`[data-zentao-retry-btn='${id}']`);
+  const originalText = button ? button.innerText : '';
+  if (button) {
+    button.disabled = true;
+    button.innerText = '重试中...';
+  }
+  try {
+    const res = await api(`/api/admin/build-records/${id}/retry-zentao-push`, {
+      method: 'POST',
+      headers: window.H,
+    });
+    const data = await res.json();
+    const item = data?.item;
+    if (item?.id) {
+      upsertRecordInState(item);
+      renderCards();
+      pulseBuildCard(item.id, data.success ? 'green' : 'purple');
+    }
+    const tone = data.success ? 'success' : 'error';
+    const fallbackMsg = data.success ? '写入禅道成功' : (data.message || '写入禅道仍未成功');
+    window.showMessage && window.showMessage(fallbackMsg, tone);
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '重试失败', 'error');
+    if (button) {
+      button.disabled = false;
+      button.innerText = originalText || '重试写入禅道';
+    }
+  }
+}
+
 export async function submitBuildRecordReassign() {
   const modal = document.getElementById('buildRecordReassignModal');
   if (!modal) return;
@@ -556,11 +600,13 @@ window.OmniQABuildRecordsTab = {
   openBuildRecordReassignModal,
   closeBuildRecordReassignModal,
   submitBuildRecordReassign,
+  retryZentaoPush,
 };
 
 window.openBuildRecordReassignModal = openBuildRecordReassignModal;
 window.closeBuildRecordReassignModal = closeBuildRecordReassignModal;
 window.submitBuildRecordReassign = submitBuildRecordReassign;
+window.retryZentaoPush = retryZentaoPush;
 
 function bindBuildRecordSSE() {
   if (buildSseBound) return;

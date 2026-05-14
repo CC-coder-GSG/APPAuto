@@ -392,6 +392,27 @@ def admin_build_record_detail(
     return row
 
 
+@router.post("/admin/build-records/{record_id}/retry-zentao-push")
+@router.post("/api/admin/build-records/{record_id}/retry-zentao-push")
+def admin_build_record_retry_zentao_push(
+    record_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_tab_access(current_user, "build-records")
+    try:
+        item, status = BuildRecordService(db).retry_zentao_push(record_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    success = status == "ok"
+    return {
+        "success": success,
+        "status": status,
+        "message": (item or {}).get("zentao_push_message") or "",
+        "item": item,
+    }
+
+
 class BuildRecordReassignPayload(BaseModel):
     target_major_id: int
     retain_original_zentao_build: bool = False

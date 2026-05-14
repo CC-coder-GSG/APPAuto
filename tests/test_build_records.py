@@ -88,6 +88,35 @@ def test_build_report_payload_accepts_optional_version_name():
     assert payload.build_url == "http://jenkins/job/s40311/6/"
 
 
+def test_retry_zentao_push_re_runs_push_and_returns_status(db_session):
+    service = BuildRecordService(db_session)
+    record, _ = service.upsert_report(
+        job_name="s40311",
+        build_number="9",
+        build_status="SUCCESS",
+        version_name="4.0.3.11.260316_alpha.3(40311003)",
+    )
+    # 没绑定大版本 → 首跑就是 no_execution；重试应当复现同一结果而不抛错
+    initial_status = record.zentao_push_status
+
+    item, status = service.retry_zentao_push(record.id)
+
+    assert item["id"] == record.id
+    # 状态可能是 no_execution / no_binding / not_success，但必须是确定的字符串
+    assert status
+    assert status == item["zentao_push_status"]
+    # 重试不应该把成功状态翻成 None
+    if initial_status:
+        assert item["zentao_push_status"] is not None
+
+
+def test_retry_zentao_push_raises_on_missing_record(db_session):
+    import pytest
+    service = BuildRecordService(db_session)
+    with pytest.raises(ValueError):
+        service.retry_zentao_push(99999)
+
+
 def test_get_major_log_aggregates_change_logs_in_created_order(db_session):
     service = BuildRecordService(db_session)
     service.upsert_report(
