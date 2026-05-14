@@ -200,8 +200,9 @@ def _safe_create_build(
     返回 (new_build_id, error)。
     """
     today = datetime.now().strftime("%Y-%m-%d")
+    raw_response = None
     try:
-        client.create_execution_build(
+        raw_response = client.create_execution_build(
             exec_id,
             name,
             product_id=product_id,
@@ -211,6 +212,11 @@ def _safe_create_build(
     except Exception as exc:
         logger.warning("create build under exec=%s name=%s failed: %s", exec_id, name, exc)
         return None, f"create_execution_build 抛错：{exc}"
+
+    # 禅道返回如果带 id，直接信任它 —— 部分禅道版本 list 接口有缓存延迟
+    rid = _extract_id_from_create_response(raw_response)
+    if rid:
+        return rid, None
 
     # Re-list 验证是否真的写进去了
     try:
@@ -222,8 +228,33 @@ def _safe_create_build(
     match = next((b for b in builds if str(b.get("name") or "").strip() == name), None)
     if match is None:
         hint = f"product_id={product_id}" if product_id else "product_id=None（未解析到）"
-        return None, f"禅道未真正创建 build（name='{name}'，{hint}）"
+        # 把禅道原始返回塞进 message —— "可能缺 product 或权限"太含糊，看不到根因
+        resp_preview = _preview_create_response(raw_response)
+        return None, f"禅道未真正创建 build（name='{name}'，{hint}，resp={resp_preview}）"
     return _coerce_int(match.get("id")), None
+
+
+def _extract_id_from_create_response(resp) -> int | None:
+    """从 create 返回里抓 build id —— 兼容 {id} / {build:{id}} / {data:{id}} 多种 shape。"""
+    if not isinstance(resp, dict):
+        return None
+    for candidate in (resp, resp.get("build"), resp.get("data")):
+        if isinstance(candidate, dict):
+            bid = _coerce_int(candidate.get("id"))
+            if bid:
+                return bid
+    return None
+
+
+def _preview_create_response(resp) -> str:
+    """把禅道返回压成一段短字符串塞到错误消息里。"""
+    if resp is None:
+        return "None"
+    try:
+        text = str(resp)
+    except Exception:
+        text = repr(resp)
+    return text[:200]
 
 
 def _push_one_execution(client: ZentaoClient, major: Version, version_name: str) -> PushExecutionResult:
