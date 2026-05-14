@@ -125,6 +125,10 @@ def _resolve_execution_product(client: ZentaoClient, exec_id: int) -> tuple[int 
     禅道 v1 `POST /executions/{id}/builds` 实际要求 body 带 `product`，否则会
     返回 200 但什么都不写（看起来"成功"但禅道侧空）。这里抓一次 execution
     detail 把 product id 拿出来。返回 (product_id, builder_account)。
+
+    注意：禅道 v1 GET /executions/{id} 返回字段名是 `products`（复数列表），
+    不是 `product`。`product`（单数）只在老版本/部分 IPD fork 上出现，留作
+    fallback。两个都读不到 → 兜底再调一次 get_execution_context()。
     """
     try:
         detail = client.get(f"executions/{exec_id}")
@@ -134,16 +138,21 @@ def _resolve_execution_product(client: ZentaoClient, exec_id: int) -> tuple[int 
     if not isinstance(detail, dict):
         return None, None
     exec_obj = detail.get("execution") if isinstance(detail.get("execution"), dict) else detail
+    if not isinstance(exec_obj, dict):
+        return None, None
 
-    pid = None
-    raw_product = exec_obj.get("product")
-    if isinstance(raw_product, dict):
-        pid = _coerce_int(raw_product.get("id"))
-    elif isinstance(raw_product, list) and raw_product:
-        first = raw_product[0]
-        pid = _coerce_int(first.get("id")) if isinstance(first, dict) else _coerce_int(first)
-    else:
-        pid = _coerce_int(raw_product)
+    pid = _extract_first_product_id(exec_obj.get("products"))
+    if pid is None:
+        pid = _extract_first_product_id(exec_obj.get("product"))
+    if pid is None:
+        # 兜底：用现成的 helper 再解析一次（它内部用的就是 products 复数）
+        try:
+            ctx = client.get_execution_context(exec_id)
+            ids = ctx.get("product_ids") if isinstance(ctx, dict) else None
+            if isinstance(ids, list) and ids:
+                pid = _coerce_int(ids[0])
+        except Exception as exc:
+            logger.warning("get_execution_context(%s) failed: %s", exec_id, exc)
 
     builder = None
     raw_builder = exec_obj.get("PM") or exec_obj.get("openedBy")
@@ -152,6 +161,26 @@ def _resolve_execution_product(client: ZentaoClient, exec_id: int) -> tuple[int 
     elif isinstance(raw_builder, str):
         builder = raw_builder
     return pid, builder
+
+
+def _extract_first_product_id(raw) -> int | None:
+    """从禅道返回里抓第一个 product id —— 支持 list[dict] / list[int] / dict / 标量四种 shape。"""
+    if raw is None:
+        return None
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                pid = _coerce_int(item.get("id"))
+                if pid:
+                    return pid
+            else:
+                pid = _coerce_int(item)
+                if pid:
+                    return pid
+        return None
+    if isinstance(raw, dict):
+        return _coerce_int(raw.get("id"))
+    return _coerce_int(raw)
 
 
 def _safe_create_build(
@@ -192,7 +221,8 @@ def _safe_create_build(
 
     match = next((b for b in builds if str(b.get("name") or "").strip() == name), None)
     if match is None:
-        return None, f"禅道未真正创建 build（name='{name}'，可能缺 product 或权限）"
+        hint = f"product_id={product_id}" if product_id else "product_id=None（未解析到）"
+        return None, f"禅道未真正创建 build（name='{name}'，{hint}）"
     return _coerce_int(match.get("id")), None
 
 
