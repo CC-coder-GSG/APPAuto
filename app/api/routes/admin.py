@@ -415,7 +415,6 @@ def admin_build_record_retry_zentao_push(
 
 class BuildRecordReassignPayload(BaseModel):
     target_major_id: int
-    retain_original_zentao_build: bool = False
 
 
 @router.post("/admin/build-records/{record_id}/reassign-major")
@@ -432,7 +431,6 @@ def admin_build_record_reassign_major(
         db,
         record_id,
         payload.target_major_id,
-        retain_original_zentao_build=payload.retain_original_zentao_build,
     )
     if not result.get("ok"):
         # 把 errors 拼成 HTTP 400 提示给前端

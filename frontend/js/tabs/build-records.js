@@ -469,10 +469,10 @@ function ensureReassignModal() {
         <label style="font-size:12px; color:#64748b; display:block; margin-bottom:6px;">目标大版本（仅同一软件下）</label>
         <select id="buildRecordReassignSelect" style="width:100%; padding:8px 10px;"></select>
       </div>
-      <label style="display:flex; align-items:center; gap:8px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc;">
-        <input type="checkbox" id="buildRecordReassignRetain">
-        <span style="font-size:13px;">同时保留原执行下的禅道 build（不删除原 build）</span>
-      </label>
+      <div style="font-size:12px; color:#64748b; padding:10px 12px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc;">
+        禅道侧会通过 PUT 把当前 build 直接移到目标执行下（保留 stories/bugs/history）。
+        禅道 IPD 4.3 不支持 API 删 build，所以这里不会有"留两份"的选项。
+      </div>
       <div class="row" style="justify-content:flex-end; gap:8px; margin:18px 0 0;">
         <button class="secondary" onclick="closeBuildRecordReassignModal()">取消</button>
         <button onclick="submitBuildRecordReassign()">确认切换</button>
@@ -516,8 +516,6 @@ export async function openBuildRecordReassignModal(recordId) {
       select.innerHTML = '<option value="">加载失败</option>';
     }
   }
-  const retain = document.getElementById('buildRecordReassignRetain');
-  if (retain) retain.checked = false;
   modal.classList.remove('hidden');
   modal.style.display = 'flex';
 }
@@ -567,7 +565,6 @@ export async function submitBuildRecordReassign() {
   if (!modal) return;
   const recordId = Number(modal.dataset.recordId || 0);
   const targetMajorId = Number(document.getElementById('buildRecordReassignSelect')?.value || 0);
-  const retain = !!document.getElementById('buildRecordReassignRetain')?.checked;
   if (!recordId || !targetMajorId) {
     window.showMessage && window.showMessage('请选择目标大版本', 'error');
     return;
@@ -576,7 +573,7 @@ export async function submitBuildRecordReassign() {
     const res = await api(`/api/admin/build-records/${recordId}/reassign-major`, {
       method: 'POST',
       headers: window.H,
-      body: { target_major_id: targetMajorId, retain_original_zentao_build: retain },
+      body: { target_major_id: targetMajorId },
     });
     const data = await res.json();
     window.showMessage && window.showMessage(data.message || '切换成功', 'success');

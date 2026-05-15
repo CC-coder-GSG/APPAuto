@@ -4,8 +4,11 @@
 提供：
   - compare_local_vs_zentao(db, major_version_id) — 拉本地 minor + 禅道 builds，给前端做 diff 展示
   - apply_version_diff(db, major_version_id, actions) — 执行 diff 修复（删本地 / 从禅道补到本地）
-  - build_record_reassign_major(db, build_record_id, target_major_id, retain_original_zentao_build)
+  - build_record_reassign_major(db, build_record_id, target_major_id)
         — 把一条构建记录指向的小版本搬到另一个大版本下；禅道侧也跟着搬
+        （禅道 IPD 4.3 不允许 API 删 build，DELETE → 403。所以走 PUT
+          /v1/builds/{id} {execution:new_exec} 直接把原 build 移到目标执行下；
+          只有原本没有 zentao_build_id 时才退回到"在目标执行下新建"。）
 
 注意：所有禅道侧改动都走 get_system_zentao_client（优先 chenwenbo）。
 任何禅道调用失败都返回 partial 结果 + 错误描述，不抛异常给路由。
@@ -286,21 +289,26 @@ def build_record_reassign_major(
     db: Session,
     build_record_id: int,
     target_major_id: int,
-    *,
-    retain_original_zentao_build: bool,
 ) -> dict:
     """
-    把一条 BuildRecord 对应的本地小版本（auto_archive_minor_version_id）切到 target_major_id 下。
-    并尝试同步到禅道：在新执行下新建一条同名 build；retain=False 时删除原执行下那条。
+    把一条 BuildRecord 对应的本地小版本（auto_archive_minor_version_id）切到 target_major_id 下，
+    禅道侧同步搬迁。
 
-    返回 {ok, message, local_minor_id, new_zentao_build_id, removed_zentao_build_id, errors}
+    禅道侧策略（基于 IPD 4.3 实测）：
+      - 原 minor 已经有 zentao_build_id ⇒ PUT /v1/builds/{old_bid} {execution:new_exec}
+        把同一个 build 移到目标执行下（不删除、不新建、保留 stories/bugs/history）。
+      - 原 minor 没绑过禅道 build ⇒ 在目标执行下新建一条同名 build。
+      - API 不支持 DELETE build（403 Access not allowed），所以不再提供"保留原 build"
+        这个开关；切归属永远是"移动"，不可能出现两个 build。
+
+    返回 {ok, message, local_minor_id, moved_zentao_build_id, new_zentao_build_id, errors}
     """
     out: dict = {
         "ok": False,
         "message": "",
         "local_minor_id": None,
+        "moved_zentao_build_id": None,
         "new_zentao_build_id": None,
-        "removed_zentao_build_id": None,
         "errors": [],
     }
 
@@ -339,17 +347,31 @@ def build_record_reassign_major(
     client = get_system_zentao_client(db)
     if not client:
         out["errors"].append("找不到可用的禅道账号绑定，仅修改本地归属")
+    elif not target_major.zentao_execution_id:
+        out["errors"].append("目标大版本未绑定禅道执行，仅修改本地归属")
     else:
-        # 1. 在 target_major 对应执行下新建 build（如目标已绑定执行）
-        if target_major.zentao_execution_id:
+        target_exec_id = int(target_major.zentao_execution_id)
+        if old_zentao_build_id:
+            # 已经有 build —— 走 PUT 移动，最干净（无重复、stories/bugs 跟着走）
             try:
-                target_exec_id = int(target_major.zentao_execution_id)
+                client.update_build(int(old_zentao_build_id), execution_id=target_exec_id)
+                minor.zentao_build_id = int(old_zentao_build_id)
+                minor.zentao_build_name_cache = version_name
+                out["moved_zentao_build_id"] = int(old_zentao_build_id)
+            except Exception as exc:
+                logger.warning(
+                    "move build %s to exec %s failed: %s",
+                    old_zentao_build_id, target_exec_id, exc,
+                )
+                out["errors"].append(f"移动原 build 到目标执行失败：{exc}")
+        else:
+            # 没绑过禅道 build —— 在目标执行下新建一条
+            try:
                 project_id, product_id = _resolve_target_exec_project_product(client, target_exec_id)
                 if not project_id:
                     out["errors"].append(
                         f"无法解析目标执行 {target_exec_id} 的 project_id，跳过在目标执行新建 build"
                     )
-                    created = {}
                 else:
                     created = client.create_execution_build(
                         target_exec_id,
@@ -357,25 +379,14 @@ def build_record_reassign_major(
                         project_id=project_id,
                         product_id=product_id,
                     ) or {}
-                new_bid = _coerce_int(created.get("id"))
-                if new_bid:
-                    minor.zentao_build_id = new_bid
-                    minor.zentao_build_name_cache = version_name
-                    out["new_zentao_build_id"] = new_bid
+                    new_bid = _coerce_int(created.get("id"))
+                    if new_bid:
+                        minor.zentao_build_id = new_bid
+                        minor.zentao_build_name_cache = version_name
+                        out["new_zentao_build_id"] = new_bid
             except Exception as exc:
                 logger.warning("create build in target execution failed: %s", exc)
                 out["errors"].append(f"在目标执行创建 build 失败：{exc}")
-        else:
-            out["errors"].append("目标大版本未绑定禅道执行，仅修改本地归属")
-
-        # 2. 如果用户选择不保留原执行下的 build，且原 build 存在，则删除
-        if not retain_original_zentao_build and old_zentao_build_id:
-            try:
-                client.delete_build(int(old_zentao_build_id))
-                out["removed_zentao_build_id"] = int(old_zentao_build_id)
-            except Exception as exc:
-                logger.warning("delete original zentao build failed: %s", exc)
-                out["errors"].append(f"删除原执行下的 build 失败：{exc}")
 
     # ── 本地切归属 ──
     minor.parent_id = target_major.id
@@ -387,10 +398,10 @@ def build_record_reassign_major(
     parts = [f"已切到大版本 {target_major.version_no}"]
     if old_major:
         parts.insert(0, f"原大版本 {old_major.version_no}")
-    if out["new_zentao_build_id"]:
-        parts.append(f"禅道新 build id={out['new_zentao_build_id']}")
-    if out["removed_zentao_build_id"]:
-        parts.append(f"已删除原 build id={out['removed_zentao_build_id']}")
+    if out["moved_zentao_build_id"]:
+        parts.append(f"禅道 build id={out['moved_zentao_build_id']} 已移到目标执行")
+    elif out["new_zentao_build_id"]:
+        parts.append(f"禅道新建 build id={out['new_zentao_build_id']}")
     out["message"] = "；".join(parts)
     return out
 
