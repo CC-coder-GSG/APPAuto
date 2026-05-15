@@ -350,6 +350,17 @@ class ZentaoClient:
         rows = data.get("builds") if isinstance(data, dict) else []
         return rows if isinstance(rows, list) else []
 
+    def list_project_builds(self, project_id: int, limit: int = 500) -> list[dict]:
+        """Return all builds in a project across all its executions.
+
+        用于"按名字找 build" —— 禅道 v1 没有按 name 的全局搜索 endpoint，
+        只能拉这个项目的全量列表然后客户端过滤。每条 row 带 execution / id /
+        name，足够定位。
+        """
+        data = self.get(f"projects/{project_id}/builds", params={"limit": limit}) or {}
+        rows = data.get("builds") if isinstance(data, dict) else []
+        return rows if isinstance(rows, list) else []
+
     # ------------------------------------------------------------------
     # Build write actions
     # ------------------------------------------------------------------

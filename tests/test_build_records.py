@@ -343,6 +343,121 @@ def test_reassign_publishes_sse_for_live_clients(db_session, monkeypatch):
     assert "build_record_updated" in events, f"reassign must publish build_record_updated; got {events}"
 
 
+def test_reassign_adopts_existing_build_already_in_target_exec(db_session, monkeypatch):
+    """禅道里已经有同名 build 而本地 minor.zentao_build_id 没记录的情况：reassign
+    必须先在项目维度按 name 找一遍，找到再"收编" —— 否则会撞禅道 unique-name
+    400 "名称编号已经有 xxx 这条记录了"。"""
+    from app.models import Version
+    from app.models.enums import VersionType
+    from app.services import zentao_version_diff_service as svc
+    from app.services.build_record_service import BuildRecordService
+
+    source_major = Version(version_no="V4.0.3.1", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1647)
+    target_major = Version(version_no="V4.0.3.1.custom", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1822)
+    db_session.add_all([source_major, target_major])
+    db_session.commit()
+
+    # 关键：本地 minor.zentao_build_id 为 None（push 时没回填），但禅道里
+    # 同名 build #4598 已经存在并且已经在 target_exec (1822) 下
+    minor = Version(version_no="4.0.3.1.260515_Gnss7(40301052)", version_type=VersionType.MINOR,
+                    parent_id=source_major.id, software_id=1, zentao_build_id=None)
+    db_session.add(minor)
+    db_session.commit()
+
+    record, _ = BuildRecordService(db_session).upsert_report(
+        job_name="s4031", build_number="52", build_status="SUCCESS",
+        version_name="4.0.3.1.260515_Gnss7(40301052)",
+    )
+    record.auto_archive_minor_version_id = minor.id
+    db_session.commit()
+
+    class _StubClient:
+        def get(self, path):
+            if path == "executions/1822":
+                return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}], "PM": {"account": "zhangchao"}}
+            raise AssertionError(f"unexpected get: {path}")
+
+        def list_project_builds(self, project_id, limit=500):
+            assert project_id == 134
+            return [
+                {"id": 4599, "name": "other-build", "execution": 1822},
+                {"id": 4598, "name": "4.0.3.1.260515_Gnss7(40301052)", "execution": 1822},
+            ]
+
+        def create_execution_build(self, *args, **kwargs):
+            raise AssertionError("must NOT create when same-name build already exists — 会被禅道 400 挡掉")
+
+        def update_build(self, build_id, **kwargs):
+            raise AssertionError("already in target exec; PUT-move is unnecessary")
+
+    monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
+
+    out = svc.build_record_reassign_major(db_session, record.id, target_major.id)
+
+    assert out["ok"] is True
+    assert out["moved_zentao_build_id"] == 4598   # 收编同名已存在 build
+    assert out["new_zentao_build_id"] is None
+    db_session.refresh(minor)
+    assert minor.zentao_build_id == 4598
+    assert minor.parent_id == target_major.id
+
+
+def test_reassign_moves_existing_build_from_other_exec(db_session, monkeypatch):
+    """本地 minor 没绑过 build，但禅道里同名 build 在 OTHER 执行下 ⇒ PUT 把它
+    搬到 target，而不是新建（会撞 unique-name）也不是放任不管。"""
+    from app.models import Version
+    from app.models.enums import VersionType
+    from app.services import zentao_version_diff_service as svc
+    from app.services.build_record_service import BuildRecordService
+
+    source_major = Version(version_no="V4.0.3.1", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1647)
+    target_major = Version(version_no="V4.0.3.1.custom", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1822)
+    db_session.add_all([source_major, target_major])
+    db_session.commit()
+
+    minor = Version(version_no="v.dup", version_type=VersionType.MINOR,
+                    parent_id=source_major.id, software_id=1, zentao_build_id=None)
+    db_session.add(minor)
+    db_session.commit()
+
+    record, _ = BuildRecordService(db_session).upsert_report(
+        job_name="s4031", build_number="60", build_status="SUCCESS", version_name="v.dup",
+    )
+    record.auto_archive_minor_version_id = minor.id
+    db_session.commit()
+
+    put_calls = []
+
+    class _StubClient:
+        def get(self, path):
+            if path == "executions/1822":
+                return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}], "PM": {"account": "zhangchao"}}
+            raise AssertionError(f"unexpected get: {path}")
+
+        def list_project_builds(self, project_id, limit=500):
+            # 同名 build 在 source exec (1647) 下，不在 target (1822)
+            return [{"id": 4700, "name": "v.dup", "execution": 1647}]
+
+        def update_build(self, build_id, **kwargs):
+            put_calls.append((build_id, kwargs))
+            return {"id": build_id, **kwargs}
+
+        def create_execution_build(self, *args, **kwargs):
+            raise AssertionError("must NOT create — duplicate name lives in source exec, PUT-move it")
+
+    monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
+
+    out = svc.build_record_reassign_major(db_session, record.id, target_major.id)
+
+    assert out["ok"] is True
+    assert out["moved_zentao_build_id"] == 4700
+    assert put_calls == [(4700, {"execution_id": 1822})]
+
+
 def test_reassign_create_falls_back_to_current_user_when_pm_missing(db_session, monkeypatch):
     """执行的 PM/openedBy 都没解析到时（理论上罕见）必须回退到 /v1/user.profile.account，
     否则 create build 会被禅道挡为 400 "构建者不能为空"。"""

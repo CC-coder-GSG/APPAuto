@@ -372,25 +372,56 @@ def build_record_reassign_major(
                 )
                 out["errors"].append(f"移动原 build 到目标执行失败：{exc}")
         else:
-            # 没绑过禅道 build —— 在目标执行下新建一条
+            # 本地 minor 没记录 zentao_build_id —— 不一定真的没建过 build。常见原因：
+            # push 时只更新了 BuildRecord，没回填 minor.zentao_build_id。所以这里先
+            # 在项目维度按 name 找一遍：
+            #   - 找到 + 已经在 target_exec ⇒ 视作成功，把 id 写回本地
+            #   - 找到 + 在别的 exec ⇒ PUT 移过去
+            #   - 没找到 ⇒ 才真的去 create
+            # 这条分支必须有，否则禅道返回 400 "名称编号已经有 xxx 这条记录了"。
             try:
                 if not target_project_id:
                     out["errors"].append(
                         f"无法解析目标执行 {target_exec_id} 的 project_id，跳过在目标执行新建 build"
                     )
                 else:
-                    created = client.create_execution_build(
-                        target_exec_id,
-                        version_name,
-                        project_id=target_project_id,
-                        product_id=target_product_id,
-                        builder=target_builder,
-                    ) or {}
-                    new_bid = _coerce_int(created.get("id"))
-                    if new_bid:
-                        minor.zentao_build_id = new_bid
-                        minor.zentao_build_name_cache = version_name
-                        out["new_zentao_build_id"] = new_bid
+                    existing = _find_build_by_name_in_project(client, target_project_id, version_name)
+                    if existing:
+                        existing_id = _coerce_int(existing.get("id"))
+                        existing_exec = _coerce_int(existing.get("execution"))
+                        if existing_exec == target_exec_id:
+                            # 已经在目标执行下 —— 直接收编，不用动禅道
+                            minor.zentao_build_id = existing_id
+                            minor.zentao_build_name_cache = version_name
+                            out["moved_zentao_build_id"] = existing_id
+                        else:
+                            # 在别的执行下 —— PUT 移到 target
+                            try:
+                                client.update_build(existing_id, execution_id=target_exec_id)
+                                minor.zentao_build_id = existing_id
+                                minor.zentao_build_name_cache = version_name
+                                out["moved_zentao_build_id"] = existing_id
+                            except Exception as exc:
+                                logger.warning(
+                                    "move existing build %s (was exec %s) to %s failed: %s",
+                                    existing_id, existing_exec, target_exec_id, exc,
+                                )
+                                out["errors"].append(
+                                    f"找到同名 build #{existing_id}（在执行 {existing_exec}），移到目标执行失败：{exc}"
+                                )
+                    else:
+                        created = client.create_execution_build(
+                            target_exec_id,
+                            version_name,
+                            project_id=target_project_id,
+                            product_id=target_product_id,
+                            builder=target_builder,
+                        ) or {}
+                        new_bid = _coerce_int(created.get("id"))
+                        if new_bid:
+                            minor.zentao_build_id = new_bid
+                            minor.zentao_build_name_cache = version_name
+                            out["new_zentao_build_id"] = new_bid
             except Exception as exc:
                 logger.warning("create build in target execution failed: %s", exc)
                 out["errors"].append(f"在目标执行创建 build 失败：{exc}")
@@ -447,6 +478,27 @@ def _coerce_int(value) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _find_build_by_name_in_project(client, project_id: int, name: str) -> Optional[dict]:
+    """在项目维度（跨所有 execution）按 name 精确找 build。
+
+    禅道 v1 没有 "GET /v1/builds?name=..." 这种全局搜索，但 GET /v1/projects/{id}/builds
+    返回的每条 row 已经带 execution 字段。找到 → 调用方可以"收编（同 exec）/
+    PUT 移动（异 exec）"二选一，不用真的 POST 出去撞 unique-name 约束。
+    """
+    target = (name or "").strip()
+    if not target:
+        return None
+    try:
+        rows = client.list_project_builds(project_id, limit=500) or []
+    except Exception as exc:
+        logger.warning("list_project_builds(%s) failed: %s", project_id, exc)
+        return None
+    for row in rows:
+        if str(row.get("name") or "").strip() == target:
+            return row
+    return None
 
 
 def _resolve_target_exec_meta(
