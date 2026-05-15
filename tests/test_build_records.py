@@ -150,11 +150,18 @@ def test_reassign_major_moves_zentao_build_via_put(db_session, monkeypatch):
     class _StubClient:
         def get(self, path):
             calls.append(("get", path))
-            return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}]}
+            return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}], "PM": {"account": "zhangchao"}}
 
         def update_build(self, build_id, **kwargs):
             calls.append(("update_build", build_id, kwargs))
             return {"id": build_id, **kwargs}
+
+        def list_execution_builds(self, exec_id, limit=500):
+            # target_exec 已经有占位 ⇒ 不会再 create placeholder
+            return [{"id": 9000, "name": "4.0.3.1.26xxxx(4030xxxx)"}]
+
+        def list_project_builds(self, project_id, limit=500):
+            return []
 
         def delete_build(self, build_id):
             calls.append(("delete_build", build_id))
@@ -216,26 +223,32 @@ def test_reassign_major_creates_when_no_existing_build(db_session, monkeypatch):
     record.auto_archive_minor_version_id = minor.id
     db_session.commit()
 
+    create_seq = []
+
     class _StubClient:
         def get(self, path):
             assert path == "executions/1822"
-            # 同时给上 PM —— 反映真实禅道返回，并要求 reassign 把它读为 builder
             return {
                 "id": 1822, "name": "s4031定制",
                 "project": 134, "products": [{"id": 15}],
                 "PM": {"account": "zhangchao", "realname": "张超"},
             }
 
+        def list_execution_builds(self, exec_id, limit=500):
+            return []
+
+        def list_project_builds(self, project_id, limit=500):
+            return []
+
         def update_build(self, *args, **kwargs):
             raise AssertionError("no existing build → should NOT call update_build")
 
         def create_execution_build(self, exec_id, name, **kwargs):
+            create_seq.append(name)
             assert exec_id == 1822
             assert kwargs.get("project_id") == 134
-            # 关键回归：禅道 POST 不带 builder 会 400 "构建者不能为空"
-            assert kwargs.get("builder"), "reassign create must pass a non-empty builder"
-            assert kwargs.get("builder") == "zhangchao"
-            return {"id": 9001, "name": name}
+            assert kwargs.get("builder") == "zhangchao", "reassign create must pass non-empty builder"
+            return {"id": 9000 + len(create_seq), "name": name}
 
     monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
 
@@ -244,6 +257,8 @@ def test_reassign_major_creates_when_no_existing_build(db_session, monkeypatch):
     assert out["ok"] is True
     assert out["new_zentao_build_id"] == 9001
     assert out["moved_zentao_build_id"] is None
+    # 还应该自动补一条占位
+    assert out["new_placeholder_build_id"] == 9002
 
     db_session.refresh(minor)
     assert minor.zentao_build_id == 9001
@@ -284,6 +299,13 @@ def test_reassign_message_is_fresh_not_appended(db_session, monkeypatch):
 
         def update_build(self, build_id, **kwargs):
             return {"id": build_id, **kwargs}
+
+        def list_execution_builds(self, exec_id, limit=500):
+            # 假装 target_exec 已经有占位，免得测试还要 mock create
+            return [{"id": 9999, "name": "v.xxxx"}]
+
+        def list_project_builds(self, project_id, limit=500):
+            return []
 
     monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
 
@@ -333,6 +355,12 @@ def test_reassign_publishes_sse_for_live_clients(db_session, monkeypatch):
 
         def update_build(self, build_id, **kwargs):
             return {"id": build_id}
+
+        def list_execution_builds(self, exec_id, limit=500):
+            return [{"id": 9999, "name": "v.xxxx"}]
+
+        def list_project_builds(self, project_id, limit=500):
+            return []
 
     monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
     monkeypatch.setattr(sse, "sse_publish", lambda event, payload, channels=None: sse_calls.append((event, payload, channels)))
@@ -385,6 +413,10 @@ def test_reassign_adopts_existing_build_already_in_target_exec(db_session, monke
                 {"id": 4599, "name": "other-build", "execution": 1822},
                 {"id": 4598, "name": "4.0.3.1.260515_Gnss7(40301052)", "execution": 1822},
             ]
+
+        def list_execution_builds(self, exec_id, limit=500):
+            # target_exec 已经有占位
+            return [{"id": 4596, "name": "4.0.3.1.26xxxx(4030xxxx)"}]
 
         def create_execution_build(self, *args, **kwargs):
             raise AssertionError("must NOT create when same-name build already exists — 会被禅道 400 挡掉")
@@ -442,6 +474,10 @@ def test_reassign_moves_existing_build_from_other_exec(db_session, monkeypatch):
             # 同名 build 在 source exec (1647) 下，不在 target (1822)
             return [{"id": 4700, "name": "v.dup", "execution": 1647}]
 
+        def list_execution_builds(self, exec_id, limit=500):
+            # target_exec 已经有占位 ⇒ 不需要 mock create_execution_build
+            return [{"id": 4596, "name": "v.xxxx"}]
+
         def update_build(self, build_id, **kwargs):
             put_calls.append((build_id, kwargs))
             return {"id": build_id, **kwargs}
@@ -456,6 +492,120 @@ def test_reassign_moves_existing_build_from_other_exec(db_session, monkeypatch):
     assert out["ok"] is True
     assert out["moved_zentao_build_id"] == 4700
     assert put_calls == [(4700, {"execution_id": 1822})]
+
+
+def test_reassign_creates_placeholder_in_target_with_disambiguator_on_collision(db_session, monkeypatch):
+    """禅道 IPD 4.3 的 build name 在 PROJECT 维度唯一。规范占位名 '4.0.3.1.26xxxx(4030xxxx)'
+    可能已经被另一个 exec 用了。这时 reassign 给 target_exec 补占位时必须给名字
+    加一个 _e<exec_id> 后缀来规避 unique-name 400，不能直接放弃也不能撞墙。"""
+    from app.models import Version
+    from app.models.enums import VersionType
+    from app.services import zentao_version_diff_service as svc
+    from app.services.build_record_service import BuildRecordService
+
+    source_major = Version(version_no="V4.0.3.1", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1647)
+    target_major = Version(version_no="V4.0.3.1.custom", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1822)
+    db_session.add_all([source_major, target_major])
+    db_session.commit()
+
+    minor = Version(version_no="4.0.3.1.260515_Gnss7(40301052)", version_type=VersionType.MINOR,
+                    parent_id=source_major.id, software_id=1, zentao_build_id=4598)
+    db_session.add(minor)
+    db_session.commit()
+
+    record, _ = BuildRecordService(db_session).upsert_report(
+        job_name="s4031", build_number="52", build_status="SUCCESS",
+        version_name="4.0.3.1.260515_Gnss7(40301052)",
+    )
+    record.auto_archive_minor_version_id = minor.id
+    db_session.commit()
+
+    create_calls = []
+
+    class _StubClient:
+        def get(self, path):
+            return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}], "PM": {"account": "zhangchao"}}
+
+        def update_build(self, build_id, **kwargs):
+            return {"id": build_id, **kwargs}
+
+        def list_execution_builds(self, exec_id, limit=500):
+            # target_exec 没占位 ⇒ 必须 create 一条
+            return []
+
+        def list_project_builds(self, project_id, limit=500):
+            # 关键：规范占位名 '4.0.3.1.26xxxx(4030xxxx)' 已经被别的 exec 占了
+            return [{"id": 4596, "name": "4.0.3.1.26xxxx(4030xxxx)", "execution": 1647}]
+
+        def create_execution_build(self, exec_id, name, **kwargs):
+            create_calls.append((exec_id, name))
+            return {"id": 5500, "name": name}
+
+    monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
+
+    out = svc.build_record_reassign_major(db_session, record.id, target_major.id)
+
+    assert out["ok"] is True
+    assert out["moved_zentao_build_id"] == 4598
+    assert out["new_placeholder_build_id"] == 5500
+    # 占位名带 _e1822 后缀以避开 project-wide unique 冲突
+    assert "_e1822" in out["new_placeholder_name"]
+    assert "xxxx" in out["new_placeholder_name"]  # 仍然要含 xxxx 让 is_placeholder_name 认得
+    # message 也要把占位信息体现出来
+    db_session.refresh(record)
+    assert out["new_placeholder_name"] in (record.zentao_push_message or "")
+    assert "#5500" in (record.zentao_push_message or "")
+
+
+def test_reassign_skips_placeholder_create_when_target_exec_already_has_one(db_session, monkeypatch):
+    """如果 target_exec 已经有占位（任意含 'xxxx' 的 build），就不应该再调
+    create_execution_build —— 否则可能撞 unique 也浪费一次 RTT。"""
+    from app.models import Version
+    from app.models.enums import VersionType
+    from app.services import zentao_version_diff_service as svc
+    from app.services.build_record_service import BuildRecordService
+
+    source_major = Version(version_no="V4.0.3.1", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1647)
+    target_major = Version(version_no="V4.0.3.1.custom", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1822)
+    db_session.add_all([source_major, target_major])
+    db_session.commit()
+
+    minor = Version(version_no="v.has_ph", version_type=VersionType.MINOR,
+                    parent_id=source_major.id, software_id=1, zentao_build_id=6000)
+    db_session.add(minor)
+    db_session.commit()
+
+    record, _ = BuildRecordService(db_session).upsert_report(
+        job_name="s4031", build_number="61", build_status="SUCCESS", version_name="v.has_ph",
+    )
+    record.auto_archive_minor_version_id = minor.id
+    db_session.commit()
+
+    class _StubClient:
+        def get(self, path):
+            return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}], "PM": {"account": "zhangchao"}}
+
+        def update_build(self, build_id, **kwargs):
+            return {"id": build_id}
+
+        def list_execution_builds(self, exec_id, limit=500):
+            return [{"id": 6100, "name": "v.260XXXxxxx(4030xxxx)"}]  # 已有占位
+
+        def list_project_builds(self, project_id, limit=500):
+            raise AssertionError("不应调 list_project_builds — 已经有 placeholder 就早返")
+
+        def create_execution_build(self, *args, **kwargs):
+            raise AssertionError("不应调 create_execution_build — 已经有 placeholder 就早返")
+
+    monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
+
+    out = svc.build_record_reassign_major(db_session, record.id, target_major.id)
+    assert out["ok"] is True
+    assert out["moved_zentao_build_id"] == 6000
 
 
 def test_reassign_create_falls_back_to_current_user_when_pm_missing(db_session, monkeypatch):
@@ -484,6 +634,8 @@ def test_reassign_create_falls_back_to_current_user_when_pm_missing(db_session, 
     record.auto_archive_minor_version_id = minor.id
     db_session.commit()
 
+    create_seq = []
+
     class _StubClient:
         def get(self, path):
             if path == "executions/1822":
@@ -493,9 +645,16 @@ def test_reassign_create_falls_back_to_current_user_when_pm_missing(db_session, 
                 return {"profile": {"account": "chenwenbo", "realname": "陈文博"}}
             raise AssertionError(f"unexpected get path: {path}")
 
+        def list_execution_builds(self, exec_id, limit=500):
+            return []
+
+        def list_project_builds(self, project_id, limit=500):
+            return []
+
         def create_execution_build(self, exec_id, name, **kwargs):
+            create_seq.append(name)
             assert kwargs.get("builder") == "chenwenbo"
-            return {"id": 9100, "name": name}
+            return {"id": 9100 + len(create_seq) - 1, "name": name}
 
     monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
 
@@ -541,6 +700,12 @@ def test_reassign_major_does_not_early_error_when_local_parent_matches_target(db
         def update_build(self, build_id, **kwargs):
             update_calls.append((build_id, kwargs))
             return {"id": build_id, **kwargs}
+
+        def list_execution_builds(self, exec_id, limit=500):
+            return [{"id": 5999, "name": "v.xxxx"}]  # 占位已存在
+
+        def list_project_builds(self, project_id, limit=500):
+            return []
 
     monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
 

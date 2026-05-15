@@ -25,7 +25,7 @@ from app.models import BuildRecord, Version
 from app.models.enums import VersionType
 from app.services.zentao_client_service import ZentaoClient
 from app.services.zentao_system_client import get_system_zentao_client
-from app.services.zentao_utils import is_placeholder_name, normalize_version_name
+from app.services.zentao_utils import is_placeholder_name, make_placeholder_name, normalize_version_name
 
 logger = logging.getLogger(__name__)
 
@@ -309,6 +309,8 @@ def build_record_reassign_major(
         "local_minor_id": None,
         "moved_zentao_build_id": None,
         "new_zentao_build_id": None,
+        "new_placeholder_build_id": None,
+        "new_placeholder_name": None,
         "errors": [],
     }
 
@@ -426,6 +428,24 @@ def build_record_reassign_major(
                 logger.warning("create build in target execution failed: %s", exc)
                 out["errors"].append(f"在目标执行创建 build 失败：{exc}")
 
+        # ── 保证 target_exec 下有占位 build，未来 push 才有东西可以 rename ──
+        # 只在成功 reassign（move 或 create 或收编）后做。失败不致命，加到 errors 但不挡总流程。
+        zentao_succeeded = bool(out["moved_zentao_build_id"] or out["new_zentao_build_id"])
+        if zentao_succeeded and target_project_id:
+            ph_id, ph_name, ph_err = _ensure_placeholder_in_target_exec(
+                client,
+                target_exec_id=target_exec_id,
+                target_project_id=target_project_id,
+                target_product_id=target_product_id,
+                target_builder=target_builder,
+                version_name=version_name,
+            )
+            if ph_id:
+                out["new_placeholder_build_id"] = ph_id
+                out["new_placeholder_name"] = ph_name
+            elif ph_err:
+                out["errors"].append(f"目标执行补占位失败：{ph_err}")
+
     # ── 本地切归属 ──
     minor.parent_id = target_major.id
     minor.software_id = target_major.software_id
@@ -439,6 +459,8 @@ def build_record_reassign_major(
         target_exec_name=target_exec_name,
         moved_build_id=out["moved_zentao_build_id"],
         new_build_id=out["new_zentao_build_id"],
+        placeholder_build_id=out["new_placeholder_build_id"],
+        placeholder_name=out["new_placeholder_name"],
         errors=out["errors"],
     )
 
@@ -478,6 +500,100 @@ def _coerce_int(value) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _ensure_placeholder_in_target_exec(
+    client,
+    *,
+    target_exec_id: int,
+    target_project_id: int,
+    target_product_id: Optional[int],
+    target_builder: Optional[str],
+    version_name: str,
+) -> tuple[Optional[int], Optional[str], Optional[str]]:
+    """切归属后保证 target_exec 下有一条占位 build，让以后的 push 有东西可以 rename。
+
+    禅道 build name 是 PROJECT 维度唯一的（不是 per-exec），所以不能简单拷贝
+    源 exec 的占位名。规则：
+      1) target_exec 已经有任何含 'xxxx' 的 build ⇒ 不动
+      2) 否则用 make_placeholder_name(version_name) 取规范占位名
+      3) 在 project 维度查这个名字有没有用过：
+         - 没用过 ⇒ 用规范名 create
+         - 用过了 ⇒ 给规范名加个 _e<exec_id> 后缀让它在 project 内独一份
+
+    返回 (placeholder_id, placeholder_name, error)。失败不致命，由调用方决定要不要
+    把它写进 errors。
+    """
+    canonical = make_placeholder_name(version_name)
+    if not canonical or canonical == version_name:
+        return None, None, "无法从 version_name 生成占位名"
+
+    # (1) target_exec 已经有占位？
+    try:
+        target_builds = client.list_execution_builds(target_exec_id, limit=500) or []
+    except Exception as exc:
+        logger.warning("list target exec(%s) builds failed: %s", target_exec_id, exc)
+        return None, None, f"读取目标执行 build 列表失败：{exc}"
+    for b in target_builds:
+        if is_placeholder_name(str(b.get("name") or "")):
+            return _coerce_int(b.get("id")), str(b.get("name") or ""), None
+
+    # (2)/(3) 决定要 create 哪个 name
+    try:
+        project_builds = client.list_project_builds(target_project_id, limit=500) or []
+    except Exception as exc:
+        logger.warning("list project(%s) builds failed: %s", target_project_id, exc)
+        project_builds = []
+    used_names = {str(b.get("name") or "").strip() for b in project_builds}
+    placeholder_name = canonical
+    if canonical in used_names:
+        placeholder_name = _disambiguate_placeholder(canonical, target_exec_id)
+        # 极端情况：连带后缀也撞了 —— 再 append "_b" / "_c"
+        suffix_idx = ord("b")
+        while placeholder_name in used_names and suffix_idx < ord("z"):
+            placeholder_name = f"{canonical}_e{target_exec_id}_{chr(suffix_idx)}"
+            suffix_idx += 1
+        if placeholder_name in used_names:
+            return None, None, f"无法为占位名 '{canonical}' 找到不冲突的变体"
+
+    # (4) create
+    try:
+        created = client.create_execution_build(
+            target_exec_id,
+            placeholder_name,
+            project_id=target_project_id,
+            product_id=target_product_id,
+            builder=target_builder,
+        ) or {}
+        new_id = _coerce_int(created.get("id"))
+        if not new_id:
+            # 容忍 list 缓存延迟：再查一次
+            try:
+                refreshed = client.list_execution_builds(target_exec_id, limit=500) or []
+                match = next((b for b in refreshed if str(b.get("name") or "").strip() == placeholder_name), None)
+                if match:
+                    new_id = _coerce_int(match.get("id"))
+            except Exception:
+                pass
+        if new_id:
+            return new_id, placeholder_name, None
+        return None, placeholder_name, "禅道返回了 200 但 list 里找不到新建的占位"
+    except Exception as exc:
+        logger.warning("create placeholder in exec(%s) failed: %s", target_exec_id, exc)
+        return None, placeholder_name, f"建占位失败：{exc}"
+
+
+def _disambiguate_placeholder(canonical: str, exec_id: int) -> str:
+    """给占位名加 _e<exec_id> 后缀，让它在 project 内独一份。
+
+    canonical 里末尾通常是 ')'（如 '4.0.3.1.26xxxx(4030xxxx)'），把后缀塞在
+    最后一个 '(' 之前看上去更整齐。没有括号的极端情况就直接 append。
+    """
+    base = canonical
+    if base.endswith(')') and '(' in base:
+        head, sep, tail = base.rpartition('(')
+        return f"{head.rstrip()}_e{exec_id}({tail}"
+    return f"{canonical}_e{exec_id}"
 
 
 def _find_build_by_name_in_project(client, project_id: int, name: str) -> Optional[dict]:
@@ -563,7 +679,9 @@ def _refresh_record_zentao_push_after_reassign(
     target_exec_name: Optional[str],
     moved_build_id: Optional[int],
     new_build_id: Optional[int],
-    errors: list[str],
+    placeholder_build_id: Optional[int] = None,
+    placeholder_name: Optional[str] = None,
+    errors: Optional[list[str]] = None,
 ) -> None:
     """切归属后**永远**重写 BuildRecord.zentao_push_*，让"禅道写回"那张卡片立即
     反映新位置。
@@ -597,6 +715,8 @@ def _refresh_record_zentao_push_after_reassign(
         body = "切归属（无禅道 build 关联）"
 
     msg = f"切归属 → {head}: {body}"
+    if placeholder_build_id and placeholder_name:
+        msg = f'{msg}; 占位 "{placeholder_name}" #{placeholder_build_id}'
     if errors:
         note = "；".join(errors[:2])[:200]
         msg = f"{msg} | 部分失败：{note}"
