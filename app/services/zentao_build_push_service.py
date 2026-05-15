@@ -120,37 +120,44 @@ def push_build_to_zentao(db: Session, record: BuildRecord) -> PushResult:
     return out
 
 
-def _resolve_execution_product(client: ZentaoClient, exec_id: int) -> tuple[int | None, str | None]:
+def _resolve_execution_context(
+    client: ZentaoClient, exec_id: int
+) -> tuple[int | None, int | None, str | None]:
     """
-    禅道 v1 `POST /executions/{id}/builds` 实际要求 body 带 `product`，否则会
-    返回 200 但什么都不写（看起来"成功"但禅道侧空）。这里抓一次 execution
-    detail 把 product id 拿出来。返回 (product_id, builder_account)。
+    抓一次 execution detail，返回 (project_id, product_id, builder_account)。
 
-    注意：禅道 v1 GET /executions/{id} 返回字段名是 `products`（复数列表），
-    不是 `product`。`product`（单数）只在老版本/部分 IPD fork 上出现，留作
-    fallback。两个都读不到 → 兜底再调一次 get_execution_context()。
+    - project_id：MUST。`POST /v1/projects/{project_id}/builds` 是禅道 IPD 4.3 下
+      实测唯一会真正落库的"创建 build"入口；`/executions/{id}/builds` 是空头允诺
+      （200 + 空 body + 不写）。
+    - product_id：禅道写 build 需要的 product 外键。v1 GET /executions/{id} 用的
+      字段名是 `products`（复数列表），`product`（单数）只在老/IPD fork 上出现，
+      留作 fallback。两个都拿不到 → 兜底再调 get_execution_context()。
+    - builder：尽量从 PM / openedBy 里取一个有意义的禅道账号名。
     """
     try:
         detail = client.get(f"executions/{exec_id}")
     except Exception as exc:
         logger.warning("get execution(%s) failed: %s", exec_id, exc)
-        return None, None
+        return None, None, None
     if not isinstance(detail, dict):
-        return None, None
+        return None, None, None
     exec_obj = detail.get("execution") if isinstance(detail.get("execution"), dict) else detail
     if not isinstance(exec_obj, dict):
-        return None, None
+        return None, None, None
+
+    project_id = _coerce_int(exec_obj.get("project"))
 
     pid = _extract_first_product_id(exec_obj.get("products"))
     if pid is None:
         pid = _extract_first_product_id(exec_obj.get("product"))
     if pid is None:
-        # 兜底：用现成的 helper 再解析一次（它内部用的就是 products 复数）
         try:
             ctx = client.get_execution_context(exec_id)
             ids = ctx.get("product_ids") if isinstance(ctx, dict) else None
             if isinstance(ids, list) and ids:
                 pid = _coerce_int(ids[0])
+            if project_id is None and isinstance(ctx, dict):
+                project_id = _coerce_int(ctx.get("project_id"))
         except Exception as exc:
             logger.warning("get_execution_context(%s) failed: %s", exec_id, exc)
 
@@ -160,7 +167,7 @@ def _resolve_execution_product(client: ZentaoClient, exec_id: int) -> tuple[int 
         builder = raw_builder.get("account") or raw_builder.get("realname")
     elif isinstance(raw_builder, str):
         builder = raw_builder
-    return pid, builder
+    return project_id, pid, builder
 
 
 def _extract_first_product_id(raw) -> int | None:
@@ -188,6 +195,7 @@ def _safe_create_build(
     exec_id: int,
     name: str,
     *,
+    project_id: int | None,
     product_id: int | None,
     builder: str | None,
 ) -> tuple[int | None, str | None]:
@@ -199,12 +207,18 @@ def _safe_create_build(
 
     返回 (new_build_id, error)。
     """
+    if project_id is None:
+        return None, (
+            f"未能解析到执行 {exec_id} 的 project_id —— 无法走 "
+            f"/v1/projects/{{project}}/builds 入口，禅道侧不会真正落库"
+        )
     today = datetime.now().strftime("%Y-%m-%d")
     raw_response = None
     try:
         raw_response = client.create_execution_build(
             exec_id,
             name,
+            project_id=project_id,
             product_id=product_id,
             builder=builder,
             date=today,
@@ -227,10 +241,12 @@ def _safe_create_build(
 
     match = next((b for b in builds if str(b.get("name") or "").strip() == name), None)
     if match is None:
-        hint = f"product_id={product_id}" if product_id else "product_id=None（未解析到）"
-        # 把禅道原始返回塞进 message —— "可能缺 product 或权限"太含糊，看不到根因
+        product_hint = f"product_id={product_id}" if product_id else "product_id=None"
         resp_preview = _preview_create_response(raw_response)
-        return None, f"禅道未真正创建 build（name='{name}'，{hint}，resp={resp_preview}）"
+        return None, (
+            f"禅道未真正创建 build（name='{name}'，project_id={project_id}，"
+            f"{product_hint}，resp={resp_preview}）"
+        )
     return _coerce_int(match.get("id")), None
 
 
@@ -271,8 +287,8 @@ def _push_one_execution(client: ZentaoClient, major: Version, version_name: str)
         result.error = f"读取禅道 build 列表失败：{exc}"
         return result
 
-    # 预取 execution 的 product / builder，给所有后续 create 用
-    product_id, builder = _resolve_execution_product(client, exec_id)
+    # 预取 execution 的 project / product / builder，给所有后续 create 用
+    project_id, product_id, builder = _resolve_execution_context(client, exec_id)
 
     # 判重：禅道里如果已经有同名 build，跳过 rename/create，但仍尝试补一个占位
     for b in builds:
@@ -296,7 +312,7 @@ def _push_one_execution(client: ZentaoClient, major: Version, version_name: str)
         else:
             new_id, err = _safe_create_build(
                 client, exec_id, version_name,
-                product_id=product_id, builder=builder,
+                project_id=project_id, product_id=product_id, builder=builder,
             )
             if err:
                 result.error = f"创建 build 失败：{err}"
@@ -310,7 +326,7 @@ def _push_one_execution(client: ZentaoClient, major: Version, version_name: str)
         if new_name and new_name != version_name:
             new_id, err = _safe_create_build(
                 client, exec_id, new_name,
-                product_id=product_id, builder=builder,
+                project_id=project_id, product_id=product_id, builder=builder,
             )
             if err:
                 # 不视为致命 — 真实版本已经写进去了

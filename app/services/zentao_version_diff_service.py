@@ -343,7 +343,20 @@ def build_record_reassign_major(
         # 1. 在 target_major 对应执行下新建 build（如目标已绑定执行）
         if target_major.zentao_execution_id:
             try:
-                created = client.create_execution_build(int(target_major.zentao_execution_id), version_name) or {}
+                target_exec_id = int(target_major.zentao_execution_id)
+                project_id, product_id = _resolve_target_exec_project_product(client, target_exec_id)
+                if not project_id:
+                    out["errors"].append(
+                        f"无法解析目标执行 {target_exec_id} 的 project_id，跳过在目标执行新建 build"
+                    )
+                    created = {}
+                else:
+                    created = client.create_execution_build(
+                        target_exec_id,
+                        version_name,
+                        project_id=project_id,
+                        product_id=product_id,
+                    ) or {}
                 new_bid = _coerce_int(created.get("id"))
                 if new_bid:
                     minor.zentao_build_id = new_bid
@@ -387,6 +400,35 @@ def _coerce_int(value) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _resolve_target_exec_project_product(client, exec_id: int) -> tuple[Optional[int], Optional[int]]:
+    """读一次执行 detail，取 (project_id, product_id)。两者都拿不到时返回 (None, None)。
+
+    禅道 IPD 4.3 GET /v1/executions/{id} 用的字段是 `project`(标量) + `products`(列表)。
+    """
+    try:
+        detail = client.get(f"executions/{exec_id}")
+    except Exception as exc:
+        logger.warning("resolve target execution(%s) detail failed: %s", exec_id, exc)
+        return None, None
+    if not isinstance(detail, dict):
+        return None, None
+    exec_obj = detail.get("execution") if isinstance(detail.get("execution"), dict) else detail
+    if not isinstance(exec_obj, dict):
+        return None, None
+    project_id = _coerce_int(exec_obj.get("project"))
+    product_id = None
+    products = exec_obj.get("products")
+    if isinstance(products, list):
+        for item in products:
+            if isinstance(item, dict):
+                product_id = _coerce_int(item.get("id"))
+                if product_id:
+                    break
+    if product_id is None:
+        product_id = _coerce_int(exec_obj.get("product"))
+    return project_id, product_id
 
 
 __all__ = [

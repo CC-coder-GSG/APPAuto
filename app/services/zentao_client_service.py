@@ -359,16 +359,26 @@ class ZentaoClient:
         execution_id: int,
         name: str,
         *,
+        project_id: int | None = None,
         product_id: int | None = None,
         builder: str | None = None,
         date: str | None = None,
         desc: str | None = None,
     ) -> dict | None:
         """
-        POST /v1/executions/{id}/builds
-        Create a build under the given execution.
+        Create a build attached to an execution.
+
+        实测：禅道 IPD 4.3 的 `POST /v1/executions/{id}/builds` 永远返回 200 + 空 body
+        且什么都不写（哪怕权限 / 字段全部正确）。但 `POST /v1/projects/{project_id}/builds`
+        在同一 token 下能正常 201 + 完整 body + 真正落库 —— 在 body 里把 `execution`
+        传上就行。所以这里强制走 projects 端点，必须传 project_id。
         """
-        body: dict[str, Any] = {"name": name}
+        if project_id is None:
+            raise ValueError("create_execution_build: project_id is required")
+        body: dict[str, Any] = {
+            "name": name,
+            "execution": execution_id,
+        }
         if product_id is not None:
             body["product"] = product_id
         if builder:
@@ -377,7 +387,7 @@ class ZentaoClient:
             body["date"] = date
         if desc is not None:
             body["desc"] = desc
-        return self.post(f"executions/{execution_id}/builds", body)
+        return self.post(f"projects/{project_id}/builds", body)
 
     def update_build(
         self,
