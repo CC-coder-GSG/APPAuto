@@ -249,6 +249,100 @@ def test_reassign_major_creates_when_no_existing_build(db_session, monkeypatch):
     assert minor.zentao_build_id == 9001
 
 
+def test_reassign_message_is_fresh_not_appended(db_session, monkeypatch):
+    """切归属后，zentao_push_message 不应该是"旧 push 日志 | 切归属：..."这种 append 形态——
+    旧位置信息会主导视觉，用户以为没变。改成"切归属 → 新位置..."的崭新一句话。"""
+    from app.models import Version
+    from app.models.enums import VersionType
+    from app.services import zentao_version_diff_service as svc
+    from app.services.build_record_service import BuildRecordService
+
+    source_major = Version(version_no="V4.0.3.1", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1647)
+    target_major = Version(version_no="V4.0.3.1.custom", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1822)
+    db_session.add_all([source_major, target_major])
+    db_session.commit()
+
+    minor = Version(version_no="v.test", version_type=VersionType.MINOR,
+                    parent_id=source_major.id, software_id=1, zentao_build_id=7777)
+    db_session.add(minor)
+    db_session.commit()
+
+    record, _ = BuildRecordService(db_session).upsert_report(
+        job_name="s4031", build_number="99", build_status="SUCCESS", version_name="v.test",
+    )
+    record.auto_archive_minor_version_id = minor.id
+    # 模拟之前推送过禅道留下的旧 message
+    record.zentao_push_message = "s4031 #1647: 重命名为 \"v.test\" #7777; 占位 \"v.xxxx\" #7778"
+    record.zentao_push_status = "ok"
+    db_session.commit()
+
+    class _StubClient:
+        def get(self, path):
+            return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}], "PM": {"account": "zhangchao"}}
+
+        def update_build(self, build_id, **kwargs):
+            return {"id": build_id, **kwargs}
+
+    monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
+
+    svc.build_record_reassign_major(db_session, record.id, target_major.id)
+    db_session.refresh(record)
+
+    msg = record.zentao_push_message or ""
+    # 新 message 必须以"切归属 → "开头，且不能包含旧 push log 的痕迹（"重命名为"）
+    assert msg.startswith("切归属 → "), f"message must start fresh, got: {msg}"
+    assert "重命名为" not in msg, f"must NOT carry old push log forward, got: {msg}"
+    assert "s4031定制" in msg
+    assert "#1822" in msg
+    assert "#7777" in msg
+
+
+def test_reassign_publishes_sse_for_live_clients(db_session, monkeypatch):
+    """切归属后端要主动推 SSE，否则其他打开页面的客户端看不到禅道写回卡片的变更。"""
+    from app.models import Version
+    from app.models.enums import VersionType
+    from app.services import zentao_version_diff_service as svc
+    from app.services.build_record_service import BuildRecordService
+    import app.services.sse_service as sse
+
+    target_major = Version(version_no="V4.0.3.1.custom", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1822)
+    source_major = Version(version_no="V4.0.3.1", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1647)
+    db_session.add_all([source_major, target_major])
+    db_session.commit()
+
+    minor = Version(version_no="v.sse", version_type=VersionType.MINOR,
+                    parent_id=source_major.id, software_id=1, zentao_build_id=8888)
+    db_session.add(minor)
+    db_session.commit()
+
+    record, _ = BuildRecordService(db_session).upsert_report(
+        job_name="s4031", build_number="100", build_status="SUCCESS", version_name="v.sse",
+    )
+    record.auto_archive_minor_version_id = minor.id
+    db_session.commit()
+
+    sse_calls = []
+
+    class _StubClient:
+        def get(self, path):
+            return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}], "PM": {"account": "zhangchao"}}
+
+        def update_build(self, build_id, **kwargs):
+            return {"id": build_id}
+
+    monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
+    monkeypatch.setattr(sse, "sse_publish", lambda event, payload, channels=None: sse_calls.append((event, payload, channels)))
+
+    svc.build_record_reassign_major(db_session, record.id, target_major.id)
+
+    events = [c[0] for c in sse_calls]
+    assert "build_record_updated" in events, f"reassign must publish build_record_updated; got {events}"
+
+
 def test_reassign_create_falls_back_to_current_user_when_pm_missing(db_session, monkeypatch):
     """执行的 PM/openedBy 都没解析到时（理论上罕见）必须回退到 /v1/user.profile.account，
     否则 create build 会被禅道挡为 400 "构建者不能为空"。"""

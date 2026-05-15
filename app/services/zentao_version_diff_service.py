@@ -403,6 +403,7 @@ def build_record_reassign_major(
     _refresh_record_zentao_push_after_reassign(
         record=record,
         version_name=version_name,
+        target_major_no=target_major.version_no,
         target_exec_id=target_major.zentao_execution_id,
         target_exec_name=target_exec_name,
         moved_build_id=out["moved_zentao_build_id"],
@@ -412,6 +413,20 @@ def build_record_reassign_major(
 
     db.commit()
     db.refresh(minor)
+    db.refresh(record)
+
+    # 通知 SSE 订阅者：让正打开页面的客户端立即看到"禅道写回"卡片的新位置，
+    # 不用等用户手动刷新
+    try:
+        from app.services.build_record_service import BuildRecordService
+        from app.services.sse_service import sse_publish
+        sse_publish(
+            "build_record_updated",
+            {"item": BuildRecordService.serialize(record), "action": "updated"},
+            channels=["global"],
+        )
+    except Exception as exc:
+        logger.warning("sse_publish after reassign failed: %s", exc)
 
     out["ok"] = True
     parts = [f"已切到大版本 {target_major.version_no}"]
@@ -491,37 +506,51 @@ def _refresh_record_zentao_push_after_reassign(
     *,
     record: BuildRecord,
     version_name: str,
+    target_major_no: str,
     target_exec_id,
     target_exec_name: Optional[str],
     moved_build_id: Optional[int],
     new_build_id: Optional[int],
     errors: list[str],
 ) -> None:
-    """切归属成功后同步刷新 BuildRecord.zentao_push_*，让"禅道写回"那张卡片立即反映新位置。
+    """切归属后**永远**重写 BuildRecord.zentao_push_*，让"禅道写回"那张卡片立即
+    反映新位置。
 
-    设计：
-      - 成功 ⇒ status='ok'，message 是人类可读的"<exec_name> #<id>: build "<name>" #<bid>（已切归属）"
-      - 失败但已落到本地 ⇒ status 不动，message 加一条 errors 说明
+    设计原则：写一段崭新的、能让用户一眼看出新归属的 message —— 不再"在旧
+    message 上 append 注解"，因为那种格式下旧位置信息会主导视觉，用户会以为
+    什么都没变。
+
+    message 形态：
+      "切归属 → <exec_name> #<exec_id>: build \"<version>\" #<bid>"
+      "切归属 → <target_major>（未绑定禅道执行）"
+      失败时再 ` | 部分失败：xxx` 接在末尾
     """
     from app.utils.time_utils import local_now
 
-    if errors:
-        # 禅道侧动作失败 —— 不改 status，但在 message 上加一条注解，方便用户看到出问题了
-        prefix = (record.zentao_push_message or "").strip()
-        note = "切归属：" + "；".join(errors[:2])[:200]
-        record.zentao_push_message = (prefix + " | " + note if prefix else note)[:480]
-        record.zentao_pushed_at = local_now()
-        return
-
-    exec_id_str = str(target_exec_id) if target_exec_id else "?"
-    head = f"{target_exec_name} #{exec_id_str}" if target_exec_name else f"执行 #{exec_id_str}"
-    bid = moved_build_id or new_build_id
-    action = "已切归属" if moved_build_id else ("新建" if new_build_id else "")
-    if bid:
-        msg = f'{head}: build "{version_name}" #{bid}（{action}）'
+    # 头部 —— 优先用执行名+id，没有执行就回落到大版本号
+    if target_exec_name and target_exec_id:
+        head = f"{target_exec_name} #{target_exec_id}"
+    elif target_exec_id:
+        head = f"执行 #{target_exec_id}"
     else:
-        msg = f"{head}: 切归属（无禅道 build 关联）"
-    record.zentao_push_status = "ok"
+        head = target_major_no or "目标大版本"
+
+    bid = moved_build_id or new_build_id
+    if bid:
+        action = "已切归属" if moved_build_id else "新建"
+        body = f'build "{version_name}" #{bid}（{action}）'
+    elif errors:
+        body = "未写入禅道"
+    else:
+        body = "切归属（无禅道 build 关联）"
+
+    msg = f"切归属 → {head}: {body}"
+    if errors:
+        note = "；".join(errors[:2])[:200]
+        msg = f"{msg} | 部分失败：{note}"
+
+    # 状态：禅道侧动作有失败时打 'error' 让卡片用红色标记，没有失败就是 'ok'
+    record.zentao_push_status = "error" if errors and not bid else "ok"
     record.zentao_push_message = msg[:480]
     record.zentao_pushed_at = local_now()
 
