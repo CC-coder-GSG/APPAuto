@@ -372,19 +372,23 @@ class ZentaoClient:
         且什么都不写（哪怕权限 / 字段全部正确）。但 `POST /v1/projects/{project_id}/builds`
         在同一 token 下能正常 201 + 完整 body + 真正落库 —— 在 body 里把 `execution`
         传上就行。所以这里强制走 projects 端点，必须传 project_id。
+
+        date 不传时自动填今天 —— 禅道 IPD 4.3 不传 `date` 会 400 "打包日期不能为空"，
+        所有调用方都得"今天"，没必要让每个调用方各自重复一遍。
         """
         if project_id is None:
             raise ValueError("create_execution_build: project_id is required")
+        from datetime import datetime as _dt
+
         body: dict[str, Any] = {
             "name": name,
             "execution": execution_id,
+            "date": date or _dt.now().strftime("%Y-%m-%d"),
         }
         if product_id is not None:
             body["product"] = product_id
         if builder:
             body["builder"] = builder
-        if date:
-            body["date"] = date
         if desc is not None:
             body["desc"] = desc
         return self.post(f"projects/{project_id}/builds", body)

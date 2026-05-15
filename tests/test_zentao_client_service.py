@@ -85,3 +85,24 @@ def test_create_execution_build_requires_project_id():
     client = ZentaoClient("http://zentao.example/zentao", "token")
     with pytest.raises(ValueError, match="project_id"):
         client.create_execution_build(1647, "x", product_id=15)
+
+
+def test_create_execution_build_defaults_date_to_today():
+    """禅道 IPD 4.3：date 不传 → 400 "打包日期不能为空"。客户端默认填今天，
+    免得每个调用方都得记着传这个字段。"""
+    from datetime import datetime
+    captured = {}
+    client = ZentaoClient("http://zentao.example/zentao", "token")
+
+    def _fake_post(path, body):
+        captured["body"] = body
+        return {"id": 5000, "name": body["name"]}
+
+    client.post = _fake_post  # type: ignore[assignment]
+
+    client.create_execution_build(
+        1647, "build-x",
+        project_id=134, product_id=15, builder="chenwenbo",
+        # date omitted on purpose
+    )
+    assert captured["body"]["date"] == datetime.now().strftime("%Y-%m-%d")
