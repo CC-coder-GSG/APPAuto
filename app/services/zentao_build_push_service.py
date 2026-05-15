@@ -40,6 +40,9 @@ logger = logging.getLogger(__name__)
 class PushExecutionResult:
     execution_id: int
     major_version_no: str
+    execution_name: Optional[str] = None     # 禅道执行的可读名（如 "s4031定制"），格式化消息时用
+    real_build_name: Optional[str] = None    # 此次写入的真实 build 名（= version_name）
+    placeholder_build_name: Optional[str] = None  # 此次补的占位 build 名
     renamed_build_id: Optional[int] = None
     created_build_id: Optional[int] = None
     new_placeholder_build_id: Optional[int] = None
@@ -122,9 +125,9 @@ def push_build_to_zentao(db: Session, record: BuildRecord) -> PushResult:
 
 def _resolve_execution_context(
     client: ZentaoClient, exec_id: int
-) -> tuple[int | None, int | None, str | None]:
+) -> tuple[int | None, int | None, str | None, str | None]:
     """
-    抓一次 execution detail，返回 (project_id, product_id, builder_account)。
+    抓一次 execution detail，返回 (project_id, product_id, builder_account, execution_name)。
 
     - project_id：MUST。`POST /v1/projects/{project_id}/builds` 是禅道 IPD 4.3 下
       实测唯一会真正落库的"创建 build"入口；`/executions/{id}/builds` 是空头允诺
@@ -138,14 +141,15 @@ def _resolve_execution_context(
         detail = client.get(f"executions/{exec_id}")
     except Exception as exc:
         logger.warning("get execution(%s) failed: %s", exec_id, exc)
-        return None, None, None
+        return None, None, None, None
     if not isinstance(detail, dict):
-        return None, None, None
+        return None, None, None, None
     exec_obj = detail.get("execution") if isinstance(detail.get("execution"), dict) else detail
     if not isinstance(exec_obj, dict):
-        return None, None, None
+        return None, None, None, None
 
     project_id = _coerce_int(exec_obj.get("project"))
+    execution_name = exec_obj.get("name") if isinstance(exec_obj.get("name"), str) else None
 
     pid = _extract_first_product_id(exec_obj.get("products"))
     if pid is None:
@@ -167,7 +171,7 @@ def _resolve_execution_context(
         builder = raw_builder.get("account") or raw_builder.get("realname")
     elif isinstance(raw_builder, str):
         builder = raw_builder
-    return project_id, pid, builder
+    return project_id, pid, builder, execution_name
 
 
 def _extract_first_product_id(raw) -> int | None:
@@ -287,8 +291,10 @@ def _push_one_execution(client: ZentaoClient, major: Version, version_name: str)
         result.error = f"读取禅道 build 列表失败：{exc}"
         return result
 
-    # 预取 execution 的 project / product / builder，给所有后续 create 用
-    project_id, product_id, builder = _resolve_execution_context(client, exec_id)
+    # 预取 execution 的 project / product / builder / name，给所有后续 create 用
+    project_id, product_id, builder, exec_name = _resolve_execution_context(client, exec_id)
+    result.execution_name = exec_name
+    result.real_build_name = version_name
 
     # 判重：禅道里如果已经有同名 build，跳过 rename/create，但仍尝试补一个占位
     for b in builds:
@@ -334,6 +340,7 @@ def _push_one_execution(client: ZentaoClient, major: Version, version_name: str)
                 result.error = (existing + "；" if existing else "") + f"补占位 build 失败：{err}"
             else:
                 result.new_placeholder_build_id = new_id
+                result.placeholder_build_name = new_name
                 refreshed_placeholder = new_name
 
     if refreshed_placeholder:
@@ -354,26 +361,53 @@ def _coerce_int(value) -> Optional[int]:
 
 
 def apply_push_result_to_record(record: BuildRecord, push: PushResult) -> None:
-    """把 PushResult 序列化到 BuildRecord.zentao_push_* 三列。调用方负责 commit。"""
+    """把 PushResult 序列化到 BuildRecord.zentao_push_* 三列。调用方负责 commit。
+
+    展示格式（用户视角，可读为主）：
+      s4031 #1647: build "4.0.3.1.260513_Gnss7(40301050)" #4585（重命名）;
+        占位 "4.0.3.1.26xxxx(4030xxxx)" #4587
+      | s4031定制 #1822: ...
+    """
     record.zentao_push_status = push.status
-    msg = (push.message or "")[:480]
     if push.executions:
-        details = []
-        for e in push.executions:
-            parts = [f"exec={e.execution_id}"]
-            if e.renamed_build_id:
-                parts.append(f"renamed={e.renamed_build_id}")
-            if e.created_build_id and not e.renamed_build_id:
-                parts.append(f"created={e.created_build_id}")
-            if e.new_placeholder_build_id:
-                parts.append(f"placeholder={e.new_placeholder_build_id}")
-            if e.error:
-                parts.append(f"err={e.error[:80]}")
-            details.append(" ".join(parts))
-        joined = "|".join(details)
-        msg = (msg + " | " + joined)[:480] if msg else joined[:480]
-    record.zentao_push_message = msg
+        msg = _format_push_executions(push.executions)
+        # 兜底：执行细节里没成功 build，再退到原 push.message（多是 'not_success' 这类）
+        if not msg:
+            msg = push.message or ""
+    else:
+        msg = push.message or ""
+    record.zentao_push_message = (msg or "")[:480]
     record.zentao_pushed_at = local_now()
+
+
+def _format_push_executions(items: list[PushExecutionResult]) -> str:
+    blocks: list[str] = []
+    for e in items:
+        head = e.execution_name or f"执行 {e.execution_id}"
+        head = f"{head} #{e.execution_id}"
+
+        actions: list[str] = []
+        if e.renamed_build_id and e.real_build_name:
+            actions.append(f'重命名为 "{e.real_build_name}" #{e.renamed_build_id}')
+        elif e.renamed_build_id:
+            actions.append(f"重命名 #{e.renamed_build_id}")
+        if e.created_build_id and not e.renamed_build_id:
+            if e.real_build_name:
+                actions.append(f'新建 "{e.real_build_name}" #{e.created_build_id}')
+            else:
+                actions.append(f"新建 #{e.created_build_id}")
+        if e.new_placeholder_build_id and e.placeholder_build_name:
+            actions.append(f'占位 "{e.placeholder_build_name}" #{e.new_placeholder_build_id}')
+        elif e.new_placeholder_build_id:
+            actions.append(f"占位 #{e.new_placeholder_build_id}")
+        if e.error:
+            actions.append(f"失败：{e.error[:120]}")
+
+        if actions:
+            blocks.append(f"{head}: {'; '.join(actions)}")
+        else:
+            blocks.append(head)
+    return " | ".join(blocks)
 
 
 __all__ = [

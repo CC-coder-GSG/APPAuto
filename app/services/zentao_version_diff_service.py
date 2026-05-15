@@ -334,10 +334,12 @@ def build_record_reassign_major(
     if not target_major:
         out["errors"].append("目标大版本不存在")
         return out
-    if target_major.id == minor.parent_id:
-        out["errors"].append("目标大版本就是当前大版本，无需切换")
-        return out
 
+    # 旧版本会在 target_major.id == minor.parent_id 时 hard-fail "已经在该大版本"。
+    # 但本地 parent_id 跟禅道 build 真实归属可能脱节（早期 reassign 失败留下的状态），
+    # 这种情况用户点"切到 X"恰恰是想做一次"对齐到 X"的修复。所以这里不再 early-return，
+    # 不管 local 怎么说都跑一遍禅道侧搬迁逻辑：update_build 把 build 拽到 target_exec，
+    # 如果 build 本来就在那儿，update_build 实际上是 no-op，依然安全。
     old_major = db.query(Version).filter(Version.id == minor.parent_id).first()
     old_zentao_build_id = minor.zentao_build_id
     version_name = minor.version_no
@@ -345,12 +347,17 @@ def build_record_reassign_major(
 
     # ── 禅道侧操作 ──
     client = get_system_zentao_client(db)
+    target_exec_name: Optional[str] = None
     if not client:
         out["errors"].append("找不到可用的禅道账号绑定，仅修改本地归属")
     elif not target_major.zentao_execution_id:
         out["errors"].append("目标大版本未绑定禅道执行，仅修改本地归属")
     else:
         target_exec_id = int(target_major.zentao_execution_id)
+        # 拿目标执行的 name / project / product，三处都要用到
+        target_exec_name, target_project_id, target_product_id = _resolve_target_exec_meta(
+            client, target_exec_id
+        )
         if old_zentao_build_id:
             # 已经有 build —— 走 PUT 移动，最干净（无重复、stories/bugs 跟着走）
             try:
@@ -367,8 +374,7 @@ def build_record_reassign_major(
         else:
             # 没绑过禅道 build —— 在目标执行下新建一条
             try:
-                project_id, product_id = _resolve_target_exec_project_product(client, target_exec_id)
-                if not project_id:
+                if not target_project_id:
                     out["errors"].append(
                         f"无法解析目标执行 {target_exec_id} 的 project_id，跳过在目标执行新建 build"
                     )
@@ -376,8 +382,8 @@ def build_record_reassign_major(
                     created = client.create_execution_build(
                         target_exec_id,
                         version_name,
-                        project_id=project_id,
-                        product_id=product_id,
+                        project_id=target_project_id,
+                        product_id=target_product_id,
                     ) or {}
                     new_bid = _coerce_int(created.get("id"))
                     if new_bid:
@@ -391,6 +397,18 @@ def build_record_reassign_major(
     # ── 本地切归属 ──
     minor.parent_id = target_major.id
     minor.software_id = target_major.software_id
+
+    # ── 写回到 BuildRecord.zentao_push_*，让"禅道写回"卡片立即反映新位置 ──
+    _refresh_record_zentao_push_after_reassign(
+        record=record,
+        version_name=version_name,
+        target_exec_id=target_major.zentao_execution_id,
+        target_exec_name=target_exec_name,
+        moved_build_id=out["moved_zentao_build_id"],
+        new_build_id=out["new_zentao_build_id"],
+        errors=out["errors"],
+    )
+
     db.commit()
     db.refresh(minor)
 
@@ -399,9 +417,11 @@ def build_record_reassign_major(
     if old_major:
         parts.insert(0, f"原大版本 {old_major.version_no}")
     if out["moved_zentao_build_id"]:
-        parts.append(f"禅道 build id={out['moved_zentao_build_id']} 已移到目标执行")
+        head = f"{target_exec_name} #{target_major.zentao_execution_id}" if target_exec_name else f"执行 #{target_major.zentao_execution_id}"
+        parts.append(f"禅道 build #{out['moved_zentao_build_id']} 已移到 {head}")
     elif out["new_zentao_build_id"]:
-        parts.append(f"禅道新建 build id={out['new_zentao_build_id']}")
+        head = f"{target_exec_name} #{target_major.zentao_execution_id}" if target_exec_name else f"执行 #{target_major.zentao_execution_id}"
+        parts.append(f"在 {head} 新建 build #{out['new_zentao_build_id']}")
     out["message"] = "；".join(parts)
     return out
 
@@ -413,21 +433,25 @@ def _coerce_int(value) -> Optional[int]:
         return None
 
 
-def _resolve_target_exec_project_product(client, exec_id: int) -> tuple[Optional[int], Optional[int]]:
-    """读一次执行 detail，取 (project_id, product_id)。两者都拿不到时返回 (None, None)。
+def _resolve_target_exec_meta(
+    client, exec_id: int
+) -> tuple[Optional[str], Optional[int], Optional[int]]:
+    """读一次执行 detail，取 (execution_name, project_id, product_id)。
 
-    禅道 IPD 4.3 GET /v1/executions/{id} 用的字段是 `project`(标量) + `products`(列表)。
+    禅道 IPD 4.3 GET /v1/executions/{id} 字段：`name`、`project`(标量) + `products`(列表)。
+    解析失败的字段返回 None；调用方自己判断够不够用。
     """
     try:
         detail = client.get(f"executions/{exec_id}")
     except Exception as exc:
         logger.warning("resolve target execution(%s) detail failed: %s", exec_id, exc)
-        return None, None
+        return None, None, None
     if not isinstance(detail, dict):
-        return None, None
+        return None, None, None
     exec_obj = detail.get("execution") if isinstance(detail.get("execution"), dict) else detail
     if not isinstance(exec_obj, dict):
-        return None, None
+        return None, None, None
+    exec_name = exec_obj.get("name") if isinstance(exec_obj.get("name"), str) else None
     project_id = _coerce_int(exec_obj.get("project"))
     product_id = None
     products = exec_obj.get("products")
@@ -439,7 +463,46 @@ def _resolve_target_exec_project_product(client, exec_id: int) -> tuple[Optional
                     break
     if product_id is None:
         product_id = _coerce_int(exec_obj.get("product"))
-    return project_id, product_id
+    return exec_name, project_id, product_id
+
+
+def _refresh_record_zentao_push_after_reassign(
+    *,
+    record: BuildRecord,
+    version_name: str,
+    target_exec_id,
+    target_exec_name: Optional[str],
+    moved_build_id: Optional[int],
+    new_build_id: Optional[int],
+    errors: list[str],
+) -> None:
+    """切归属成功后同步刷新 BuildRecord.zentao_push_*，让"禅道写回"那张卡片立即反映新位置。
+
+    设计：
+      - 成功 ⇒ status='ok'，message 是人类可读的"<exec_name> #<id>: build "<name>" #<bid>（已切归属）"
+      - 失败但已落到本地 ⇒ status 不动，message 加一条 errors 说明
+    """
+    from app.utils.time_utils import local_now
+
+    if errors:
+        # 禅道侧动作失败 —— 不改 status，但在 message 上加一条注解，方便用户看到出问题了
+        prefix = (record.zentao_push_message or "").strip()
+        note = "切归属：" + "；".join(errors[:2])[:200]
+        record.zentao_push_message = (prefix + " | " + note if prefix else note)[:480]
+        record.zentao_pushed_at = local_now()
+        return
+
+    exec_id_str = str(target_exec_id) if target_exec_id else "?"
+    head = f"{target_exec_name} #{exec_id_str}" if target_exec_name else f"执行 #{exec_id_str}"
+    bid = moved_build_id or new_build_id
+    action = "已切归属" if moved_build_id else ("新建" if new_build_id else "")
+    if bid:
+        msg = f'{head}: build "{version_name}" #{bid}（{action}）'
+    else:
+        msg = f"{head}: 切归属（无禅道 build 关联）"
+    record.zentao_push_status = "ok"
+    record.zentao_push_message = msg[:480]
+    record.zentao_pushed_at = local_now()
 
 
 __all__ = [

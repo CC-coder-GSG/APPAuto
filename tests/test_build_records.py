@@ -148,6 +148,10 @@ def test_reassign_major_moves_zentao_build_via_put(db_session, monkeypatch):
     calls = []
 
     class _StubClient:
+        def get(self, path):
+            calls.append(("get", path))
+            return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}]}
+
         def update_build(self, build_id, **kwargs):
             calls.append(("update_build", build_id, kwargs))
             return {"id": build_id, **kwargs}
@@ -173,6 +177,16 @@ def test_reassign_major_moves_zentao_build_via_put(db_session, monkeypatch):
     db_session.refresh(minor)
     assert minor.parent_id == target_major.id
     assert minor.zentao_build_id == 4591  # same build, just moved
+
+    # 切归属成功后，"禅道写回"卡片要立刻反映新位置：execution 名 + build 名 + build #id
+    db_session.refresh(record)
+    assert record.zentao_push_status == "ok"
+    assert "s4031定制" in (record.zentao_push_message or "")
+    assert "#1822" in (record.zentao_push_message or "")
+    assert "#4591" in (record.zentao_push_message or "")
+    assert "4.0.3.1.260514(40301051)" in (record.zentao_push_message or "")
+    assert "切归属" in (record.zentao_push_message or "")
+    assert record.zentao_pushed_at is not None
 
 
 def test_reassign_major_creates_when_no_existing_build(db_session, monkeypatch):
@@ -205,7 +219,7 @@ def test_reassign_major_creates_when_no_existing_build(db_session, monkeypatch):
     class _StubClient:
         def get(self, path):
             assert path == "executions/1822"
-            return {"id": 1822, "project": 134, "products": [{"id": 15}]}
+            return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}]}
 
         def update_build(self, *args, **kwargs):
             raise AssertionError("no existing build → should NOT call update_build")
@@ -225,6 +239,107 @@ def test_reassign_major_creates_when_no_existing_build(db_session, monkeypatch):
 
     db_session.refresh(minor)
     assert minor.zentao_build_id == 9001
+
+
+def test_reassign_major_does_not_early_error_when_local_parent_matches_target(db_session, monkeypatch):
+    """旧逻辑：local minor.parent_id == target_major.id → hard fail "已经在该大版本"。
+    新逻辑：local 状态可能跟禅道脱节（早期 reassign 失败留下来的），用户重复点击
+    "切到 X" 恰恰是想 reconcile —— 不能 early-return，必须再跑一遍禅道侧动作。"""
+    from app.models import Version
+    from app.models.enums import VersionType
+    from app.services import zentao_version_diff_service as svc
+    from app.services.build_record_service import BuildRecordService
+
+    target_major = Version(version_no="V4.0.3.1.custom", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1822)
+    db_session.add(target_major)
+    db_session.commit()
+
+    # minor.parent_id 已经指向 target —— 用户重复点 "切到 target"，老逻辑会拒绝
+    minor = Version(version_no="4.0.3.1.260513_Gnss7(40301050)", version_type=VersionType.MINOR,
+                    parent_id=target_major.id, software_id=1,
+                    zentao_build_id=5001)
+    db_session.add(minor)
+    db_session.commit()
+
+    record, _ = BuildRecordService(db_session).upsert_report(
+        job_name="s4031", build_number="50", build_status="SUCCESS",
+        version_name="4.0.3.1.260513_Gnss7(40301050)",
+    )
+    record.auto_archive_minor_version_id = minor.id
+    db_session.commit()
+
+    update_calls = []
+
+    class _StubClient:
+        def get(self, path):
+            return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}]}
+
+        def update_build(self, build_id, **kwargs):
+            update_calls.append((build_id, kwargs))
+            return {"id": build_id, **kwargs}
+
+    monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
+
+    out = svc.build_record_reassign_major(db_session, record.id, target_major.id)
+
+    # 不再 "目标大版本就是当前大版本，无需切换"；走完一整轮禅道侧 PUT
+    assert out["ok"] is True
+    assert out["moved_zentao_build_id"] == 5001
+    assert update_calls == [(5001, {"execution_id": 1822})]
+
+
+def test_zentao_push_message_shows_execution_and_build_names(db_session, monkeypatch):
+    """禅道写回卡片不能只显示 'exec=1647 renamed=4585'。
+    要把执行名（'s4031'）和 build 名（version_name）都摆出来才便于查看。"""
+    from app.models import Version
+    from app.models.enums import VersionType
+    from app.services.build_record_service import BuildRecordService
+    from app.services import zentao_build_push_service as svc
+
+    major = Version(version_no="V4.0.3.1", version_type=VersionType.MAJOR,
+                    software_id=1, zentao_execution_id=1647)
+    db_session.add(major)
+    db_session.commit()
+
+    record, _ = BuildRecordService(db_session).upsert_report(
+        job_name="s4031", build_number="50", build_status="SUCCESS",
+        version_name="4.0.3.1.260513_Gnss7(40301050)",
+    )
+
+    class _StubClient:
+        def list_execution_builds(self, exec_id, **kwargs):
+            # 一个占位 build 等着被重命名
+            return [{"id": 4500, "name": "4.0.3.1.26xxxx(4030xxxx)"}]
+
+        def get(self, path):
+            return {"id": 1647, "name": "s4031", "project": 134, "products": [{"id": 15}]}
+
+        def update_build(self, build_id, **kwargs):
+            return {"id": build_id, **kwargs}
+
+        def create_execution_build(self, exec_id, name, **kwargs):
+            # 占位补建
+            return {"id": 4502, "name": name}
+
+        def list_projects(self, **kwargs):
+            return []
+
+    monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
+
+    push = svc.push_build_to_zentao(db_session, record)
+    svc.apply_push_result_to_record(record, push)
+
+    msg = record.zentao_push_message or ""
+    assert "s4031" in msg                                # execution 名
+    assert "#1647" in msg                                # execution id
+    assert "4.0.3.1.260513_Gnss7(40301050)" in msg       # real build 名
+    assert "#4500" in msg                                # renamed build id
+    assert "4.0.3.1.26xxxx(4030xxxx)" in msg             # 占位 build 名
+    assert "#4502" in msg                                # 占位 build id
+    # 不再用 'exec=' / 'renamed=' / 'placeholder=' 这种代号
+    assert "exec=" not in msg
+    assert "renamed=" not in msg
 
 
 def test_get_major_log_aggregates_change_logs_in_created_order(db_session):
