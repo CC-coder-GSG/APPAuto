@@ -373,43 +373,76 @@ def build_record_reassign_major(
                     old_zentao_build_id, target_exec_id, exc,
                 )
                 out["errors"].append(f"移动原 build 到目标执行失败：{exc}")
+
+            # 收尾：扫一下项目里 normalize 后同名的 build（包括 (64-bit) 变体），
+            # 把不在 target_exec 的全部 PUT 过去 —— 用户明确要"源不留 build"
+            if target_project_id and out["moved_zentao_build_id"]:
+                _move_orphans_to_target(
+                    client,
+                    project_id=target_project_id,
+                    version_name=version_name,
+                    target_exec_id=target_exec_id,
+                    skip_ids={int(old_zentao_build_id)},
+                    errors=out["errors"],
+                )
         else:
             # 本地 minor 没记录 zentao_build_id —— 不一定真的没建过 build。常见原因：
             # push 时只更新了 BuildRecord，没回填 minor.zentao_build_id。所以这里先
-            # 在项目维度按 name 找一遍：
-            #   - 找到 + 已经在 target_exec ⇒ 视作成功，把 id 写回本地
-            #   - 找到 + 在别的 exec ⇒ PUT 移过去
-            #   - 没找到 ⇒ 才真的去 create
-            # 这条分支必须有，否则禅道返回 400 "名称编号已经有 xxx 这条记录了"。
+            # 在项目维度按归一化 name 找一遍：
+            #   - 找到 + 已经在 target_exec ⇒ adopt（写回本地，不动禅道）
+            #   - 找到 + 在别的 exec ⇒ PUT 移到 target
+            #   - 找到多条（既有 target 的也有源的孤儿）⇒ adopt target 的那条，
+            #     把所有源孤儿都 PUT 到 target，让源不再留有 build
+            #   - 一条都没找到 ⇒ 才真的去 create
+            # 没这条分支会撞禅道 400 "名称编号已经有 xxx 这条记录了"。
             try:
                 if not target_project_id:
                     out["errors"].append(
                         f"无法解析目标执行 {target_exec_id} 的 project_id，跳过在目标执行新建 build"
                     )
                 else:
-                    existing = _find_build_by_name_in_project(client, target_project_id, version_name)
-                    if existing:
-                        existing_id = _coerce_int(existing.get("id"))
-                        existing_exec = _coerce_int(existing.get("execution"))
-                        if existing_exec == target_exec_id:
-                            # 已经在目标执行下 —— 直接收编，不用动禅道
-                            minor.zentao_build_id = existing_id
+                    matches = _find_builds_by_name_in_project(client, target_project_id, version_name)
+                    if matches:
+                        # 拆出 target 内 vs 其他 exec 的孤儿
+                        in_target = [m for m in matches if _coerce_int(m.get("execution")) == target_exec_id]
+                        orphans = [m for m in matches if _coerce_int(m.get("execution")) != target_exec_id]
+                        # adopt：优先用 target 内已有的；没有就把第一个孤儿 PUT 过去后 adopt
+                        adopt_id: Optional[int] = None
+                        if in_target:
+                            adopt_id = _coerce_int(in_target[0].get("id"))
+                            minor.zentao_build_id = adopt_id
                             minor.zentao_build_name_cache = version_name
-                            out["moved_zentao_build_id"] = existing_id
-                        else:
-                            # 在别的执行下 —— PUT 移到 target
+                            out["moved_zentao_build_id"] = adopt_id
+                        elif orphans:
+                            first_orphan = orphans.pop(0)
+                            orphan_id = _coerce_int(first_orphan.get("id"))
                             try:
-                                client.update_build(existing_id, execution_id=target_exec_id)
-                                minor.zentao_build_id = existing_id
+                                client.update_build(orphan_id, execution_id=target_exec_id)
+                                adopt_id = orphan_id
+                                minor.zentao_build_id = adopt_id
                                 minor.zentao_build_name_cache = version_name
-                                out["moved_zentao_build_id"] = existing_id
+                                out["moved_zentao_build_id"] = adopt_id
                             except Exception as exc:
                                 logger.warning(
                                     "move existing build %s (was exec %s) to %s failed: %s",
-                                    existing_id, existing_exec, target_exec_id, exc,
+                                    orphan_id, first_orphan.get("execution"), target_exec_id, exc,
                                 )
                                 out["errors"].append(
-                                    f"找到同名 build #{existing_id}（在执行 {existing_exec}），移到目标执行失败：{exc}"
+                                    f"找到同名 build #{orphan_id}（在执行 {first_orphan.get('execution')}），移到目标执行失败：{exc}"
+                                )
+                        # 把剩余孤儿也都 PUT 到 target —— 用户明确要"源执行不留 build"
+                        for orphan in orphans:
+                            orphan_id = _coerce_int(orphan.get("id"))
+                            orphan_exec = orphan.get("execution")
+                            try:
+                                client.update_build(orphan_id, execution_id=target_exec_id)
+                            except Exception as exc:
+                                logger.warning(
+                                    "move orphan build %s (was exec %s) to %s failed: %s",
+                                    orphan_id, orphan_exec, target_exec_id, exc,
+                                )
+                                out["errors"].append(
+                                    f"清理源执行 {orphan_exec} 的孤儿 build #{orphan_id} 失败：{exc}"
                                 )
                     else:
                         created = client.create_execution_build(
@@ -596,25 +629,76 @@ def _disambiguate_placeholder(canonical: str, exec_id: int) -> str:
     return f"{canonical}_e{exec_id}"
 
 
-def _find_build_by_name_in_project(client, project_id: int, name: str) -> Optional[dict]:
-    """在项目维度（跨所有 execution）按 name 精确找 build。
+def _move_orphans_to_target(
+    client,
+    *,
+    project_id: int,
+    version_name: str,
+    target_exec_id: int,
+    skip_ids: set,
+    errors: list[str],
+) -> None:
+    """扫项目里 normalize 后同名的 build，把不在 target_exec 的全部 PUT 过去。
+
+    用于 reassign 收尾 —— 用户期望"切归属后源执行不再有这个 build"。但禅道 API
+    不允许 DELETE（403），所以唯一让源 exec 失去 build 的办法就是 PUT 把
+    execution 字段改成 target。命中的 build 即使在 target 已经存在同名变体
+    （比如 (64-bit) vs 无 (64-bit)），也仍然是 project 内唯一 name 的两条记录，
+    PUT 不会冲突。
+
+    skip_ids：跳过的 build id 集合（通常是已经 adopt 的那条，避免对自己再 PUT）。
+    """
+    try:
+        matches = _find_builds_by_name_in_project(client, project_id, version_name)
+    except Exception as exc:
+        logger.warning("find orphans for '%s' failed: %s", version_name, exc)
+        return
+    for row in matches:
+        rid = _coerce_int(row.get("id"))
+        if not rid or rid in skip_ids:
+            continue
+        if _coerce_int(row.get("execution")) == target_exec_id:
+            continue
+        try:
+            client.update_build(rid, execution_id=target_exec_id)
+            logger.info(
+                "move orphan build #%s (was exec %s) → target exec %s",
+                rid, row.get("execution"), target_exec_id,
+            )
+        except Exception as exc:
+            logger.warning("move orphan build #%s → %s failed: %s", rid, target_exec_id, exc)
+            errors.append(
+                f"清理源执行 {row.get('execution')} 的孤儿 build #{rid} 失败：{exc}"
+            )
+
+
+def _find_builds_by_name_in_project(client, project_id: int, name: str) -> list[dict]:
+    """在项目维度（跨所有 execution）按归一化 name 找 build，返回所有匹配。
 
     禅道 v1 没有 "GET /v1/builds?name=..." 这种全局搜索，但 GET /v1/projects/{id}/builds
-    返回的每条 row 已经带 execution 字段。找到 → 调用方可以"收编（同 exec）/
-    PUT 移动（异 exec）"二选一，不用真的 POST 出去撞 unique-name 约束。
+    返回的每条 row 已经带 execution 字段。
+
+    归一化对比：本地 minor.version_no 是 normalize_version_name 处理过的（剥掉
+    (64-bit) / (32-bit) 平台后缀），但禅道 build name 经常保留原样。所以这里
+    在比较前两边都跑一次 normalize_version_name 让 `...40301053)` 能匹到
+    `...40301053)(64-bit)`，不至于落到 create 分支撞 unique-name。
+
+    返回所有匹配 —— 调用方可以"adopt（同 exec）+ PUT-move（异 exec 的孤儿）"。
     """
-    target = (name or "").strip()
+    target = normalize_version_name((name or "").strip()).strip()
     if not target:
-        return None
+        return []
     try:
         rows = client.list_project_builds(project_id, limit=500) or []
     except Exception as exc:
         logger.warning("list_project_builds(%s) failed: %s", project_id, exc)
-        return None
+        return []
+    out: list[dict] = []
     for row in rows:
-        if str(row.get("name") or "").strip() == target:
-            return row
-    return None
+        row_norm = normalize_version_name(str(row.get("name") or "").strip()).strip()
+        if row_norm == target:
+            out.append(row)
+    return out
 
 
 def _resolve_target_exec_meta(
@@ -716,7 +800,9 @@ def _refresh_record_zentao_push_after_reassign(
 
     msg = f"切归属 → {head}: {body}"
     if placeholder_build_id and placeholder_name:
-        msg = f'{msg}; 占位 "{placeholder_name}" #{placeholder_build_id}'
+        # 注意：这条占位可能是这次新建的，也可能是之前 reassign 留下来的；不管哪种
+        # 都是 target_exec 当前"有效"的占位，未来 push 来了就 rename 它
+        msg = f'{msg}; 占位（就绪）"{placeholder_name}" #{placeholder_build_id}'
     if errors:
         note = "；".join(errors[:2])[:200]
         msg = f"{msg} | 部分失败：{note}"

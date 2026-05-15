@@ -559,6 +559,124 @@ def test_reassign_creates_placeholder_in_target_with_disambiguator_on_collision(
     assert "#5500" in (record.zentao_push_message or "")
 
 
+def test_reassign_matches_64bit_variant_name_via_normalized_lookup(db_session, monkeypatch):
+    """禅道 build name 经常保留 (64-bit) 后缀，本地 minor.version_no 经过
+    normalize_version_name 把 (64-bit) 剥掉了。Lookup 必须两边都 normalize
+    再比对，否则就会"匹不到 → 落 create → 撞 unique-name 或创出重复"。"""
+    from app.models import Version
+    from app.models.enums import VersionType
+    from app.services import zentao_version_diff_service as svc
+    from app.services.build_record_service import BuildRecordService
+
+    source_major = Version(version_no="V4.0.3.1", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1647)
+    target_major = Version(version_no="V4.0.3.1.custom", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1822)
+    db_session.add_all([source_major, target_major])
+    db_session.commit()
+
+    # 本地 minor name 不带 (64-bit)
+    minor = Version(version_no="4.0.3.1.260515_Gnss7(40301053)", version_type=VersionType.MINOR,
+                    parent_id=source_major.id, software_id=1, zentao_build_id=None)
+    db_session.add(minor)
+    db_session.commit()
+
+    record, _ = BuildRecordService(db_session).upsert_report(
+        job_name="s4031", build_number="53", build_status="SUCCESS",
+        version_name="4.0.3.1.260515_Gnss7(40301053)(64-bit)",
+    )
+    record.auto_archive_minor_version_id = minor.id
+    db_session.commit()
+
+    put_calls = []
+
+    class _StubClient:
+        def get(self, path):
+            return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}], "PM": {"account": "zhangchao"}}
+
+        def list_project_builds(self, project_id, limit=500):
+            # 禅道里 build 带 (64-bit) 后缀，跟 minor.version_no 不字面相等
+            return [{"id": 4596, "name": "4.0.3.1.260515_Gnss7(40301053)(64-bit)", "execution": 1647}]
+
+        def list_execution_builds(self, exec_id, limit=500):
+            return [{"id": 4602, "name": "v.xxxx"}]  # target 已有占位
+
+        def update_build(self, build_id, **kwargs):
+            put_calls.append((build_id, kwargs))
+            return {"id": build_id, **kwargs}
+
+        def create_execution_build(self, *args, **kwargs):
+            raise AssertionError("normalize-tolerant lookup 应该匹到 (64-bit) 变体，不该落 create")
+
+    monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
+
+    out = svc.build_record_reassign_major(db_session, record.id, target_major.id)
+
+    assert out["ok"] is True
+    assert out["moved_zentao_build_id"] == 4596
+    # 走 PUT-move 把 (64-bit) 那条搬到 target，source 不再留 build
+    assert put_calls == [(4596, {"execution_id": 1822})]
+
+
+def test_reassign_cleans_up_source_orphan_when_local_id_already_in_target(db_session, monkeypatch):
+    """本地 minor.zentao_build_id 已经指向 target 内的 build（之前 reassign 留下来的），
+    但源 exec 里还有一条 normalize 后同名的孤儿 —— 用户再点一次 reassign 要把
+    这条孤儿 PUT 到 target 让源 exec 不留 build。"""
+    from app.models import Version
+    from app.models.enums import VersionType
+    from app.services import zentao_version_diff_service as svc
+    from app.services.build_record_service import BuildRecordService
+
+    source_major = Version(version_no="V4.0.3.1", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1647)
+    target_major = Version(version_no="V4.0.3.1.custom", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1822)
+    db_session.add_all([source_major, target_major])
+    db_session.commit()
+
+    # local 已经被绑到 #4608（target 内的那条），但 1647 里还有孤儿 #4596
+    minor = Version(version_no="4.0.3.1.260515_Gnss7(40301053)", version_type=VersionType.MINOR,
+                    parent_id=source_major.id, software_id=1, zentao_build_id=4608)
+    db_session.add(minor)
+    db_session.commit()
+
+    record, _ = BuildRecordService(db_session).upsert_report(
+        job_name="s4031", build_number="53", build_status="SUCCESS",
+        version_name="4.0.3.1.260515_Gnss7(40301053)(64-bit)",
+    )
+    record.auto_archive_minor_version_id = minor.id
+    db_session.commit()
+
+    put_calls = []
+
+    class _StubClient:
+        def get(self, path):
+            return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}], "PM": {"account": "zhangchao"}}
+
+        def list_project_builds(self, project_id, limit=500):
+            return [
+                {"id": 4596, "name": "4.0.3.1.260515_Gnss7(40301053)(64-bit)", "execution": 1647},
+                {"id": 4608, "name": "4.0.3.1.260515_Gnss7(40301053)", "execution": 1822},
+            ]
+
+        def list_execution_builds(self, exec_id, limit=500):
+            return [{"id": 4602, "name": "v.xxxx"}]
+
+        def update_build(self, build_id, **kwargs):
+            put_calls.append((build_id, kwargs))
+            return {"id": build_id, **kwargs}
+
+    monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
+
+    svc.build_record_reassign_major(db_session, record.id, target_major.id)
+
+    # 关键：源 exec 的孤儿 #4596 必须被 PUT 到 target_exec，让源不再留 build
+    moved_to_target = [c for c in put_calls if c[1].get("execution_id") == 1822]
+    moved_ids = {c[0] for c in moved_to_target}
+    assert 4596 in moved_ids, f"orphan #4596 should be moved; put_calls={put_calls}"
+    # #4608 已在 target；可以再 PUT 一次（无害 no-op），但绝对不能在源 exec 留 #4596
+
+
 def test_reassign_skips_placeholder_create_when_target_exec_already_has_one(db_session, monkeypatch):
     """如果 target_exec 已经有占位（任意含 'xxxx' 的 build），就不应该再调
     create_execution_build —— 否则可能撞 unique 也浪费一次 RTT。"""
