@@ -171,6 +171,16 @@ def _resolve_execution_context(
         builder = raw_builder.get("account") or raw_builder.get("realname")
     elif isinstance(raw_builder, str):
         builder = raw_builder
+    # 兜底：PM/openedBy 都拿不到 ⇒ 用 token 对应的账号（/v1/user.profile.account），
+    # 否则 create build 会被禅道挡为 400 "构建者不能为空"。
+    if not builder:
+        try:
+            me = client.get("user")
+            profile = me.get("profile") if isinstance(me, dict) else None
+            if isinstance(profile, dict):
+                builder = profile.get("account") or profile.get("realname")
+        except Exception as exc:
+            logger.warning("fallback resolve current user account (exec=%s) failed: %s", exec_id, exc)
     return project_id, pid, builder, execution_name
 
 

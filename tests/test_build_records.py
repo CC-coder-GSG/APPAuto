@@ -219,7 +219,12 @@ def test_reassign_major_creates_when_no_existing_build(db_session, monkeypatch):
     class _StubClient:
         def get(self, path):
             assert path == "executions/1822"
-            return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}]}
+            # 同时给上 PM —— 反映真实禅道返回，并要求 reassign 把它读为 builder
+            return {
+                "id": 1822, "name": "s4031定制",
+                "project": 134, "products": [{"id": 15}],
+                "PM": {"account": "zhangchao", "realname": "张超"},
+            }
 
         def update_build(self, *args, **kwargs):
             raise AssertionError("no existing build → should NOT call update_build")
@@ -227,6 +232,9 @@ def test_reassign_major_creates_when_no_existing_build(db_session, monkeypatch):
         def create_execution_build(self, exec_id, name, **kwargs):
             assert exec_id == 1822
             assert kwargs.get("project_id") == 134
+            # 关键回归：禅道 POST 不带 builder 会 400 "构建者不能为空"
+            assert kwargs.get("builder"), "reassign create must pass a non-empty builder"
+            assert kwargs.get("builder") == "zhangchao"
             return {"id": 9001, "name": name}
 
     monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
@@ -239,6 +247,52 @@ def test_reassign_major_creates_when_no_existing_build(db_session, monkeypatch):
 
     db_session.refresh(minor)
     assert minor.zentao_build_id == 9001
+
+
+def test_reassign_create_falls_back_to_current_user_when_pm_missing(db_session, monkeypatch):
+    """执行的 PM/openedBy 都没解析到时（理论上罕见）必须回退到 /v1/user.profile.account，
+    否则 create build 会被禅道挡为 400 "构建者不能为空"。"""
+    from app.models import Version
+    from app.models.enums import VersionType
+    from app.services import zentao_version_diff_service as svc
+    from app.services.build_record_service import BuildRecordService
+
+    source_major = Version(version_no="V4.0.3.1", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1647)
+    target_major = Version(version_no="V4.0.3.20", version_type=VersionType.MAJOR,
+                           software_id=1, zentao_execution_id=1822)
+    db_session.add_all([source_major, target_major])
+    db_session.commit()
+
+    minor = Version(version_no="v.x", version_type=VersionType.MINOR,
+                    parent_id=source_major.id, software_id=1, zentao_build_id=None)
+    db_session.add(minor)
+    db_session.commit()
+
+    record, _ = BuildRecordService(db_session).upsert_report(
+        job_name="s4031", build_number="53", build_status="SUCCESS", version_name="v.x",
+    )
+    record.auto_archive_minor_version_id = minor.id
+    db_session.commit()
+
+    class _StubClient:
+        def get(self, path):
+            if path == "executions/1822":
+                # PM / openedBy 都缺
+                return {"id": 1822, "name": "s4031定制", "project": 134, "products": [{"id": 15}]}
+            if path == "user":
+                return {"profile": {"account": "chenwenbo", "realname": "陈文博"}}
+            raise AssertionError(f"unexpected get path: {path}")
+
+        def create_execution_build(self, exec_id, name, **kwargs):
+            assert kwargs.get("builder") == "chenwenbo"
+            return {"id": 9100, "name": name}
+
+    monkeypatch.setattr(svc, "get_system_zentao_client", lambda db: _StubClient())
+
+    out = svc.build_record_reassign_major(db_session, record.id, target_major.id)
+    assert out["ok"] is True
+    assert out["new_zentao_build_id"] == 9100
 
 
 def test_reassign_major_does_not_early_error_when_local_parent_matches_target(db_session, monkeypatch):

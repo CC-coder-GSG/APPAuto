@@ -354,8 +354,8 @@ def build_record_reassign_major(
         out["errors"].append("目标大版本未绑定禅道执行，仅修改本地归属")
     else:
         target_exec_id = int(target_major.zentao_execution_id)
-        # 拿目标执行的 name / project / product，三处都要用到
-        target_exec_name, target_project_id, target_product_id = _resolve_target_exec_meta(
+        # 拿目标执行的 name / project / product / builder —— builder 是 create 必填
+        target_exec_name, target_project_id, target_product_id, target_builder = _resolve_target_exec_meta(
             client, target_exec_id
         )
         if old_zentao_build_id:
@@ -384,6 +384,7 @@ def build_record_reassign_major(
                         version_name,
                         project_id=target_project_id,
                         product_id=target_product_id,
+                        builder=target_builder,
                     ) or {}
                     new_bid = _coerce_int(created.get("id"))
                     if new_bid:
@@ -435,22 +436,25 @@ def _coerce_int(value) -> Optional[int]:
 
 def _resolve_target_exec_meta(
     client, exec_id: int
-) -> tuple[Optional[str], Optional[int], Optional[int]]:
-    """读一次执行 detail，取 (execution_name, project_id, product_id)。
+) -> tuple[Optional[str], Optional[int], Optional[int], Optional[str]]:
+    """读一次执行 detail，取 (execution_name, project_id, product_id, builder)。
 
-    禅道 IPD 4.3 GET /v1/executions/{id} 字段：`name`、`project`(标量) + `products`(列表)。
+    禅道 IPD 4.3 GET /v1/executions/{id} 字段：`name`、`project`(标量) + `products`(列表)、PM/openedBy。
     解析失败的字段返回 None；调用方自己判断够不够用。
+
+    builder：MCP 实测 `POST /v1/projects/{id}/builds` 缺 builder ⇒ 400
+    "构建者不能为空"，所以 reassign 走 create 分支前必须先把它解出来。
     """
     try:
         detail = client.get(f"executions/{exec_id}")
     except Exception as exc:
         logger.warning("resolve target execution(%s) detail failed: %s", exec_id, exc)
-        return None, None, None
+        return None, None, None, None
     if not isinstance(detail, dict):
-        return None, None, None
+        return None, None, None, None
     exec_obj = detail.get("execution") if isinstance(detail.get("execution"), dict) else detail
     if not isinstance(exec_obj, dict):
-        return None, None, None
+        return None, None, None, None
     exec_name = exec_obj.get("name") if isinstance(exec_obj.get("name"), str) else None
     project_id = _coerce_int(exec_obj.get("project"))
     product_id = None
@@ -463,7 +467,24 @@ def _resolve_target_exec_meta(
                     break
     if product_id is None:
         product_id = _coerce_int(exec_obj.get("product"))
-    return exec_name, project_id, product_id
+
+    builder: Optional[str] = None
+    raw_builder = exec_obj.get("PM") or exec_obj.get("openedBy")
+    if isinstance(raw_builder, dict):
+        builder = raw_builder.get("account") or raw_builder.get("realname")
+    elif isinstance(raw_builder, str):
+        builder = raw_builder
+    # 兜底：PM/openedBy 都空 ⇒ 回退到当前 token 对应的账号（/v1/user.profile.account）。
+    # 否则 create build 会被禅道挡为 400 "构建者不能为空"。
+    if not builder:
+        try:
+            me = client.get("user")
+            profile = me.get("profile") if isinstance(me, dict) else None
+            if isinstance(profile, dict):
+                builder = profile.get("account") or profile.get("realname")
+        except Exception as exc:
+            logger.warning("fallback resolve current user account failed: %s", exc)
+    return exec_name, project_id, product_id, builder
 
 
 def _refresh_record_zentao_push_after_reassign(
