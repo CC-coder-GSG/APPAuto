@@ -35,6 +35,16 @@ export function resizeAllCharts() {
 export function renderReportCharts(data, advancedData, helpers = {}) {
   const { sourceTypeZh = (v) => v, isAllUsersMode = false, fieldTestData = null } = helpers;
 
+  // 先把会改变 .chart-grid 布局的显隐/整行类切换完，再渲染任何图表，
+  // 否则后续 ECharts 会在旧布局/零尺寸下测量容器，导致同格其他图表概率性空白。
+  const radarEl = document.getElementById('radarChart');
+  const teamEl = document.getElementById('teamCompareChart');
+  if (radarEl) radarEl.style.display = isAllUsersMode ? 'none' : '';
+  if (teamEl) {
+    teamEl.style.display = isAllUsersMode ? '' : 'none';
+    teamEl.classList.toggle('full-row', isAllUsersMode);
+  }
+
   const x = data.trend.map((i) => i.date);
   const yReq = data.trend.map((i) => i.executed_requirements);
   const yCase = data.trend.map((i) => i.created_cases);
@@ -61,14 +71,6 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
       { name: '关闭Bug', type: 'line', data: yClosed, smooth: true },
     ],
   });
-
-  const radarEl = document.getElementById('radarChart');
-  const teamEl = document.getElementById('teamCompareChart');
-  if (radarEl) radarEl.style.display = isAllUsersMode ? 'none' : '';
-  if (teamEl) {
-    teamEl.style.display = isAllUsersMode ? '' : 'none';
-    teamEl.classList.toggle('full-row', isAllUsersMode);
-  }
 
   initChart('sourcePieChart', 'sourcePieChart')?.setOption({
     title: { text: 'Bug来源分布', left: 'center' },
@@ -333,6 +335,9 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
     }, { replaceMerge: ['graphic'] });
   }
 
+  // 布局（含整行独占切换）reflow 完成后再统一 resize 一次，
+  // 兜底修正任何在布局未稳定时初始化/渲染的图表（双 rAF 等浏览器完成排版）。
+  requestAnimationFrame(() => requestAnimationFrame(() => resizeAllCharts()));
 }
 
 export function renderGovernanceCharts(governanceData) {
