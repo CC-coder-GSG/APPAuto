@@ -12,13 +12,13 @@ import './components/modal.js?v=20260417-3';
 import './components/ai-result-modal.js?v=20260422-2';
 import './components/ai-config-modal.js?v=20260422-3';
 import './ai-tasks.js?v=20260423-1';
-import { resizeAllCharts } from './components/charts.js?v=20260417-3';
+import { resizeAllCharts } from './components/charts.js?v=20260518-1';
 import { runGuardrails } from './guardrails.js?v=20260417-3';
 
 const OPTIONAL_TAB_MODULES = [
   { name: 'mine', path: './tabs/mine.js?v=20260427-2' },
   { name: 'feedback', path: './tabs/feedback.js?v=20260417-3' },
-  { name: 'report', path: './tabs/report.js?v=20260417-3' },
+  { name: 'report', path: './tabs/report.js?v=20260518-1' },
   { name: 'retest', path: './tabs/retest.js?v=20260427-1' },
   { name: 'overall-test', path: './tabs/overall-test.js?v=20260420-2' },
   { name: 'field-test', path: './tabs/field-test.js?v=20260417-3' },
