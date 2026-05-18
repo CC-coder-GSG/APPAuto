@@ -479,6 +479,12 @@ tbody tr:hover {
   box-shadow: var(--shadow-xs);
 }
 
+/* 团队对比图（全员模式）独占整行，留足横向空间给智能形态/滚动 */
+.chart-box.full-row {
+  grid-column: 1 / -1;
+  height: 460px;
+}
+
 #trendChart,
 #versionBugChart {
   grid-column: 1 / -1;

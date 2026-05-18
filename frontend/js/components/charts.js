@@ -65,7 +65,10 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
   const radarEl = document.getElementById('radarChart');
   const teamEl = document.getElementById('teamCompareChart');
   if (radarEl) radarEl.style.display = isAllUsersMode ? 'none' : '';
-  if (teamEl) teamEl.style.display = isAllUsersMode ? '' : 'none';
+  if (teamEl) {
+    teamEl.style.display = isAllUsersMode ? '' : 'none';
+    teamEl.classList.toggle('full-row', isAllUsersMode);
+  }
 
   initChart('sourcePieChart', 'sourcePieChart')?.setOption({
     title: { text: 'Bug来源分布', left: 'center' },
@@ -99,22 +102,62 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
   const team = data.team_comparison || [];
   if (isAllUsersMode) {
     const teamChart = initChart('teamCompareChart', 'teamCompareChart');
-    teamChart?.setOption({
+    const names = team.map((i) => i.username);
+    const metricDefs = [
+      ['执行需求', 'executed_requirements'],
+      ['创建用例', 'created_cases'],
+      ['创建Bug', 'created_bugs'],
+      ['处理反馈', 'processed_feedbacks'],
+      ['复测需求', 'retested_reqs'],
+      ['关闭Bug', 'closed_bugs'],
+    ];
+    // 智能形态：人数多时转横向条形（人名不挤），并用 dataZoom 滚动浏览
+    const count = team.length;
+    const horizontal = count > 6;
+    // 横向时每人需要约 78px 纵向空间放下 6 组柱；超过可视范围就靠 dataZoom 滚动
+    const visiblePeople = horizontal ? Math.max(1, Math.min(count, 6)) : count;
+    const baseSeries = metricDefs.map(([name, key]) => ({
+      name,
+      type: 'bar',
+      data: team.map((i) => i[key] || 0),
+    }));
+
+    const common = {
       title: { text: '团队对比（全员模式）' },
-      tooltip: { trigger: 'axis' },
-      grid: { top: 60, bottom: 40, left: 50, right: 30 },
-      legend: { data: ['执行需求', '创建用例', '创建Bug', '处理反馈', '复测需求', '关闭Bug'], top: 30 },
-      xAxis: { type: 'category', data: team.map((i) => i.username) },
-      yAxis: { type: 'value' },
-      series: [
-        { name: '执行需求', type: 'bar', data: team.map((i) => i.executed_requirements || 0) },
-        { name: '创建用例', type: 'bar', data: team.map((i) => i.created_cases || 0) },
-        { name: '创建Bug', type: 'bar', data: team.map((i) => i.created_bugs || 0) },
-        { name: '处理反馈', type: 'bar', data: team.map((i) => i.processed_feedbacks || 0) },
-        { name: '复测需求', type: 'bar', data: team.map((i) => i.retested_reqs || 0) },
-        { name: '关闭Bug', type: 'bar', data: team.map((i) => i.closed_bugs || 0) },
-      ],
-    });
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      legend: { type: 'scroll', data: metricDefs.map(([n]) => n), top: 28 },
+      series: baseSeries,
+    };
+
+    let opt;
+    if (horizontal) {
+      const endPct = Math.min(100, (visiblePeople / count) * 100);
+      opt = {
+        ...common,
+        grid: { top: 64, bottom: 40, left: 90, right: 56 },
+        xAxis: { type: 'value' },
+        // inverse 让第一个人显示在顶部，符合阅读习惯
+        yAxis: { type: 'category', data: names, inverse: true, axisLabel: { interval: 0, fontSize: 12 } },
+        dataZoom: [
+          { type: 'slider', yAxisIndex: 0, width: 14, right: 12, start: 0, end: endPct, zoomLock: false },
+          { type: 'inside', yAxisIndex: 0, start: 0, end: endPct },
+        ],
+      };
+    } else {
+      const rotate = count > 4 ? 22 : 0;
+      opt = {
+        ...common,
+        grid: { top: 64, bottom: rotate ? 70 : 44, left: 50, right: 30 },
+        xAxis: {
+          type: 'category',
+          data: names,
+          axisLabel: { interval: 0, rotate, fontSize: 12 },
+        },
+        yAxis: { type: 'value' },
+      };
+    }
+    // notMerge=true：横/纵形态切换时清掉旧坐标轴与 dataZoom，避免残留
+    teamChart?.setOption(opt, true);
     teamChart?.resize();
   }
 
