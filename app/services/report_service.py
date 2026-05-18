@@ -738,8 +738,15 @@ class ReportService:
             if bug_count > 0:
                 parent = self.db.query(Version).filter(Version.id == mv.parent_id).first()
                 parent_name = parent.version_no if parent else "未知大版本"
-                display_name = f"{parent_name}\n{mv.version_no}"
-                result.append({"version_name": display_name, "bug_count": bug_count})
+                result.append({
+                    # version_name 保留旧的两行格式做向后兼容
+                    "version_name": f"{parent_name}\n{mv.version_no}",
+                    "major_name": parent_name,
+                    "minor_name": mv.version_no,
+                    "bug_count": bug_count,
+                })
+        # 按检出 Bug 数降序：前端横向条形图「哪个发包最多」一眼可见
+        result.sort(key=lambda r: r["bug_count"], reverse=True)
         return result
 
     def governance(

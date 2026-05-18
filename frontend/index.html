@@ -972,7 +972,16 @@
         <div id="sourcePieChart" class="chart-box"></div>
         <div id="radarChart" class="chart-box"></div>
         <div id="teamCompareChart" class="chart-box"></div>
-        <div id="versionBugChart" class="chart-box"></div>
+      </div>
+      <div class="chart-box" style="height:480px; margin-top:20px; display:flex; flex-direction:column;">
+        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <strong style="color:#334155; font-size:15px;">各发包(小版本) Bug 检出分布</strong>
+          <span class="row" style="gap:6px; align-items:center;">
+            <label style="font-size:12px; color:#64748b;">大版本</label>
+            <select id="vbMajorSelect" style="font-size:12px; padding:3px 6px;"></select>
+          </span>
+        </div>
+        <div id="versionBugChart" style="flex:1; min-height:0;"></div>
       </div>
       <div style="margin-top: 26px; border-top: 2px dashed #cbd5e1; padding-top: 18px;">
         <h3 style="margin:0 0 12px 0; color:#334155; text-align:center;">🚚 外业测试统计</h3>
@@ -2214,6 +2223,12 @@ function fillVersionSelects(){
   const reportMajorEl=document.getElementById('reportMajorSelect');
   if(reportMajorEl){
     reportMajorEl.innerHTML = majors.length
+      ? "<option value='0'>全部版本</option>" + majors.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('')
+      : "<option value='0'>全部版本</option>";
+  }
+  const vbMajorEl=document.getElementById('vbMajorSelect');
+  if(vbMajorEl){
+    vbMajorEl.innerHTML = majors.length
       ? "<option value='0'>全部版本</option>" + majors.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('')
       : "<option value='0'>全部版本</option>";
   }

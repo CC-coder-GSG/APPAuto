@@ -163,35 +163,7 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
     teamChart?.resize();
   }
 
-  const vbData = helpers.versionBugs || [];
-  const hasVersionBugData = vbData.length > 0;
-  const versionBugChart = initChart('versionBugChart', 'versionBugChart');
-  versionBugChart?.setOption({
-    title: { text: '各发包(小版本) Bug 检出分布', textStyle: { fontSize: 15, color: '#334155' } },
-    tooltip: { trigger: 'axis' },
-    grid: { top: 60, bottom: '15%' },
-    xAxis: { type: 'category', data: vbData.map((i) => i.version_name), axisLabel: { interval: 0, fontSize: 11, color: '#64748b' } },
-    yAxis: { type: 'value', minInterval: 1 },
-    series: [{
-      name: '检出 Bug 数', type: 'bar', barMaxWidth: 40,
-      itemStyle: { color: '#3b82f6', borderRadius: [4, 4, 0, 0] },
-      data: vbData.map((i) => i.bug_count),
-      label: { show: hasVersionBugData, position: 'top', color: '#1e293b', fontWeight: 'bold' },
-    }],
-    graphic: hasVersionBugData
-      ? []
-      : [{
-        type: 'text',
-        left: 'center',
-        top: 'middle',
-        style: {
-          text: '该大版本暂无检出 Bug',
-          fill: '#94a3b8',
-          fontSize: 14,
-          fontWeight: 600,
-        },
-      }],
-  }, { replaceMerge: ['graphic'] });
+  renderVersionBugChart(helpers.versionBugs || []);
 
   initChart('topReqChart', 'topReqChart')?.setOption({
     title: { text: '需求质量“刺客”排行榜 (Top 7)', textStyle: { fontSize: 15 } },
@@ -338,6 +310,64 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
   // 布局（含整行独占切换）reflow 完成后再统一 resize 一次，
   // 兜底修正任何在布局未稳定时初始化/渲染的图表（双 rAF 等浏览器完成排版）。
   requestAnimationFrame(() => requestAnimationFrame(() => resizeAllCharts()));
+}
+
+// 各发包(小版本) Bug 检出分布：横向条形 + 按 Bug 数降序 + dataZoom 滚动。
+// 单独导出，供报表查询与「大版本」筛选下拉各自重渲染。
+export function renderVersionBugChart(vbData) {
+  const chart = initChart('versionBugChart', 'versionBugChart');
+  if (!chart) return;
+  // 后端已降序；前端再兜底排一次，保证「最多」永远在顶部
+  const rows = (vbData || []).slice().sort((a, b) => (b.bug_count || 0) - (a.bug_count || 0));
+  const has = rows.length > 0;
+  // 纵轴只显示小版本号（短、可读）；大版本放进 tooltip，解决版本名挤一起
+  const names = rows.map((r) => r.minor_name || r.version_name || '-');
+  const counts = rows.map((r) => r.bug_count || 0);
+  // 每条约 26px；超出可视区靠 dataZoom 滚动，默认展示最多的约 14 条
+  const visible = Math.max(1, Math.min(rows.length, 14));
+  const endPct = rows.length ? Math.min(100, (visible / rows.length) * 100) : 100;
+
+  chart.setOption({
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (ps) => {
+        const p = ps[0];
+        const r = rows[p.dataIndex] || {};
+        const major = r.major_name ? `${r.major_name} / ` : '';
+        return `${major}${r.minor_name || p.name}<br/>检出 Bug 数：<b>${p.value}</b>`;
+      },
+    },
+    grid: { top: 16, bottom: 28, left: 12, right: 64, containLabel: true },
+    xAxis: { type: 'value', minInterval: 1 },
+    yAxis: {
+      type: 'category',
+      data: names,
+      inverse: true, // 配合降序：检出最多的发包在最上方
+      axisLabel: { fontSize: 11, color: '#64748b', width: 220, overflow: 'truncate' },
+    },
+    dataZoom: rows.length > visible
+      ? [
+        { type: 'slider', yAxisIndex: 0, width: 14, right: 14, start: 0, end: endPct },
+        { type: 'inside', yAxisIndex: 0, start: 0, end: endPct },
+      ]
+      : [],
+    series: [{
+      name: '检出 Bug 数',
+      type: 'bar',
+      barMaxWidth: 22,
+      itemStyle: { color: '#3b82f6', borderRadius: [0, 4, 4, 0] },
+      data: counts,
+      label: { show: has, position: 'right', color: '#1e293b', fontWeight: 'bold' },
+    }],
+    graphic: has ? [] : [{
+      type: 'text',
+      left: 'center',
+      top: 'middle',
+      style: { text: '该大版本暂无检出 Bug', fill: '#94a3b8', fontSize: 14, fontWeight: 600 },
+    }],
+  }, { replaceMerge: ['graphic', 'dataZoom'] });
+  chart.resize();
 }
 
 export function renderGovernanceCharts(governanceData) {

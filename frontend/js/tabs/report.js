@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { renderGovernanceCharts, renderReportCharts } from '../components/charts.js';
+import { renderGovernanceCharts, renderReportCharts, renderVersionBugChart } from '../components/charts.js';
 import { renderBugLink, sourceTypeZh } from '../utils.js';
 
 let governanceCache = null;
@@ -235,6 +235,26 @@ export async function queryReport() {
     fieldTestData,
   });
   renderGovernanceBoard(governanceData);
+
+  // 「各发包 Bug 检出分布」独立大版本筛选：默认跟随报表选的大版本，
+  // 之后可单独切换、即时重渲染该图（不重查整张报表）。
+  const vbMajorSelect = document.getElementById('vbMajorSelect');
+  if (vbMajorSelect) {
+    vbMajorSelect.value = String(selectedMajorId || 0);
+    if (!vbMajorSelect.dataset.bound) {
+      vbMajorSelect.dataset.bound = '1';
+      vbMajorSelect.addEventListener('change', async () => {
+        const mid = Number(vbMajorSelect.value || 0);
+        const url = mid ? `/reports/version-bugs?major_version_id=${mid}` : '/reports/version-bugs';
+        try {
+          const rows = await (await api(url)).json();
+          renderVersionBugChart(rows);
+        } catch (e) {
+          window.showMessage && window.showMessage('加载发包 Bug 分布失败', 'error');
+        }
+      });
+    }
+  }
 
   if (typeof window.adjustReportChartVisibility === 'function') {
     window.adjustReportChartVisibility();
