@@ -125,9 +125,11 @@ def compare_local_vs_zentao(db: Session, major_version_id: int) -> dict:
         })
     out["remote"] = remote_norm
 
-    remote_by_id = {r["id"]: r for r in remote_norm if not r["is_placeholder"]}
-    remote_by_name = {r["normalized_name"]: r for r in remote_norm if not r["is_placeholder"]}
-    out["diff"]["remote_placeholders"] = [r for r in remote_norm if r["is_placeholder"]]
+    # 占位 build（名字带 xxxx）也是禅道侧"有"的版本，应当参与匹配 —— 本地占位行
+    # 通过 sync 正确绑定到了禅道占位 build 时，对账页应该把这对配对显示成"已对齐"，
+    # 而不是把本地行划到"本地有/禅道无"、把禅道行划到 placeholder 折叠区。
+    remote_by_id = {r["id"]: r for r in remote_norm}
+    remote_by_name = {r["normalized_name"]: r for r in remote_norm}
 
     matched_remote_ids: set[int] = set()
 
@@ -153,9 +155,12 @@ def compare_local_vs_zentao(db: Session, major_version_id: int) -> dict:
             out["diff"]["only_local"].append(local_row)
 
     for r in remote_norm:
-        if r["is_placeholder"]:
-            continue
         if r["id"] in matched_remote_ids:
+            continue
+        # 未匹配的占位 build 单独归到 remote_placeholders（展示用，不建议用户"补到本地"
+        # —— 占位本身就是 push 流程的中间产物，下次 sync 会自动建对应本地行）。
+        if r["is_placeholder"]:
+            out["diff"]["remote_placeholders"].append(r)
             continue
         out["diff"]["only_remote"].append(r)
 

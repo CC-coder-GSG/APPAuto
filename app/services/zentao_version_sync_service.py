@@ -374,6 +374,41 @@ class ZentaoVersionSyncService:
                 v.parent_id = parent_id
             if software_id and v.software_id != software_id:
                 v.software_id = software_id
+            # 跟随禅道侧的 build name：push 流程会把"占位 build"在禅道侧 rename 成真实
+            # 版本名（id 不变），但本地行的 version_no 不会自动变。下次 sync 按
+            # zentao_build_id 命中本地行时，如果只刷 cache、不刷 version_no，会留下
+            # "version_no=占位 + cache=真实名"的脏状态；后续禅道补的新占位 build 同步
+            # 时会通过"按 version_no+parent 匹配"误抢这一行的 zentao_build_id，导致
+            # 真实 build 在本地丢失。这里把 version_no 也跟随到禅道当前名。
+            if v.version_no != version_no:
+                conflict = (
+                    self.db.query(Version)
+                    .filter(
+                        Version.version_no == version_no,
+                        Version.version_type == VersionType.MINOR,
+                        Version.id != v.id,
+                    )
+                    .first()
+                )
+                if conflict is None:
+                    logger.info(
+                        'sync_versions: rename minor id=%s %r -> %r (build_id=%s)',
+                        v.id, v.version_no, version_no, zentao_build_id,
+                    )
+                    v.version_no = version_no
+                else:
+                    # 唯一约束 (version_no, version_type) 不允许两行同名 MINOR。
+                    # 命中冲突时不强行 rename —— 把脏状态保留下来不致 500，下次
+                    # sync 在另一条 build 上仍有机会修复。
+                    logger.warning(
+                        'sync_versions: cannot rename minor id=%s %r -> %r '
+                        '(conflict with id=%s); leaving version_no as-is',
+                        v.id, v.version_no, version_no, conflict.id,
+                    )
+                    result.skipped.append(
+                        f'rename-blocked {v.version_no!r} -> {version_no!r} '
+                        f'(conflict id={conflict.id})'
+                    )
             result.updated_minor.append(version_no)
             return v
 
