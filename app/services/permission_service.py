@@ -11,6 +11,7 @@ from app.core.exceptions import PermissionDenied
 ALL_TAB_KEYS = [
     "assign",
     "mine",
+    "task-board",
     "feedback",
     "retest",
     "overall-test",
@@ -27,6 +28,7 @@ ALL_TAB_KEYS = [
 
 DEFAULT_USER_TAB_KEYS = [
     "mine",
+    "task-board",
     "feedback",
     "retest",
     "overall-test",

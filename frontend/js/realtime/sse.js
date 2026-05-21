@@ -150,7 +150,7 @@ function bumpCounterByEvent() {
 // ─── Active tab detection ────────────────────────────────────────────────────
 
 function visibleTabName() {
-  const names = ['assign','mine','feedback','retest','overall-test','field-test','build-records','zentao-sync','report','activity','data','dispatch'];
+  const names = ['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','zentao-sync','report','activity','data','dispatch'];
   return names.find((n) => {
     const domId = `tab-${n}`;
     const el = document.getElementById(domId);

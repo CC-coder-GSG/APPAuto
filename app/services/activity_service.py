@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import AuditLog, BugTracking, FeedbackRecord, FieldTestRecord, Requirement, TestCase, User, Version
+from app.models import AuditLog, BugTracking, FeedbackRecord, FieldTestRecord, Requirement, TaskBoardTask, TestCase, User, Version
 from app.utils.time_utils import local_now
 
 
@@ -57,6 +57,12 @@ ACTION_META: dict[str, dict[str, Any]] = {
     "user.delete": {"module": "admin", "action_text": "删除用户", "level": "critical", "important": True},
     "user.update_role": {"module": "admin", "action_text": "修改用户角色", "level": "important", "important": True},
     "user.update_team_status": {"module": "admin", "action_text": "修改成员归属", "level": "important", "important": True},
+    "task_board.create": {"module": "task_board", "action_text": "创建任务", "level": "important", "important": True},
+    "task_board.update": {"module": "task_board", "action_text": "更新任务", "level": "info", "important": False},
+    "task_board.assign": {"module": "task_board", "action_text": "指派任务", "level": "important", "important": True},
+    "task_board.status": {"module": "task_board", "action_text": "更新任务状态", "level": "important", "important": True},
+    "task_board.progress": {"module": "task_board", "action_text": "更新任务进展", "level": "info", "important": False},
+    "task_board.archive": {"module": "task_board", "action_text": "归档任务", "level": "important", "important": True},
 }
 
 SUMMARY_BUCKETS: dict[str, tuple[str, str]] = {
@@ -193,6 +199,14 @@ class ActivityService:
         if ids_by_type.get("user"):
             rows = self.db.query(User).filter(User.id.in_(ids_by_type["user"])).all()
             ctx["user"] = {row.id: row for row in rows}
+        if ids_by_type.get("task_board"):
+            rows = (
+                self.db.query(TaskBoardTask)
+                .options(joinedload(TaskBoardTask.assignee))
+                .filter(TaskBoardTask.id.in_(ids_by_type["task_board"]))
+                .all()
+            )
+            ctx["task_board"] = {row.id: row for row in rows}
         if ids_by_type.get("version"):
             rows = self.db.query(Version).filter(Version.id.in_(ids_by_type["version"])).all()
             ctx["version"] = {row.id: row for row in rows}
@@ -221,6 +235,9 @@ class ActivityService:
             return numeric_target_id, item.shown_name, item.username
         if target_type == "version" and item:
             return numeric_target_id, item.version_no, getattr(item.version_type, "value", "")
+        if target_type == "task_board" and item:
+            assignee_name = item.assignee.shown_name if item.assignee else "未指派"
+            return numeric_target_id, f"任务#{item.id}", f"{item.title}（指派给 {assignee_name}）"
         return numeric_target_id, log.target_id, None
 
     def _resolve_item_software_id(self, log: AuditLog, ctx: dict[str, dict[int, Any]]) -> int | None:
@@ -321,6 +338,21 @@ class ActivityService:
             )
         if action == "stage5.add_issue":
             return f"新增问题：{raw}"
+        if action == "task_board.assign" and raw.startswith("assignee="):
+            old_value, _, new_value = raw[len("assignee="):].partition("->")
+            return f"指派变更：{self._user_name(old_value or None)} -> {self._user_name(new_value or None)}"
+        if action == "task_board.status" and "->" in raw:
+            old_value, new_value = raw.split("->", 1)
+            status_text = {
+                "todo": "待处理",
+                "in_progress": "进行中",
+                "blocked": "阻塞",
+                "done": "已完成",
+                "deferred": "延期",
+            }
+            return f"状态变更：{status_text.get(old_value, old_value)} -> {status_text.get(new_value, new_value)}"
+        if action == "task_board.progress":
+            return f"进展：{raw}"
         return raw
 
     def _build_summary(self, log: AuditLog, actor_name: str, action_text: str, target_no: str | None, target_title: str | None) -> str:

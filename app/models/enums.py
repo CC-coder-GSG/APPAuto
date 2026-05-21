@@ -47,4 +47,38 @@ class TestResultStatus(str, Enum):
     UNTESTED = "untested"
 
 
-__all__ = ["UserRole", "VersionType", "RequirementStatus", "BugSourceType", "FeedbackStatus", "TestResultStatus"]
+class TaskBoardStatus(str, Enum):
+    TODO = "todo"
+    IN_PROGRESS = "in_progress"
+    BLOCKED = "blocked"
+    DONE = "done"
+    DEFERRED = "deferred"
+
+
+class TaskBoardPriority(str, Enum):
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    URGENT = "urgent"
+
+
+class TaskBoardTargetType(str, Enum):
+    REQUIREMENT = "requirement"
+    BUG = "bug"
+    FEEDBACK = "feedback"
+    FIELD_TEST = "field_test"
+    BUILD_RECORD = "build_record"
+    MANUAL = "manual"
+
+
+__all__ = [
+    "UserRole",
+    "VersionType",
+    "RequirementStatus",
+    "BugSourceType",
+    "FeedbackStatus",
+    "TestResultStatus",
+    "TaskBoardStatus",
+    "TaskBoardPriority",
+    "TaskBoardTargetType",
+]

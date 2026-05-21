@@ -190,6 +190,7 @@
   <!-- Tab navigation -->
   <div id="tabs" class="card row">
     <button id="tabAssignBtn" onclick="showTab('assign')">任务分配台</button>
+    <button id="tabTaskBoardBtn" onclick="showTab('task-board')">任务看板<span id="tabTaskBoardBadge" class="nav-badge hidden"></span></button>
     <button id="tabMineBtn" onclick="showTab('mine')">我的工作台<span id="tabMinePrimaryBadge" class="nav-badge hidden"></span><span id="tabMineSecondaryBadge" class="nav-badge nav-badge--sub hidden"></span></button>
     <button id="tabFeedbackBtn" onclick="showTab('feedback')">反馈记录与处理<span id="tabFeedbackBadge" class="nav-badge hidden"></span></button>
     <button id="tabFieldTestBtn" onclick="showTab('field-test')">外业测试</button>
@@ -240,6 +241,132 @@
       <div id="assignProgressArea"></div>
     </div>
   </section>
+
+  <section id="tab-task-board" class="hidden card">
+    <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h2 style="margin-bottom:4px;">任务看板</h2>
+        <div class="muted">面向团队的每日任务派发与执行透明视图。所有登录用户可见。</div>
+      </div>
+      <div class="row" style="gap:8px;">
+        <button id="taskBoardCreateBtn" class="hidden" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.openCreate()">新建任务</button>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:12px; flex-wrap:wrap; gap:10px; align-items:center; background:#f8fafc; padding:12px; border-radius:8px; border:1px solid #e2e8f0;">
+      <label>日期</label>
+      <button class="secondary" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.shiftDate(-1)">◀</button>
+      <input type="date" id="taskBoardDate" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()">
+      <button class="secondary" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.shiftDate(1)">▶</button>
+      <button class="secondary" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.gotoToday()">今天</button>
+      <label style="margin-left:8px;">成员</label>
+      <select id="taskBoardAssigneeFilter" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()">
+        <option value="">全部</option>
+      </select>
+      <label style="cursor:pointer;">
+        <input type="checkbox" id="taskBoardMineOnly" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()"> 只看我的
+      </label>
+      <label>状态</label>
+      <select id="taskBoardStatusFilter" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()">
+        <option value="">全部</option>
+        <option value="todo">待处理</option>
+        <option value="in_progress">进行中</option>
+        <option value="blocked">阻塞</option>
+        <option value="done">已完成</option>
+        <option value="deferred">延期</option>
+      </select>
+      <label style="cursor:pointer;">
+        <input type="checkbox" id="taskBoardShowArchived" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()"> 包含已归档
+      </label>
+      <button onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()">刷新</button>
+    </div>
+
+    <div id="taskBoardSummary" class="row" style="margin-top:12px; gap:10px; flex-wrap:wrap;"></div>
+
+    <div id="taskBoardColumns" style="margin-top:12px; display:grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap:12px;"></div>
+
+    <div id="taskBoardAssigneeSummary" style="margin-top:16px;"></div>
+  </section>
+
+  <div id="taskBoardModal" class="hidden" data-modal-display="flex" style="position:fixed; inset:0; background:rgba(15,23,42,.35); z-index:10000; display:none; align-items:center; justify-content:center;">
+    <div style="width:min(720px, 94vw); max-height:90vh; overflow:auto; background:#fff; border-radius:10px; box-shadow:0 12px 28px rgba(0,0,0,.18); padding:20px;">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <h3 id="taskBoardModalTitle" style="margin:0; color:#0f172a;">新建任务</h3>
+        <button class="secondary" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.closeModal()">关闭</button>
+      </div>
+      <div style="margin-top:14px; display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div style="grid-column:1/-1;">
+          <label style="display:block; margin-bottom:4px; font-weight:600;">标题<span style="color:#dc2626;">*</span></label>
+          <input id="taskBoardFormTitle" maxlength="200" style="width:100%;" placeholder="任务标题（必填）">
+        </div>
+        <div>
+          <label style="display:block; margin-bottom:4px;">指派给（仅编内成员）</label>
+          <select id="taskBoardFormAssignee" style="width:100%;"><option value="">不指派</option></select>
+        </div>
+        <div>
+          <label style="display:block; margin-bottom:4px;">优先级</label>
+          <select id="taskBoardFormPriority" style="width:100%;">
+            <option value="low">低</option>
+            <option value="normal" selected>普通</option>
+            <option value="high">高</option>
+            <option value="urgent">紧急</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block; margin-bottom:4px;">看板日期</label>
+          <input type="date" id="taskBoardFormBoardDate" style="width:100%;">
+        </div>
+        <div>
+          <label style="display:block; margin-bottom:4px;">截止时间</label>
+          <input type="datetime-local" id="taskBoardFormDueAt" style="width:100%;">
+        </div>
+        <div>
+          <label style="display:block; margin-bottom:4px;">关联对象类型</label>
+          <select id="taskBoardFormTargetType" style="width:100%;">
+            <option value="">无</option>
+            <option value="requirement">需求</option>
+            <option value="bug">Bug</option>
+            <option value="feedback">反馈</option>
+            <option value="field_test">外业测试</option>
+            <option value="build_record">构建记录</option>
+            <option value="manual">手工事项</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block; margin-bottom:4px;">关联对象 ID</label>
+          <input id="taskBoardFormTargetId" type="number" min="1" style="width:100%;" placeholder="本地数据库 ID">
+        </div>
+        <div style="grid-column:1/-1;">
+          <label style="display:block; margin-bottom:4px;">描述</label>
+          <textarea id="taskBoardFormDescription" rows="4" style="width:100%;" placeholder="任务详细描述、验收标准、注意事项等"></textarea>
+        </div>
+      </div>
+      <div id="taskBoardModalExtra" class="hidden" style="margin-top:14px; border-top:1px dashed #cbd5e1; padding-top:12px;">
+        <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
+          <label>更新状态</label>
+          <select id="taskBoardModalStatus">
+            <option value="todo">待处理</option>
+            <option value="in_progress">进行中</option>
+            <option value="blocked">阻塞</option>
+            <option value="done">已完成</option>
+            <option value="deferred">延期</option>
+          </select>
+          <input id="taskBoardModalProgress" placeholder="可选：进展说明" style="flex:1; min-width:240px;">
+          <button onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.submitStatus()">提交</button>
+        </div>
+        <div style="margin-top:12px;">
+          <label style="display:block; margin-bottom:4px; font-weight:600;">变更时间线</label>
+          <div id="taskBoardModalTimeline" class="muted" style="max-height:200px; overflow:auto; border:1px dashed #e2e8f0; border-radius:6px; padding:8px; background:#f8fafc;"></div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:16px; justify-content:flex-end; gap:8px;">
+        <button id="taskBoardModalArchiveBtn" class="hidden secondary" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.archive()">归档</button>
+        <button id="taskBoardModalCarryBtn" class="hidden secondary" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.carryOver()">顺延到明天</button>
+        <button class="secondary" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.closeModal()">取消</button>
+        <button onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.submit()">保存</button>
+      </div>
+    </div>
+  </div>
 
   <section id="tab-mine" class="hidden card">
     <div class="workbench-shell">
@@ -1786,8 +1913,8 @@ function sourceTypeZh(v){
 }
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
-const ALL_TAB_KEYS=['assign','mine','feedback','retest','overall-test','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai'];
-const DEFAULT_ALLOWED_TABS=['mine','feedback','retest','overall-test','field-test','testcase-center','zentao-sync','report'];
+const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai'];
+const DEFAULT_ALLOWED_TABS=['mine','task-board','feedback','retest','overall-test','field-test','testcase-center','zentao-sync','report'];
 const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test'];
 const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test' };
 const WORKBENCH_SUBTAB_LOADERS={
@@ -1942,7 +2069,7 @@ async function switchWorkbenchSubtab(name, options={}){
 window.switchWorkbenchSubtab = switchWorkbenchSubtab;
 function applyTabVisibility(){
   const buttonMap={
-    'assign':'tabAssignBtn','mine':'tabMineBtn','feedback':'tabFeedbackBtn',
+    'assign':'tabAssignBtn','mine':'tabMineBtn','task-board':'tabTaskBoardBtn','feedback':'tabFeedbackBtn',
     'field-test':'tabFieldTestBtn','build-records':'tabBuildRecordsBtn','testcase-center':'tabTestcaseCenterBtn',
     'zentao-sync':'tabZentaoSyncBtn','report':'tabReportBtn','activity':'tabActivityBtn',
     'data':'tabDataBtn','dispatch':'tabDispatchBtn','zentao-ai':'tabZentaoAiBtn'
@@ -1957,13 +2084,14 @@ function applyTabVisibility(){
   }
 }
 function getDefaultVisibleTab(){
-  return ['assign','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai']
     .find((name)=>canAccessTab(name)) || 'mine';
 }
 function getTabNamespaceName(name){
   return {
     assign:'OmniQAAssignTab',
     mine:'OmniQAMineTab',
+    'task-board':'OmniQATaskBoardTab',
     feedback:'OmniQAFeedbackTab',
     retest:'OmniQARetestTab',
     'overall-test':'OmniQAOverallTestTab',
@@ -1984,7 +2112,7 @@ function isTabRuntimeReady(name){
   return !!window[nsName];
 }
 function getFirstRuntimeReadyTab(){
-  return ['assign','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai']
     .find((tabName)=>canAccessTab(tabName) && isTabRuntimeReady(tabName)) || null;
 }
 async function showTab(name){
@@ -2007,7 +2135,7 @@ async function showTab(name){
     if(!fallback || fallback===name) return;
     name = fallback;
   }
-  ['assign','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai'].forEach(x=>{
+  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai'].forEach(x=>{
     const el=document.getElementById('tab-'+x);
     if(el) el.classList.add('hidden');
   });
@@ -2021,6 +2149,7 @@ async function showTab(name){
   if(name === 'data' && !dataOverviewCache) { loadDataOverview().catch(err=>showMessage(err.message||'加载数据管理台失败','error')); }
   if(name === 'data') { window.loadZtProjects && window.loadZtProjects().catch(()=>{}); }
   if(name === 'mine') { await switchWorkbenchSubtab(requestedSubtab || getDefaultWorkbenchSubtab(), { load:true }); }
+  if(name === 'task-board') { window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.activate && window.OmniQATaskBoardTab.activate().catch(err=>showMessage(err.message||'加载任务看板失败','error')); }
   if(name === 'feedback') { loadFeedbackBoard().catch(err=>showMessage(err.message||'加载反馈列表失败','error')); }
   if(name === 'field-test') { loadFieldTestBoard().catch(err=>showMessage(err.message||'加载外业测试失败','error')); }
   if(name === 'build-records') { loadBuildRecordsBoard().catch(err=>showMessage(err.message||'加载构建记录失败','error')); }
@@ -2165,12 +2294,13 @@ async function onSoftwareChange(){
   dataOverviewCache = null;
   await loadVersions();
   // 切换软件后，刷新当前页内容，确保旧软件数据不残留
-  const visible = ['assign','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai'].find(x=>{
+  const visible = ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai'].find(x=>{
     const el=document.getElementById('tab-'+x);
     return el && !el.classList.contains('hidden');
   });
   if(visible){
     if(visible==='mine') await loadWorkbenchSubtab(getWorkbenchVisibleSubtab());
+    if(visible==='task-board' && window.OmniQATaskBoardTab) await window.OmniQATaskBoardTab.load();
     if(visible==='feedback') await loadFeedbackBoard();
     if(visible==='report') await queryReport();
     if(visible==='activity') await loadActivityBoard();

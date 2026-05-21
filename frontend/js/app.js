@@ -17,6 +17,7 @@ import { runGuardrails } from './guardrails.js?v=20260417-3';
 
 const OPTIONAL_TAB_MODULES = [
   { name: 'mine', path: './tabs/mine.js?v=20260427-2' },
+  { name: 'task-board', path: './tabs/task-board.js?v=20260521-1' },
   { name: 'feedback', path: './tabs/feedback.js?v=20260417-3' },
   { name: 'report', path: './tabs/report.js?v=20260518-1' },
   { name: 'retest', path: './tabs/retest.js?v=20260427-1' },

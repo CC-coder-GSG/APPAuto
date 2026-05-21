@@ -31,6 +31,8 @@ from app.models import (
     Requirement,
     RequirementStatusHistory,
     SoftwareProduct,
+    TaskBoardTask,
+    TaskBoardUpdate,
     TestCase,
     TestExecution,
     User,

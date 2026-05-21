@@ -4,6 +4,7 @@ import { withPrefix, renderBugLink, renderCaseLink } from '../utils.js';
 const TAB_PERMISSION_OPTIONS = [
   { key: 'assign', label: '任务分配台' },
   { key: 'mine', label: '我的工作台' },
+  { key: 'task-board', label: '任务看板' },
   { key: 'feedback', label: '反馈记录与处理' },
   { key: 'retest', label: '复测工作台' },
   { key: 'overall-test', label: '整体测试' },

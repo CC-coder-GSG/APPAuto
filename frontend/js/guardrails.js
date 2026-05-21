@@ -16,6 +16,7 @@ const REQUIRED_NAMESPACES = {
   OmniQAActivityTab: ['loadActivityBoard', 'pushActivitySummary', 'openAuditTimelineModal'],
   OmniQADataTab: ['loadDataOverview', 'createUser', 'createVersion'],
   OmniQADispatchTab: ['loadDispatchedAll', 'searchDispatchBug', 'confirmDispatchBug'],
+  OmniQATaskBoardTab: ['activate', 'load', 'openCreate', 'openEdit', 'submit'],
 };
 
 const REQUIRED_DOM_IDS = [
@@ -38,6 +39,8 @@ const REQUIRED_DOM_IDS = [
   'tab-activity',
   'tab-data',
   'tab-dispatch',
+  'tab-task-board',
+  'taskBoardColumns',
   'assignMajorSelect',
   'mineMajorSelect',
   'mineMinorSelect',
