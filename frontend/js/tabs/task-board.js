@@ -323,7 +323,7 @@ function readForm() {
     assignee_id: assigneeRaw ? Number(assigneeRaw) : null,
     priority,
     board_date: boardDate,
-    due_at: dueAtRaw ? new Date(dueAtRaw).toISOString() : null,
+    due_at: dueAtRaw || null,
     target_type: targetType,
     target_id: targetIdRaw ? Number(targetIdRaw) : null,
   };
