@@ -438,6 +438,20 @@ function mountS5DetailRows(table, pageRows, colSpan) {
   });
 }
 
+// 等两帧让浏览器先完成展开后的 reflow，再判断是否需要滚动
+function ensureS5ElementVisible(el) {
+  if (!el) return;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const rect = el.getBoundingClientRect();
+      const viewportH = window.innerHeight || document.documentElement.clientHeight;
+      if (rect.bottom > viewportH || rect.top < 0) {
+        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    });
+  });
+}
+
 export function toggleS5DetailRow(id, forceExpand = null) {
   const detailRow = document.querySelector(`.overall-test-detail-row[data-bug-id="${id}"]`);
   if (!detailRow) return;
@@ -447,6 +461,7 @@ export function toggleS5DetailRow(id, forceExpand = null) {
   detailRow.classList.toggle('hidden', !shouldExpand);
   const toggleLink = document.querySelector(`[data-s5-toggle-link][data-bug-id="${id}"]`);
   if (toggleLink) toggleLink.textContent = shouldExpand ? '收起' : '展开';
+  if (shouldExpand) ensureS5ElementVisible(detailRow);
 }
 
 export function renderS5() {
@@ -636,6 +651,11 @@ export async function syncOverallTestRecentFromZentao(options = {}) {
 export function toggleS5CloseComment(bugId, checked) {
   const wrap = document.getElementById('closeComment_' + bugId);
   if (wrap) wrap.style.display = checked ? '' : 'none';
+  if (checked) {
+    // 展开后若行底跑到视口外，自动把整行滚回可见区域
+    const rowEl = document.querySelector(`.overall-test-row-card[data-bug-id="${bugId}"]`);
+    ensureS5ElementVisible(rowEl || wrap);
+  }
 }
 
 export async function saveS5(id) {
