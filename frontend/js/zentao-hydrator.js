@@ -281,6 +281,38 @@ function _upgradeBugIdLinks(bugSlots) {
   }
 }
 
+/**
+ * Same as _upgradeBugIdLinks but for story slots. Pages render a
+ * non-link wrapper like:
+ *   <span class="qa-story-id-nohref" data-zt-story-id="6453">s#6453</span>
+ * After hydration we replace it with a real anchor pointing to the
+ * Zentao story view URL.
+ *
+ * Searches the whole document for matching ids (not just the slot's
+ * sibling) so callers can place the wrapper anywhere in the row.
+ */
+function _upgradeStoryIdLinks(storySlots) {
+  for (const el of storySlots) {
+    const id = el.dataset.ztStoryId;
+    if (!id) continue;
+    const data = _cacheGet(_storyCache, id);
+    if (!data?.zentao_url) continue;
+
+    const noHrefSpans = document.querySelectorAll(
+      `.qa-story-id-nohref[data-zt-story-id="${id}"]`
+    );
+    for (const span of noHrefSpans) {
+      const link = document.createElement('a');
+      link.className = 'qa-ext-link';
+      link.href = data.zentao_url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.innerHTML = span.innerHTML;
+      span.replaceWith(link);
+    }
+  }
+}
+
 // ─── Main hydration entry point ───────────────────────────────────────────────
 
 /**
@@ -422,8 +454,9 @@ async function hydrateContainer(containerEl) {
     el.dataset.ztLoaded = '1';
   }
 
-  // — Step 5: upgrade no-href bug ID spans to links —
+  // — Step 5: upgrade no-href bug/story ID spans to links —
   _upgradeBugIdLinks(bugSlots);
+  _upgradeStoryIdLinks(storySlots);
 
   // — Step 6: update page indicator —
   const hasErrors = bugErrorIds.size > 0 || storyErrorIds.size > 0;

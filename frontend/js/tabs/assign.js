@@ -85,7 +85,16 @@ function renderAssignProgress(data) {
           <tbody>${
             reqRows.map((r) => `<tr>
               <td>${r.major_version_name}</td>
-              <td>${r.zentao_req_id} ${r.title || ''}${(() => { const sid = String(r.zentao_req_id || '').replace(/\D/g, ''); return sid ? ` <span class="ai-result-slot" data-story-id="${sid}"></span>` : ''; })()}</td>
+              <td>${(() => {
+                const sid = String(r.zentao_req_id || '').replace(/\D/g, '');
+                const idHtml = sid
+                  ? `<span class="qa-story-id-nohref" data-zt-story-id="${sid}">${r.zentao_req_id}</span>`
+                  : (r.zentao_req_id || '');
+                const ztSlot = sid ? ` <span class="zt-story-slot" data-zt-story-id="${sid}" style="margin-left:4px;"></span>` : '';
+                const aiSlot = sid ? ` <span class="ai-result-slot" data-story-id="${sid}"></span>` : '';
+                const previewBtn = sid ? ` <a href="javascript:void(0)" onclick="window.OmniQAStoryPreview && window.OmniQAStoryPreview.open(${sid})" title="预览禅道需求正文" style="color:#0ea5e9; margin-left:4px; text-decoration:none;">👁</a>` : '';
+                return `${idHtml} ${r.title || ''}${ztSlot}${previewBtn}${aiSlot}`;
+              })()}</td>
               <td>${r.case_completed ? '✅已勾选' : '⏳未勾选'}</td>
               <td>${r.test_completed ? '✅已勾选' : '⏳未勾选'}</td>
               <td>${r.case_count || 0}</td>
@@ -126,6 +135,7 @@ function renderAssignProgress(data) {
     <div style="margin-top:8px;">${ownerCards || '<div class="muted">暂无任务进行状态数据</div>'}</div>
   `;
   window.OmniQAStoryAI?.refreshSlots?.(area);
+  window.OmniQAZentao?.hydrateContainer?.(area);
 }
 
 export async function loadAssignBoard() {
@@ -155,10 +165,15 @@ export async function loadAssignBoard() {
   const users = getUsers();
   assignTable.innerHTML = state.assignReqs.map((r) => {
     const sid = String(r.zentao_req_id || '').replace(/\D/g, '');
+    const idHtml = sid
+      ? `<span class="qa-story-id-nohref" data-zt-story-id="${sid}">${r.zentao_req_id}</span>`
+      : (r.zentao_req_id || '');
+    const ztSlot = sid ? ` <span class="zt-story-slot" data-zt-story-id="${sid}" style="margin-left:4px;"></span>` : '';
+    const previewBtn = sid ? ` <a href="javascript:void(0)" onclick="window.OmniQAStoryPreview && window.OmniQAStoryPreview.open(${sid})" title="预览禅道需求正文" style="color:#0ea5e9; margin-left:4px; text-decoration:none;">👁</a>` : '';
     const aiSlot = sid ? ` <span class="ai-result-slot" data-story-id="${sid}"></span>` : '';
     return `
     <tr>
-      <td>${r.zentao_req_id} ${r.title}${aiSlot}</td>
+      <td>${idHtml} ${r.title || ''}${ztSlot}${previewBtn}${aiSlot}</td>
       <td>
         <select id='o_${r.id}'>
           <option value=''>未分配</option>
@@ -169,6 +184,7 @@ export async function loadAssignBoard() {
     </tr>`;
   }).join('');
   window.OmniQAStoryAI?.refreshSlots?.(assignTable);
+  window.OmniQAZentao?.hydrateContainer?.(assignTable);
 
   await loadAssignProgress();
   await loadLinkCandidates();

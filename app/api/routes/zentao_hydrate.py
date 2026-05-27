@@ -44,7 +44,11 @@ from app.models.bug import BugTracking
 from app.models.user_zentao_binding import UserZentaoBinding
 from app.services.zentao_auth_service import get_valid_token, invalidate_token
 from app.services.zentao_client_service import ZentaoClient, ZentaoAPIError
-from app.services.zentao_normalizer import normalize_bug, normalize_story
+from app.services.zentao_normalizer import (
+    normalize_bug,
+    normalize_story,
+    normalize_story_detail,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -123,17 +127,62 @@ async def hydrate_stories(
         return {}
     client, base_url = ctx
 
-    result, got_401, errors = await _fetch_stories_concurrent(client, id_list)
+    result, got_401, errors = await _fetch_stories_concurrent(client, base_url, id_list)
 
     if got_401:
         invalidate_token(current_user.id, db)
         ctx2 = _get_client_ctx(current_user.id, db)
         if ctx2 is None:
             return _build_response({}, errors)
-        client2, _ = ctx2
-        result, _, errors = await _fetch_stories_concurrent(client2, id_list)
+        client2, base_url2 = ctx2
+        result, _, errors = await _fetch_stories_concurrent(client2, base_url2, id_list)
 
     return _build_response(result, errors)
+
+
+@router.get("/story/{story_id}/detail")
+def get_story_detail(
+    story_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Fetch one Zentao story's full payload (including spec/verify) for the
+    requirement preview modal.
+
+    Returns the normalized dict from ``normalize_story_detail``. On any
+    failure the response carries an ``error`` key so the frontend can show
+    a friendly message in the modal instead of failing silently.
+    """
+    ctx = _get_client_ctx(current_user.id, db)
+    if ctx is None:
+        return {"error": "no_binding", "message": "当前用户未绑定禅道账号"}
+    client, base_url = ctx
+
+    def _fetch(c: ZentaoClient) -> tuple[dict | None, int | None]:
+        try:
+            raw = c.get_story(story_id)
+            return raw, None
+        except ZentaoAPIError as exc:
+            return None, exc.status_code
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_story_detail story=%s err=%s", story_id, exc)
+            return None, -1
+
+    raw, err_code = _fetch(client)
+    if err_code == 401:
+        invalidate_token(current_user.id, db)
+        ctx2 = _get_client_ctx(current_user.id, db)
+        if ctx2 is None:
+            return {"error": "no_binding", "message": "禅道 token 失效且无法续期"}
+        client2, base_url = ctx2
+        raw, err_code = _fetch(client2)
+
+    if raw is None:
+        if err_code == 404:
+            return {"error": "not_found", "message": f"禅道中找不到需求 s#{story_id}"}
+        return {"error": "fetch_failed", "message": "拉取禅道需求详情失败"}
+
+    return normalize_story_detail(raw, base_url=base_url)
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +229,7 @@ async def _fetch_bugs_concurrent(
 
 async def _fetch_stories_concurrent(
     client: ZentaoClient,
+    base_url: str,
     id_list: list[int],
 ) -> tuple[dict, bool, list[str]]:
     """
@@ -198,7 +248,9 @@ async def _fetch_stories_concurrent(
             try:
                 raw = await asyncio.to_thread(client.get_story, story_id)
                 if raw:
-                    result[str(story_id)] = normalize_story(raw)
+                    data = normalize_story(raw)
+                    data["zentao_url"] = f"{base_url}/story-view-{story_id}.html"
+                    result[str(story_id)] = data
             except ZentaoAPIError as exc:
                 if exc.status_code == 401:
                     got_401 = True

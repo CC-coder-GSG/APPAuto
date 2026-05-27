@@ -276,6 +276,54 @@ def normalize_story(raw: dict) -> dict:
     }
 
 
+def normalize_story_detail(raw: dict, base_url: str = "") -> dict:
+    """Normalize a full Zentao story payload for preview dialogs.
+
+    Returns the same fields as ``normalize_story`` plus ``spec`` / ``verify``
+    (HTML strings — caller must sanitize before injecting) and editor /
+    timestamp metadata useful for the preview panel header.
+    """
+    if not raw or not isinstance(raw, dict):
+        return {}
+
+    story = raw.get("story") or raw
+    if not isinstance(story, dict):
+        return {}
+
+    status = str(story.get("status") or "")
+    stage = str(story.get("stage") or "")
+    story_id = story.get("id")
+
+    zentao_url = ""
+    if base_url and story_id:
+        zentao_url = f"{base_url.rstrip('/')}/story-view-{story_id}.html"
+
+    return {
+        "id": story_id,
+        "title": story.get("title") or "",
+        "status": status,
+        "status_zh": _STORY_STATUS_ZH.get(status, status),
+        "stage": stage,
+        "stage_zh": _STORY_STAGE_ZH.get(stage, stage),
+        "pri": story.get("pri"),
+        "assigned_to": _extract_person_name(story.get("assignedTo")),
+        "opened_by": _extract_person_name(story.get("openedBy")),
+        "opened_date": story.get("openedDate") or "",
+        "last_edited_by": _extract_person_name(story.get("lastEditedBy")),
+        "last_edited_date": story.get("lastEditedDate") or "",
+        "module": _extract_simple_value(story.get("moduleTitle") or story.get("module")),
+        "product": _extract_simple_value(story.get("productName") or story.get("product")),
+        "plan": _extract_plan_name(story.get("plan")),
+        "category": _extract_simple_value(story.get("category")),
+        "type": _extract_simple_value(story.get("type")),
+        "keywords": _extract_simple_value(story.get("keywords")),
+        "estimate": story.get("estimate"),
+        "spec": story.get("spec") or "",
+        "verify": story.get("verify") or "",
+        "zentao_url": zentao_url,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -386,4 +434,9 @@ def _is_image_file(name: Any, *, extension: str = "", mime: Any = None) -> bool:
     return ext in {"png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"}
 
 
-__all__ = ["normalize_bug", "normalize_bug_detail", "normalize_story"]
+__all__ = [
+    "normalize_bug",
+    "normalize_bug_detail",
+    "normalize_story",
+    "normalize_story_detail",
+]
