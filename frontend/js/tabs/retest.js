@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { withPrefix, renderBugLink, renderCaseLink } from '../utils.js';
+import { withPrefix, renderBugLink, renderCaseLink, renderPreviewBtn } from '../utils.js';
 let retestSseBound = false;
 let retestPreflightPromise = null;
 let retestPreflightKey = '';
@@ -110,12 +110,13 @@ export async function loadRetest() {
         const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
         const linkedBadge = b.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
         return `<div style="margin-top:4px;">
-          <span class="badge" style="background:#fef2f2; color:#dc2626; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${linkedBadge}
+          <span class="badge" style="background:#fef2f2; color:#dc2626; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${linkedBadge}
           <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
         </div>`;
       }).join('');
+      const caseZtId = String(c.zentao_case_id || '').replace(/\D/g, '');
       return `<div style="margin-bottom: 10px; padding-left: 12px; border-left: 3px solid #cbd5e1;">
-        <div style="font-weight: bold; color: #475569;">🧪 用例 [${renderCaseLink(c)}]${c.auto_linked ? renderAutoLinkedBadge('自动归集用例') : ''}</div>
+        <div style="font-weight: bold; color: #475569;">🧪 用例 [${renderCaseLink(c)}]${renderPreviewBtn('testcase', caseZtId)}${c.auto_linked ? renderAutoLinkedBadge('自动归集用例') : ''}</div>
         <div style="margin-top: 4px;">${bugs || '<span class="muted" style="font-size:12px;">✓ 完美通过，无关联Bug</span>'}</div>
       </div>`;
     }).join('');
@@ -126,7 +127,7 @@ export async function loadRetest() {
       const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
       const linkedBadge = b.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
       return `<div style="margin-bottom:6px;">
-      <span class="badge" style="background:#fff7ed; color:#ea580c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${linkedBadge}
+      <span class="badge" style="background:#fff7ed; color:#ea580c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${linkedBadge}
       <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
     </div>`;
     }).join('');

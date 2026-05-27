@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -48,7 +49,21 @@ from app.services.zentao_normalizer import (
     normalize_bug,
     normalize_story,
     normalize_story_detail,
+    normalize_testcase_detail,
 )
+
+# Rewrite Zentao file URLs inside rich-text HTML to the local /zentao/files/{id}
+# proxy so the browser can load them without a direct Zentao session. Mirrors
+# the regex used in app/api/routes/zentao_bug_actions.py.
+_FILE_URL_RE = re.compile(
+    r'(?:https?://)?[^"\'>\s]*/file-(?:read|download|preview)-(\d+)\.[a-zA-Z0-9]+'
+)
+
+
+def _rewrite_file_urls(html: str | None) -> str:
+    if not html:
+        return ""
+    return _FILE_URL_RE.sub(lambda m: f"/zentao/files/{m.group(1)}", html)
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +197,55 @@ def get_story_detail(
             return {"error": "not_found", "message": f"禅道中找不到需求 s#{story_id}"}
         return {"error": "fetch_failed", "message": "拉取禅道需求详情失败"}
 
-    return normalize_story_detail(raw, base_url=base_url)
+    detail = normalize_story_detail(raw, base_url=base_url)
+    detail["spec"] = _rewrite_file_urls(detail.get("spec"))
+    detail["verify"] = _rewrite_file_urls(detail.get("verify"))
+    return detail
+
+
+@router.get("/testcase/{case_id}/detail")
+def get_testcase_detail(
+    case_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Fetch one Zentao testcase's full payload for the preview modal."""
+    ctx = _get_client_ctx(current_user.id, db)
+    if ctx is None:
+        return {"error": "no_binding", "message": "当前用户未绑定禅道账号"}
+    client, base_url = ctx
+
+    def _fetch(c: ZentaoClient) -> tuple[dict | None, int | None]:
+        try:
+            raw = c.get_testcase(case_id)
+            return raw, None
+        except ZentaoAPIError as exc:
+            return None, exc.status_code
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_testcase_detail case=%s err=%s", case_id, exc)
+            return None, -1
+
+    raw, err_code = _fetch(client)
+    if err_code == 401:
+        invalidate_token(current_user.id, db)
+        ctx2 = _get_client_ctx(current_user.id, db)
+        if ctx2 is None:
+            return {"error": "no_binding", "message": "禅道 token 失效且无法续期"}
+        client2, base_url = ctx2
+        raw, err_code = _fetch(client2)
+
+    if raw is None:
+        if err_code == 404:
+            return {"error": "not_found", "message": f"禅道中找不到用例 case#{case_id}"}
+        return {"error": "fetch_failed", "message": "拉取禅道用例详情失败"}
+
+    detail = normalize_testcase_detail(raw, base_url=base_url)
+    detail["precondition"] = _rewrite_file_urls(detail.get("precondition"))
+    for step in detail.get("steps") or []:
+        if isinstance(step, dict):
+            step["step"] = _rewrite_file_urls(step.get("step"))
+            step["expect"] = _rewrite_file_urls(step.get("expect"))
+    return detail
 
 
 # ---------------------------------------------------------------------------

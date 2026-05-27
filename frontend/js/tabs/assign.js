@@ -1,5 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
+import { renderPreviewBtn } from '../utils.js';
 
 function getUsers() {
   return window.users || state.users || [];
@@ -92,8 +93,7 @@ function renderAssignProgress(data) {
                   : (r.zentao_req_id || '');
                 const ztSlot = sid ? ` <span class="zt-story-slot" data-zt-story-id="${sid}" style="margin-left:4px;"></span>` : '';
                 const aiSlot = sid ? ` <span class="ai-result-slot" data-story-id="${sid}"></span>` : '';
-                const previewBtn = sid ? ` <a href="javascript:void(0)" onclick="window.OmniQAStoryPreview && window.OmniQAStoryPreview.open(${sid})" title="预览禅道需求正文" style="color:#0ea5e9; margin-left:4px; text-decoration:none;">👁</a>` : '';
-                return `${idHtml} ${r.title || ''}${ztSlot}${previewBtn}${aiSlot}`;
+                return `${idHtml} ${r.title || ''}${ztSlot}${renderPreviewBtn('story', sid)}${aiSlot}`;
               })()}</td>
               <td>${r.case_completed ? '✅已勾选' : '⏳未勾选'}</td>
               <td>${r.test_completed ? '✅已勾选' : '⏳未勾选'}</td>
@@ -169,11 +169,10 @@ export async function loadAssignBoard() {
       ? `<span class="qa-story-id-nohref" data-zt-story-id="${sid}">${r.zentao_req_id}</span>`
       : (r.zentao_req_id || '');
     const ztSlot = sid ? ` <span class="zt-story-slot" data-zt-story-id="${sid}" style="margin-left:4px;"></span>` : '';
-    const previewBtn = sid ? ` <a href="javascript:void(0)" onclick="window.OmniQAStoryPreview && window.OmniQAStoryPreview.open(${sid})" title="预览禅道需求正文" style="color:#0ea5e9; margin-left:4px; text-decoration:none;">👁</a>` : '';
     const aiSlot = sid ? ` <span class="ai-result-slot" data-story-id="${sid}"></span>` : '';
     return `
     <tr>
-      <td>${idHtml} ${r.title || ''}${ztSlot}${previewBtn}${aiSlot}</td>
+      <td>${idHtml} ${r.title || ''}${ztSlot}${renderPreviewBtn('story', sid)}${aiSlot}</td>
       <td>
         <select id='o_${r.id}'>
           <option value=''>未分配</option>

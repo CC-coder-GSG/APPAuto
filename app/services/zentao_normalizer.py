@@ -325,6 +325,89 @@ def normalize_story_detail(raw: dict, base_url: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Testcase normalization
+# ---------------------------------------------------------------------------
+
+_TESTCASE_TYPE_ZH: dict[str, str] = {
+    "feature": "功能测试",
+    "performance": "性能测试",
+    "config": "配置相关",
+    "install": "安装部署",
+    "security": "安全相关",
+    "interface": "接口测试",
+    "unit": "单元测试",
+    "other": "其他",
+}
+
+_TESTCASE_STATUS_ZH: dict[str, str] = {
+    "normal": "正常",
+    "wait": "待执行",
+    "blocked": "阻塞",
+    "investigate": "调研中",
+    "tested": "已测试",
+}
+
+
+def normalize_testcase_detail(raw: dict, base_url: str = "") -> dict:
+    """Normalize a Zentao testcase payload for the preview modal."""
+    if not raw or not isinstance(raw, dict):
+        return {}
+
+    tc = raw.get("testcase") or raw
+    if not isinstance(tc, dict):
+        return {}
+
+    case_id = tc.get("id")
+    type_code = str(tc.get("type") or "")
+    status_code = str(tc.get("status") or "")
+
+    steps_out: list[dict] = []
+    raw_steps = tc.get("steps") or []
+    if isinstance(raw_steps, dict):
+        raw_steps = list(raw_steps.values())
+    if isinstance(raw_steps, list):
+        for s in raw_steps:
+            if not isinstance(s, dict):
+                continue
+            steps_out.append(
+                {
+                    "name": s.get("name") or "",
+                    "step": s.get("step") or s.get("desc") or "",
+                    "expect": s.get("expect") or "",
+                    "type": s.get("type") or "step",
+                }
+            )
+
+    zentao_url = ""
+    if base_url and case_id:
+        zentao_url = f"{base_url.rstrip('/')}/testcase-view-{case_id}.html"
+
+    return {
+        "id": case_id,
+        "title": tc.get("title") or "",
+        "type": type_code,
+        "type_zh": _TESTCASE_TYPE_ZH.get(type_code, type_code),
+        "pri": tc.get("pri"),
+        "status": status_code,
+        "status_zh": _TESTCASE_STATUS_ZH.get(status_code, status_code),
+        "stage": _extract_simple_value(tc.get("stage")),
+        "precondition": tc.get("precondition") or "",
+        "keywords": _extract_simple_value(tc.get("keywords")),
+        "story": _extract_simple_value(tc.get("storyTitle") or tc.get("story")),
+        "module": _extract_simple_value(tc.get("moduleTitle") or tc.get("module")),
+        "product": _extract_simple_value(tc.get("productName") or tc.get("product")),
+        "opened_by": _extract_person_name(tc.get("openedBy")),
+        "opened_date": tc.get("openedDate") or "",
+        "last_edited_by": _extract_person_name(tc.get("lastEditedBy")),
+        "last_edited_date": tc.get("lastEditedDate") or "",
+        "last_run_result": tc.get("lastRunResult") or "",
+        "last_run_date": tc.get("lastRunDate") or "",
+        "steps": steps_out,
+        "zentao_url": zentao_url,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
@@ -439,4 +522,5 @@ __all__ = [
     "normalize_bug_detail",
     "normalize_story",
     "normalize_story_detail",
+    "normalize_testcase_detail",
 ]

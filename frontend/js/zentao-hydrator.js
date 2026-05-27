@@ -163,15 +163,38 @@ const _STORY_STATUS_COLOR = {
   changing: { bg: '#fef3c7', color: '#92400e' },
 };
 
+// Eye-catching colors per stage. "developed" (开发完成) gets a bright green
+// pill with a sparkle so testers can spot stories that just became testable.
+const _STORY_STAGE_STYLE = {
+  developed: {
+    style: 'background:#16a34a;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;margin-left:3px;box-shadow:0 0 0 1px #bbf7d0;',
+    icon: '✨ ',
+  },
+  testing: {
+    style: 'background:#f59e0b;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;margin-left:3px;',
+    icon: '',
+  },
+  released: {
+    style: 'background:#0ea5e9;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;margin-left:3px;',
+    icon: '',
+  },
+};
+
 function _renderStorySlot(d) {
   if (!d) return '';
 
   const sc = _STORY_STATUS_COLOR[d.status] || { bg: '#f1f5f9', color: '#475569' };
   const statusBadge = `<span style="background:${sc.bg};color:${sc.color};padding:1px 5px;border-radius:4px;font-size:10px;font-weight:600;">${d.status_zh || d.status}</span>`;
 
-  const stageBadge = d.stage_zh
-    ? `<span style="color:#64748b;font-size:10px;margin-left:3px;">[${d.stage_zh}]</span>`
-    : '';
+  let stageBadge = '';
+  if (d.stage_zh) {
+    const sty = _STORY_STAGE_STYLE[d.stage];
+    if (sty) {
+      stageBadge = `<span style="${sty.style}">${sty.icon}${d.stage_zh}</span>`;
+    } else {
+      stageBadge = `<span style="color:#64748b;font-size:10px;margin-left:3px;">[${d.stage_zh}]</span>`;
+    }
+  }
 
   const assignee = d.assigned_to
     ? `<span style="color:#0ea5e9;font-size:10px;margin-left:3px;">→${d.assigned_to}</span>`

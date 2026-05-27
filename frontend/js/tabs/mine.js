@@ -1,7 +1,7 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
 import { closeModal, openModal } from '../components/modal.js';
-import { renderBugLink, renderCaseLink } from '../utils.js';
+import { renderBugLink, renderCaseLink, renderPreviewBtn } from '../utils.js';
 
 const RESULT_OPTIONS = [
   { value: 'passed', label: '通过' },
@@ -99,9 +99,10 @@ function renderBugChip(req, bug) {
   const ztBugId = (bug.bug_id || '').replace(/\D/g, '');
   const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:4px;"></span>` : '';
   const autoBadge = bug.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
+  const previewBugBtn = renderPreviewBtn('bug', ztBugId);
 
   return `<span class="badge" style="background:#f1f5f9; border:1px solid #cbd5e1; padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
-      ${renderBugLink(bug)} ${ztSlot} ${verText} ${dBadge} ${autoBadge}
+      ${renderBugLink(bug)} ${ztSlot} ${previewBugBtn} ${verText} ${dBadge} ${autoBadge}
       <a href="javascript:void(0)" title="编辑" onclick="${immutable ? 'return false;' : `editWorkbenchBug(${bug.id}, '${bug.bug_id}')`}" style="color:${immutable ? '#94a3b8' : '#3b82f6'}; margin-left:4px; text-decoration:none;">✎</a>
       <a href="javascript:void(0)" title="删除" onclick="${immutable ? 'return false;' : `removeWorkbenchBug(${bug.id})`}" style="color:${immutable ? '#94a3b8' : '#ef4444'}; margin-left:2px; text-decoration:none;">×</a>
   </span>`;
@@ -445,10 +446,11 @@ export function renderMineCards() {
     ].join('');
 
     const caseHtml = (req.test_cases || []).map((c) => {
+      const caseZtId = String(c.zentao_case_id || '').replace(/\D/g, '');
       return `
       <div class="case-item">
         <div class="row">
-          ${renderCaseLink(c)}${c.auto_linked ? renderAutoLinkedBadge() : ''}
+          ${renderCaseLink(c)}${renderPreviewBtn('testcase', caseZtId)}${c.auto_linked ? renderAutoLinkedBadge() : ''}
         </div>
         <div class="case-bugs" style="margin-top:6px;">${(c.bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无关联Bug</span>'}</div>
       </div>`;
@@ -462,9 +464,7 @@ export function renderMineCards() {
     const reqIdHtml = ztStoryId
       ? `<span class="qa-story-id-nohref" data-zt-story-id="${ztStoryId}">${req.zentao_req_id}</span>`
       : (req.zentao_req_id || '');
-    const previewBtn = ztStoryId
-      ? `<a href="javascript:void(0)" onclick="event.preventDefault(); event.stopPropagation(); window.OmniQAStoryPreview && window.OmniQAStoryPreview.open(${ztStoryId})" title="预览禅道需求正文" style="color:#0ea5e9; margin-left:6px; text-decoration:none; vertical-align:middle;">👁</a>`
-      : '';
+    const previewBtn = renderPreviewBtn('story', ztStoryId);
 
     return `
       <details class="mine-req-card" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; transition: all 0.3s;">
