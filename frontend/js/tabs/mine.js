@@ -529,7 +529,7 @@ export async function loadMyWorkbench() {
                     <label style="color:#0f172a; display:flex; align-items:center; gap:4px; margin:0;"><input id='ddone_${b.id}' type='checkbox' ${b.test_done ? 'checked' : ''} onchange="toggleDispatchedClose(${b.id}, this.checked)"> 确认闭环</label>
                     <button class="${b.test_done ? 'secondary' : ''}" onclick="saveDispatchedBug(${b.id})">保存记录</button>
                   </div>
-                  <div id="dcomment_wrap_${b.id}" style="margin-top:6px; ${(b.test_done && b.zentao_bug_id) ? '' : 'display:none;'}">
+                  <div id="dcomment_wrap_${b.id}" style="margin-top:6px; display:none;">
                     <textarea id="dcomment_${b.id}" rows="2" placeholder="闭环说明（将同步写入禅道备注）" style="width:100%; font-size:12px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px;"></textarea>
                     ${b.zentao_bug_id ? '<div class="muted" style="font-size:11px; margin-top:2px;">勾选「确认闭环」保存时会同步关闭禅道 Bug（需禅道中已是“已解决”）。</div>' : ''}
                   </div>
