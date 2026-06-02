@@ -489,9 +489,14 @@
             <option value="rejected">⛔ 拒绝修复</option>
           </select>
         </div>
-        <div style="margin-bottom: 14px;">
-          <label style="display:flex; align-items:center; gap:6px; color:#0f172a;"><input id="mineBugResultDone" type="checkbox"> 确认闭环</label>
+        <div style="margin-bottom: 10px;">
+          <label style="display:flex; align-items:center; gap:6px; color:#0f172a;"><input id="mineBugResultDone" type="checkbox" onchange="toggleBugResultCloseComment()"> 确认闭环</label>
         </div>
+        <div id="mineBugResultCommentWrap" style="margin-bottom: 12px; display:none;">
+          <label style="display:block; margin-bottom:6px; color:#0f172a;">闭环说明（将同步写入禅道备注）</label>
+          <textarea id="mineBugResultComment" rows="3" placeholder="填写闭环/验证说明，提交时同步写入禅道关闭备注" style="width:100%;"></textarea>
+        </div>
+        <div id="mineBugResultZentaoHint" class="muted" style="font-size:12px; margin-bottom:12px;"></div>
         <div class="row" style="justify-content: flex-end; gap: 8px;">
           <button class="secondary" onclick="closeBugResultModal()">取消</button>
           <button onclick="confirmBugResultModal()">保存记录</button>
@@ -2648,8 +2653,8 @@ async function saveReqTestNotes(){
   return window.OmniQAMineTab.saveReqTestNotes();
 }
 
-function openBugResultModal(bugId, bugIdText, closed){
-  return window.OmniQAMineTab.openBugResultModal(bugId, bugIdText, closed);
+function openBugResultModal(bugId, bugIdText, closed, zentaoBugId){
+  return window.OmniQAMineTab.openBugResultModal(bugId, bugIdText, closed, zentaoBugId);
 }
 
 function closeBugResultModal(){
@@ -2658,6 +2663,10 @@ function closeBugResultModal(){
 
 async function confirmBugResultModal(){
   return window.OmniQAMineTab.confirmBugResultModal();
+}
+
+function toggleBugResultCloseComment(){
+  return window.OmniQAMineTab.toggleBugResultCloseComment();
 }
 
 async function addCase(reqId){
@@ -3199,6 +3208,10 @@ async function editBug(id,b){
 
 async function saveDispatchedBug(id) {
   return window.OmniQADispatchTab.saveDispatchedBug(id);
+}
+
+function toggleDispatchedClose(id, checked) {
+  return window.OmniQADispatchTab.toggleDispatchedClose(id, checked);
 }
 
 async function addDerivedBug(id) {

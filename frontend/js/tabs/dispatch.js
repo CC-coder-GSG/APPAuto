@@ -70,13 +70,57 @@ export async function loadDispatchedAll() {
   }
 }
 
+export function toggleDispatchedClose(id, checked) {
+  // 勾选闭环时禁用「引出Bug」隐藏输入（沿用旧逻辑），同时为禅道 Bug 展开闭环说明输入框
+  const hidden = document.getElementById('dnb_hidden_' + id);
+  if (hidden) hidden.disabled = checked;
+  const wrap = document.getElementById('dcomment_wrap_' + id);
+  const isZentao = !!(document.getElementById('dzt_' + id)?.value || '').trim();
+  if (wrap) wrap.style.display = (checked && isZentao) ? '' : 'none';
+}
+
 export async function saveDispatchedBug(id) {
   const done = document.getElementById('ddone_' + id).checked;
   const n = document.getElementById('dnb_hidden_' + id).value || null;
   const res = document.getElementById('dres_' + id).value;
+  const zentaoBugId = (document.getElementById('dzt_' + id)?.value || '').trim();
+  const wasClosed = !!(document.getElementById('dwasclosed_' + id)?.value || '');
+  const comment = (document.getElementById('dcomment_' + id)?.value || '').trim();
+  const isZentaoBug = !!zentaoBugId;
+  const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
+
+  // 勾选闭环且是禅道 Bug：先同步关闭禅道（与测试工作台一致）
+  if (isZentaoBug && done) {
+    const ztId = Number(zentaoBugId);
+    if (ztId) {
+      try {
+        await api(`/zentao/bugs/${ztId}/close`, { method: 'POST', headers: window.H, body: { comment } });
+      } catch (err) {
+        window.showMessage && window.showMessage(err.message || '禅道关闭失败，本地未保存闭环结果', 'error');
+        return;
+      }
+    }
+  }
+
+  // 取消闭环且禅道侧已关闭：必须先在禅道重新激活
+  if (isZentaoBug && !done && wasClosed) {
+    const ztId = Number(zentaoBugId);
+    if (ztId) {
+      const reactivate = window.OmniQAOverallTestTab?.openS5ReactivateModalAsync;
+      if (typeof reactivate === 'function') {
+        window.showMessage && window.showMessage('取消闭环需要先在禅道重新激活该 Bug', 'info');
+        const activated = await reactivate(id, ztId);
+        if (!activated) {
+          window.showMessage && window.showMessage('未完成重新激活，已取消「取消闭环」操作', 'error');
+          return;
+        }
+      }
+    }
+  }
+
   await api(`/overall-test/bugs/${id}/result`, {
     method: 'PUT', headers: window.H,
-    body: ({ minor_version_id: Number(document.getElementById('mineMinorSelect')?.value || 0), test_done: done, newly_found_bug_id: n, resolution: res }),
+    body: ({ minor_version_id: minorId, test_done: done, newly_found_bug_id: n, resolution: res }),
   });
   window.showMessage && window.showMessage('特派专项验证已保存并同步至总盘');
   await window.OmniQAMineTab.loadMyWorkbench();
@@ -106,7 +150,7 @@ export async function removeDerivedBug(id, bugToRemove) {
   await saveDispatchedBug(id);
 }
 
-window.OmniQADispatchTab = { searchDispatchBug, confirmDispatchBug, loadDispatchedAll, saveDispatchedBug, addDerivedBug, removeDerivedBug };
+window.OmniQADispatchTab = { searchDispatchBug, confirmDispatchBug, loadDispatchedAll, saveDispatchedBug, addDerivedBug, removeDerivedBug, toggleDispatchedClose };
 
 function bindDispatchSSE() {
   if (dispatchSseBound) return;

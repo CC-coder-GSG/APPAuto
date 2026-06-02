@@ -22,6 +22,8 @@ const notesModalState = {
 
 const bugResultModalState = {
   bugId: null,
+  zentaoBugId: '',
+  wasClosed: false,
 };
 let mineSseBound = false;
 let minePreflightPromise = null;
@@ -108,7 +110,7 @@ function renderBugChip(req, bug) {
   const closedHint = bug.closed
     ? '<span title="已闭环" style="color:#16a34a; margin-left:4px;">✅</span>'
     : '';
-  const resultBtn = `<a href="javascript:void(0)" title="修复结果 / 闭环确认" onclick="openBugResultModal(${bug.id}, '${bug.bug_id}', ${bug.closed ? 'true' : 'false'})" style="color:#16a34a; margin-left:6px; text-decoration:none;">🛠️</a>`;
+  const resultBtn = `<a href="javascript:void(0)" title="修复结果 / 闭环确认" onclick="openBugResultModal(${bug.id}, '${bug.bug_id}', ${bug.closed ? 'true' : 'false'}, '${bug.zentao_bug_id || ''}')" style="color:#16a34a; margin-left:6px; text-decoration:none;">🛠️</a>`;
 
   return `<span class="badge" style="background:#f1f5f9; border:1px solid #cbd5e1; padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
       ${renderBugLink(bug)} ${ztSlot} ${previewBugBtn} ${verText} ${dBadge} ${autoBadge}${closedHint}
@@ -249,7 +251,16 @@ export async function saveReqTestNotes() {
   }
 }
 
-export function openBugResultModal(bugId, bugIdText, closed) {
+function toggleBugResultCloseComment() {
+  const wrap = document.getElementById('mineBugResultCommentWrap');
+  if (!wrap) return;
+  const done = !!document.getElementById('mineBugResultDone')?.checked;
+  const isZentao = !!bugResultModalState.zentaoBugId;
+  // 仅在「禅道 Bug + 勾选闭环」时需要填写闭环说明（会同步写入禅道备注）
+  wrap.style.display = done && isZentao ? '' : 'none';
+}
+
+export function openBugResultModal(bugId, bugIdText, closed, zentaoBugId) {
   const modal = document.getElementById('mineBugResultModal');
   if (!modal) return;
   const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
@@ -258,14 +269,25 @@ export function openBugResultModal(bugId, bugIdText, closed) {
     return;
   }
   bugResultModalState.bugId = bugId;
+  bugResultModalState.zentaoBugId = String(zentaoBugId || '');
+  bugResultModalState.wasClosed = !!closed;
   const titleEl = document.getElementById('mineBugResultTitle');
   const minorEl = document.getElementById('mineBugResultMinor');
   const resSel = document.getElementById('mineBugResultResolution');
   const doneChk = document.getElementById('mineBugResultDone');
+  const commentEl = document.getElementById('mineBugResultComment');
+  const hintEl = document.getElementById('mineBugResultZentaoHint');
   if (titleEl) titleEl.innerText = `Bug 修复结果 / 闭环确认 - ${bugIdText}`;
   if (minorEl) minorEl.innerText = getMinorText(minorId);
   if (resSel) resSel.value = 'fixed';
   if (doneChk) doneChk.checked = !!closed;
+  if (commentEl) commentEl.value = '';
+  if (hintEl) {
+    hintEl.innerText = bugResultModalState.zentaoBugId
+      ? '该 Bug 关联禅道，勾选「确认闭环」保存时会同步关闭禅道 Bug（需禅道中已是“已解决”状态）。'
+      : '该 Bug 为本地 Bug，保存仅记录闭环结果。';
+  }
+  toggleBugResultCloseComment();
   openModal(modal);
 }
 
@@ -273,6 +295,8 @@ export function closeBugResultModal() {
   const modal = document.getElementById('mineBugResultModal');
   if (modal) closeModal(modal);
   bugResultModalState.bugId = null;
+  bugResultModalState.zentaoBugId = '';
+  bugResultModalState.wasClosed = false;
 }
 
 export async function confirmBugResultModal() {
@@ -288,7 +312,44 @@ export async function confirmBugResultModal() {
   }
   const resolution = document.getElementById('mineBugResultResolution')?.value || 'fixed';
   const done = !!document.getElementById('mineBugResultDone')?.checked;
+  const comment = (document.getElementById('mineBugResultComment')?.value || '').trim();
+  const zentaoBugId = bugResultModalState.zentaoBugId;
+  const isZentaoBug = !!zentaoBugId;
+
   try {
+    // 勾选闭环且是禅道 Bug：先同步关闭禅道（与测试工作台一致）
+    if (isZentaoBug && done) {
+      const ztId = Number(zentaoBugId);
+      if (ztId) {
+        try {
+          await api(`/zentao/bugs/${ztId}/close`, {
+            method: 'POST',
+            headers: window.H,
+            body: { comment },
+          });
+        } catch (err) {
+          window.showMessage && window.showMessage(err.message || '禅道关闭失败，本地未保存闭环结果', 'error');
+          return;
+        }
+      }
+    }
+
+    // 取消闭环且禅道侧已关闭：必须先在禅道重新激活，再落本地未闭环
+    if (isZentaoBug && !done && bugResultModalState.wasClosed) {
+      const ztId = Number(zentaoBugId);
+      if (ztId) {
+        const reactivate = window.OmniQAOverallTestTab?.openS5ReactivateModalAsync;
+        if (typeof reactivate === 'function') {
+          window.showMessage && window.showMessage('取消闭环需要先在禅道重新激活该 Bug', 'info');
+          const activated = await reactivate(bugId, ztId);
+          if (!activated) {
+            window.showMessage && window.showMessage('未完成重新激活，已取消「取消闭环」操作', 'error');
+            return;
+          }
+        }
+      }
+    }
+
     await api(`/overall-test/bugs/${bugId}/result`, {
       method: 'PUT',
       headers: window.H,
@@ -457,14 +518,20 @@ export async function loadMyWorkbench() {
                   <button class="secondary" style="padding:2px 8px; font-size:12px;" ${b.test_done ? 'disabled' : ''} onclick="addDerivedBug(${b.id})">➕ 添加引出Bug</button>
                 </td>
                 <td style="text-decoration:none;">
+                  <input type="hidden" id="dzt_${b.id}" value="${b.zentao_bug_id || ''}">
+                  <input type="hidden" id="dwasclosed_${b.id}" value="${b.closed ? '1' : ''}">
                   <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                     <select id='dres_${b.id}' style="padding:2px; font-size:13px;" ${b.test_done ? 'disabled' : ''}>
                       <option value="fixed" ${b.resolution === 'fixed' ? 'selected' : ''}>🚀修复通过</option>
                       <option value="false_alarm" ${b.resolution === 'false_alarm' ? 'selected' : ''}>⚠️误报</option>
                       <option value="rejected" ${b.resolution === 'rejected' ? 'selected' : ''}>⛔拒绝修复</option>
                     </select>
-                    <label style="color:#0f172a; display:flex; align-items:center; gap:4px; margin:0;"><input id='ddone_${b.id}' type='checkbox' ${b.test_done ? 'checked' : ''} onchange="document.getElementById('dnb_hidden_'+${b.id}).disabled=this.checked"> 确认闭环</label>
+                    <label style="color:#0f172a; display:flex; align-items:center; gap:4px; margin:0;"><input id='ddone_${b.id}' type='checkbox' ${b.test_done ? 'checked' : ''} onchange="toggleDispatchedClose(${b.id}, this.checked)"> 确认闭环</label>
                     <button class="${b.test_done ? 'secondary' : ''}" onclick="saveDispatchedBug(${b.id})">保存记录</button>
+                  </div>
+                  <div id="dcomment_wrap_${b.id}" style="margin-top:6px; ${(b.test_done && b.zentao_bug_id) ? '' : 'display:none;'}">
+                    <textarea id="dcomment_${b.id}" rows="2" placeholder="闭环说明（将同步写入禅道备注）" style="width:100%; font-size:12px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px;"></textarea>
+                    ${b.zentao_bug_id ? '<div class="muted" style="font-size:11px; margin-top:2px;">勾选「确认闭环」保存时会同步关闭禅道 Bug（需禅道中已是“已解决”）。</div>' : ''}
                   </div>
                 </td>
               </tr>
@@ -784,6 +851,7 @@ window.OmniQAMineTab = {
   openBugResultModal,
   closeBugResultModal,
   confirmBugResultModal,
+  toggleBugResultCloseComment,
 };
 
 

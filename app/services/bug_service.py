@@ -138,6 +138,8 @@ class BugService:
                 {
                     "id": bug.id,
                     "bug_id": bug.bug_id,
+                    "zentao_bug_id": bug.zentao_bug_id,
+                    "closed": bool(bug.closed),
                     "source_type": bug.source_type.value,
                     "req_title": bug.requirement.title if bug.requirement else "无关联需求 / 自由Bug",
                     "test_done": record.test_done if record else False,

@@ -29,6 +29,7 @@ class WorkbenchLinkService:
         return {
             "id": bug.id,
             "bug_id": bug.bug_id,
+            "zentao_bug_id": bug.zentao_bug_id,
             "zentao_bug_url": bug.zentao_bug_url,
             "zentao_bug_title": bug.zentao_bug_title,
             "found_minor_version_no": minors.get(bug.found_minor_version_id, "未知") if bug.found_minor_version_id else "未知",
