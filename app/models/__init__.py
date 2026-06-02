@@ -19,6 +19,7 @@ from app.models.execution import TestExecution
 from app.models.feedback import FeedbackAttachment, FeedbackBugLink, FeedbackRecord
 from app.models.field_test import FieldTestBugLink, FieldTestPurposeType, FieldTestRecord, FieldTestResultStatus
 from app.models.requirement import Requirement
+from app.models.requirement_retest_record import RequirementRetestRecord
 from app.models.requirement_status_history import RequirementStatusHistory
 from app.models.software import SoftwareProduct
 from app.models.stage5 import BugStage5Record
@@ -49,6 +50,7 @@ __all__ = [
     "FieldTestRecord",
     "FieldTestResultStatus",
     "Requirement",
+    "RequirementRetestRecord",
     "RequirementStatusHistory",
     "RequirementStatus",
     "SoftwareProduct",

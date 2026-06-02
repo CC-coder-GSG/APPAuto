@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Requirement, User, Version
+from app.models import Requirement, RequirementRetestRecord, User, Version
 from app.services.workbench_link_service import WorkbenchLinkService
 
 
@@ -95,13 +95,41 @@ class WorkbenchService:
                 return []
             query = query.filter(Requirement.major_version_id == major_version_id)
         elif mode == "all_pending":
-            query = query.filter(Requirement.retest_completed.is_(False))
+            # 复测状态按用户独立：这里只过滤"当前用户尚未复测"的需求
+            retested_by_me = (
+                self.db.query(RequirementRetestRecord.requirement_id)
+                .filter(RequirementRetestRecord.user_id == current_user.id)
+                .subquery()
+            )
+            query = query.filter(Requirement.id.notin_(retested_by_me))
             if software_id:
                 query = query.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
         else:
             raise HTTPException(status_code=400, detail="mode only supports version/all_pending")
 
         reqs = query.order_by(Requirement.id.asc()).all()
+
+        # 拉取这批需求的全部 per-user 复测记录，构建"我的复测状态"和"已复测人"标签
+        req_ids = [r.id for r in reqs]
+        retest_records_map: dict[int, list[dict]] = {}
+        my_record_map: dict[int, RequirementRetestRecord] = {}
+        if req_ids:
+            records = (
+                self.db.query(RequirementRetestRecord)
+                .options(joinedload(RequirementRetestRecord.user))
+                .filter(RequirementRetestRecord.requirement_id.in_(req_ids))
+                .all()
+            )
+            for rec in records:
+                retest_records_map.setdefault(rec.requirement_id, []).append({
+                    "user_id": rec.user_id,
+                    "user_name": rec.user.shown_name if rec.user else "未知",
+                    "passed": bool(rec.passed),
+                    "is_me": rec.user_id == current_user.id,
+                })
+                if rec.user_id == current_user.id:
+                    my_record_map[rec.requirement_id] = rec
+
         minors = self.link_service.minor_version_name_map()
         case_view_map = self.link_service.build_requirement_case_view(reqs, minors)
         free_bug_map, _ = self.link_service.build_requirement_free_bug_view(reqs, minors, include_retest=False)
@@ -126,6 +154,7 @@ class WorkbenchService:
                 and bug["id"] not in existing_free_ids
                 and bug["id"] not in existing_case_bug_ids
             ]
+            my_record = my_record_map.get(r.id)
             result.append({
                 "id": r.id,
                 "zentao_req_id": r.zentao_req_id,
@@ -133,10 +162,16 @@ class WorkbenchService:
                 "major_version_id": r.major_version_id,
                 "major_version_name": r.major_version.version_no if r.major_version else "未知",
                 "owner": r.owner.shown_name if r.owner else None,
+                # 共享聚合字段（保留给报表/状态机；前端展示改用 my_* / retest_records）
                 "retest_completed": r.retest_completed,
                 "retest_passed": r.retest_passed,
                 "retest_minor_version_id": r.retest_minor_version_id,
                 "retested_by": r.retester.shown_name if r.retester else None,
+                # 当前用户自己的复测状态（前端据此显示通过/打回/未提交 + 删除线）
+                "my_retest_completed": my_record is not None,
+                "my_retest_passed": bool(my_record.passed) if my_record else None,
+                # 所有已复测的人（用于标签展示）
+                "retest_records": retest_records_map.get(r.id, []),
                 "zentao_story_id": r.zentao_story_id,
                 "test_completed_at": r.test_completed_at.isoformat() if r.test_completed_at else None,
                 "test_cases": case_view_map.get(r.id, []),

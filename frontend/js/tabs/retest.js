@@ -139,7 +139,8 @@ export async function loadRetest() {
     });
 
     const evidenceBugs = req.retest_evidence_bugs || [];
-    if (evidenceBugs.length > 0) evidenceCount += evidenceBugs.length;
+    // 仅"未闭环"的测后归集 Bug 才算作打回证据 / 阻止通过的依据（与后端口径一致）
+    evidenceCount += evidenceBugs.filter((b) => !b.closed).length;
     const evidenceBugHtml = evidenceBugs.map((b) => {
       const ztBugId = (b.bug_id || '').replace(/\D/g, '');
       const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
@@ -152,10 +153,21 @@ export async function loadRetest() {
     }).join('');
 
     const hasEvidence = evidenceCount > 0;
-    const isCompleted = req.retest_completed;
+    // 复测状态按用户独立：只看"我自己"是否复测过
+    const isCompleted = req.my_retest_completed;
     const statusTag = isCompleted
-      ? (req.retest_passed ? '<span class="badge" style="background:#dcfce7;color:#166534;">✅已通过</span>' : '<span class="badge" style="background:#fee2e2;color:#b91c1c;">❌已打回</span>')
+      ? (req.my_retest_passed ? '<span class="badge" style="background:#dcfce7;color:#166534;">✅我已通过</span>' : '<span class="badge" style="background:#fee2e2;color:#b91c1c;">❌我已打回</span>')
       : '<span class="badge">未提交复测结论</span>';
+    // 已复测人标签：列出所有提交过复测结论的人及其结论
+    const retestRecordsHtml = (req.retest_records || []).map((rec) => {
+      const tone = rec.passed
+        ? 'background:#dcfce7;color:#166534;border:1px solid #bbf7d0;'
+        : 'background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;';
+      return `<span class="badge" style="${tone} margin-left:4px;">${rec.passed ? '✅' : '❌'} ${rec.user_name}${rec.is_me ? '（我）' : ''}</span>`;
+    }).join('');
+    const retestRecordsBar = retestRecordsHtml
+      ? `<span style="margin-left:8px; font-size:12px; color:#64748b;">已复测:</span>${retestRecordsHtml}`
+      : '';
 
     return `
       <details class="card retest-req-card" data-req-id="${req.id}" ${isCompleted ? '' : 'open'} ontoggle="window.scheduleWorkbenchViewportResize?.()" style="border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px; background: ${isCompleted ? '#f8fafc' : '#fff'}; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: all 0.3s;">
@@ -166,6 +178,7 @@ export async function loadRetest() {
             <span class="badge" style="margin-left: 12px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;">👤 原测试人: ${req.owner || '未知'}</span>
             ${req.auto_linked_case_count > 0 ? renderAutoLinkedBadge(`自动归集用例 ${req.auto_linked_case_count}`) : ''}
             <span style="margin-left:8px;">${statusTag}</span>
+            ${retestRecordsBar}
           </div>
           <div onclick="event.stopPropagation()"><button style="background:#16a34a;" onclick='setRetest(${req.id}, true, ${hasEvidence})'>✅通过</button>
             <button class="danger" onclick='setRetest(${req.id}, false, ${hasEvidence})'>❌打回</button>
