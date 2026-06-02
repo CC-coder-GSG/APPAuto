@@ -32,7 +32,7 @@ from app.models import Version, VersionType
 from app.models.user_zentao_binding import UserZentaoBinding
 from app.services.zentao_auth_service import get_valid_token
 from app.services.zentao_client_service import ZentaoClient, ZentaoAPIError
-from app.services.zentao_utils import normalize_version_name
+from app.services.zentao_utils import is_placeholder_name, normalize_version_name
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +221,66 @@ class ZentaoVersionSyncService:
             logger.warning('sync_versions: bulk commit failed (%s) — falling back to per-row', exc)
             self.db.rollback()
             self._fallback_per_row_commit(result)
+        return result
+
+    def reconcile_execution_minors(
+        self,
+        client: ZentaoClient,
+        *,
+        software_id: int,
+        parent_id: int,
+        zentao_execution_id: int,
+    ) -> VersionSyncResult:
+        """
+        Pull a single execution's builds from Zentao and upsert local MINOR
+        versions under ``parent_id``.
+
+        与 ``sync_versions`` 不同，本方法是**同步**的、接受一个已认证好的
+        ``ZentaoClient``（通常是系统账号），且只处理单个执行——用于 Jenkins
+        构建写回禅道之后立即对齐本地小版本（webhook 没有用户级禅道绑定）。
+
+        幂等：按 ``zentao_build_id`` / ``version_no+parent`` 命中已有行只更新；
+        占位 build（名字带 xxxx）不算真实小版本，跳过。
+        """
+        result = VersionSyncResult()
+        try:
+            builds = client.list_execution_builds(zentao_execution_id, limit=500) or []
+        except Exception as exc:
+            logger.warning(
+                "reconcile_execution_minors: list builds exec=%s failed: %s",
+                zentao_execution_id, exc,
+            )
+            return result
+
+        for b in builds:
+            build_id = b.get("id")
+            build_name = (b.get("name") or "").strip()
+            if not build_id or not build_name:
+                continue
+            if is_placeholder_name(build_name):
+                continue
+            version_no = normalize_version_name(build_name) or build_name
+            try:
+                self._upsert_minor(
+                    version_no=version_no,
+                    parent_id=parent_id,
+                    software_id=software_id,
+                    zentao_build_id=build_id,
+                    zentao_build_name_cache=build_name,
+                    result=result,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "reconcile_execution_minors: upsert minor failed exec=%s build=%s name=%s err=%s",
+                    zentao_execution_id, build_id, build_name, exc,
+                )
+                result.skipped.append(f"{build_name} (exec={zentao_execution_id})")
+
+        try:
+            self.db.commit()
+        except Exception as exc:
+            logger.warning("reconcile_execution_minors: commit failed (%s)", exc)
+            self.db.rollback()
         return result
 
     def _fallback_per_row_commit(self, result: VersionSyncResult) -> None:

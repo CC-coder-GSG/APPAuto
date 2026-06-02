@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { withPrefix, renderBugLink, renderCaseLink, renderPreviewBtn } from '../utils.js';
+import { renderBugLink, renderCaseLink, renderPreviewBtn } from '../utils.js';
 let retestSseBound = false;
 let retestPreflightPromise = null;
 let retestPreflightKey = '';
@@ -109,9 +109,9 @@ export async function loadRetest() {
         const ztBugId = (b.bug_id || '').replace(/\D/g, '');
         const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
         const linkedBadge = b.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
-        return `<div style="margin-top:4px;">
-          <span class="badge" style="background:#fef2f2; color:#dc2626; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${linkedBadge}
-          <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
+        return `<div style="margin-top:4px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
+          <span class="badge" style="background:#fef2f2; color:#dc2626; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${linkedBadge}
+          <label style="font-size:12px; color:#b91c1c; display:flex; align-items:center; gap:4px; margin:0;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
         </div>`;
       }).join('');
       const caseZtId = String(c.zentao_case_id || '').replace(/\D/g, '');
@@ -126,23 +126,17 @@ export async function loadRetest() {
       const ztBugId = (b.bug_id || '').replace(/\D/g, '');
       const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
       const linkedBadge = b.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
-      return `<div style="margin-bottom:6px;">
-      <span class="badge" style="background:#fff7ed; color:#ea580c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${linkedBadge}
-      <label style="font-size:12px; color:#b91c1c;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
+      return `<div style="margin-bottom:6px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
+      <span class="badge" style="background:#fff7ed; color:#ea580c; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${linkedBadge}
+      <label style="font-size:12px; color:#b91c1c; display:flex; align-items:center; gap:4px; margin:0;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
     </div>`;
     }).join('');
 
-    const retestBugHtml = (req.retest_bugs || []).map((b) => {
+    // 复测新增漏测 Bug 已改为由禅道自动归集，不再单独展示/手工录入，
+    // 但历史 retest_bugs 仍作为打回证据参与计数。
+    (req.retest_bugs || []).forEach((b) => {
       if (!b.closed) evidenceCount++;
-      const ztBugId = (b.bug_id || '').replace(/\D/g, '');
-      const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
-      const closedTag = b.closed
-        ? '<span class="badge" style="background:#dcfce7; color:#166534; margin-left:6px; padding:1px 6px;">✅已闭环</span>'
-        : '<span class="badge" style="background:#fee2e2; color:#b91c1c; margin-left:6px; padding:1px 6px;">⏳未闭环</span>';
-      return `<div style="margin-bottom:6px;">
-      <span class="badge" style="background:#fee2e2; color:#b91c1c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(复测新增)</span></span>${closedTag}
-    </div>`;
-    }).join('');
+    });
 
     const evidenceBugs = req.retest_evidence_bugs || [];
     if (evidenceBugs.length > 0) evidenceCount += evidenceBugs.length;
@@ -164,7 +158,7 @@ export async function loadRetest() {
       : '<span class="badge">未提交复测结论</span>';
 
     return `
-      <details class="card retest-req-card" data-req-id="${req.id}" ${isCompleted ? '' : 'open'} style="border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px; background: ${isCompleted ? '#f8fafc' : '#fff'}; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: all 0.3s;">
+      <details class="card retest-req-card" data-req-id="${req.id}" ${isCompleted ? '' : 'open'} ontoggle="window.scheduleWorkbenchViewportResize?.()" style="border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px; background: ${isCompleted ? '#f8fafc' : '#fff'}; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; list-style:none; display: flex; justify-content: space-between; align-items: center; border-bottom: ${isCompleted ? 'none' : '1px dashed #cbd5e1'}; padding-bottom: ${isCompleted ? '0' : '12px'}; margin-bottom: ${isCompleted ? '0' : '12px'};">
           <div>
             <span style="font-size: 16px; font-weight: bold; color: ${isCompleted ? '#94a3b8; text-decoration:line-through;' : '#0f172a'};">📄 ${req.zentao_req_id} ${req.title}</span>
@@ -195,14 +189,6 @@ export async function loadRetest() {
             <div class="muted" style="font-size:12px; margin-bottom:6px;">${req.test_completed_at ? `测试完成时间：${new Date(req.test_completed_at).toLocaleString()}` : '该需求暂无测试完成时间，归集结果可能不完整'}</div>
             <div>${evidenceBugHtml}</div>
           </div>` : ''}
-          <div style="margin-top:12px; border-top:1px dashed #e2e8f0; padding-top:12px;">
-            <div style="font-weight:bold; color:#b91c1c; margin-bottom:8px;">【复测新增漏测 Bug】（兜底入口）</div>
-            <div>${retestBugHtml || '<div class="muted">暂无复测新增Bug</div>'}</div>
-            <div class="row" style="margin-top:8px;">
-              <div class="prefix-input"><span>b#</span><input id="rb_${req.id}" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增漏测Bug编号（系统未自动归集到时使用）"></div>
-              <button onclick="addRetestBug(${req.id})">➕新增漏测Bug</button>
-            </div>
-          </div>
         </div>
       </details>`;
   }).join('');
@@ -245,27 +231,6 @@ export async function toggleBugFail(id, checked) {
   await loadRetest();
 }
 
-export async function addRetestBug(reqId) {
-  try {
-    const num = (document.getElementById('rb_' + reqId)?.value || '').trim();
-    const bug = withPrefix('b#', num);
-    const minorId = Number(document.getElementById('retestMinorSelect')?.value || 0);
-    if (!bug) {
-      window.showMessage && window.showMessage('请输入漏测Bug编号数字部分', 'error');
-      return;
-    }
-    if (!minorId) {
-      window.showMessage && window.showMessage('请选择当前复测发包(小版本)', 'error');
-      return;
-    }
-    await api('/bugs/execution', { method: 'POST', headers: window.H, body: { bug_id: bug, minor_version_id: minorId, requirement_id: reqId, source_type: 'retest' } });
-    window.showMessage && window.showMessage('复测漏测Bug已新增', 'success');
-    await loadRetest();
-  } catch (err) {
-    window.showMessage && window.showMessage(err.message || '新增漏测Bug失败', 'error');
-  }
-}
-
 export async function pushRetest() {
   if (!(window.confirmPush && window.confirmPush())) return;
   if (getRetestMode() !== 'version') {
@@ -276,7 +241,7 @@ export async function pushRetest() {
   window.showMessage && window.showMessage('复测结果已推送');
 }
 
-window.OmniQARetestTab = { loadRetest, toggleRetestMode, setRetest, toggleBugFail, addRetestBug, pushRetest };
+window.OmniQARetestTab = { loadRetest, toggleRetestMode, setRetest, toggleBugFail, pushRetest };
 
 function bindRetestSSE() {
   if (retestSseBound) return;

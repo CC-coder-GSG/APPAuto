@@ -74,6 +74,14 @@ class BuildRecordService:
             record.zentao_push_message = f"推送禅道异常：{exc}"[:480]
             self.db.commit()
 
+        # 写回禅道后，立即从禅道回拉该执行的 build 列表，把本地小版本与禅道对齐
+        # （补 zentao_build_id / 跟随重命名），保证小版本始终和禅道一致。失败不影响主流程。
+        try:
+            self._try_sync_minors_from_zentao(record)
+            self.db.refresh(record)
+        except Exception as exc:
+            logger.warning("sync minors from zentao crashed | record_id=%s err=%s", record.id, exc)
+
         sse_publish(
             "build_record_created" if action == "created" else "build_record_updated",
             {"item": self.serialize(record), "action": action},
@@ -156,6 +164,57 @@ class BuildRecordService:
         except Exception as e:
             logger.exception("Auto-archive minor version failed | job=%s version_name=%s: %s", record.job_name, normalized, e)
             return 'error', None, f'归档异常：{e}'
+
+    def _try_sync_minors_from_zentao(self, record: BuildRecord) -> None:
+        """
+        收到构建并写回禅道后，从禅道回拉该执行下的 build 列表，把本地小版本与
+        禅道对齐（补 zentao_build_id / 跟随禅道重命名）。
+
+        - 仅处理 SUCCESS 包；
+        - 用系统禅道账号（webhook 无用户级绑定）；
+        - 幂等，单次失败仅记日志、不影响构建报告主流程。
+        """
+        from app.services.zentao_system_client import get_system_zentao_client
+        from app.services.zentao_version_sync_service import ZentaoVersionSyncService
+
+        if (record.build_status or "").upper() != "SUCCESS":
+            return
+
+        major_version_no = parse_job_name_to_major_version_no(record.job_name or "")
+        if not major_version_no:
+            return
+
+        majors = (
+            self.db.query(Version)
+            .filter(
+                Version.version_no == major_version_no,
+                Version.version_type == VersionType.MAJOR,
+            )
+            .all()
+        )
+        bound_majors = [m for m in majors if m.zentao_execution_id]
+        if not bound_majors:
+            return
+
+        client = get_system_zentao_client(self.db)
+        if not client:
+            logger.info("sync minors from zentao skipped: no system zentao client | job=%s", record.job_name)
+            return
+
+        sync_service = ZentaoVersionSyncService(self.db)
+        for major in bound_majors:
+            try:
+                sync_service.reconcile_execution_minors(
+                    client,
+                    software_id=major.software_id,
+                    parent_id=major.id,
+                    zentao_execution_id=int(major.zentao_execution_id),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "reconcile minors failed | major=%s exec=%s err=%s",
+                    major.version_no, major.zentao_execution_id, exc,
+                )
 
     def list_records(
         self,

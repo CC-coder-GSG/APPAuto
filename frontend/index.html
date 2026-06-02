@@ -202,6 +202,7 @@
     <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
     <button id="tabDispatchBtn" class="hidden" onclick="showTab('dispatch')">BUG特派</button>
     <button id="tabZentaoAiBtn" class="hidden" onclick="showTab('zentao-ai')">禅道AI用例生成</button>
+    <button id="tabJenkinsBtn" class="hidden" onclick="showTab('jenkins')">自动化测试</button>
     <span id="sseConnectionState" class="sse-conn-badge hidden" aria-live="polite">实时连接中</span>
   </div>
 
@@ -469,6 +470,31 @@
         <div class="row" style="justify-content: flex-end; gap: 8px;">
           <button class="secondary" onclick="closeReqTestNotesModal()">取消</button>
           <button onclick="saveReqTestNotes()">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="mineBugResultModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
+      <div style="width: min(520px, 92vw); background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px 18px 14px 18px;">
+        <h3 id="mineBugResultTitle" style="margin: 0 0 12px 0; color:#0f172a;">Bug 修复结果 / 闭环确认</h3>
+        <div class="row" style="margin-bottom: 10px;">
+          <label style="min-width: 90px;">复测发包</label>
+          <span id="mineBugResultMinor" style="flex:1; color:#475569;"></span>
+        </div>
+        <div class="row" style="margin-bottom: 10px;">
+          <label style="min-width: 90px;">修复结论</label>
+          <select id="mineBugResultResolution" style="flex:1;">
+            <option value="fixed">🚀 修复通过</option>
+            <option value="false_alarm">⚠️ 误报</option>
+            <option value="rejected">⛔ 拒绝修复</option>
+          </select>
+        </div>
+        <div style="margin-bottom: 14px;">
+          <label style="display:flex; align-items:center; gap:6px; color:#0f172a;"><input id="mineBugResultDone" type="checkbox"> 确认闭环</label>
+        </div>
+        <div class="row" style="justify-content: flex-end; gap: 8px;">
+          <button class="secondary" onclick="closeBugResultModal()">取消</button>
+          <button onclick="confirmBugResultModal()">保存记录</button>
         </div>
       </div>
     </div>
@@ -1376,6 +1402,50 @@
     </div>
   </section>
 
+  <section id="tab-jenkins" class="hidden card">
+    <div class="row" style="justify-content:space-between; align-items:center;">
+      <div>
+        <h2 style="margin-bottom:6px;">自动化测试（Jenkins）</h2>
+        <div class="muted">用你自己的 Jenkins 账号 + API Token 绑定后，可在此一键触发「自动化测试」视图下已配置好的 Job。</div>
+      </div>
+      <div class="row">
+        <button class="secondary" onclick="loadJenkinsJobs()">刷新 Job 列表</button>
+      </div>
+    </div>
+
+    <div style="margin-top:14px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; padding:14px 16px;">
+      <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h3 style="margin:0; color:#0f172a;">我的 Jenkins 账号绑定</h3>
+        <div id="jenkinsBindingStatus"></div>
+      </div>
+      <div class="muted" style="font-size:12px; margin-bottom:12px;">
+        API Token 在 Jenkins 中生成：登录 Jenkins → 右上角用户名 → 设置(Configure) → API Token → Add new Token。Token 加密存储，绝不回显。
+      </div>
+      <div class="row" style="gap:12px; flex-wrap:wrap; align-items:flex-end;">
+        <div>
+          <label style="display:block; font-weight:600; color:#0f172a;">Jenkins 地址</label>
+          <input id="jenkinsBaseUrl" style="min-width:280px;" placeholder="http://192.168.2.229:8080">
+        </div>
+        <div>
+          <label style="display:block; font-weight:600; color:#0f172a;">Jenkins 账号</label>
+          <input id="jenkinsAccount" style="min-width:160px;" placeholder="你的 Jenkins 用户名">
+        </div>
+        <div>
+          <label style="display:block; font-weight:600; color:#0f172a;">API Token</label>
+          <input id="jenkinsToken" type="password" style="min-width:240px;" placeholder="粘贴 API Token（不回显）">
+        </div>
+        <div class="row" style="gap:8px;">
+          <button class="secondary" onclick="testJenkinsBinding()">测试连接</button>
+          <button onclick="saveJenkinsBinding()">保存绑定</button>
+          <button class="danger" onclick="deleteJenkinsBinding()">删除绑定</button>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="margin:16px 0 8px 0; color:#0f172a;">可触发的自动化测试 Job</h3>
+    <div id="jenkinsJobsArea"></div>
+  </section>
+
   <section id="tab-data" class="hidden card">
     <h2>数据管理台</h2>
     <div id="dataReadonlyHint" class="hidden muted" style="margin-bottom:12px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc;">
@@ -1913,8 +1983,8 @@ function sourceTypeZh(v){
 }
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
-const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai'];
-const DEFAULT_ALLOWED_TABS=['mine','task-board','feedback','retest','overall-test','field-test','testcase-center','zentao-sync','report'];
+const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins'];
+const DEFAULT_ALLOWED_TABS=['mine','task-board','feedback','retest','overall-test','field-test','testcase-center','zentao-sync','report','jenkins'];
 const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test'];
 const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test' };
 const WORKBENCH_SUBTAB_LOADERS={
@@ -1998,7 +2068,28 @@ function scheduleWorkbenchViewportResize(){
     const activePanel=document.querySelector(`.workbench-panel[data-workbench-panel="${currentWorkbenchSubtab}"]`);
     if(!viewport || !activePanel) return;
     viewport.style.height=`${Math.ceil(activePanel.scrollHeight)}px`;
+    ensureWorkbenchPanelObserver(activePanel);
   });
+}
+// 异步内容（禅道状态徽标、AI 结论、展开的卡片等）会在首次测高之后继续撑高面板，
+// 用 ResizeObserver 跟随活动面板内容高度变化，避免末尾内容被裁切。
+let workbenchPanelObserver=null;
+let workbenchObservedPanel=null;
+function ensureWorkbenchPanelObserver(activePanel){
+  if(typeof ResizeObserver==='undefined' || !activePanel) return;
+  if(!workbenchPanelObserver){
+    workbenchPanelObserver=new ResizeObserver(()=>{
+      const viewport=document.getElementById('workbenchViewport');
+      const panel=document.querySelector(`.workbench-panel[data-workbench-panel="${currentWorkbenchSubtab}"]`);
+      if(!viewport || !panel) return;
+      viewport.style.height=`${Math.ceil(panel.scrollHeight)}px`;
+    });
+  }
+  if(workbenchObservedPanel!==activePanel){
+    if(workbenchObservedPanel) workbenchPanelObserver.unobserve(workbenchObservedPanel);
+    workbenchPanelObserver.observe(activePanel);
+    workbenchObservedPanel=activePanel;
+  }
 }
 function applyWorkbenchSubtabVisibility(){
   const buttonMap={
@@ -2072,7 +2163,7 @@ function applyTabVisibility(){
     'assign':'tabAssignBtn','mine':'tabMineBtn','task-board':'tabTaskBoardBtn','feedback':'tabFeedbackBtn',
     'field-test':'tabFieldTestBtn','build-records':'tabBuildRecordsBtn','testcase-center':'tabTestcaseCenterBtn',
     'zentao-sync':'tabZentaoSyncBtn','report':'tabReportBtn','activity':'tabActivityBtn',
-    'data':'tabDataBtn','dispatch':'tabDispatchBtn','zentao-ai':'tabZentaoAiBtn'
+    'data':'tabDataBtn','dispatch':'tabDispatchBtn','zentao-ai':'tabZentaoAiBtn','jenkins':'tabJenkinsBtn'
   };
   ALL_TAB_KEYS.forEach((name)=>{
     const btn=document.getElementById(buttonMap[name]);
@@ -2084,7 +2175,7 @@ function applyTabVisibility(){
   }
 }
 function getDefaultVisibleTab(){
-  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins']
     .find((name)=>canAccessTab(name)) || 'mine';
 }
 function getTabNamespaceName(name){
@@ -2104,6 +2195,7 @@ function getTabNamespaceName(name){
     data:'OmniQADataTab',
     dispatch:'OmniQADispatchTab',
     'zentao-ai':'OmniQAZentaoAiTab',
+    jenkins:'OmniQAJenkinsTab',
   }[name] || '';
 }
 function isTabRuntimeReady(name){
@@ -2112,7 +2204,7 @@ function isTabRuntimeReady(name){
   return !!window[nsName];
 }
 function getFirstRuntimeReadyTab(){
-  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins']
     .find((tabName)=>canAccessTab(tabName) && isTabRuntimeReady(tabName)) || null;
 }
 async function showTab(name){
@@ -2135,7 +2227,7 @@ async function showTab(name){
     if(!fallback || fallback===name) return;
     name = fallback;
   }
-  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai'].forEach(x=>{
+  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins'].forEach(x=>{
     const el=document.getElementById('tab-'+x);
     if(el) el.classList.add('hidden');
   });
@@ -2157,6 +2249,7 @@ async function showTab(name){
   if(name === 'zentao-sync') { initZentaoSyncBoard().catch(err=>showMessage(err.message||'加载禅道同步中心失败','error')); }
   if(name === 'activity') { loadActivityBoard().catch(err=>showMessage(err.message||'加载活动中心失败','error')); }
   if(name === 'zentao-ai') { window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.activate && window.OmniQAZentaoAiTab.activate().catch(err=>showMessage(err.message||'加载禅道AI用例生成失败','error')); }
+  if(name === 'jenkins') { window.OmniQAJenkinsTab && window.OmniQAJenkinsTab.loadJenkinsTab && window.OmniQAJenkinsTab.loadJenkinsTab().catch(err=>showMessage(err.message||'加载自动化测试失败','error')); }
   if(name==='report'){loadReportOnDemand()}
 }
 function isAllUsersReport(){return currentUser && currentUser.role==='admin' && reportUserSelect && reportUserSelect.value==='0'}
@@ -2555,6 +2648,18 @@ async function saveReqTestNotes(){
   return window.OmniQAMineTab.saveReqTestNotes();
 }
 
+function openBugResultModal(bugId, bugIdText, closed){
+  return window.OmniQAMineTab.openBugResultModal(bugId, bugIdText, closed);
+}
+
+function closeBugResultModal(){
+  return window.OmniQAMineTab.closeBugResultModal();
+}
+
+async function confirmBugResultModal(){
+  return window.OmniQAMineTab.confirmBugResultModal();
+}
+
 async function addCase(reqId){
   return window.OmniQAMineTab.addCase(reqId);
 }
@@ -2948,13 +3053,15 @@ async function toggleBugFail(id, checked){
   return window.OmniQARetestTab.toggleBugFail(id, checked);
 }
 
-async function addRetestBug(reqId){
-  return window.OmniQARetestTab.addRetestBug(reqId);
-}
-
 async function pushRetest(){
   return window.OmniQARetestTab.pushRetest();
 }
+
+function testJenkinsBinding(){ return window.OmniQAJenkinsTab && window.OmniQAJenkinsTab.testJenkinsBinding(); }
+function saveJenkinsBinding(){ return window.OmniQAJenkinsTab && window.OmniQAJenkinsTab.saveJenkinsBinding(); }
+function deleteJenkinsBinding(){ return window.OmniQAJenkinsTab && window.OmniQAJenkinsTab.deleteJenkinsBinding(); }
+function loadJenkinsJobs(){ return window.OmniQAJenkinsTab && window.OmniQAJenkinsTab.loadJenkinsJobs(); }
+function triggerJenkinsJob(name, btn){ return window.OmniQAJenkinsTab && window.OmniQAJenkinsTab.triggerJenkinsJob(name, btn); }
 
 async function loadOverallTest(){
   return window.OmniQAOverallTestTab.loadOverallTest();

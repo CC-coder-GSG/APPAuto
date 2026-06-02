@@ -30,6 +30,7 @@ class User(Base):
     assigned_requirements = relationship("Requirement", back_populates="owner", foreign_keys="Requirement.owner_id")
     retested_requirements = relationship("Requirement", back_populates="retester", foreign_keys="Requirement.retested_by_id")
     zentao_binding = relationship("UserZentaoBinding", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    jenkins_binding = relationship("UserJenkinsBinding", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
     @staticmethod
     def hash_password(raw_password: str) -> str:

@@ -6,7 +6,7 @@ const REQUIRED_NAMESPACES = {
   OmniQAAssignTab: ['loadAssignBoard', 'publishAssign'],
   OmniQAMineTab: ['loadMyWorkbench', 'renderMineCards', 'pushCase', 'pushTest'],
   OmniQAFeedbackTab: ['loadFeedbackBoard', 'createFeedback', 'openFeedbackDetail'],
-  OmniQARetestTab: ['loadRetest', 'setRetest', 'addRetestBug'],
+  OmniQARetestTab: ['loadRetest', 'setRetest', 'toggleBugFail'],
   OmniQAOverallTestTab: ['loadOverallTest', 'renderS5', 'submitS5Bug'],
   OmniQAFieldTestTab: ['loadFieldTestBoard', 'submitFieldTestRecord', 'editFieldTestRecord', 'openFieldTestDetail', 'addFieldTestDetailBug', 'searchFieldTestBugOptions', 'linkFieldTestDetailBug'],
   OmniQABuildRecordsTab: ['loadBuildRecordsBoard', 'openBuildRecordLogModal', 'openMajorBuildLogModal'],

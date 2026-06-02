@@ -19,6 +19,10 @@ const modalState = {
 const notesModalState = {
   reqId: null,
 };
+
+const bugResultModalState = {
+  bugId: null,
+};
 let mineSseBound = false;
 let minePreflightPromise = null;
 let minePreflightKey = '';
@@ -100,9 +104,15 @@ function renderBugChip(req, bug) {
   const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:4px;"></span>` : '';
   const autoBadge = bug.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
   const previewBugBtn = renderPreviewBtn('bug', ztBugId);
+  // 修复结果/闭环确认入口：点击弹窗完成「修复通过 + 确认闭环 + 保存记录」，不占用标签空间
+  const closedHint = bug.closed
+    ? '<span title="已闭环" style="color:#16a34a; margin-left:4px;">✅</span>'
+    : '';
+  const resultBtn = `<a href="javascript:void(0)" title="修复结果 / 闭环确认" onclick="openBugResultModal(${bug.id}, '${bug.bug_id}', ${bug.closed ? 'true' : 'false'})" style="color:#16a34a; margin-left:6px; text-decoration:none;">🛠️</a>`;
 
   return `<span class="badge" style="background:#f1f5f9; border:1px solid #cbd5e1; padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
-      ${renderBugLink(bug)} ${ztSlot} ${previewBugBtn} ${verText} ${dBadge} ${autoBadge}
+      ${renderBugLink(bug)} ${ztSlot} ${previewBugBtn} ${verText} ${dBadge} ${autoBadge}${closedHint}
+      ${resultBtn}
       <a href="javascript:void(0)" title="编辑" onclick="${immutable ? 'return false;' : `editWorkbenchBug(${bug.id}, '${bug.bug_id}')`}" style="color:${immutable ? '#94a3b8' : '#3b82f6'}; margin-left:4px; text-decoration:none;">✎</a>
       <a href="javascript:void(0)" title="删除" onclick="${immutable ? 'return false;' : `removeWorkbenchBug(${bug.id})`}" style="color:${immutable ? '#94a3b8' : '#ef4444'}; margin-left:2px; text-decoration:none;">×</a>
   </span>`;
@@ -236,6 +246,59 @@ export async function saveReqTestNotes() {
     await loadMyWorkbench();
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '保存测试要点失败', 'error');
+  }
+}
+
+export function openBugResultModal(bugId, bugIdText, closed) {
+  const modal = document.getElementById('mineBugResultModal');
+  if (!modal) return;
+  const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
+  if (!minorId) {
+    window.showMessage && window.showMessage('请先在页面顶部选择【当前复测发包(小版本)】环境！', 'error');
+    return;
+  }
+  bugResultModalState.bugId = bugId;
+  const titleEl = document.getElementById('mineBugResultTitle');
+  const minorEl = document.getElementById('mineBugResultMinor');
+  const resSel = document.getElementById('mineBugResultResolution');
+  const doneChk = document.getElementById('mineBugResultDone');
+  if (titleEl) titleEl.innerText = `Bug 修复结果 / 闭环确认 - ${bugIdText}`;
+  if (minorEl) minorEl.innerText = getMinorText(minorId);
+  if (resSel) resSel.value = 'fixed';
+  if (doneChk) doneChk.checked = !!closed;
+  openModal(modal);
+}
+
+export function closeBugResultModal() {
+  const modal = document.getElementById('mineBugResultModal');
+  if (modal) closeModal(modal);
+  bugResultModalState.bugId = null;
+}
+
+export async function confirmBugResultModal() {
+  const bugId = Number(bugResultModalState.bugId || 0);
+  if (!bugId) {
+    closeBugResultModal();
+    return;
+  }
+  const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
+  if (!minorId) {
+    window.showMessage && window.showMessage('请先在页面顶部选择【当前复测发包(小版本)】环境！', 'error');
+    return;
+  }
+  const resolution = document.getElementById('mineBugResultResolution')?.value || 'fixed';
+  const done = !!document.getElementById('mineBugResultDone')?.checked;
+  try {
+    await api(`/overall-test/bugs/${bugId}/result`, {
+      method: 'PUT',
+      headers: window.H,
+      body: { minor_version_id: minorId, test_done: done, newly_found_bug_id: null, resolution },
+    });
+    window.showMessage && window.showMessage('Bug 修复结果已保存并同步至总盘', 'success');
+    closeBugResultModal();
+    await loadMyWorkbench();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '保存失败，请稍后重试', 'error');
   }
 }
 
@@ -375,7 +438,7 @@ export async function loadMyWorkbench() {
     const ddata = await (await api('/bugs/dispatched-to-me?major_version_id=' + majorId)).json();
     if (ddata.length > 0) {
       state.currentDispatchHtml = `<div class="card" style="border:2px solid #3b82f6; background:#eff6ff; margin-bottom:24px;">
-        <h3 style="color:#1d4ed8; margin-top:0; border-bottom:1px dashed #93c5fd; padding-bottom:8px;">🪂 管理员特派给我的专项 Bug</h3>
+        <h3 style="color:#1d4ed8; margin-top:0; border-bottom:1px dashed #93c5fd; padding-bottom:8px;">🪂 指派给我的Bug</h3>
         <table style="background:#fff; border-radius:6px; overflow:hidden;">
           <thead><tr><th>Bug 编号 / 归属需求</th><th>引出的新Bug</th><th>专项处理操作</th></tr></thead>
           <tbody>
@@ -394,13 +457,15 @@ export async function loadMyWorkbench() {
                   <button class="secondary" style="padding:2px 8px; font-size:12px;" ${b.test_done ? 'disabled' : ''} onclick="addDerivedBug(${b.id})">➕ 添加引出Bug</button>
                 </td>
                 <td style="text-decoration:none;">
-                  <select id='dres_${b.id}' style="margin-right:8px; padding:2px; font-size:13px;" ${b.test_done ? 'disabled' : ''}>
-                    <option value="fixed" ${b.resolution === 'fixed' ? 'selected' : ''}>🚀修复通过</option>
-                    <option value="false_alarm" ${b.resolution === 'false_alarm' ? 'selected' : ''}>⚠️误报</option>
-                    <option value="rejected" ${b.resolution === 'rejected' ? 'selected' : ''}>⛔拒绝修复</option>
-                  </select>
-                  <label style="color:#0f172a;"><input id='ddone_${b.id}' type='checkbox' ${b.test_done ? 'checked' : ''} onchange="document.getElementById('dnb_hidden_'+${b.id}).disabled=this.checked"> 确认闭环</label>
-                  <button class="${b.test_done ? 'secondary' : ''}" onclick="saveDispatchedBug(${b.id})" style="margin-left:8px;">保存记录</button>
+                  <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <select id='dres_${b.id}' style="padding:2px; font-size:13px;" ${b.test_done ? 'disabled' : ''}>
+                      <option value="fixed" ${b.resolution === 'fixed' ? 'selected' : ''}>🚀修复通过</option>
+                      <option value="false_alarm" ${b.resolution === 'false_alarm' ? 'selected' : ''}>⚠️误报</option>
+                      <option value="rejected" ${b.resolution === 'rejected' ? 'selected' : ''}>⛔拒绝修复</option>
+                    </select>
+                    <label style="color:#0f172a; display:flex; align-items:center; gap:4px; margin:0;"><input id='ddone_${b.id}' type='checkbox' ${b.test_done ? 'checked' : ''} onchange="document.getElementById('dnb_hidden_'+${b.id}).disabled=this.checked"> 确认闭环</label>
+                    <button class="${b.test_done ? 'secondary' : ''}" onclick="saveDispatchedBug(${b.id})">保存记录</button>
+                  </div>
                 </td>
               </tr>
             `).join('')}
@@ -556,6 +621,8 @@ export function rememberMineReqFold(reqId, isOpen) {
   const map = getFoldStateMap();
   map[String(reqId)] = !!isOpen;
   setFoldStateMap(map);
+  // 展开/收起卡片后容器高度会变化，重新计算工作台视口高度，避免末尾内容被裁切
+  window.scheduleWorkbenchViewportResize?.();
 }
 
 export async function editWorkbenchCase(id, oldCaseId) {
@@ -714,6 +781,9 @@ window.OmniQAMineTab = {
   openReqTestNotesModal,
   closeReqTestNotesModal,
   saveReqTestNotes,
+  openBugResultModal,
+  closeBugResultModal,
+  confirmBugResultModal,
 };
 
 

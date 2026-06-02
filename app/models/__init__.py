@@ -28,6 +28,7 @@ from app.models.task_board import TaskBoardTask, TaskBoardUpdate
 from app.models.testcase import TestCase
 from app.models.user import User
 from app.models.user_ai_provider_config import UserAIProviderConfig
+from app.models.user_jenkins_binding import UserJenkinsBinding
 from app.models.user_zentao_binding import UserZentaoBinding
 from app.models.version import Version
 from app.models.zentao_testcase_mirror import ZentaoTestCaseMirror
@@ -63,6 +64,7 @@ __all__ = [
     "TestResultStatus",
     "User",
     "UserAIProviderConfig",
+    "UserJenkinsBinding",
     "UserRole",
     "UserZentaoBinding",
     "Version",

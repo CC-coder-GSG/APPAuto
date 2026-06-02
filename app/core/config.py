@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     # If not set, a deterministic fallback derived from secret_key is used (development only).
     zentao_binding_secret: str = Field(default_factory=lambda: os.getenv('APP_ZENTAO_BINDING_SECRET', os.getenv('ZENTAO_BINDING_SECRET', '')))
 
+    # Jenkins 集成：用户用各自的 Jenkins 账号 + API Token 触发自动化测试 Job。
+    # base_url / view 仅用于前端预填默认值；凭据按用户加密存储在 user_jenkins_bindings。
+    jenkins_default_base_url: str = Field(default_factory=lambda: os.getenv('APP_JENKINS_BASE_URL', os.getenv('JENKINS_BASE_URL', 'http://192.168.2.229:8080')))
+    jenkins_default_view: str = Field(default_factory=lambda: os.getenv('APP_JENKINS_DEFAULT_VIEW', os.getenv('JENKINS_DEFAULT_VIEW', '自动化测试')))
+
     # Zentao browser sync integration
     zentao_sync_enabled: bool = Field(default_factory=lambda: os.getenv('APP_ZENTAO_SYNC_ENABLED', os.getenv('ZENTAO_SYNC_ENABLED', 'true')).lower() == 'true')
     zentao_sync_api_key: str = Field(default_factory=lambda: os.getenv('APP_ZENTAO_SYNC_API_KEY', os.getenv('ZENTAO_SYNC_API_KEY', '')))
