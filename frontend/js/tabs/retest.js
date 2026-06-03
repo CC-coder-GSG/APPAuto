@@ -169,11 +169,19 @@ export async function loadRetest() {
       ? `<span style="margin-left:8px; font-size:12px; color:#64748b;">已复测:</span>${retestRecordsHtml}`
       : '';
 
+    // 需求标题：禅道需求号渲染为可跳转的蓝色链接（由 hydrator 升级），并附预览按钮（对齐需求/测试工作台）
+    const ztStoryId = (req.zentao_req_id || '').replace(/\D/g, '');
+    const ztStorySlot = ztStoryId ? `<span class="zt-story-slot" data-zt-story-id="${ztStoryId}" style="margin-left:6px; vertical-align:middle;"></span>` : '';
+    const reqIdHtml = ztStoryId
+      ? `<span class="qa-story-id-nohref" data-zt-story-id="${ztStoryId}">${req.zentao_req_id}</span>`
+      : (req.zentao_req_id || '');
+    const previewBtn = renderPreviewBtn('story', ztStoryId);
+
     return `
       <details class="card retest-req-card" data-req-id="${req.id}" ${isCompleted ? '' : 'open'} ontoggle="window.scheduleWorkbenchViewportResize?.()" style="border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px; background: ${isCompleted ? '#f8fafc' : '#fff'}; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; list-style:none; display: flex; justify-content: space-between; align-items: center; border-bottom: ${isCompleted ? 'none' : '1px dashed #cbd5e1'}; padding-bottom: ${isCompleted ? '0' : '12px'}; margin-bottom: ${isCompleted ? '0' : '12px'};">
           <div>
-            <span style="font-size: 16px; font-weight: bold; color: ${isCompleted ? '#94a3b8; text-decoration:line-through;' : '#0f172a'};">📄 ${req.zentao_req_id} ${req.title}</span>
+            <span style="font-size: 16px; font-weight: bold; color: ${isCompleted ? '#94a3b8; text-decoration:line-through;' : '#0f172a'};">📄 ${reqIdHtml} ${req.title}</span>${ztStorySlot}${previewBtn}
             ${mode === 'all_pending' ? `<span class="badge" style="margin-left:8px; background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd;">🏷️${req.major_version_name || '未知版本'}</span>` : ''}
             <span class="badge" style="margin-left: 12px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;">👤 原测试人: ${req.owner || '未知'}</span>
             ${req.auto_linked_case_count > 0 ? renderAutoLinkedBadge(`自动归集用例 ${req.auto_linked_case_count}`) : ''}
