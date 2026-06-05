@@ -62,6 +62,19 @@ def delete_binding(db: Session, user_id: int) -> bool:
 
 def get_client_for_user(db: Session, user_id: int) -> JenkinsClient | None:
     """Build a JenkinsClient from the user's stored binding, or None if unusable."""
+    creds = get_binding_creds(db, user_id)
+    if not creds:
+        return None
+    base_url, account, token = creds
+    return JenkinsClient(base_url, account, token)
+
+
+def get_binding_creds(db: Session, user_id: int) -> tuple[str, str, str] | None:
+    """
+    Return (base_url, account, plaintext_token) for the user's Jenkins binding,
+    or None if missing / undecryptable. Used by the reverse proxy and artifact
+    download endpoints which need raw HTTP access (not the high-level client).
+    """
     binding = get_binding(db, user_id)
     if not binding or not binding.base_url or not binding.jenkins_token_ciphertext:
         return None
@@ -69,7 +82,7 @@ def get_client_for_user(db: Session, user_id: int) -> JenkinsClient | None:
     if not token:
         logger.warning("jenkins: cannot decrypt token for user_id=%s", user_id)
         return None
-    return JenkinsClient(binding.base_url, binding.jenkins_account, token)
+    return binding.base_url.rstrip("/"), binding.jenkins_account, token
 
 
 def record_check_result(db: Session, user_id: int, *, ok: bool, message: str | None) -> None:
@@ -100,6 +113,7 @@ __all__ = [
     "upsert_binding",
     "delete_binding",
     "get_client_for_user",
+    "get_binding_creds",
     "record_check_result",
     "test_credentials",
 ]

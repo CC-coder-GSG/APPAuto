@@ -22,7 +22,7 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'feedback', path: './tabs/feedback.js?v=20260417-3' },
   { name: 'report', path: './tabs/report.js?v=20260518-1' },
   { name: 'retest', path: './tabs/retest.js?v=20260527-2' },
-  { name: 'overall-test', path: './tabs/overall-test.js?v=20260525-1' },
+  { name: 'overall-test', path: './tabs/overall-test.js?v=20260604-1' },
   { name: 'field-test', path: './tabs/field-test.js?v=20260417-3' },
   { name: 'build-records', path: './tabs/build-records.js?v=20260513-1' },
   { name: 'testcase-center', path: './tabs/testcase-center.js?v=20260427-2' },
@@ -32,7 +32,7 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'dispatch', path: './tabs/dispatch.js?v=20260417-3' },
   { name: 'data', path: './tabs/data.js?v=20260513-1' },
   { name: 'zentao-ai', path: './tabs/zentao-ai.js?v=20260422-2' },
-  { name: 'jenkins', path: './tabs/jenkins.js?v=20260602-1' },
+  { name: 'jenkins', path: './tabs/jenkins.js?v=20260604-1' },
 ];
 
 window.__omniqaOptionalModuleFailures = {};

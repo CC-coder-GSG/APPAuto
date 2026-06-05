@@ -182,7 +182,6 @@ class OverallTestService:
                 )
                 .filter(
                     BugTracking.major_version_id.in_(major_ids),
-                    BugTracking.zentao_deleted.isnot(True),
                 )
                 .order_by(BugTracking.created_at.desc(), BugTracking.id.desc())
                 .all()
@@ -204,14 +203,16 @@ class OverallTestService:
                 )
                 .filter(
                     BugTracking.major_version_id == major_version_id,
-                    BugTracking.zentao_deleted.isnot(True),
                 )
                 .order_by(BugTracking.created_at.desc(), BugTracking.id.desc())
                 .all()
             )
 
-        base_total = len(bugs)
-        base_closed_count = sum(1 for bug in bugs if bug.closed)
+        # 禅道已删除的 Bug 仍然展示（前端会红色标记并隐藏状态/指派），
+        # 但不计入大盘统计，避免污染就绪率。
+        stat_bugs = [bug for bug in bugs if not bool(bug.zentao_deleted)]
+        base_total = len(stat_bugs)
+        base_closed_count = sum(1 for bug in stat_bugs if bug.closed)
         base_pending_count = base_total - base_closed_count
         base_ready_rate = 100 if base_total == 0 else round(base_closed_count * 100 / base_total)
 
@@ -250,6 +251,7 @@ class OverallTestService:
                 "zentao_close_comment": bug.zentao_close_comment or "",
                 "zentao_close_date": bug.zentao_close_date.strftime("%Y-%m-%d %H:%M") if bug.zentao_close_date else "",
                 "zentao_assigned_to_name": bug.zentao_assigned_to_name or "",
+                "zentao_deleted": bool(bug.zentao_deleted),
                 "last_zentao_synced_at": bug.last_zentao_synced_at.strftime("%Y-%m-%d %H:%M") if bug.last_zentao_synced_at else "",
                 "source_type": bug.source_type.value,
                 "source_ref": bug.source_ref,
@@ -271,8 +273,9 @@ class OverallTestService:
 
             bug_pool.append(entry)
 
-        filtered_total = len(bug_pool)
-        filtered_closed_count = sum(1 for e in bug_pool if e["closed"])
+        stat_pool = [e for e in bug_pool if not e.get("zentao_deleted")]
+        filtered_total = len(stat_pool)
+        filtered_closed_count = sum(1 for e in stat_pool if e["closed"])
         filtered_pending_count = filtered_total - filtered_closed_count
         filtered_ready_rate = 100 if filtered_total == 0 else round(filtered_closed_count * 100 / filtered_total)
 
@@ -675,6 +678,17 @@ class OverallTestService:
                     self._auto_create_zentao_close_record(bug_row, normalized)
                 self.db.commit()
 
+            # 对账：禅道的产品 Bug 列表接口不返回已删除的 Bug，所以本地里
+            # “上次同步过、但这次全量列表里消失”的 Bug 很可能已被删除。逐条
+            # 用 get_bug 探测其 deleted 标记（该接口仍会返回已删除 Bug），命中
+            # 则标记 zentao_deleted=True，供前端红色展示。
+            deleted_detected = self._reconcile_deleted_bugs(
+                client=client,
+                software_id=software_id,
+                unclassified_major_id=unclassified_major.id,
+                seen_zentao_ids=set(all_zentao_ids),
+            )
+
             _sync_all_cache[software_id] = local_now()
             elapsed = (local_now() - started).total_seconds()
             return {
@@ -686,6 +700,7 @@ class OverallTestService:
                 "updated": updated,
                 "unclassified": unclassified,
                 "matched_minor": matched_minor,
+                "deleted_detected": deleted_detected,
                 "elapsed_seconds": round(elapsed, 1),
                 "cached": False,
                 "sync_source": sync_source,
@@ -896,9 +911,111 @@ class OverallTestService:
 
         return ids
 
-    def _fetch_product_bugs_with_retry(
-        self, client: ZentaoClient, product_id: int, user_id: int
-    ) -> list[dict]:
+    # Max bugs to probe per full-sync reconciliation pass. The candidate set
+    # (locally-synced but absent from the remote product list) is normally tiny
+    # — this cap只是防御极端情况（如某产品拉取失败返回空列表）。
+    _DELETED_PROBE_CAP = 600
+    _DELETED_PROBE_CONCURRENCY = 6
+
+    @staticmethod
+    def _zentao_bug_is_deleted(raw: dict | None) -> bool | None:
+        """
+        判断 get_bug 返回的原始数据是否表示该 Bug 已删除。
+        - None → 接口 404/不可达，无法判定（返回 None）
+        - dict 带 deleted 真值 → True
+        - dict 不带删除标记 → False
+        """
+        if not isinstance(raw, dict):
+            return None
+        bug = raw.get("bug") if isinstance(raw.get("bug"), dict) else raw
+        deleted_raw = bug.get("deleted")
+        if isinstance(deleted_raw, bool):
+            return deleted_raw
+        if deleted_raw is None:
+            return False
+        return str(deleted_raw).strip() in {"1", "true", "True", "yes"}
+
+    def _reconcile_deleted_bugs(
+        self,
+        *,
+        client: ZentaoClient,
+        software_id: int,
+        unclassified_major_id: int,
+        seen_zentao_ids: set[str],
+    ) -> int:
+        """
+        探测本地已同步、但本次全量列表中缺失的禅道 Bug 是否已被删除。
+
+        禅道 `/products/{id}/bugs` 接口会过滤掉 deleted=1 的记录，因此这些 Bug
+        在本地会一直停留在删除前的旧状态。这里用 `get_bug`（仍会返回已删除
+        Bug 且带 deleted 字段）逐条核对，命中则标记 zentao_deleted=True。
+        """
+        from app.models import SoftwareProduct  # noqa: F401  (consistency w/ caller)
+
+        major_ids = [
+            v.id
+            for v in self.db.query(Version.id)
+            .filter(
+                Version.software_id == software_id,
+                Version.version_type == VersionType.MAJOR,
+            )
+            .all()
+        ]
+        if unclassified_major_id not in major_ids:
+            major_ids.append(unclassified_major_id)
+        if not major_ids:
+            return 0
+
+        candidates = (
+            self.db.query(BugTracking)
+            .filter(
+                BugTracking.major_version_id.in_(major_ids),
+                BugTracking.zentao_bug_id.isnot(None),
+                BugTracking.zentao_deleted.isnot(True),
+                BugTracking.last_zentao_synced_at.isnot(None),
+            )
+            .all()
+        )
+        candidates = [
+            b for b in candidates
+            if b.zentao_bug_id and b.zentao_bug_id not in seen_zentao_ids
+        ]
+        if not candidates:
+            return 0
+
+        # 优先核对最久没探测过的，配合 cap 在多次同步内轮流覆盖。
+        candidates.sort(
+            key=lambda b: (b.last_zentao_checked_at or datetime.min)
+        )
+        candidates = candidates[: self._DELETED_PROBE_CAP]
+
+        def _probe(bug_id_str: str) -> tuple[str, bool | None]:
+            try:
+                raw = client.get_bug(int(bug_id_str))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("reconcile get_bug(%s) failed: %s", bug_id_str, exc)
+                return bug_id_str, None
+            return bug_id_str, self._zentao_bug_is_deleted(raw)
+
+        results: dict[str, bool | None] = {}
+        with ThreadPoolExecutor(max_workers=self._DELETED_PROBE_CONCURRENCY) as executor:
+            futures = [executor.submit(_probe, b.zentao_bug_id) for b in candidates]
+            for future in as_completed(futures):
+                bid, is_deleted = future.result()
+                results[bid] = is_deleted
+
+        now = local_now()
+        deleted_count = 0
+        for bug in candidates:
+            verdict = results.get(bug.zentao_bug_id)
+            bug.last_zentao_checked_at = now
+            if verdict is True:
+                bug.zentao_deleted = True
+                bug.zentao_sync_message = "禅道已删除（对账探测）"
+                deleted_count += 1
+        if deleted_count or candidates:
+            self.db.commit()
+        return deleted_count
         try:
             return self._fetch_bug_collection(
                 client, f"products/{product_id}/bugs", limit=500, max_pages=50

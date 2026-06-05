@@ -166,9 +166,10 @@
         <span id="me"></span>
       </div>
       <div class="header-action-group">
-        <button onclick="runFrontendSelfCheck()">🩺 自检</button>
-        <button onclick="runOnlineApiCheck()">🌐 探测</button>
-        <button onclick="runFullHealthCheck()">🧭 体检</button>
+        <!-- 自检/探测/体检：不常用，默认隐藏腾出空间（功能保留，可在控制台调用） -->
+        <button onclick="runFrontendSelfCheck()" style="display:none;">🩺 自检</button>
+        <button onclick="runOnlineApiCheck()" style="display:none;">🌐 探测</button>
+        <button onclick="runFullHealthCheck()" style="display:none;">🧭 体检</button>
         <button onclick="changeMyPassword()">🔐 密码</button>
         <button id="aiConfigBtn" onclick="window.OmniQAAIConfig?.open()" title="管理个人 AI（DeepSeek）API Key">🤖 AI密钥</button>
         <button id="zentaoBindingBtn" onclick="window.OmniQAZentaoBinding?.open()" title="管理禅道账号绑定">🔌 禅道<span id="ztSyncDot" data-state="none" title=""></span></button>
@@ -202,7 +203,7 @@
     <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
     <button id="tabDispatchBtn" class="hidden" onclick="showTab('dispatch')">BUG特派</button>
     <button id="tabZentaoAiBtn" class="hidden" onclick="showTab('zentao-ai')">禅道AI用例生成</button>
-    <button id="tabJenkinsBtn" class="hidden" onclick="showTab('jenkins')">自动化测试</button>
+    <button id="tabJenkinsBtn" class="hidden" onclick="showTab('jenkins')">Jenkins</button>
     <span id="sseConnectionState" class="sse-conn-badge hidden" aria-live="polite">实时连接中</span>
   </div>
 
@@ -1408,23 +1409,25 @@
   </section>
 
   <section id="tab-jenkins" class="hidden card">
-    <div class="row" style="justify-content:space-between; align-items:center;">
-      <div>
-        <h2 style="margin-bottom:6px;">自动化测试（Jenkins）</h2>
-        <div class="muted">用你自己的 Jenkins 账号 + API Token 绑定后，可在此一键触发「自动化测试」视图下已配置好的 Job。</div>
+    <!-- 顶部工具条：标题 + 视图选择 + 搜索 + 设置入口 -->
+    <div class="row" style="justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+      <div class="row" style="gap:10px; align-items:center;">
+        <h2 style="margin:0;">Jenkins</h2>
+        <span id="jenkinsBindingStatus" style="font-size:12px;"></span>
       </div>
-      <div class="row">
-        <button class="secondary" onclick="loadJenkinsJobs()">刷新 Job 列表</button>
+      <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
+        <label style="font-size:13px; color:#475569;">视图</label>
+        <select id="jenkinsViewSelect" onchange="onJenkinsViewChange()" style="min-width:160px;"></select>
+        <input id="jenkinsJobFilter" oninput="onJenkinsJobFilter()" placeholder="🔍 过滤 Job" style="min-width:160px;">
+        <button class="secondary" onclick="loadJenkinsJobs()">刷新</button>
+        <button class="secondary" onclick="toggleJenkinsSettings()">⚙ 账号设置</button>
       </div>
     </div>
 
-    <div style="margin-top:14px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; padding:14px 16px;">
-      <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:10px;">
-        <h3 style="margin:0; color:#0f172a;">我的 Jenkins 账号绑定</h3>
-        <div id="jenkinsBindingStatus"></div>
-      </div>
+    <!-- 账号绑定：默认收起，点击「⚙ 账号设置」展开 -->
+    <div id="jenkinsSettingsPanel" class="hidden" style="margin-top:12px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; padding:14px 16px;">
       <div class="muted" style="font-size:12px; margin-bottom:12px;">
-        API Token 在 Jenkins 中生成：登录 Jenkins → 右上角用户名 → 设置(Configure) → API Token → Add new Token。Token 加密存储，绝不回显。
+        API Token 在 Jenkins 中生成：登录 Jenkins → 右上角用户名 → 设置(Configure) → API Token → Add new Token。Token 加密存储，绝不回显。也可填登录密码。
       </div>
       <div class="row" style="gap:12px; flex-wrap:wrap; align-items:flex-end;">
         <div>
@@ -1436,7 +1439,7 @@
           <input id="jenkinsAccount" style="min-width:160px;" placeholder="你的 Jenkins 用户名">
         </div>
         <div>
-          <label style="display:block; font-weight:600; color:#0f172a;">API Token</label>
+          <label style="display:block; font-weight:600; color:#0f172a;">API Token / 密码</label>
           <input id="jenkinsToken" type="password" style="min-width:240px;" placeholder="粘贴 API Token（不回显）">
         </div>
         <div class="row" style="gap:8px;">
@@ -1447,9 +1450,32 @@
       </div>
     </div>
 
-    <h3 style="margin:16px 0 8px 0; color:#0f172a;">可触发的自动化测试 Job</h3>
-    <div id="jenkinsJobsArea"></div>
+    <!-- 主体：左 Job 列表 / 右 Job 详情 -->
+    <div id="jenkinsMain" style="display:grid; grid-template-columns: minmax(320px, 420px) 1fr; gap:16px; margin-top:16px; align-items:start;">
+      <div>
+        <h3 style="margin:0 0 8px 0; color:#0f172a; font-size:15px;">Job 列表</h3>
+        <div id="jenkinsJobsArea"></div>
+      </div>
+      <div>
+        <h3 style="margin:0 0 8px 0; color:#0f172a; font-size:15px;">Job 详情</h3>
+        <div id="jenkinsDetailArea"><div class="muted" style="padding:16px;">在左侧选择一个 Job 查看详情、构建历史与产物。</div></div>
+      </div>
+    </div>
   </section>
+
+  <!-- 参数化构建：内嵌原生 Jenkins 构建页（经后端反向代理，支持 Active Choices 级联参数） -->
+  <div id="jenkinsBuildModal" class="hidden" style="position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:9999; display:flex; align-items:center; justify-content:center;">
+    <div style="background:#fff; width:min(960px, 94vw); height:min(86vh, 900px); border-radius:12px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.3);">
+      <div class="row" style="justify-content:space-between; align-items:center; padding:10px 14px; border-bottom:1px solid #e2e8f0;">
+        <h3 id="jenkinsBuildModalTitle" style="margin:0; font-size:15px; color:#0f172a;">参数化构建</h3>
+        <div class="row" style="gap:8px;">
+          <a id="jenkinsBuildModalOpen" class="qa-ext-link" href="#" target="_blank" rel="noopener noreferrer" style="font-size:12px;">在 Jenkins 打开</a>
+          <button class="secondary" onclick="closeJenkinsBuildModal()">关闭</button>
+        </div>
+      </div>
+      <iframe id="jenkinsBuildFrame" src="about:blank" style="border:0; width:100%; flex:1;"></iframe>
+    </div>
+  </div>
 
   <section id="tab-data" class="hidden card">
     <h2>数据管理台</h2>

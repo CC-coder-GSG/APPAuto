@@ -128,6 +128,13 @@ class JenkinsClient:
         except Exception:
             return {}
 
+    def list_views(self) -> list[dict]:
+        """List all top-level Jenkins views (name + url)."""
+        resp = self._get("api/json", params={"tree": "views[name,url]"})
+        data = resp.json() if resp is not None else {}
+        views = data.get("views") if isinstance(data, dict) else []
+        return views if isinstance(views, list) else []
+
     def list_view_jobs(self, view_name: str) -> list[dict]:
         """
         List jobs under a Jenkins view.
@@ -137,22 +144,37 @@ class JenkinsClient:
         *_anime=运行中、disabled=禁用 等）。
         """
         path = f"view/{quote(view_name)}/api/json"
-        resp = self._get(path, params={"tree": "jobs[name,url,color,buildable]"})
+        resp = self._get(
+            path,
+            params={
+                "tree": (
+                    "jobs[name,url,color,buildable,_class,description,"
+                    "lastBuild[number,result,timestamp,building,duration],"
+                    "lastSuccessfulBuild[number,timestamp],"
+                    "healthReport[score,description]]"
+                )
+            },
+        )
         data = resp.json() if resp is not None else {}
         jobs = data.get("jobs") if isinstance(data, dict) else []
         return jobs if isinstance(jobs, list) else []
 
     def get_job(self, job_full_name: str) -> dict:
-        """Return job detail incl. last build pointers and parameter definitions."""
+        """Return job detail incl. recent builds, artifacts and parameter definitions."""
         path = f"{self._job_path(job_full_name)}/api/json"
         resp = self._get(
             path,
             params={
                 "tree": (
-                    "name,url,color,buildable,inQueue,"
-                    "lastBuild[number,url],"
+                    "name,fullName,url,color,buildable,inQueue,description,_class,"
+                    "healthReport[score,description],"
+                    "lastBuild[number,url,result,building,timestamp,duration],"
                     "lastCompletedBuild[number,url,result,timestamp,duration],"
-                    "property[parameterDefinitions[name,type,defaultParameterValue[value]]]"
+                    "lastSuccessfulBuild[number,url,timestamp],"
+                    "lastFailedBuild[number,url,timestamp],"
+                    "builds[number,url,result,building,timestamp,duration]{0,30},"
+                    "property[parameterDefinitions[name,type,description,"
+                    "defaultParameterValue[value],choices]]"
                 )
             },
         )
@@ -162,7 +184,14 @@ class JenkinsClient:
         path = f"{self._job_path(job_full_name)}/{int(build_number)}/api/json"
         resp = self._get(
             path,
-            params={"tree": "number,url,result,building,timestamp,duration,displayName"},
+            params={
+                "tree": (
+                    "number,url,result,building,timestamp,duration,displayName,description,"
+                    "artifacts[fileName,relativePath],"
+                    "actions[parameters[name,value]],"
+                    "actions[causes[shortDescription,userName]]"
+                )
+            },
         )
         return resp.json()
 

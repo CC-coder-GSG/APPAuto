@@ -234,7 +234,10 @@ function isS5BugReactivatable(bug) {
 
 function buildS5RowHtml(b, allVersionsMode) {
   const isMyClosed = b.my_test_done;
-  const rowStyle = isMyClosed ? 'background: #f8fafc; color: #94a3b8;' : '';
+  const isZentaoDeleted = !!b.zentao_deleted;
+  const rowStyle = isZentaoDeleted
+    ? 'background:#fef2f2; box-shadow: inset 4px 0 0 #dc2626;'
+    : (isMyClosed ? 'background: #f8fafc; color: #94a3b8;' : '');
   const isZentaoBug = !!b.zentao_bug_id;
   const isEffectivelyClosed = isS5BugEffectivelyClosed(b);
   const canReactivate = isS5BugReactivatable(b);
@@ -255,10 +258,14 @@ function buildS5RowHtml(b, allVersionsMode) {
       : `<span>${bugIdText}</span>`;
   const bugTitle = escapeHtml(b.zentao_bug_title || b.bug_title || '');
   const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" data-zt-no-title="1" style="margin-left:4px;"></span>` : '';
+  // 禅道已删除的 Bug：用红色醒目标记，且不展示状态 / 指派等会误导的信息。
+  const deletedBadge = isZentaoDeleted
+    ? `<span class="badge" style="background:#dc2626; color:#fff; font-weight:bold;">🗑️ 禅道已删除</span>`
+    : '';
   const syncMeta = b.last_zentao_synced_at ? `<span class="badge" style="background:#f8fafc; color:#64748b;">同步 ${escapeHtml(b.last_zentao_synced_at)}</span>` : '';
-  const assignedMeta = b.zentao_assigned_to_name ? `<span class="badge" style="background:#faf5ff; color:#7c3aed;">当前指派 ${escapeHtml(getS5AssignedDisplayName(b.zentao_assigned_to_name))}</span>` : '';
-  const closedByMeta = b.zentao_closed_by_name ? `<span class="badge" style="background:#ecfdf5; color:#047857;">禅道关闭 ${escapeHtml(b.zentao_closed_by_name)}</span>` : '';
-  const closeDateMeta = b.zentao_close_date ? `<span class="badge" style="background:#f1f5f9; color:#475569;">${escapeHtml(b.zentao_close_date)}</span>` : '';
+  const assignedMeta = (!isZentaoDeleted && b.zentao_assigned_to_name) ? `<span class="badge" style="background:#faf5ff; color:#7c3aed;">当前指派 ${escapeHtml(getS5AssignedDisplayName(b.zentao_assigned_to_name))}</span>` : '';
+  const closedByMeta = (!isZentaoDeleted && b.zentao_closed_by_name) ? `<span class="badge" style="background:#ecfdf5; color:#047857;">禅道关闭 ${escapeHtml(b.zentao_closed_by_name)}</span>` : '';
+  const closeDateMeta = (!isZentaoDeleted && b.zentao_close_date) ? `<span class="badge" style="background:#f1f5f9; color:#475569;">${escapeHtml(b.zentao_close_date)}</span>` : '';
   const closeCommentPreview = (b.zentao_close_comment || '').trim();
   const detailMeta = [
     (b.other_records && b.other_records.length > 0)
@@ -314,8 +321,8 @@ function buildS5RowHtml(b, allVersionsMode) {
   return `<tr class="overall-test-row-card" data-bug-id="${b.id}" style="${rowStyle}">
     ${versionCell}
     <td style="vertical-align:middle; padding:6px 10px;">
-      <div>${bugHref}${ztSlot} <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span>${failBadge}${dispatchBadge}</div>
-      ${detailMeta ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">${detailMeta}</div>` : ''}
+      <div${isZentaoDeleted ? ' style="color:#dc2626; font-weight:bold;"' : ''}>${bugHref}${ztSlot} <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span>${failBadge}${dispatchBadge}</div>
+      ${(deletedBadge || detailMeta) ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">${deletedBadge}${detailMeta}</div>` : ''}
     </td>
     <td style="vertical-align:middle; padding:6px 10px;">
       ${bugTitle ? `<div style="max-height:60px; overflow-y:auto; font-size:13px; color:#475569; line-height:1.65; word-break:break-word; ${strikeDecoration}">${bugTitle}</div>` : '<span style="color:#94a3b8;">-</span>'}
