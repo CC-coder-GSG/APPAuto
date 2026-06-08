@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose 接管实际主题，这里仅提供启动主题（含状态栏背景），避免冷启动闪白。 -->
+    <style name="Theme.QaMobile" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#F8FAFC</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">@color/qa_background</item>
+    </style>
+</resources>

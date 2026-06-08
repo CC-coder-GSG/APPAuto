@@ -1,0 +1,40 @@
+{
+  "$comment": "两端共用的设计真源。Android 映射到 core/designsystem，iOS 后续映射到 SwiftUI。色值对齐现有 Web 端视觉。",
+  "color": {
+    "brand": {
+      "primary": "#2563EB",
+      "primaryDark": "#1D4ED8",
+      "primaryContainer": "#EFF6FF",
+      "onPrimaryContainer": "#1D4ED8"
+    },
+    "text": {
+      "strong": "#0F172A",
+      "default": "#1E293B",
+      "muted": "#64748B",
+      "disabled": "#94A3B8"
+    },
+    "surface": {
+      "background": "#F8FAFC",
+      "card": "#FFFFFF",
+      "border": "#E2E8F0"
+    },
+    "status": {
+      "success": "#16A34A",
+      "successContainer": "#F0FDF4",
+      "successBorder": "#BBF7D0",
+      "warning": "#D97706",
+      "danger": "#DC2626",
+      "info": "#2563EB"
+    }
+  },
+  "radius": { "sm": 4, "md": 8, "lg": 10, "xl": 16, "pill": 999 },
+  "spacing": { "xxs": 2, "xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 24, "xxl": 32 },
+  "typography": {
+    "title": { "size": 20, "weight": "bold" },
+    "headline": { "size": 16, "weight": "bold" },
+    "body": { "size": 14, "weight": "normal" },
+    "caption": { "size": 12, "weight": "normal" }
+  },
+  "elevation": { "card": 1, "modal": 8 },
+  "motion": { "fast": 150, "normal": 300, "slow": 420 }
+}
