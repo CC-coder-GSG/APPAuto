@@ -24,6 +24,7 @@ ALL_TAB_KEYS = [
     "data",
     "dispatch",
     "zentao-ai",
+    "cad-test",
 ]
 
 DEFAULT_USER_TAB_KEYS = [

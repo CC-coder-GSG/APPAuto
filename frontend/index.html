@@ -204,6 +204,7 @@
     <button id="tabDispatchBtn" class="hidden" onclick="showTab('dispatch')">BUG特派</button>
     <button id="tabZentaoAiBtn" class="hidden" onclick="showTab('zentao-ai')">禅道AI用例生成</button>
     <button id="tabJenkinsBtn" class="hidden" onclick="showTab('jenkins')">Jenkins</button>
+    <button id="tabCadTestBtn" class="hidden" onclick="showTab('cad-test')">CAD测试统计</button>
     <span id="sseConnectionState" class="sse-conn-badge hidden" aria-live="polite">实时连接中</span>
   </div>
 
@@ -1408,6 +1409,10 @@
     </div>
   </section>
 
+  <section id="tab-cad-test" class="hidden card">
+    <div id="cadTestRoot"><div class="muted" style="padding:20px;">正在加载 CAD 测试统计…</div></div>
+  </section>
+
   <section id="tab-jenkins" class="hidden card">
     <!-- 顶部工具条：标题 + 视图选择 + 搜索 + 设置入口 -->
     <div class="row" style="justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
@@ -2014,7 +2019,7 @@ function sourceTypeZh(v){
 }
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
-const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins'];
+const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins','cad-test'];
 const DEFAULT_ALLOWED_TABS=['mine','task-board','feedback','retest','overall-test','field-test','testcase-center','zentao-sync','report','jenkins'];
 const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test'];
 const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test' };
@@ -2194,7 +2199,7 @@ function applyTabVisibility(){
     'assign':'tabAssignBtn','mine':'tabMineBtn','task-board':'tabTaskBoardBtn','feedback':'tabFeedbackBtn',
     'field-test':'tabFieldTestBtn','build-records':'tabBuildRecordsBtn','testcase-center':'tabTestcaseCenterBtn',
     'zentao-sync':'tabZentaoSyncBtn','report':'tabReportBtn','activity':'tabActivityBtn',
-    'data':'tabDataBtn','dispatch':'tabDispatchBtn','zentao-ai':'tabZentaoAiBtn','jenkins':'tabJenkinsBtn'
+    'data':'tabDataBtn','dispatch':'tabDispatchBtn','zentao-ai':'tabZentaoAiBtn','jenkins':'tabJenkinsBtn','cad-test':'tabCadTestBtn'
   };
   ALL_TAB_KEYS.forEach((name)=>{
     const btn=document.getElementById(buttonMap[name]);
@@ -2206,7 +2211,7 @@ function applyTabVisibility(){
   }
 }
 function getDefaultVisibleTab(){
-  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins','cad-test']
     .find((name)=>canAccessTab(name)) || 'mine';
 }
 function getTabNamespaceName(name){
@@ -2227,6 +2232,7 @@ function getTabNamespaceName(name){
     dispatch:'OmniQADispatchTab',
     'zentao-ai':'OmniQAZentaoAiTab',
     jenkins:'OmniQAJenkinsTab',
+    'cad-test':'OmniQACadTab',
   }[name] || '';
 }
 function isTabRuntimeReady(name){
@@ -2235,7 +2241,7 @@ function isTabRuntimeReady(name){
   return !!window[nsName];
 }
 function getFirstRuntimeReadyTab(){
-  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins','cad-test']
     .find((tabName)=>canAccessTab(tabName) && isTabRuntimeReady(tabName)) || null;
 }
 async function showTab(name){
@@ -2258,7 +2264,7 @@ async function showTab(name){
     if(!fallback || fallback===name) return;
     name = fallback;
   }
-  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins'].forEach(x=>{
+  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins','cad-test'].forEach(x=>{
     const el=document.getElementById('tab-'+x);
     if(el) el.classList.add('hidden');
   });
@@ -2281,6 +2287,7 @@ async function showTab(name){
   if(name === 'activity') { loadActivityBoard().catch(err=>showMessage(err.message||'加载活动中心失败','error')); }
   if(name === 'zentao-ai') { window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.activate && window.OmniQAZentaoAiTab.activate().catch(err=>showMessage(err.message||'加载禅道AI用例生成失败','error')); }
   if(name === 'jenkins') { window.OmniQAJenkinsTab && window.OmniQAJenkinsTab.loadJenkinsTab && window.OmniQAJenkinsTab.loadJenkinsTab().catch(err=>showMessage(err.message||'加载自动化测试失败','error')); }
+  if(name === 'cad-test') { window.OmniQACadTab && window.OmniQACadTab.activate && window.OmniQACadTab.activate().catch(err=>showMessage(err.message||'加载CAD测试统计失败','error')); }
   if(name==='report'){loadReportOnDemand()}
 }
 function isAllUsersReport(){return currentUser && currentUser.role==='admin' && reportUserSelect && reportUserSelect.value==='0'}
