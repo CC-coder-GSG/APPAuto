@@ -149,15 +149,11 @@ function renderCard(item, versionId) {
         <span class="badge" style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0;">正常 ${rec ? rec.normal_count : 0}</span>
         <span class="badge" style="background:${hasAbnormal ? '#fef2f2' : '#f1f5f9'}; color:${hasAbnormal ? '#dc2626' : '#94a3b8'}; border:1px solid ${hasAbnormal ? '#fecaca' : '#e2e8f0'};">异常 ${rec ? rec.abnormal_count : 0}</span>
       </div>
-      ${cadFiles.length ? `<div style="display:flex; flex-wrap:wrap; gap:6px;">
-        ${cadFiles.map((a) => `<a class="qa-ext-link" href="javascript:void(0)" onclick="window.OmniQACadTab._download(${a.id})" title="下载 CAD 文件">📐 ${esc(a.original_name)}</a>`).join('')}
-      </div>` : ''}
-      ${rec && rec.description ? `<div style="font-size:13px; color:#334155; white-space:pre-wrap; line-height:1.5;">${esc(rec.description)}</div>` : ''}
-      ${shots.length ? `<div style="display:flex; flex-wrap:wrap; gap:6px;">
-        ${shots.map((a) => `<img data-cad-src="${a.download_url}" data-att-id="${a.id}" style="width:72px; height:72px; object-fit:cover; border-radius:6px; border:1px solid #e2e8f0; cursor:pointer;" onclick="window.OmniQACadTab._viewShot(${a.id})" title="${esc(a.original_name)}">`).join('')}
-      </div>` : ''}
-      ${videos.length ? `<div style="display:flex; flex-wrap:wrap; gap:8px;">
-        ${videos.map((a) => `<video src="${streamSrc(a)}" controls preload="metadata" playsinline style="width:200px; max-height:140px; border-radius:8px; border:1px solid #e2e8f0; background:#000;" title="${esc(a.original_name)}"></video>`).join('')}
+      ${rec && rec.description ? `<div style="font-size:13px; color:#334155; white-space:pre-wrap; line-height:1.55; background:#f8fafc; border-left:3px solid ${hasAbnormal ? '#f87171' : '#94a3b8'}; border-radius:6px; padding:8px 10px;"><span style="color:#64748b; font-size:11px;">问题说明</span><br>${esc(rec.description)}</div>` : ''}
+      ${(shots.length || videos.length || cadFiles.length) ? `<div class="row" style="flex-wrap:wrap; gap:8px; align-items:center;">
+        ${shots.map((a) => `<img data-cad-src="${a.download_url}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;cursor:pointer;" onclick="window.OmniQACadTab._viewShot(${a.id})" title="查看图片：${esc(a.original_name)}">`).join('')}
+        ${videos.map((a) => `<button class="secondary" style="padding:4px 10px; font-size:12px;" onclick="window.OmniQACadTab._viewVideo(${a.id})" title="${esc(a.original_name)}">▶ 预览视频</button>`).join('')}
+        ${cadFiles.map((a) => `<button class="secondary" style="padding:4px 10px; font-size:12px;" onclick="window.OmniQACadTab._download(${a.id})" title="下载：${esc(a.original_name)}">⬇ ${esc(a.original_name.length > 16 ? a.original_name.slice(0, 16) + '…' : a.original_name)}</button>`).join('')}
       </div>` : ''}
       ${customs}
       <div class="row" style="justify-content:flex-end; gap:6px; margin-top:2px;">
@@ -428,6 +424,16 @@ async function _viewShot(attId) {
     document.body.appendChild(ov);
   } catch {}
 }
+function _viewVideo(attId) {
+  // 视频走流式端点（Range），不预下整段；点击空白处关闭，点击播放器本身不关闭。
+  const token = encodeURIComponent(localStorage.getItem('token') || window.token || '');
+  const url = `/api/cad/attachments/${attId}/stream?token=${token}`;
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:11000; display:flex; align-items:center; justify-content:center; cursor:zoom-out;';
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `<video src="${url}" controls autoplay playsinline style="max-width:94vw; max-height:94vh; border-radius:8px; background:#000;"></video>`;
+  document.body.appendChild(ov);
+}
 
 // ------------------------------------------------------------------- modal
 function openModal(title, bodyHtml) {
@@ -454,6 +460,6 @@ window.OmniQACadTab = {
   _newVersion, _renameVersion, _delVersion,
   _manageColumns, _addColumn, _renameColumn, _delColumn,
   _newItem, _editItem, _saveItem, _delItem,
-  _editRecord, _saveRecord, _upload, _delAtt, _download, _viewShot,
+  _editRecord, _saveRecord, _upload, _delAtt, _download, _viewShot, _viewVideo,
   _close: closeModal,
 };
