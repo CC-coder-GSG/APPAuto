@@ -24,7 +24,6 @@ import site.geonest.qa.core.designsystem.QaSpacing
 
 @Composable
 fun ProfileScreen(
-    onLoggedOut: () -> Unit,
     viewModel: ProfileViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -58,10 +57,7 @@ fun ProfileScreen(
                 )
                 Spacer(Modifier.height(QaSpacing.xxl))
                 OutlinedButton(
-                    onClick = {
-                        viewModel.logout()
-                        onLoggedOut()
-                    },
+                    onClick = { viewModel.logout() },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                 ) { Text("退出登录") }
             }

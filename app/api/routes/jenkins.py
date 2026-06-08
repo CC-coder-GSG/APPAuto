@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
+from app.core.auth import normalize_client_type, session_token_for
 from app.core.config import settings
 from app.models import User
 from app.services import jenkins_service
@@ -72,10 +73,11 @@ def _user_from_token_value(token: str | None, db: Session) -> User | None:
         return None
     username = payload.get("sub")
     session_token = payload.get("session")
+    client_type = normalize_client_type(payload.get("client"))
     if not username:
         return None
     user = db.query(User).filter(User.username == username).first()
-    if not user or user.session_token != session_token:
+    if not user or session_token_for(user, client_type) != session_token:
         return None
     return user
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -12,8 +12,14 @@ router = APIRouter()
 
 
 @router.post("/auth/token")
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    return AuthService.login_with_form(db, form_data.username, form_data.password)
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    x_client_type: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    # 客户端通过 X-Client-Type 头声明终端类型（mobile / web）。
+    # 不传或非 mobile 一律按 web 处理，保证现有桌面端行为不变。
+    return AuthService.login_with_form(db, form_data.username, form_data.password, client_type=x_client_type)
 
 
 @router.get("/auth/me")

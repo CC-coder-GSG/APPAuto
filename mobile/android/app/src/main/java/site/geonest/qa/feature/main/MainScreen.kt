@@ -38,7 +38,7 @@ private enum class MainTab(val label: String, val icon: ImageVector) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(onLoggedOut: () -> Unit) {
+fun MainScreen() {
     var selected by remember { mutableIntStateOf(0) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -67,7 +67,7 @@ fun MainScreen(onLoggedOut: () -> Unit) {
                 )
                 MainTab.Retest -> Placeholder("复测工作台开发中")
                 MainTab.TaskBoard -> Placeholder("任务看板开发中")
-                MainTab.Profile -> ProfileScreen(onLoggedOut = onLoggedOut)
+                MainTab.Profile -> ProfileScreen()
             }
         }
     }

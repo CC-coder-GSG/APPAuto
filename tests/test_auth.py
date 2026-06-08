@@ -63,6 +63,45 @@ def test_single_session_kicks_old_token(db_session):
     assert current.username == user.username
 
 
+def test_web_and_mobile_sessions_coexist(db_session):
+    """不同终端（web / mobile）应能同时在线，互不踢出。"""
+    user = _create_user(db_session)
+    web = AuthService.login_with_form(db_session, user.username, "pass123", client_type="web")
+    mobile = AuthService.login_with_form(db_session, user.username, "pass123", client_type="mobile")
+
+    web_token = web["access_token"]
+    mobile_token = mobile["access_token"]
+
+    # 两个 token 都应有效
+    assert get_current_user(web_token, db_session).username == user.username
+    assert get_current_user(mobile_token, db_session).username == user.username
+
+    db_session.refresh(user)
+    assert user.session_token is not None
+    assert user.session_token_mobile is not None
+    assert user.session_token != user.session_token_mobile
+
+
+def test_same_client_type_kicks_old_but_keeps_other(db_session):
+    """相同终端再次登录踢掉旧会话；另一终端不受影响。"""
+    user = _create_user(db_session)
+    web = AuthService.login_with_form(db_session, user.username, "pass123", client_type="web")
+    mobile_first = AuthService.login_with_form(db_session, user.username, "pass123", client_type="mobile")
+    mobile_second = AuthService.login_with_form(db_session, user.username, "pass123", client_type="mobile")
+
+    # 旧的 mobile token 失效
+    try:
+        get_current_user(mobile_first["access_token"], db_session)
+    except HTTPException as exc:
+        assert exc.status_code == 401
+    else:
+        raise AssertionError("Old mobile token should be rejected")
+
+    # 新 mobile token 与 web token 仍有效
+    assert get_current_user(mobile_second["access_token"], db_session).username == user.username
+    assert get_current_user(web["access_token"], db_session).username == user.username
+
+
 def test_change_my_password_clears_session(db_session):
     user = _create_user(db_session)
     user.session_token = "active-session"

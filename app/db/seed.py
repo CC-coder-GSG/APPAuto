@@ -75,6 +75,9 @@ def ensure_user_schema_compat(db: Session) -> None:
     if "tab_permissions" not in cols:
         db.execute(text("ALTER TABLE users ADD COLUMN tab_permissions TEXT"))
         db.commit()
+    if "session_token_mobile" not in cols:
+        db.execute(text("ALTER TABLE users ADD COLUMN session_token_mobile VARCHAR(36)"))
+        db.commit()
     db.execute(text("UPDATE users SET display_name = username WHERE display_name IS NULL OR TRIM(display_name) = ''"))
     db.commit()
 

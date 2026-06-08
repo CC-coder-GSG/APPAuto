@@ -1,6 +1,7 @@
 package site.geonest.qa.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -29,26 +30,23 @@ class AppViewModel @Inject constructor(tokenStore: TokenStore) : ViewModel() {
 fun AppNavigation(appViewModel: AppViewModel = hiltViewModel()) {
     val navController = rememberNavController()
     val token by appViewModel.token.collectAsStateWithLifecycle()
-    val start = if (!token.isNullOrBlank()) Routes.MAIN else Routes.LOGIN
+    val loggedIn = !token.isNullOrBlank()
+    val start = if (loggedIn) Routes.MAIN else Routes.LOGIN
+
+    // 令牌驱动导航：登录成功(token 出现) → 主界面；登出 / 401 会话失效(token 清空) → 登录页。
+    // 这样 401 后无需用户手动操作即可回到登录页，避免"重试"反复失败卡死。
+    LaunchedEffect(loggedIn) {
+        val target = if (loggedIn) Routes.MAIN else Routes.LOGIN
+        val current = navController.currentDestination?.route
+        if (current != null && current != target) {
+            navController.navigate(target) {
+                popUpTo(navController.graph.id) { inclusive = true }
+            }
+        }
+    }
 
     NavHost(navController = navController, startDestination = start) {
-        composable(Routes.LOGIN) {
-            LoginScreen(
-                onLoggedIn = {
-                    navController.navigate(Routes.MAIN) {
-                        popUpTo(Routes.LOGIN) { inclusive = true }
-                    }
-                },
-            )
-        }
-        composable(Routes.MAIN) {
-            MainScreen(
-                onLoggedOut = {
-                    navController.navigate(Routes.LOGIN) {
-                        popUpTo(Routes.MAIN) { inclusive = true }
-                    }
-                },
-            )
-        }
+        composable(Routes.LOGIN) { LoginScreen() }
+        composable(Routes.MAIN) { MainScreen() }
     }
 }
