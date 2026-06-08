@@ -6,6 +6,16 @@ const U = () => window.OmniQAUtils || {};
 const esc = (s) => (U().escapeHtml ? U().escapeHtml(String(s ?? '')) : String(s ?? ''));
 const toast = (m, t = 'success') => window.showMessage && window.showMessage(m, t);
 const authHeaders = () => ({ Authorization: 'Bearer ' + (localStorage.getItem('token') || window.token || '') });
+// 视频/流式访问：JWT 走 query token，<video src> 无法设置请求头。
+const streamSrc = (a) => `${a.stream_url}?token=${encodeURIComponent(localStorage.getItem('token') || window.token || '')}`;
+const splitAtts = (rec) => {
+  const all = rec ? rec.attachments : [];
+  return {
+    cad: all.filter((a) => a.kind === 'cad'),
+    video: all.filter((a) => a.is_video || a.kind === 'video'),
+    shot: all.filter((a) => a.kind === 'screenshot' && !a.is_video),
+  };
+};
 
 const state = {
   boards: [],
@@ -117,8 +127,7 @@ function renderCard(item, versionId) {
          ${bug && bug.zentao_bug_url ? `<a class="qa-ext-link" href="${esc(bug.zentao_bug_url)}" target="_blank" rel="noopener" title="${esc(bug.zentao_bug_title || '')}">跳转</a>` : ''}
        </span>`
     : '';
-  const cadFiles = rec ? rec.attachments.filter((a) => a.kind === 'cad') : [];
-  const shots = rec ? rec.attachments.filter((a) => a.kind === 'screenshot') : [];
+  const { cad: cadFiles, video: videos, shot: shots } = splitAtts(rec);
   const customs = (state.board.columns || [])
     .map((c) => {
       const val = rec && rec.custom_values ? rec.custom_values[String(c.id)] : '';
@@ -146,6 +155,9 @@ function renderCard(item, versionId) {
       ${rec && rec.description ? `<div style="font-size:13px; color:#334155; white-space:pre-wrap; line-height:1.5;">${esc(rec.description)}</div>` : ''}
       ${shots.length ? `<div style="display:flex; flex-wrap:wrap; gap:6px;">
         ${shots.map((a) => `<img data-cad-src="${a.download_url}" data-att-id="${a.id}" style="width:72px; height:72px; object-fit:cover; border-radius:6px; border:1px solid #e2e8f0; cursor:pointer;" onclick="window.OmniQACadTab._viewShot(${a.id})" title="${esc(a.original_name)}">`).join('')}
+      </div>` : ''}
+      ${videos.length ? `<div style="display:flex; flex-wrap:wrap; gap:8px;">
+        ${videos.map((a) => `<video src="${streamSrc(a)}" controls preload="metadata" playsinline style="width:200px; max-height:140px; border-radius:8px; border:1px solid #e2e8f0; background:#000;" title="${esc(a.original_name)}"></video>`).join('')}
       </div>` : ''}
       ${customs}
       <div class="row" style="justify-content:flex-end; gap:6px; margin-top:2px;">
@@ -285,8 +297,7 @@ function _editRecord(itemId, versionId) {
   const item = state.board.items.find((i) => i.id === itemId);
   const rec = state.board.records[`${itemId}:${versionId}`];
   const cols = state.board.columns || [];
-  const cadFiles = rec ? rec.attachments.filter((a) => a.kind === 'cad') : [];
-  const shots = rec ? rec.attachments.filter((a) => a.kind === 'screenshot') : [];
+  const { cad: cadFiles, video: videos, shot: shots } = splitAtts(rec);
   const body = `
     <div style="display:flex; flex-direction:column; gap:12px;">
       <div class="muted">条目 #${item?.seq ?? '-'} ${item?.zentao_bug_id ? `· Bug ${item.zentao_bug_id}` : ''}</div>
@@ -322,6 +333,20 @@ function _editRecord(itemId, versionId) {
         <div id="cadRecShotList" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">
           ${shots.map((a) => `<span style="position:relative; display:inline-block;">
             <img data-cad-src="${a.download_url}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;">
+            <button onclick="window.OmniQACadTab._delAtt(${a.id},${itemId},${versionId})" title="删除" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:#dc2626;color:#fff;cursor:pointer;line-height:1;">×</button>
+          </span>`).join('') || '<span class="muted" style="font-size:12px;">无</span>'}
+        </div>
+      </div>
+      <div>
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <b style="font-size:13px;">视频（支持在线播放）</b>
+          <label class="secondary" style="cursor:pointer; padding:4px 10px; border:1px solid #e2e8f0; border-radius:8px;">+ 上传视频
+            <input type="file" accept="video/*" style="display:none;" onchange="window.OmniQACadTab._upload(${itemId},${versionId},'video',this)">
+          </label>
+        </div>
+        <div id="cadRecVideoList" style="display:flex; flex-wrap:wrap; gap:10px; margin-top:6px;">
+          ${videos.map((a) => `<span style="position:relative; display:inline-block;">
+            <video src="${streamSrc(a)}" controls preload="metadata" playsinline style="width:240px; max-height:160px; border-radius:8px; border:1px solid #e2e8f0; background:#000;"></video>
             <button onclick="window.OmniQACadTab._delAtt(${a.id},${itemId},${versionId})" title="删除" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:#dc2626;color:#fff;cursor:pointer;line-height:1;">×</button>
           </span>`).join('') || '<span class="muted" style="font-size:12px;">无</span>'}
         </div>

@@ -22,7 +22,9 @@ from app.services.audit_service import audit
 from app.utils.time_utils import local_now
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"}
+VIDEO_EXTS = {".mp4", ".webm", ".ogg", ".ogv", ".mov", ".m4v", ".avi", ".mkv"}
 CAD_EXTS = {".dwg", ".dxf", ".dwf", ".dgn", ".dwt"}
+ALLOWED_KINDS = {"cad", "screenshot", "video"}
 UPLOAD_ROOT = Path(__file__).resolve().parents[2] / "uploads" / "cad"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -161,7 +163,9 @@ class CadTestService:
                     "file_ext": a.file_ext,
                     "file_size": a.file_size,
                     "is_image": a.is_image,
+                    "is_video": a.kind == "video" or (a.file_type or "").startswith("video/"),
                     "download_url": f"/api/cad/attachments/{a.id}/download",
+                    "stream_url": f"/api/cad/attachments/{a.id}/stream",
                 }
                 for a in sorted(r.attachments, key=lambda x: x.id)
             ],
@@ -292,7 +296,8 @@ class CadTestService:
     def save_attachment(self, item_id: int, version_id: int, kind: str, upload_file: UploadFile, actor: User) -> dict:
         rec = self._get_or_create_record(item_id, version_id)
         suffix = Path(upload_file.filename or "").suffix.lower()
-        kind = "cad" if kind == "cad" else "screenshot"
+        if kind not in ALLOWED_KINDS:
+            kind = "video" if suffix in VIDEO_EXTS else ("cad" if suffix in CAD_EXTS else "screenshot")
 
         now = local_now()
         folder = UPLOAD_ROOT / now.strftime("%Y") / now.strftime("%m")
@@ -330,7 +335,9 @@ class CadTestService:
             "file_ext": att.file_ext,
             "file_size": att.file_size,
             "is_image": att.is_image,
+            "is_video": att.kind == "video" or (att.file_type or "").startswith("video/"),
             "download_url": f"/api/cad/attachments/{att.id}/download",
+            "stream_url": f"/api/cad/attachments/{att.id}/stream",
         }
 
     def get_attachment(self, attachment_id: int) -> CadAttachment:

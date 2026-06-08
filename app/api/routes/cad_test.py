@@ -1,10 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
-from fastapi.responses import FileResponse
+import re
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
+from app.core.auth import normalize_client_type, session_token_for
+from app.core.config import settings
 from app.models import User
 from app.schemas.cad_test import (
     CadBoardPayload,
@@ -14,7 +20,7 @@ from app.schemas.cad_test import (
     CadVersionPayload,
 )
 from app.services.cad_test_service import CadTestService
-from app.services.permission_service import ensure_tab_access
+from app.services.permission_service import ensure_tab_access, has_tab_access
 
 router = APIRouter(prefix="/api/cad", tags=["cad-test"])
 
@@ -24,6 +30,63 @@ TAB_KEY = "cad-test"
 def _service(current_user: User, db: Session) -> CadTestService:
     ensure_tab_access(current_user, TAB_KEY)
     return CadTestService(db)
+
+
+def _user_from_raw_token(raw_token: str | None, db: Session) -> User | None:
+    """从原始 JWT 串解析并校验用户（供 <video>/<img> 用 query token 流式访问）。"""
+    if not raw_token:
+        return None
+    try:
+        payload = jwt.decode(raw_token, settings.secret_key, algorithms=[settings.algorithm])
+    except JWTError:
+        return None
+    username = payload.get("sub")
+    session_token = payload.get("session")
+    client_type = normalize_client_type(payload.get("client"))
+    if not username:
+        return None
+    user = db.query(User).filter(User.username == username).first()
+    if not user or session_token_for(user, client_type) != session_token:
+        return None
+    return user
+
+
+def _stream_file(path: Path, request: Request, media_type: str) -> StreamingResponse | FileResponse:
+    """支持 HTTP Range 的文件流式响应，使视频可边播边拖动（206 Partial Content）。"""
+    file_size = path.stat().st_size
+    range_header = request.headers.get("range") or request.headers.get("Range")
+    start, end, status = 0, file_size - 1, 200
+    headers = {"accept-ranges": "bytes"}
+    if range_header:
+        m = re.match(r"bytes=(\d*)-(\d*)", range_header.strip())
+        if m:
+            g1, g2 = m.group(1), m.group(2)
+            if g1 == "" and g2:  # bytes=-N → 末尾 N 字节
+                start = max(0, file_size - int(g2))
+            else:
+                start = int(g1) if g1 else 0
+                end = int(g2) if g2 else file_size - 1
+            start = max(0, start)
+            end = min(end, file_size - 1)
+            if start > end:
+                start, end = 0, file_size - 1
+            status = 206
+            headers["content-range"] = f"bytes {start}-{end}/{file_size}"
+    length = end - start + 1
+    headers["content-length"] = str(length)
+
+    def iterator(chunk: int = 512 * 1024):
+        with open(path, "rb") as f:
+            f.seek(start)
+            remaining = length
+            while remaining > 0:
+                data = f.read(min(chunk, remaining))
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    return StreamingResponse(iterator(), status_code=status, headers=headers, media_type=media_type)
 
 
 # ---------------------------------------------------------------------- boards
@@ -124,10 +187,31 @@ def download_attachment(attachment_id: int, current_user: User = Depends(get_cur
     att = service.get_attachment(attachment_id)
     path = service.attachment_abs_path(att)
     if not path.exists():
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="文件不存在")
     return FileResponse(str(path), filename=att.original_name, media_type=att.file_type or "application/octet-stream")
+
+
+@router.get("/attachments/{attachment_id}/stream")
+def stream_attachment(
+    attachment_id: int,
+    request: Request,
+    token: str | None = Query(default=None),
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """支持 Range 的流式访问（用于视频在线预览、图片内联）。
+    鉴权可走 query ?token=（<video src> 无法设置请求头）或 Authorization 头。"""
+    raw = token or ((authorization or "").removeprefix("Bearer ").strip() or None)
+    user = _user_from_raw_token(raw, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="未授权")
+    if not has_tab_access(user, TAB_KEY):
+        raise HTTPException(status_code=403, detail="无权限")
+    att = CadTestService(db).get_attachment(attachment_id)
+    path = CadTestService(db).attachment_abs_path(att)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return _stream_file(path, request, att.file_type or "application/octet-stream")
 
 
 @router.delete("/attachments/{attachment_id}")
