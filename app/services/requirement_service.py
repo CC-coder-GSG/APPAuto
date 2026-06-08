@@ -357,6 +357,19 @@ class RequirementService:
                             TestCase(
                                 requirement_id=new_req.id,
                                 zentao_case_id=c.zentao_case_id,
+                                # 跳转/预览/展示所需的禅道字段一并复制，否则合并出的
+                                # 用例只有编号、没有 url，前端会退化成不可点击的纯文本。
+                                # 注意：zentao_client_record_id 有唯一约束，不能复制。
+                                zentao_case_url=c.zentao_case_url,
+                                zentao_case_numeric_id=c.zentao_case_numeric_id,
+                                zentao_case_title=c.zentao_case_title,
+                                zentao_source=c.zentao_source,
+                                zentao_top_href=c.zentao_top_href,
+                                zentao_product_id=c.zentao_product_id,
+                                zentao_product_name=c.zentao_product_name,
+                                zentao_requirement_id=c.zentao_requirement_id,
+                                zentao_requirement_name=c.zentao_requirement_name,
+                                zentao_creator_name=c.zentao_creator_name,
                                 creator_id=c.creator_id,
                             )
                         )

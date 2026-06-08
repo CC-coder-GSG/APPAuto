@@ -160,6 +160,12 @@ export async function loadAssignBoard() {
   state.assignReqs = await (await api(reqUrl)).json();
   window.assignReqs = state.assignReqs;
 
+  const countEl = document.getElementById('assignReqCount');
+  if (countEl) {
+    const total = Array.isArray(state.assignReqs) ? state.assignReqs.length : 0;
+    countEl.textContent = majorId ? `共 ${total} 个需求` : `全部版本共 ${total} 个需求`;
+  }
+
   const assignTable = document.getElementById('assignTable');
   if (!assignTable) return;
   const users = getUsers();

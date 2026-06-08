@@ -210,7 +210,7 @@
   <section id="tab-assign" class="hidden card">
     <h2>任务分配台</h2>
     <details id="assignCreateBlock" open style="border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; background:#fff;">
-      <summary style="cursor:pointer; font-weight:700; color:#0f172a; list-style:none;">任务创建台</summary>
+      <summary style="cursor:pointer; font-weight:700; color:#0f172a; list-style:none;">任务创建台<span id="assignReqCount" class="badge" style="margin-left:8px; font-weight:600; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe;">共 0 个需求</span></summary>
       <div style="margin-top:10px;">
       <div class="row"><label>大版本</label><select id="assignMajorSelect" onchange="loadAssignBoard()"></select><button onclick="loadAssignBoard()">加载</button><button class="secondary" onclick="syncAssignRequirementsFromZentao()">同步禅道需求</button><button onclick="publishAssign()">一键发布（更新分配）</button></div>
         <table><thead><tr><th>需求</th><th>负责人</th></tr></thead><tbody id="assignTable"></tbody></table>
