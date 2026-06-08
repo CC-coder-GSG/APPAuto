@@ -4,7 +4,7 @@ from app.models.audit import AuditLog
 from app.models.browser_sync_event import BrowserSyncEvent
 from app.models.build_record import BuildRecord
 from app.models.bug import BugTracking
-from app.models.cad_test import CadAttachment, CadBoard, CadCustomColumn, CadItem, CadRecord, CadVersion
+from app.models.cad_test import CadAttachment, CadBoard, CadCustomColumn, CadItem, CadItemFile, CadRecord, CadVersion
 from app.models.enums import (
     BugSourceType,
     FeedbackStatus,
@@ -46,6 +46,7 @@ __all__ = [
     "CadBoard",
     "CadCustomColumn",
     "CadItem",
+    "CadItemFile",
     "CadRecord",
     "CadVersion",
     "FeedbackStatus",

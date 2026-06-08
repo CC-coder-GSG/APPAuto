@@ -163,6 +163,32 @@ def delete_item(item_id: int, current_user: User = Depends(get_current_user), db
     return _service(current_user, db).delete_item(item_id, current_user)
 
 
+# -------------------------------------------------- 条目级共享 CAD 文件（跨版本通用）
+@router.post("/items/{item_id}/cad-file")
+def upload_item_cad_file(
+    item_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return _service(current_user, db).save_item_cad_file(item_id, file, current_user)
+
+
+@router.get("/cad-files/{file_id}/download")
+def download_item_cad_file(file_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    service = _service(current_user, db)
+    cf = service.get_item_cad_file(file_id)
+    path = service.item_cad_file_abs_path(cf)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(str(path), filename=cf.original_name, media_type=cf.file_type or "application/octet-stream")
+
+
+@router.delete("/cad-files/{file_id}")
+def delete_item_cad_file(file_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _service(current_user, db).delete_item_cad_file(file_id, current_user)
+
+
 # --------------------------------------------------------------------- records
 @router.post("/records")
 def upsert_record(payload: CadRecordPayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

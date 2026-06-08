@@ -77,6 +77,10 @@ class CadItem(Base):
 
     board = relationship("CadBoard", back_populates="items")
     records = relationship("CadRecord", back_populates="item", cascade="all, delete-orphan")
+    # 条目级共享 CAD 文件：上传一次，该条目在所有版本下通用。
+    cad_files = relationship(
+        "CadItemFile", back_populates="item", cascade="all, delete-orphan", order_by="CadItemFile.id"
+    )
 
 
 class CadRecord(Base):
@@ -124,6 +128,25 @@ class CadAttachment(Base):
     record = relationship("CadRecord", back_populates="attachments")
 
 
+class CadItemFile(Base):
+    """条目级共享 CAD 文件：跨所有版本通用，独立于版本记录的生命周期。"""
+
+    __tablename__ = "cad_item_files"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("cad_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    file_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    file_ext: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    file_size: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    uploaded_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
+
+    item = relationship("CadItem", back_populates="cad_files")
+
+
 __all__ = [
     "CadBoard",
     "CadVersion",
@@ -131,4 +154,5 @@ __all__ = [
     "CadItem",
     "CadRecord",
     "CadAttachment",
+    "CadItemFile",
 ]

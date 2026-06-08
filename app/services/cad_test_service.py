@@ -14,6 +14,7 @@ from app.models import (
     CadBoard,
     CadCustomColumn,
     CadItem,
+    CadItemFile,
     CadRecord,
     CadVersion,
     User,
@@ -78,7 +79,7 @@ class CadTestService:
             .options(
                 joinedload(CadBoard.versions),
                 joinedload(CadBoard.columns),
-                joinedload(CadBoard.items),
+                joinedload(CadBoard.items).joinedload(CadItem.cad_files),
             )
             .filter(CadBoard.id == board_id)
             .first()
@@ -138,6 +139,17 @@ class CadTestService:
                 else None
             ),
             "sort_order": item.sort_order,
+            # 条目级共享 CAD 文件（所有版本通用）。
+            "cad_files": [
+                {
+                    "id": f.id,
+                    "original_name": f.original_name,
+                    "file_ext": f.file_ext,
+                    "file_size": f.file_size,
+                    "download_url": f"/api/cad/cad-files/{f.id}/download",
+                }
+                for f in sorted(item.cad_files, key=lambda x: x.id)
+            ],
         }
 
     def _serialize_record(self, r: CadRecord) -> dict:
@@ -244,9 +256,11 @@ class CadTestService:
 
     def delete_item(self, item_id: int, actor: User) -> dict:
         item = self._get_item(item_id)
-        # 删除条目时一并清理其记录的物理附件文件。
+        # 删除条目时一并清理其记录附件与共享 CAD 文件的物理文件。
         for rec in item.records:
             self._delete_record_files(rec)
+        for cf in item.cad_files:
+            self._safe_unlink(self.item_cad_file_abs_path(cf))
         self.db.delete(item)
         self.db.commit()
         return {"message": "已删除"}
@@ -355,6 +369,59 @@ class CadTestService:
         self.db.delete(att)
         self.db.commit()
         audit(self.db, action="cad.attachment.delete", target_type="cad_attachment", actor_id=actor.id, target_id=str(attachment_id))
+        return {"message": "已删除"}
+
+    # ------------------------------------------------------- item-level CAD files
+    def save_item_cad_file(self, item_id: int, upload_file: UploadFile, actor: User) -> dict:
+        item = self._get_item(item_id)
+        suffix = Path(upload_file.filename or "").suffix.lower()
+        now = local_now()
+        folder = UPLOAD_ROOT / "cad_files" / now.strftime("%Y") / now.strftime("%m")
+        folder.mkdir(parents=True, exist_ok=True)
+        stored_name = f"{uuid.uuid4().hex}{suffix}"
+        full_path = folder / stored_name
+        content = upload_file.file.read()
+        with open(full_path, "wb") as f:
+            f.write(content)
+        guessed = upload_file.content_type or mimetypes.guess_type(upload_file.filename or "")[0] or "application/octet-stream"
+        rel_path = str(full_path.relative_to(PROJECT_ROOT)).replace("\\", "/")
+        cf = CadItemFile(
+            item_id=item.id,
+            original_name=upload_file.filename or stored_name,
+            stored_name=stored_name,
+            file_path=rel_path,
+            file_type=guessed,
+            file_ext=suffix.lstrip("."),
+            file_size=len(content),
+            uploaded_by_id=actor.id,
+        )
+        self.db.add(cf)
+        self.db.commit()
+        self.db.refresh(cf)
+        audit(self.db, action="cad.item_cad.upload", target_type="cad_item", actor_id=actor.id, target_id=str(item.id), detail=cf.original_name)
+        return {
+            "id": cf.id,
+            "original_name": cf.original_name,
+            "file_ext": cf.file_ext,
+            "file_size": cf.file_size,
+            "download_url": f"/api/cad/cad-files/{cf.id}/download",
+        }
+
+    def get_item_cad_file(self, file_id: int) -> CadItemFile:
+        cf = self.db.query(CadItemFile).filter(CadItemFile.id == file_id).first()
+        if not cf:
+            raise HTTPException(status_code=404, detail="CAD 文件不存在")
+        return cf
+
+    def item_cad_file_abs_path(self, cf: CadItemFile) -> Path:
+        return PROJECT_ROOT / cf.file_path
+
+    def delete_item_cad_file(self, file_id: int, actor: User) -> dict:
+        cf = self.get_item_cad_file(file_id)
+        self._safe_unlink(self.item_cad_file_abs_path(cf))
+        self.db.delete(cf)
+        self.db.commit()
+        audit(self.db, action="cad.item_cad.delete", target_type="cad_item_file", actor_id=actor.id, target_id=str(file_id))
         return {"message": "已删除"}
 
     # ------------------------------------------------------------------ helpers

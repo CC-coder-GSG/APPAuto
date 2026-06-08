@@ -149,11 +149,16 @@ function renderCard(item, versionId) {
         <span class="badge" style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0;">正常 ${rec ? rec.normal_count : 0}</span>
         <span class="badge" style="background:${hasAbnormal ? '#fef2f2' : '#f1f5f9'}; color:${hasAbnormal ? '#dc2626' : '#94a3b8'}; border:1px solid ${hasAbnormal ? '#fecaca' : '#e2e8f0'};">异常 ${rec ? rec.abnormal_count : 0}</span>
       </div>
+      ${(item.cad_files && item.cad_files.length) ? `<div style="border:1px dashed #2563eb; background:#eff6ff; border-radius:8px; padding:6px 9px;">
+        <div style="font-size:11px; color:#1d4ed8; display:flex; align-items:center; gap:4px;">📎 共享 CAD 文件 · 各测试版本通用</div>
+        <div class="row" style="flex-wrap:wrap; gap:6px; margin-top:5px;">
+          ${item.cad_files.map((f) => `<button class="secondary" style="padding:4px 10px; font-size:12px;" onclick="window.OmniQACadTab._dlcad(${f.id})" title="下载：${esc(f.original_name)}">⬇ ${esc(f.original_name.length > 16 ? f.original_name.slice(0, 16) + '…' : f.original_name)}</button>`).join('')}
+        </div>
+      </div>` : ''}
       ${rec && rec.description ? `<div style="font-size:13px; color:#334155; white-space:pre-wrap; line-height:1.55; background:#f8fafc; border-left:3px solid ${hasAbnormal ? '#f87171' : '#94a3b8'}; border-radius:6px; padding:8px 10px;"><span style="color:#64748b; font-size:11px;">问题说明</span><br>${esc(rec.description)}</div>` : ''}
-      ${(shots.length || videos.length || cadFiles.length) ? `<div class="row" style="flex-wrap:wrap; gap:8px; align-items:center;">
+      ${(shots.length || videos.length) ? `<div class="row" style="flex-wrap:wrap; gap:8px; align-items:center;">
         ${shots.map((a) => `<img data-cad-src="${a.download_url}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;cursor:pointer;" onclick="window.OmniQACadTab._viewShot(${a.id})" title="查看图片：${esc(a.original_name)}">`).join('')}
         ${videos.map((a) => `<button class="secondary" style="padding:4px 10px; font-size:12px;" onclick="window.OmniQACadTab._viewVideo(${a.id})" title="${esc(a.original_name)}">▶ 预览视频</button>`).join('')}
-        ${cadFiles.map((a) => `<button class="secondary" style="padding:4px 10px; font-size:12px;" onclick="window.OmniQACadTab._download(${a.id})" title="下载：${esc(a.original_name)}">⬇ ${esc(a.original_name.length > 16 ? a.original_name.slice(0, 16) + '…' : a.original_name)}</button>`).join('')}
       </div>` : ''}
       ${customs}
       <div class="row" style="justify-content:flex-end; gap:6px; margin-top:2px;">
@@ -308,15 +313,19 @@ function _editRecord(itemId, versionId) {
         <div style="font-size:12px; color:#64748b;">自定义列</div>
         ${cols.map((c) => `<label>${esc(c.name)}<input data-cv="${c.id}" value="${esc(rec && rec.custom_values ? (rec.custom_values[String(c.id)] || '') : '')}" style="width:100%;"></label>`).join('')}
       </div>` : ''}
-      <div style="border-top:1px dashed #e2e8f0; padding-top:10px;">
+      <div style="border-top:1px dashed #e2e8f0; padding-top:10px; border:1px dashed #2563eb; border-radius:8px; padding:10px; background:#eff6ff;">
         <div class="row" style="justify-content:space-between; align-items:center;">
-          <b style="font-size:13px;">CAD 文件</b>
-          <label class="secondary" style="cursor:pointer; padding:4px 10px; border:1px solid #e2e8f0; border-radius:8px;">+ 上传CAD
+          <b style="font-size:13px; color:#1d4ed8;">📎 CAD 文件（上传后该条目各版本共享）</b>
+          <label class="secondary" style="cursor:pointer; padding:4px 10px; border:1px solid #bfdbfe; border-radius:8px; background:#fff;">+ 上传CAD
             <input type="file" accept=".dwg,.dxf,.dwf,.dgn,.dwt" style="display:none;" onchange="window.OmniQACadTab._upload(${itemId},${versionId},'cad',this)">
           </label>
         </div>
+        <div style="font-size:11px; color:#1d4ed8; margin-top:4px;">同一条目（同一张图纸）的 CAD 在所有版本通用，无需每个版本重复上传。</div>
         <div id="cadRecCadList" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">
-          ${cadFiles.map((a) => attChip(a)).join('') || '<span class="muted" style="font-size:12px;">无</span>'}
+          ${(item && item.cad_files && item.cad_files.length) ? item.cad_files.map((f) => `<span class="row" style="gap:4px; align-items:center; background:#fff; border:1px solid #bfdbfe; border-radius:8px; padding:3px 8px;">
+            <a class="qa-ext-link" href="javascript:void(0)" onclick="window.OmniQACadTab._dlcad(${f.id})">📐 ${esc(f.original_name)}</a>
+            <button onclick="window.OmniQACadTab._delCad(${f.id},${itemId},${versionId})" title="删除" style="border:none;background:none;color:#dc2626;cursor:pointer;">×</button>
+          </span>`).join('') : '<span class="muted" style="font-size:12px;">无</span>'}
         </div>
       </div>
       <div>
@@ -379,14 +388,38 @@ async function _upload(itemId, versionId, kind, inputEl) {
   if (!file) return;
   const fd = new FormData();
   fd.append('file', file);
+  // CAD 文件挂在条目上（跨版本共享）；截图/视频按版本记录存储。
+  const url = kind === 'cad'
+    ? `/api/cad/items/${itemId}/cad-file`
+    : `/api/cad/records/attachment?item_id=${itemId}&version_id=${versionId}&kind=${kind}`;
   try {
-    const r = await fetch(`/api/cad/records/attachment?item_id=${itemId}&version_id=${versionId}&kind=${kind}`, {
-      method: 'POST', headers: authHeaders(), body: fd,
-    });
+    const r = await fetch(url, { method: 'POST', headers: authHeaders(), body: fd });
     if (!r.ok) { let m = '上传失败'; try { m = (await r.json()).detail || m; } catch {} throw new Error(m); }
     await loadBoard();
     _editRecord(itemId, versionId); // 重新打开刷新附件区
     toast('上传成功');
+  } catch (e) { toast(e.message, 'error'); }
+}
+async function _dlcad(fileId) {
+  try {
+    const r = await fetch(`/api/cad/cad-files/${fileId}/download`, { headers: authHeaders() });
+    if (!r.ok) throw new Error('下载失败');
+    const blob = await r.blob();
+    const dispo = r.headers.get('Content-Disposition') || '';
+    const m = /filename\*?=(?:UTF-8'')?"?([^";]+)/i.exec(dispo);
+    const name = m ? decodeURIComponent(m[1]) : `cad_${fileId}`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  } catch (e) { toast(e.message, 'error'); }
+}
+async function _delCad(fileId, itemId, versionId) {
+  if (!confirm('删除该共享 CAD 文件？该条目所有版本都将不再显示它。')) return;
+  try {
+    await japi(`/api/cad/cad-files/${fileId}`, { method: 'DELETE' });
+    await loadBoard();
+    if (itemId != null && versionId != null) _editRecord(itemId, versionId);
+    toast('已删除');
   } catch (e) { toast(e.message, 'error'); }
 }
 async function _delAtt(attId, itemId, versionId) {
@@ -461,5 +494,6 @@ window.OmniQACadTab = {
   _manageColumns, _addColumn, _renameColumn, _delColumn,
   _newItem, _editItem, _saveItem, _delItem,
   _editRecord, _saveRecord, _upload, _delAtt, _download, _viewShot, _viewVideo,
+  _dlcad, _delCad,
   _close: closeModal,
 };
