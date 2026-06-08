@@ -1,6 +1,6 @@
-# OmniQA 测试管理系统
+# 测量软件测试平台
 
-OmniQA 是一个基于 `FastAPI + SQLAlchemy + SQLite + 原生 HTML/CSS/JS` 的轻量测试管理平台。  
+测量软件测试平台是一个基于 `FastAPI + SQLAlchemy + SQLite + 原生 HTML/CSS/JS` 的轻量测试管理平台。  
 系统覆盖需求分配、工作台执行、复测闭环、Stage5 总盘、Bug 特派、报表分析和企业微信推送。
 
 ## 技术栈

@@ -13,7 +13,7 @@ def _split_csv(value: str) -> list[str]:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', env_prefix='APP_', extra='ignore')
 
-    app_name: str = 'OmniQA Test Management System'
+    app_name: str = '测量软件测试平台'
     app_version: str = '0.4.0'
     env: str = Field(default_factory=lambda: os.getenv('APP_ENV', os.getenv('ENV', 'dev')))
     database_url: str = Field(default_factory=lambda: os.getenv('APP_DATABASE_URL', os.getenv('DATABASE_URL', 'sqlite:///./app_auto.db')))

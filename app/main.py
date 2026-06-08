@@ -101,7 +101,7 @@ from app.db.init_db import init_db
 from app.services.push_service import PushService
 from app.services.zentao_background_sync_service import ZentaoBackgroundSyncService
 
-app = FastAPI(title="APPAuto", version="0.3.0")
+app = FastAPI(title="测量软件测试平台", version="0.3.0")
 scheduler = BackgroundScheduler(timezone=settings.scheduler_timezone)
 logger = logging.getLogger("uvicorn.error")
 
