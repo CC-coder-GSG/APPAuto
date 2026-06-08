@@ -136,8 +136,19 @@ function renderCard(item, versionId) {
     })
     .join('');
 
+  const isNormal = rec && rec.normal_count > 0;
+  const statusBadge = hasAbnormal
+    ? `<span class="badge" style="background:#fef2f2; color:#dc2626; border:1px solid #fca5a5;">⚠ 异常</span>`
+    : (isNormal
+        ? `<span class="badge" style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0;">✓ 正常</span>`
+        : `<span class="badge" style="background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;">未测</span>`);
+  // 异常时整卡柔和红底 + 左侧红条，醒目但不刺眼。
+  const cardStyle = hasAbnormal
+    ? 'border:1px solid #fecaca; border-left:4px solid #f87171; background:#fef2f2;'
+    : 'border:1px solid #e2e8f0; background:#fff;';
+
   return `
-    <div class="card" style="padding:14px; border:1px solid ${hasAbnormal ? '#fecaca' : '#e2e8f0'}; background:#fff; display:flex; flex-direction:column; gap:8px;">
+    <div class="card" style="padding:14px; ${cardStyle} display:flex; flex-direction:column; gap:8px;">
       <div class="row" style="justify-content:space-between; align-items:center;">
         <div class="row" style="gap:6px; align-items:center;">
           <span style="font-weight:700; color:#0f172a;">#${item.seq ?? '-'}</span>
@@ -146,8 +157,7 @@ function renderCard(item, versionId) {
         ${headBug}
       </div>
       <div class="row" style="gap:14px; align-items:center;">
-        <span class="badge" style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0;">正常 ${rec ? rec.normal_count : 0}</span>
-        <span class="badge" style="background:${hasAbnormal ? '#fef2f2' : '#f1f5f9'}; color:${hasAbnormal ? '#dc2626' : '#94a3b8'}; border:1px solid ${hasAbnormal ? '#fecaca' : '#e2e8f0'};">异常 ${rec ? rec.abnormal_count : 0}</span>
+        ${statusBadge}
       </div>
       ${(item.cad_files && item.cad_files.length) ? `<div style="border:1px dashed #2563eb; background:#eff6ff; border-radius:8px; padding:6px 9px;">
         <div style="font-size:11px; color:#1d4ed8; display:flex; align-items:center; gap:4px;">📎 共享 CAD 文件 · 各测试版本通用</div>
@@ -302,9 +312,14 @@ function _editRecord(itemId, versionId) {
   const body = `
     <div style="display:flex; flex-direction:column; gap:12px;">
       <div class="muted">条目 #${item?.seq ?? '-'} ${item?.zentao_bug_id ? `· Bug ${item.zentao_bug_id}` : ''}</div>
-      <div class="row" style="gap:12px;">
-        <label style="flex:1;">正常数<input id="cadRecNormal" type="number" min="0" value="${rec ? rec.normal_count : 0}" style="width:100%;"></label>
-        <label style="flex:1;">异常数<input id="cadRecAbnormal" type="number" min="0" value="${rec ? rec.abnormal_count : 0}" style="width:100%;"></label>
+      <div class="row" style="gap:20px; align-items:center;">
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:#16a34a; font-weight:600;">
+          <input type="checkbox" id="cadRecNormal" ${rec && rec.normal_count > 0 ? 'checked' : ''} onchange="if(this.checked)document.getElementById('cadRecAbnormal').checked=false">✓ 正常
+        </label>
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:#dc2626; font-weight:600;">
+          <input type="checkbox" id="cadRecAbnormal" ${rec && rec.abnormal_count > 0 ? 'checked' : ''} onchange="if(this.checked)document.getElementById('cadRecNormal').checked=false">⚠ 异常
+        </label>
+        <span class="muted" style="font-size:12px;">勾选异常后，该卡片会以红色醒目标记</span>
       </div>
       <label>问题说明 / 异常说明
         <textarea id="cadRecDesc" rows="4" style="width:100%;">${esc(rec ? rec.description || '' : '')}</textarea>
@@ -370,8 +385,8 @@ function attChip(a) {
   </span>`;
 }
 async function _saveRecord(itemId, versionId) {
-  const normal = Number(document.getElementById('cadRecNormal').value || 0);
-  const abnormal = Number(document.getElementById('cadRecAbnormal').value || 0);
+  const normal = document.getElementById('cadRecNormal').checked ? 1 : 0;
+  const abnormal = document.getElementById('cadRecAbnormal').checked ? 1 : 0;
   const desc = document.getElementById('cadRecDesc').value;
   const custom = {};
   document.querySelectorAll('#cadModalBody input[data-cv]').forEach((inp) => {
