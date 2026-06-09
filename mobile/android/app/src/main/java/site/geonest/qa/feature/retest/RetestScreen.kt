@@ -80,7 +80,7 @@ fun RetestScreen(
             )
         }
 
-        Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxWidth().weight(1f)) {
             when {
                 state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
 
