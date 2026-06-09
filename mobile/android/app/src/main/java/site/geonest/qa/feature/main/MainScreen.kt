@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AssignmentInd
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Person
@@ -27,12 +28,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import site.geonest.qa.feature.assign.AssignScreen
 import site.geonest.qa.feature.overalltest.OverallTestScreen
 import site.geonest.qa.feature.preview.LocalPreviewOpen
 import site.geonest.qa.feature.preview.PreviewHost
 import site.geonest.qa.feature.preview.PreviewViewModel
 import site.geonest.qa.feature.profile.ProfileScreen
+import site.geonest.qa.feature.profile.ProfileViewModel
 import site.geonest.qa.feature.retest.RetestScreen
 import site.geonest.qa.feature.workbench.WorkbenchScreen
 
@@ -40,6 +44,7 @@ private enum class MainTab(val label: String, val icon: ImageVector) {
     Workbench("工作台", Icons.Outlined.Dashboard),
     Retest("复测", Icons.Outlined.Replay),
     OverallTest("测试", Icons.Outlined.BugReport),
+    Assign("分配", Icons.Outlined.AssignmentInd),
     Profile("我的", Icons.Outlined.Person),
 }
 
@@ -49,18 +54,23 @@ fun MainScreen() {
     var selected by remember { mutableIntStateOf(0) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val tabs = MainTab.entries
     val previewViewModel: PreviewViewModel = hiltViewModel()
+    // 复用 ProfileViewModel（同一 ViewModelStoreOwner）拿 allowed_tabs，按权限显示「分配」。
+    val profileViewModel: ProfileViewModel = hiltViewModel()
+    val profile by profileViewModel.state.collectAsStateWithLifecycle()
+    val showAssign = profile.user?.allowedTabs?.contains("assign") == true
+    val tabs = MainTab.entries.filter { it != MainTab.Assign || showAssign }
+    val current = tabs[selected.coerceIn(0, tabs.lastIndex)]
 
     CompositionLocalProvider(LocalPreviewOpen provides previewViewModel::open) {
         Scaffold(
-            topBar = { TopAppBar(title = { Text(tabs[selected].label) }) },
+            topBar = { TopAppBar(title = { Text(current.label) }) },
             snackbarHost = { SnackbarHost(snackbar) },
             bottomBar = {
                 NavigationBar {
                     tabs.forEachIndexed { index, tab ->
                         NavigationBarItem(
-                            selected = selected == index,
+                            selected = current == tab,
                             onClick = { selected = index },
                             icon = { Icon(tab.icon, contentDescription = tab.label) },
                             label = { Text(tab.label) },
@@ -70,7 +80,7 @@ fun MainScreen() {
             },
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
-                when (tabs[selected]) {
+                when (current) {
                     MainTab.Workbench -> WorkbenchScreen(
                         onMessage = { msg -> scope.launch { snackbar.showMessage(msg) } },
                     )
@@ -78,6 +88,9 @@ fun MainScreen() {
                         onMessage = { msg -> scope.launch { snackbar.showMessage(msg) } },
                     )
                     MainTab.OverallTest -> OverallTestScreen(
+                        onMessage = { msg -> scope.launch { snackbar.showMessage(msg) } },
+                    )
+                    MainTab.Assign -> AssignScreen(
                         onMessage = { msg -> scope.launch { snackbar.showMessage(msg) } },
                     )
                     MainTab.Profile -> ProfileScreen()

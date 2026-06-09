@@ -11,7 +11,15 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 import kotlinx.serialization.json.JsonObject
 import site.geonest.qa.core.network.dto.AckResponse
+import site.geonest.qa.core.network.dto.AdminReqDto
+import site.geonest.qa.core.network.dto.AssignPublishRequest
 import site.geonest.qa.core.network.dto.DispatchedBugDto
+import site.geonest.qa.core.network.dto.LinkMajorRequest
+import site.geonest.qa.core.network.dto.LinkMajorResponse
+import site.geonest.qa.core.network.dto.LinkOptionDto
+import site.geonest.qa.core.network.dto.ProgressDto
+import site.geonest.qa.core.network.dto.SyncReqResponse
+import site.geonest.qa.core.network.dto.UserDto
 import site.geonest.qa.core.network.dto.MeResponse
 import site.geonest.qa.core.network.dto.OverallOverviewDto
 import site.geonest.qa.core.network.dto.OverallResultRequest
@@ -139,4 +147,35 @@ interface QaApi {
     /** 批量拉取需求实时状态。返回 { "<id>": {status_zh, stage_zh}, "__fetch_errors__": [...] }。 */
     @GET("zentao/hydrate/stories")
     suspend fun hydrateStories(@Query("ids") ids: String): JsonObject
+
+    // ---- 任务分配台（管理员，需 allowed_tabs 含 assign）----
+    @GET("users")
+    suspend fun users(): List<UserDto>
+
+    @GET("requirements/admin/list")
+    suspend fun adminReqList(
+        @Query("major_version_id") majorVersionId: Int? = null,
+        @Query("software_id") softwareId: Int? = null,
+    ): List<AdminReqDto>
+
+    @GET("requirements/admin/progress")
+    suspend fun adminProgress(
+        @Query("major_version_id") majorVersionId: Int? = null,
+        @Query("software_id") softwareId: Int? = null,
+    ): ProgressDto
+
+    @POST("requirements/assign-and-publish")
+    suspend fun assignAndPublish(@Body body: AssignPublishRequest): AckResponse
+
+    @POST("requirements/admin/sync-zentao")
+    suspend fun syncZentaoRequirements(@Query("major_version_id") majorVersionId: Int): SyncReqResponse
+
+    @GET("requirements/admin/link-options")
+    suspend fun linkOptions(
+        @Query("source_major_version_id") sourceMajorVersionId: Int,
+        @Query("target_major_version_id") targetMajorVersionId: Int,
+    ): List<LinkOptionDto>
+
+    @POST("requirements/admin/link-major")
+    suspend fun linkMajor(@Body body: LinkMajorRequest): LinkMajorResponse
 }
