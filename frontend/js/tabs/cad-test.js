@@ -412,7 +412,60 @@ async function _upload(itemId, versionId, kind, inputEl) {
   inputEl.value = ''; // 允许再次选择同一文件
   await uploadCadFile(itemId, versionId, kind, file);
 }
-// 文件上传 / 粘贴 / 剪贴板按钮三条路径共用：接收一个 File/Blob 直接上传。
+// 带上传进度的 POST（fetch 无法读取上传进度，故用 XHR）。
+function xhrUpload(url, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    const h = authHeaders();
+    Object.keys(h).forEach((k) => xhr.setRequestHeader(k, h[k]));
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        let data = {}; try { data = JSON.parse(xhr.responseText); } catch {}
+        resolve(data);
+      } else {
+        let m = '上传失败';
+        try { m = JSON.parse(xhr.responseText).detail || m; } catch {}
+        if (xhr.status === 413) m = '文件过大，被服务器拒绝（413）。请联系管理员调大上传限制。';
+        reject(new Error(m));
+      }
+    };
+    xhr.onerror = () => reject(new Error('网络错误，上传中断'));
+    xhr.onabort = () => reject(new Error('上传已取消'));
+    xhr.send(formData);
+  });
+}
+// 右下角浮动进度卡片：支持多文件并行各占一行，完成/失败后自动消失。
+function createProgressBar(label) {
+  let host = document.getElementById('cadUploadProgressHost');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'cadUploadProgressHost';
+    host.style.cssText = 'position:fixed; right:18px; bottom:18px; z-index:12000; display:flex; flex-direction:column; gap:8px; width:280px;';
+    document.body.appendChild(host);
+  }
+  const item = document.createElement('div');
+  item.style.cssText = 'background:#fff; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,.12); padding:10px 12px; font-size:12px;';
+  item.innerHTML = `
+    <div style="display:flex; justify-content:space-between; gap:8px; color:#334155;">
+      <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">⬆ ${esc(label)}</span>
+      <span data-pct style="color:#2563eb; font-weight:600; flex-shrink:0;">0%</span>
+    </div>
+    <div style="height:6px; background:#eef2f7; border-radius:999px; margin-top:6px; overflow:hidden;">
+      <div data-bar style="height:100%; width:0%; background:linear-gradient(90deg,#3b82f6,#6366f1); transition:width .15s ease;"></div>
+    </div>`;
+  host.appendChild(item);
+  const bar = item.querySelector('[data-bar]');
+  const pct = item.querySelector('[data-pct]');
+  const remove = (delay) => setTimeout(() => { item.remove(); if (host && !host.children.length) host.remove(); }, delay);
+  return {
+    update(r) { const p = Math.round(r * 100); bar.style.width = p + '%'; pct.textContent = p === 100 ? '处理中…' : p + '%'; },
+    done() { pct.textContent = '完成'; pct.style.color = '#16a34a'; bar.style.background = '#16a34a'; bar.style.width = '100%'; remove(1200); },
+    fail() { pct.textContent = '失败'; pct.style.color = '#dc2626'; bar.style.background = '#dc2626'; remove(2500); },
+  };
+}
+// 文件上传 / 粘贴 / 剪贴板按钮三条路径共用：接收一个 File/Blob 直接上传，带进度条。
 async function uploadCadFile(itemId, versionId, kind, file) {
   const fd = new FormData();
   fd.append('file', file, file.name || 'upload');
@@ -420,13 +473,15 @@ async function uploadCadFile(itemId, versionId, kind, file) {
   const url = kind === 'cad'
     ? `/api/cad/items/${itemId}/cad-file`
     : `/api/cad/records/attachment?item_id=${itemId}&version_id=${versionId}&kind=${kind}`;
+  const label = file.name || (kind === 'cad' ? 'CAD 文件' : kind === 'video' ? '视频' : '截图');
+  const prog = createProgressBar(label);
   try {
-    const r = await fetch(url, { method: 'POST', headers: authHeaders(), body: fd });
-    if (!r.ok) { let m = '上传失败'; try { m = (await r.json()).detail || m; } catch {} throw new Error(m); }
+    await xhrUpload(url, fd, (r) => prog.update(r));
+    prog.done();
     await loadBoard();
     _editRecord(itemId, versionId); // 重新打开刷新附件区
     toast('上传成功');
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { prog.fail(); toast(e.message, 'error'); }
 }
 // 把剪贴板里的图片 Blob 包成带扩展名的 File（后端按 content_type/后缀识别为截图）后上传。
 function uploadPastedImage(itemId, versionId, blob) {
