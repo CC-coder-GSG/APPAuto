@@ -37,6 +37,7 @@ async function japi(url, opt) {
 export async function activate() {
   const root = document.getElementById('cadTestRoot');
   if (!root) return;
+  bindGlobalPaste();
   try {
     state.boards = await japi('/api/cad/boards');
   } catch (e) {
@@ -346,10 +347,14 @@ function _editRecord(itemId, versionId) {
       <div>
         <div class="row" style="justify-content:space-between; align-items:center;">
           <b style="font-size:13px;">截图</b>
-          <label class="secondary" style="cursor:pointer; padding:4px 10px; border:1px solid #e2e8f0; border-radius:8px;">+ 上传截图
-            <input type="file" accept="image/*" style="display:none;" onchange="window.OmniQACadTab._upload(${itemId},${versionId},'screenshot',this)">
-          </label>
+          <div class="row" style="gap:6px;">
+            <button class="secondary" style="cursor:pointer; padding:4px 10px; border:1px solid #c7d2fe; border-radius:8px; background:#eef2ff; color:#4338ca;" onclick="window.OmniQACadTab._pasteShot(${itemId},${versionId})">📋 粘贴截图</button>
+            <label class="secondary" style="cursor:pointer; padding:4px 10px; border:1px solid #e2e8f0; border-radius:8px;">+ 上传截图
+              <input type="file" accept="image/*" style="display:none;" onchange="window.OmniQACadTab._upload(${itemId},${versionId},'screenshot',this)">
+            </label>
+          </div>
         </div>
+        <div style="margin-top:6px; font-size:12px; color:#6366f1; background:#eef2ff; border:1px dashed #c7d2fe; border-radius:8px; padding:6px 10px;">💡 用截图工具复制图片后，在此弹窗内直接按 <b>Ctrl+V</b> 即可粘贴上传，或点「📋 粘贴截图」。</div>
         <div id="cadRecShotList" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">
           ${shots.map((a) => `<span style="position:relative; display:inline-block;">
             <img data-cad-src="${a.download_url}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;">
@@ -376,6 +381,9 @@ function _editRecord(itemId, versionId) {
       <button onclick="window.OmniQACadTab._saveRecord(${itemId},${versionId})">保存记录</button>
     </div>`;
   openModal('填写记录', body);
+  // 记录当前粘贴上下文：弹窗内 Ctrl+V 将图片作为该条目/版本的截图上传。
+  const modal = document.getElementById('cadModal');
+  if (modal) modal._cadPasteCtx = { itemId, versionId };
   hydrateScreenshots(document.getElementById('cadModalBody'));
 }
 function attChip(a) {
@@ -401,8 +409,13 @@ async function _saveRecord(itemId, versionId) {
 async function _upload(itemId, versionId, kind, inputEl) {
   const file = inputEl.files && inputEl.files[0];
   if (!file) return;
+  inputEl.value = ''; // 允许再次选择同一文件
+  await uploadCadFile(itemId, versionId, kind, file);
+}
+// 文件上传 / 粘贴 / 剪贴板按钮三条路径共用：接收一个 File/Blob 直接上传。
+async function uploadCadFile(itemId, versionId, kind, file) {
   const fd = new FormData();
-  fd.append('file', file);
+  fd.append('file', file, file.name || 'upload');
   // CAD 文件挂在条目上（跨版本共享）；截图/视频按版本记录存储。
   const url = kind === 'cad'
     ? `/api/cad/items/${itemId}/cad-file`
@@ -414,6 +427,48 @@ async function _upload(itemId, versionId, kind, inputEl) {
     _editRecord(itemId, versionId); // 重新打开刷新附件区
     toast('上传成功');
   } catch (e) { toast(e.message, 'error'); }
+}
+// 把剪贴板里的图片 Blob 包成带扩展名的 File（后端按 content_type/后缀识别为截图）后上传。
+function uploadPastedImage(itemId, versionId, blob) {
+  const type = blob.type || 'image/png';
+  const ext = (type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+  const file = new File([blob], `粘贴截图-${Date.now()}.${ext}`, { type });
+  return uploadCadFile(itemId, versionId, 'screenshot', file);
+}
+// 点击「📋 粘贴截图」：用 Async Clipboard API 主动读取剪贴板图片（需 HTTPS/localhost）。
+async function _pasteShot(itemId, versionId) {
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.read) {
+      toast('当前浏览器不支持点击读取剪贴板，请在弹窗内直接按 Ctrl+V', 'error');
+      return;
+    }
+    const items = await navigator.clipboard.read();
+    for (const it of items) {
+      const type = it.types.find((t) => t.startsWith('image/'));
+      if (type) { await uploadPastedImage(itemId, versionId, await it.getType(type)); return; }
+    }
+    toast('剪贴板里没有图片，请先用截图工具复制图片', 'error');
+  } catch (e) {
+    toast('读取剪贴板失败，请改用 Ctrl+V 粘贴', 'error');
+  }
+}
+// 全局监听一次 paste：仅当「填写记录」弹窗打开且剪贴板含图片时拦截并上传。
+let _cadPasteBound = false;
+function bindGlobalPaste() {
+  if (_cadPasteBound) return;
+  _cadPasteBound = true;
+  document.addEventListener('paste', (e) => {
+    const modal = document.getElementById('cadModal');
+    const ctx = modal && modal._cadPasteCtx;
+    if (!ctx) return;
+    const data = e.clipboardData;
+    if (!data) return;
+    const imgItem = Array.from(data.items || []).find((it) => it.kind === 'file' && it.type.startsWith('image/'));
+    if (!imgItem) return; // 纯文本粘贴不拦截，保持 textarea 正常粘贴
+    e.preventDefault();
+    const blob = imgItem.getAsFile();
+    if (blob) uploadPastedImage(ctx.itemId, ctx.versionId, blob);
+  });
 }
 async function _dlcad(fileId) {
   try {
@@ -508,7 +563,7 @@ window.OmniQACadTab = {
   _newVersion, _renameVersion, _delVersion,
   _manageColumns, _addColumn, _renameColumn, _delColumn,
   _newItem, _editItem, _saveItem, _delItem,
-  _editRecord, _saveRecord, _upload, _delAtt, _download, _viewShot, _viewVideo,
+  _editRecord, _saveRecord, _upload, _pasteShot, _delAtt, _download, _viewShot, _viewVideo,
   _dlcad, _delCad,
   _close: closeModal,
 };
