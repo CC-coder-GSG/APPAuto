@@ -10,12 +10,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -63,14 +61,15 @@ fun PreviewHost(viewModel: PreviewViewModel = hiltViewModel()) {
 
     Dialog(
         onDismissRequest = viewModel::close,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        // 默认 decorFitsSystemWindows=true：弹窗布局在系统栏内的安全区。
+        properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Surface(
-            // 全屏弹窗：避开状态栏/导航栏，否则底部内容会被系统栏遮住、超出可视区。
+            // 居中的固定高度卡片（安全区 90% 高），不铺满全屏，杜绝底部超出屏幕。
             modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.systemBars)
-                .padding(QaSpacing.sm),
+                .fillMaxWidth()
+                .fillMaxHeight(0.9f)
+                .padding(horizontal = QaSpacing.sm),
             shape = RoundedCornerShape(14.dp),
             color = QaColors.Card,
         ) {

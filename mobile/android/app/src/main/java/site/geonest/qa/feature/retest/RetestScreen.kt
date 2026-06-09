@@ -1,7 +1,10 @@
 package site.geonest.qa.feature.retest
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -44,8 +48,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import site.geonest.qa.core.designsystem.QaColors
 import site.geonest.qa.core.designsystem.QaRadius
 import site.geonest.qa.core.designsystem.QaSpacing
+import site.geonest.qa.core.domain.model.PreviewKind
 import site.geonest.qa.core.domain.model.RetestRequirement
 import site.geonest.qa.core.domain.model.WbBug
+import site.geonest.qa.feature.preview.LocalPreviewOpen
+import site.geonest.qa.feature.preview.zentaoNumericId
 
 /** 待确认的复测动作（用于二次确认弹窗）。 */
 private data class PendingAction(val req: RetestRequirement, val passed: Boolean)
@@ -162,6 +169,7 @@ private fun RetestCard(
     onPass: () -> Unit,
     onFail: () -> Unit,
 ) {
+    val preview = LocalPreviewOpen.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -180,6 +188,14 @@ private fun RetestCard(
                 style = MaterialTheme.typography.titleMedium,
                 color = QaColors.TextStrong,
                 modifier = Modifier.weight(1f),
+            )
+            Text(
+                "🔍预览",
+                style = MaterialTheme.typography.labelSmall,
+                color = QaColors.Primary,
+                modifier = Modifier
+                    .clickable { preview(PreviewKind.STORY, zentaoNumericId(req.zentaoReqId)) }
+                    .padding(start = QaSpacing.sm, top = QaSpacing.xxs, bottom = QaSpacing.xxs),
             )
         }
         Spacer(Modifier.padding(QaSpacing.xxs))
@@ -247,6 +263,8 @@ private fun BugChips(bugs: List<WbBug>, danger: Boolean = false) {
     val bg = if (danger) QaColors.Background else QaColors.SuccessContainer
     val border = if (danger) QaColors.Border else QaColors.SuccessBorder
     val fg = if (danger) QaColors.Danger else QaColors.Success
+    val preview = LocalPreviewOpen.current
+    val context = LocalContext.current
     FlowRow(
         modifier = Modifier.fillMaxWidth().padding(top = QaSpacing.xxs),
         horizontalArrangement = Arrangement.spacedBy(QaSpacing.xs),
@@ -256,13 +274,32 @@ private fun BugChips(bugs: List<WbBug>, danger: Boolean = false) {
             val text = listOfNotNull(bug.bugId.takeIf { it.isNotBlank() }, bug.title.takeIf { it.isNotBlank() })
                 .joinToString(" ")
                 .ifBlank { "Bug#${bug.id}" }
-            Box(
+            Row(
                 Modifier
                     .border(1.dp, border, RoundedCornerShape(QaRadius.sm))
                     .background(bg, RoundedCornerShape(QaRadius.sm))
                     .padding(horizontal = QaSpacing.sm, vertical = QaSpacing.xxs),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(text, style = MaterialTheme.typography.labelSmall, color = fg)
+                // 点徽标文字 → 预览 Bug
+                Text(
+                    "$text 🔍",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = fg,
+                    modifier = Modifier.clickable { preview(PreviewKind.BUG, zentaoNumericId(bug.bugId)) },
+                )
+                // ↗ 跳转禅道（有链接才显示）
+                val bugUrl = bug.zentaoBugUrl
+                if (!bugUrl.isNullOrBlank()) {
+                    Text(
+                        " ↗",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = QaColors.Primary,
+                        modifier = Modifier.clickable {
+                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(bugUrl))) }
+                        },
+                    )
+                }
             }
         }
     }
