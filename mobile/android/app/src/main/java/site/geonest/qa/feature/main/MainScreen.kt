@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.coroutines.launch
 import site.geonest.qa.feature.profile.ProfileScreen
+import site.geonest.qa.feature.retest.RetestScreen
 import site.geonest.qa.feature.workbench.WorkbenchScreen
 
 private enum class MainTab(val label: String, val icon: ImageVector) {
@@ -65,7 +66,9 @@ fun MainScreen() {
                 MainTab.Workbench -> WorkbenchScreen(
                     onMessage = { msg -> scope.launch { snackbar.showMessage(msg) } },
                 )
-                MainTab.Retest -> Placeholder("复测工作台开发中")
+                MainTab.Retest -> RetestScreen(
+                    onMessage = { msg -> scope.launch { snackbar.showMessage(msg) } },
+                )
                 MainTab.TaskBoard -> Placeholder("任务看板开发中")
                 MainTab.Profile -> ProfileScreen()
             }

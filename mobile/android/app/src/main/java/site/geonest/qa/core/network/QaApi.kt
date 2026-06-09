@@ -6,11 +6,15 @@ import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
 import retrofit2.http.PATCH
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 import site.geonest.qa.core.network.dto.MeResponse
 import site.geonest.qa.core.network.dto.PatchStatusRequest
 import site.geonest.qa.core.network.dto.PatchStatusResponse
+import site.geonest.qa.core.network.dto.RetestRequirementDto
+import site.geonest.qa.core.network.dto.RetestResultResponse
+import site.geonest.qa.core.network.dto.RetestSubmitRequest
 import site.geonest.qa.core.network.dto.TokenResponse
 import site.geonest.qa.core.network.dto.WorkbenchRequirementDto
 
@@ -47,4 +51,19 @@ interface QaApi {
         @Path("id") requirementId: Int,
         @Body body: PatchStatusRequest,
     ): PatchStatusResponse
+
+    /** 复测工作台。mode=all_pending 跨版本列出所有待复测（非本人负责、已测试完成、未复测）的需求。 */
+    @GET("retest/workbench")
+    suspend fun retestWorkbench(
+        @Query("mode") mode: String = "all_pending",
+        @Query("major_version_id") majorVersionId: Int? = null,
+        @Query("software_id") softwareId: Int? = null,
+    ): List<RetestRequirementDto>
+
+    /** 提交复测结论（通过 / 打回 / 撤销）。 */
+    @PUT("requirements/{id}/retest")
+    suspend fun submitRetest(
+        @Path("id") requirementId: Int,
+        @Body body: RetestSubmitRequest,
+    ): RetestResultResponse
 }
