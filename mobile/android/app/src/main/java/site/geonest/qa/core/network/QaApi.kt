@@ -1,6 +1,7 @@
 package site.geonest.qa.core.network
 
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.Field
 import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
@@ -10,8 +11,39 @@ import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 import kotlinx.serialization.json.JsonObject
+import okhttp3.MultipartBody
+import retrofit2.http.Multipart
+import retrofit2.http.Part
 import site.geonest.qa.core.network.dto.AckResponse
 import site.geonest.qa.core.network.dto.AdminReqDto
+import site.geonest.qa.core.network.dto.JenkinsBindingRequest
+import site.geonest.qa.core.network.dto.JenkinsBindingResponse
+import site.geonest.qa.core.network.dto.JenkinsBuildDetailDto
+import site.geonest.qa.core.network.dto.JenkinsBuildRequest
+import site.geonest.qa.core.network.dto.JenkinsBuildTriggerResponse
+import site.geonest.qa.core.network.dto.JenkinsJobDetailDto
+import site.geonest.qa.core.network.dto.JenkinsJobsResponse
+import site.geonest.qa.core.network.dto.JenkinsQueueResponse
+import site.geonest.qa.core.network.dto.JenkinsSaveResponse
+import site.geonest.qa.core.network.dto.JenkinsTestResponse
+import site.geonest.qa.core.network.dto.JenkinsViewsResponse
+import site.geonest.qa.core.network.dto.DataOverviewDto
+import site.geonest.qa.core.network.dto.DisplayNameRequest
+import site.geonest.qa.core.network.dto.GovernanceDto
+import site.geonest.qa.core.network.dto.ReportSummaryDto
+import site.geonest.qa.core.network.dto.RequirementUpsertRequest
+import site.geonest.qa.core.network.dto.RoleUpdateRequest
+import site.geonest.qa.core.network.dto.TabPermissionsRequest
+import site.geonest.qa.core.network.dto.TeamStatusRequest
+import site.geonest.qa.core.network.dto.UserCreateRequest
+import site.geonest.qa.core.network.dto.VersionBugDto
+import site.geonest.qa.core.network.dto.CadBoardDetailDto
+import site.geonest.qa.core.network.dto.CadBoardDto
+import site.geonest.qa.core.network.dto.CadBoardRequest
+import site.geonest.qa.core.network.dto.CadCreatedDto
+import site.geonest.qa.core.network.dto.CadItemRequest
+import site.geonest.qa.core.network.dto.CadRecordRequest
+import site.geonest.qa.core.network.dto.CadVersionRequest
 import site.geonest.qa.core.network.dto.AssignPublishRequest
 import site.geonest.qa.core.network.dto.DispatchedBugDto
 import site.geonest.qa.core.network.dto.LinkMajorRequest
@@ -178,4 +210,120 @@ interface QaApi {
 
     @POST("requirements/admin/link-major")
     suspend fun linkMajor(@Body body: LinkMajorRequest): LinkMajorResponse
+
+    // ---- CAD 测试统计 ----
+    @GET("api/cad/boards")
+    suspend fun cadBoards(): List<CadBoardDto>
+
+    @POST("api/cad/boards")
+    suspend fun cadCreateBoard(@Body body: CadBoardRequest): CadCreatedDto
+
+    @POST("api/cad/boards/{id}/versions")
+    suspend fun cadCreateVersion(@Path("id") boardId: Int, @Body body: CadVersionRequest): CadCreatedDto
+
+    @GET("api/cad/boards/{id}")
+    suspend fun cadBoard(@Path("id") boardId: Int): CadBoardDetailDto
+
+    @POST("api/cad/records")
+    suspend fun cadSaveRecord(@Body body: CadRecordRequest): AckResponse
+
+    @POST("api/cad/boards/{id}/items")
+    suspend fun cadCreateItem(@Path("id") boardId: Int, @Body body: CadItemRequest): AckResponse
+
+    @Multipart
+    @POST("api/cad/records/attachment")
+    suspend fun cadUploadAttachment(
+        @Query("item_id") itemId: Int,
+        @Query("version_id") versionId: Int,
+        @Query("kind") kind: String,
+        @Part file: MultipartBody.Part,
+    ): AckResponse
+
+    @DELETE("api/cad/attachments/{id}")
+    suspend fun cadDeleteAttachment(@Path("id") attachmentId: Int): AckResponse
+
+    // ---- 报表中心 ----
+    @GET("reports/summary")
+    suspend fun reportsSummary(
+        @Query("start_date") startDate: String,
+        @Query("end_date") endDate: String,
+        @Query("user_id") userId: Int? = null,
+        @Query("major_version_id") majorVersionId: Int? = null,
+        @Query("software_id") softwareId: Int? = null,
+    ): ReportSummaryDto
+
+    @GET("reports/governance")
+    suspend fun reportsGovernance(
+        @Query("start_date") startDate: String,
+        @Query("end_date") endDate: String,
+        @Query("major_version_id") majorVersionId: Int? = null,
+        @Query("software_id") softwareId: Int? = null,
+    ): GovernanceDto
+
+    @GET("reports/version-bugs")
+    suspend fun reportsVersionBugs(
+        @Query("major_version_id") majorVersionId: Int? = null,
+    ): List<VersionBugDto>
+
+    // ---- 数据管理台（admin / allowed_tabs 含 data）----
+    @GET("admin/data-overview")
+    suspend fun dataOverview(): DataOverviewDto
+
+    @POST("users")
+    suspend fun createUser(@Body body: UserCreateRequest): AckResponse
+
+    @PUT("users/{id}/role")
+    suspend fun updateUserRole(@Path("id") userId: Int, @Body body: RoleUpdateRequest): AckResponse
+
+    @PUT("users/{id}/team-status")
+    suspend fun updateUserTeamStatus(@Path("id") userId: Int, @Body body: TeamStatusRequest): AckResponse
+
+    @PUT("users/{id}/tab-permissions")
+    suspend fun updateUserTabPermissions(@Path("id") userId: Int, @Body body: TabPermissionsRequest): AckResponse
+
+    @PUT("users/{id}/display-name")
+    suspend fun updateUserDisplayName(@Path("id") userId: Int, @Body body: DisplayNameRequest): AckResponse
+
+    @DELETE("users/{id}")
+    suspend fun deleteUser(@Path("id") userId: Int): AckResponse
+
+    @POST("requirements")
+    suspend fun createRequirement(@Body body: RequirementUpsertRequest): AckResponse
+
+    @PUT("requirements/{id}")
+    suspend fun updateRequirement(@Path("id") requirementId: Int, @Body body: RequirementUpsertRequest): AckResponse
+
+    @DELETE("requirements/{id}")
+    suspend fun deleteRequirement(@Path("id") requirementId: Int): AckResponse
+
+    // ---- Jenkins ----
+    @GET("jenkins/binding/me")
+    suspend fun jenkinsBinding(): JenkinsBindingResponse
+
+    @PUT("jenkins/binding/me")
+    suspend fun jenkinsSaveBinding(@Body body: JenkinsBindingRequest): JenkinsSaveResponse
+
+    @POST("jenkins/binding/me/test")
+    suspend fun jenkinsTestBinding(@Body body: JenkinsBindingRequest): JenkinsTestResponse
+
+    @DELETE("jenkins/binding/me")
+    suspend fun jenkinsDeleteBinding(): AckResponse
+
+    @GET("jenkins/views")
+    suspend fun jenkinsViews(): JenkinsViewsResponse
+
+    @GET("jenkins/jobs")
+    suspend fun jenkinsJobs(@Query("view") view: String? = null): JenkinsJobsResponse
+
+    @GET("jenkins/jobs/{name}")
+    suspend fun jenkinsJob(@Path("name") name: String): JenkinsJobDetailDto
+
+    @POST("jenkins/jobs/{name}/build")
+    suspend fun jenkinsTriggerBuild(@Path("name") name: String, @Body body: JenkinsBuildRequest): JenkinsBuildTriggerResponse
+
+    @GET("jenkins/queue")
+    suspend fun jenkinsQueue(@Query("url") url: String): JenkinsQueueResponse
+
+    @GET("jenkins/build")
+    suspend fun jenkinsBuild(@Query("job") job: String, @Query("number") number: Int): JenkinsBuildDetailDto
 }

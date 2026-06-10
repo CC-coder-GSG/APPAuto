@@ -16,6 +16,7 @@ object QaSpacing {
 object QaRadius {
     val sm = 4.dp
     val md = 8.dp
-    val lg = 10.dp
-    val xl = 16.dp
+    val lg = 8.dp
+    val xl = 12.dp
+    val pill = 999.dp
 }

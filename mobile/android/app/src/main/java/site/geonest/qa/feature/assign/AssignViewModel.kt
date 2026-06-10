@@ -52,7 +52,8 @@ class AssignViewModel @Inject constructor(
     val ui: StateFlow<AssignUiState> = _ui.asStateFlow()
 
     init {
-        viewModelScope.launch { context.ensureLoaded() }
+        // 恢复持久化选择后 ids 加载前后一致，需在 ensureLoaded 后显式刷新，避免无限转圈。
+        viewModelScope.launch { context.ensureLoaded(); reloadAssign(); reloadProgress() }
         viewModelScope.launch { loadUsers() }
         viewModelScope.launch {
             context.state.map { it.softwareId to it.majorId }.distinctUntilChanged().collect {

@@ -45,12 +45,30 @@ data class WorkbenchContextState(
 @Singleton
 class WorkbenchContext @Inject constructor(
     private val catalog: CatalogRepository,
+    private val prefs: PreferenceStore,
 ) {
-    private val _state = MutableStateFlow(WorkbenchContextState())
+    // 启动即用上次选择初始化（id 会在拉到目录后校验是否仍存在）。
+    private val _state = MutableStateFlow(
+        WorkbenchContextState(
+            softwareId = prefs.getInt(KEY_SOFTWARE),
+            majorId = prefs.getInt(KEY_MAJOR),
+            minorId = prefs.getInt(KEY_MINOR),
+            mode = prefs.getString(KEY_MODE)?.let { runCatching { WorkbenchMode.valueOf(it) }.getOrNull() }
+                ?: WorkbenchMode.VERSION,
+        ),
+    )
     val state: StateFlow<WorkbenchContextState> = _state.asStateFlow()
 
     private val mutex = Mutex()
     private var loaded = false
+
+    private fun persistSelection() {
+        val s = _state.value
+        prefs.putInt(KEY_SOFTWARE, s.softwareId)
+        prefs.putInt(KEY_MAJOR, s.majorId)
+        prefs.putInt(KEY_MINOR, s.minorId)
+        prefs.putString(KEY_MODE, s.mode.name)
+    }
 
     /** 首次进入任一工作台时调用，仅真正加载一次。 */
     suspend fun ensureLoaded() {
@@ -101,16 +119,33 @@ class WorkbenchContext @Inject constructor(
                 )
             }
         }
+        persistSelection()
     }
 
     /** 选大版本——纯内存计算，重置小版本到该大版本下首个。 */
-    fun selectMajor(id: Int) = _state.update { st ->
-        if (id == st.majorId) return@update st
-        val minors = st.versions.filter { it.isMinor && it.parentId == id }
-        st.copy(majorId = id, minorId = minors.firstOrNull()?.id)
+    fun selectMajor(id: Int) {
+        _state.update { st ->
+            if (id == st.majorId) return@update st
+            val minors = st.versions.filter { it.isMinor && it.parentId == id }
+            st.copy(majorId = id, minorId = minors.firstOrNull()?.id)
+        }
+        persistSelection()
     }
 
-    fun selectMinor(id: Int) = _state.update { it.copy(minorId = id) }
+    fun selectMinor(id: Int) {
+        _state.update { it.copy(minorId = id) }
+        persistSelection()
+    }
 
-    fun setMode(mode: WorkbenchMode) = _state.update { it.copy(mode = mode) }
+    fun setMode(mode: WorkbenchMode) {
+        _state.update { it.copy(mode = mode) }
+        persistSelection()
+    }
+
+    private companion object {
+        const val KEY_SOFTWARE = "wb_software_id"
+        const val KEY_MAJOR = "wb_major_id"
+        const val KEY_MINOR = "wb_minor_id"
+        const val KEY_MODE = "wb_mode"
+    }
 }

@@ -48,7 +48,9 @@ class WorkbenchViewModel @Inject constructor(
     val ui: StateFlow<WorkbenchUiState> = _ui.asStateFlow()
 
     init {
-        viewModelScope.launch { context.ensureLoaded() }
+        // 恢复持久化选择后，ids 在加载前后可能一致，distinctUntilChanged 不会再触发，
+        // 因此 ensureLoaded 完成后显式 reload 一次，避免重启后无限转圈。
+        viewModelScope.launch { context.ensureLoaded(); reload() }
         // 软件 / 大版本 / 模式任一变化即重拉数据。
         viewModelScope.launch {
             context.state

@@ -43,6 +43,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import site.geonest.qa.core.data.WorkbenchContextState
 import site.geonest.qa.core.designsystem.QaColors
+import site.geonest.qa.core.designsystem.QaLinkLabel
 import site.geonest.qa.core.designsystem.QaRadius
 import site.geonest.qa.core.designsystem.QaSpacing
 import site.geonest.qa.core.domain.model.OverallBug
@@ -223,11 +224,9 @@ private fun BugCard(bug: OverallBug, onClick: () -> Unit) {
             Spacer(Modifier.width(QaSpacing.sm))
             StatusPill(bug)
             Spacer(Modifier.weight(1f))
-            Text(
-                "🔍预览",
-                style = MaterialTheme.typography.labelSmall,
-                color = QaColors.Primary,
-                modifier = Modifier.clickable { preview(PreviewKind.BUG, zentaoNumericId(bug.zentaoBugId ?: bug.bugId)) },
+            QaLinkLabel(
+                text = "预览",
+                onClick = { preview(PreviewKind.BUG, zentaoNumericId(bug.zentaoBugId ?: bug.bugId)) },
             )
         }
         if (bug.zentaoBugTitle.isNotBlank()) {
@@ -242,10 +241,10 @@ private fun BugCard(bug: OverallBug, onClick: () -> Unit) {
             Modifier.fillMaxWidth().padding(top = QaSpacing.xxs),
             horizontalArrangement = Arrangement.spacedBy(QaSpacing.sm),
         ) {
-            if (bug.majorVersionNo.isNotBlank()) Meta("🏷️ ${bug.majorVersionNo}")
+            if (bug.majorVersionNo.isNotBlank()) Meta("版本 ${bug.majorVersionNo}")
             if (bug.zentaoAssignedToName.isNotBlank()) Meta("指派禅道：${bug.zentaoAssignedToName}")
-            if (!bug.dispatchedToName.isNullOrBlank()) Meta("🪂 ${bug.dispatchedToName}")
-            if (bug.isRetestFailed) Meta("⚠ 未修好", QaColors.Danger)
+            if (!bug.dispatchedToName.isNullOrBlank()) Meta("派单：${bug.dispatchedToName}")
+            if (bug.isRetestFailed) Meta("未修好", QaColors.Danger)
         }
     }
 }

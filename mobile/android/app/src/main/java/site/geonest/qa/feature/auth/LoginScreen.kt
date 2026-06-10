@@ -1,6 +1,7 @@
 package site.geonest.qa.feature.auth
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +26,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import site.geonest.qa.core.designsystem.QaColors
+import site.geonest.qa.core.designsystem.QaGlassPanel
+import site.geonest.qa.core.designsystem.QaPill
+import site.geonest.qa.core.designsystem.QaScreenBackground
 import site.geonest.qa.core.designsystem.QaSpacing
 
 @Composable
@@ -33,73 +37,81 @@ fun LoginScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
-    Column(
+    QaScreenBackground(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = QaSpacing.xl),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = "测量软件测试平台",
-            style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
-            color = QaColors.TextStrong,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(QaSpacing.xs))
-        Text(
-            text = "测试管理系统",
-            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
-            color = QaColors.TextMuted,
-        )
-        Spacer(Modifier.height(QaSpacing.xxl))
-
-        TextField(
-            value = state.username,
-            onValueChange = viewModel::onUsernameChange,
-            label = { Text("用户名") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-        )
-        Spacer(Modifier.height(QaSpacing.md))
-        TextField(
-            value = state.password,
-            onValueChange = viewModel::onPasswordChange,
-            label = { Text("密码") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Password,
-                imeAction = ImeAction.Done,
-            ),
-            keyboardActions = KeyboardActions(onDone = { viewModel.login() }),
-        )
-
-        if (state.error != null) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            QaPill("APPAuto QA", color = QaColors.Accent, container = QaColors.AccentContainer)
             Spacer(Modifier.height(QaSpacing.md))
             Text(
-                text = state.error!!,
-                color = QaColors.Danger,
-                style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                text = "测量软件测试平台",
+                style = androidx.compose.material3.MaterialTheme.typography.headlineMedium,
+                color = QaColors.TextStrong,
+                textAlign = TextAlign.Center,
             )
-        }
+            Spacer(Modifier.height(QaSpacing.xs))
+            Text(
+                text = "移动测试管理系统",
+                style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                color = QaColors.TextMuted,
+            )
+            Spacer(Modifier.height(QaSpacing.xxl))
 
-        Spacer(Modifier.height(QaSpacing.xl))
-        Button(
-            onClick = viewModel::login,
-            enabled = state.canSubmit,
-            modifier = Modifier.fillMaxWidth().height(48.dp),
-        ) {
-            if (state.loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.height(20.dp),
-                    strokeWidth = 2.dp,
-                    color = QaColors.Card,
+            QaGlassPanel(Modifier.fillMaxWidth()) {
+                TextField(
+                    value = state.username,
+                    onValueChange = viewModel::onUsernameChange,
+                    label = { Text("用户名") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 )
-            } else {
-                Text("登录")
+                Spacer(Modifier.height(QaSpacing.md))
+                TextField(
+                    value = state.password,
+                    onValueChange = viewModel::onPasswordChange,
+                    label = { Text("密码") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { viewModel.login() }),
+                )
+
+                if (state.error != null) {
+                    Spacer(Modifier.height(QaSpacing.md))
+                    Text(
+                        text = state.error!!,
+                        color = QaColors.Danger,
+                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                    )
+                }
+
+                Spacer(Modifier.height(QaSpacing.xl))
+                Button(
+                    onClick = viewModel::login,
+                    enabled = state.canSubmit,
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                ) {
+                    if (state.loading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.height(20.dp),
+                            strokeWidth = 2.dp,
+                            color = QaColors.Card,
+                        )
+                    } else {
+                        Text("登录")
+                    }
+                }
             }
         }
     }

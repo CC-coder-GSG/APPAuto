@@ -1,6 +1,9 @@
 package site.geonest.qa.feature.common
 
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,6 +11,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -16,15 +20,19 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.dp
 import site.geonest.qa.core.data.WorkbenchContextState
+import site.geonest.qa.core.designsystem.QaColors
+import site.geonest.qa.core.designsystem.QaRadius
 import site.geonest.qa.core.designsystem.QaSpacing
 import site.geonest.qa.core.domain.model.WorkbenchMode
 
@@ -44,7 +52,10 @@ fun WorkbenchFilterBar(
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = QaSpacing.lg, vertical = QaSpacing.sm),
+            .padding(horizontal = QaSpacing.lg, vertical = QaSpacing.sm)
+            .background(QaColors.Card, RoundedCornerShape(QaRadius.lg))
+            .border(1.dp, QaColors.Border, RoundedCornerShape(QaRadius.lg))
+            .padding(QaSpacing.md),
         verticalArrangement = Arrangement.spacedBy(QaSpacing.sm),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(QaSpacing.sm)) {
@@ -82,8 +93,9 @@ fun WorkbenchFilterBar(
 }
 
 /**
- * 只读下拉选择器：用稳定的 [DropdownMenu] + 透明可点遮罩，避开各版本差异较大的
- * ExposedDropdownMenu 实验 API。
+ * 只读下拉选择器：自绘固定高度字段（标签 + 单行值 + 下拉箭头），
+ * 值过长时单行跑马灯滚动，避免换行撑高、两个下拉高度不齐（见 6-10 需求 1）。
+ * 用稳定的 [DropdownMenu] + 透明遮罩，避开版本差异大的 ExposedDropdownMenu。
  */
 @Composable
 fun LabeledDropdown(
@@ -96,16 +108,41 @@ fun LabeledDropdown(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box(modifier) {
-        OutlinedTextField(
-            value = selectedText,
-            onValueChange = {},
-            readOnly = true,
-            enabled = enabled,
-            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-            trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        // 透明遮罩层捕获点击（只读输入框本身不响应点击）。
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .background(
+                    if (enabled) QaColors.Card else QaColors.SurfaceSubtle,
+                    RoundedCornerShape(QaRadius.md),
+                )
+                .border(
+                    1.dp,
+                    if (enabled) QaColors.BorderStrong else QaColors.Border,
+                    RoundedCornerShape(QaRadius.md),
+                )
+                .padding(horizontal = QaSpacing.md, vertical = QaSpacing.sm),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = QaColors.TextMuted,
+                maxLines = 1,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    selectedText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (enabled) QaColors.TextStrong else QaColors.TextDisabled,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.weight(1f).basicMarquee(),
+                )
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = QaColors.TextMuted)
+            }
+        }
+        // 透明遮罩层捕获点击。
         Box(
             Modifier
                 .matchParentSize()

@@ -52,7 +52,8 @@ class OverallTestViewModel @Inject constructor(
     val ui: StateFlow<OverallTestUiState> = _ui.asStateFlow()
 
     init {
-        viewModelScope.launch { context.ensureLoaded() }
+        // 恢复持久化选择后 ids 加载前后一致，需在 ensureLoaded 后显式 reload，避免无限转圈。
+        viewModelScope.launch { context.ensureLoaded(); reload() }
         // 测试工作台始终按大版本，软件/大版本变化即重拉。
         viewModelScope.launch {
             context.state

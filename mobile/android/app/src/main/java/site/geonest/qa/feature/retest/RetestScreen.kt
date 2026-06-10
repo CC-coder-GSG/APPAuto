@@ -21,12 +21,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -46,11 +52,14 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import site.geonest.qa.core.designsystem.QaColors
+import site.geonest.qa.core.designsystem.QaLinkLabel
 import site.geonest.qa.core.designsystem.QaRadius
 import site.geonest.qa.core.designsystem.QaSpacing
 import site.geonest.qa.core.domain.model.PreviewKind
 import site.geonest.qa.core.domain.model.RetestRequirement
 import site.geonest.qa.core.domain.model.WbBug
+import site.geonest.qa.core.domain.model.WorkbenchMode
+import site.geonest.qa.feature.common.WorkbenchFilterBar
 import site.geonest.qa.feature.preview.LocalPreviewOpen
 import site.geonest.qa.feature.preview.zentaoNumericId
 
@@ -64,6 +73,7 @@ fun RetestScreen(
     viewModel: RetestViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val ctx by viewModel.ctx.collectAsStateWithLifecycle()
     var pending by remember { mutableStateOf<PendingAction?>(null) }
 
     LaunchedEffect(state.toast) {
@@ -74,22 +84,41 @@ fun RetestScreen(
     }
 
     Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = QaSpacing.lg, vertical = QaSpacing.sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        WorkbenchFilterBar(
+            ctx = ctx,
+            showMode = true,
+            onSelectSoftware = viewModel::selectSoftware,
+            onSelectMode = viewModel::setMode,
+            onSelectMajor = viewModel::selectMajor,
+        )
+
+        if (ctx.ready && state.error == null && !state.loading) {
             Text(
                 "待复测 ${state.items.size} 个",
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
                 color = QaColors.TextMuted,
+                modifier = Modifier.padding(horizontal = QaSpacing.lg, vertical = QaSpacing.xxs),
             )
         }
 
         Box(Modifier.fillMaxWidth().weight(1f)) {
             when {
-                state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                ctx.loading || (state.loading && ctx.ready) -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+
+                ctx.error != null -> Column(
+                    Modifier.align(Alignment.Center).padding(QaSpacing.xl),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(ctx.error!!, color = QaColors.Danger)
+                    Spacer(Modifier.padding(QaSpacing.sm))
+                    FilterChip(selected = false, onClick = { viewModel.retryContext() }, label = { Text("重试") })
+                }
+
+                !ctx.ready -> Text(
+                    if (ctx.mode == WorkbenchMode.VERSION) "请选择软件与大版本" else "请选择软件",
+                    color = QaColors.TextMuted,
+                    modifier = Modifier.align(Alignment.Center),
+                )
 
                 state.error != null -> Column(
                     Modifier.align(Alignment.Center).padding(QaSpacing.xl),
@@ -189,13 +218,9 @@ private fun RetestCard(
                 color = QaColors.TextStrong,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                "🔍预览",
-                style = MaterialTheme.typography.labelSmall,
-                color = QaColors.Primary,
-                modifier = Modifier
-                    .clickable { preview(PreviewKind.STORY, zentaoNumericId(req.zentaoReqId)) }
-                    .padding(start = QaSpacing.sm, top = QaSpacing.xxs, bottom = QaSpacing.xxs),
+            QaLinkLabel(
+                text = "预览",
+                onClick = { preview(PreviewKind.STORY, zentaoNumericId(req.zentaoReqId)) },
             )
         }
         Spacer(Modifier.padding(QaSpacing.xxs))
@@ -247,11 +272,19 @@ private fun RetestCard(
                 OutlinedButton(
                     onClick = onFail,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = QaColors.Danger),
-                ) { Text("✗ 打回") }
+                ) {
+                    Icon(Icons.Outlined.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(QaSpacing.xs))
+                    Text("打回")
+                }
                 Button(
                     onClick = onPass,
                     colors = ButtonDefaults.buttonColors(containerColor = QaColors.Success),
-                ) { Text("✓ 通过") }
+                ) {
+                    Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(QaSpacing.xs))
+                    Text("通过")
+                }
             }
         }
     }
@@ -282,22 +315,27 @@ private fun BugChips(bugs: List<WbBug>, danger: Boolean = false) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // 点徽标文字 → 预览 Bug
-                Text(
-                    "$text 🔍",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = fg,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.clickable { preview(PreviewKind.BUG, zentaoNumericId(bug.bugId)) },
-                )
-                // ↗ 跳转禅道（有链接才显示）
+                ) {
+                    Text(text, style = MaterialTheme.typography.labelSmall, color = fg)
+                    Spacer(Modifier.width(QaSpacing.xxs))
+                    Icon(Icons.Outlined.Visibility, contentDescription = "预览", tint = fg, modifier = Modifier.size(13.dp))
+                }
+                // 跳转禅道（有链接才显示）
                 val bugUrl = bug.zentaoBugUrl
                 if (!bugUrl.isNullOrBlank()) {
-                    Text(
-                        " ↗",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = QaColors.Primary,
-                        modifier = Modifier.clickable {
-                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(bugUrl))) }
-                        },
+                    Spacer(Modifier.width(QaSpacing.xs))
+                    Icon(
+                        Icons.Outlined.OpenInNew,
+                        contentDescription = "在禅道打开",
+                        tint = QaColors.Accent,
+                        modifier = Modifier
+                            .size(14.dp)
+                            .clickable {
+                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(bugUrl))) }
+                            },
                     )
                 }
             }

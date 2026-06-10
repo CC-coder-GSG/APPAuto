@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,6 +25,7 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -43,7 +45,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import site.geonest.qa.core.data.WorkbenchContextState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Visibility
 import site.geonest.qa.core.designsystem.QaColors
+import site.geonest.qa.core.designsystem.QaLinkLabel
 import site.geonest.qa.core.designsystem.QaRadius
 import site.geonest.qa.core.designsystem.QaSpacing
 import site.geonest.qa.core.domain.model.DispatchedBug
@@ -201,7 +208,11 @@ private fun DispatchedSection(bugs: List<DispatchedBug>) {
             .background(QaColors.PrimaryContainer, RoundedCornerShape(QaRadius.lg))
             .padding(QaSpacing.lg),
     ) {
-        Text("🪂 指派给我的 Bug（${bugs.size}）", style = MaterialTheme.typography.titleSmall, color = QaColors.PrimaryDark)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Inventory2, contentDescription = null, tint = QaColors.PrimaryDark, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(QaSpacing.xs))
+            Text("指派给我的 Bug（${bugs.size}）", style = MaterialTheme.typography.titleSmall, color = QaColors.PrimaryDark)
+        }
         Spacer(Modifier.padding(QaSpacing.xxs))
         bugs.forEach { b ->
             Row(
@@ -216,7 +227,11 @@ private fun DispatchedSection(bugs: List<DispatchedBug>) {
                 )
                 Spacer(Modifier.width(QaSpacing.sm))
                 Text(b.reqTitle, style = MaterialTheme.typography.labelSmall, color = QaColors.TextMuted, modifier = Modifier.weight(1f))
-                if (b.closed) Text("✅ 已闭环", style = MaterialTheme.typography.labelSmall, color = QaColors.Success)
+                if (b.closed) {
+                    Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = QaColors.Success, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(QaSpacing.xxs))
+                    Text("已闭环", style = MaterialTheme.typography.labelSmall, color = QaColors.Success)
+                }
             }
         }
         Text(
@@ -262,13 +277,9 @@ private fun RequirementCard(
                 textDecoration = if (fullyDone) TextDecoration.LineThrough else null,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                "🔍预览",
-                style = MaterialTheme.typography.labelSmall,
-                color = QaColors.Primary,
-                modifier = Modifier
-                    .clickable { preview(PreviewKind.STORY, zentaoNumericId(req.zentaoReqId)) }
-                    .padding(start = QaSpacing.sm, top = QaSpacing.xxs, bottom = QaSpacing.xxs),
+            QaLinkLabel(
+                text = "预览",
+                onClick = { preview(PreviewKind.STORY, zentaoNumericId(req.zentaoReqId)) },
             )
         }
 
@@ -315,11 +326,10 @@ private fun RequirementCard(
             Spacer(Modifier.padding(QaSpacing.xxs))
             req.testCases.forEach { case ->
                 Column(Modifier.fillMaxWidth().padding(vertical = QaSpacing.xxs)) {
-                    Text(
-                        "用例 ${case.zentaoCaseId} 🔍",
+                    QaLinkLabel(
+                        text = "用例 ${case.zentaoCaseId}",
+                        onClick = { preview(PreviewKind.TESTCASE, zentaoNumericId(case.zentaoCaseId)) },
                         style = MaterialTheme.typography.bodyMedium,
-                        color = QaColors.Primary,
-                        modifier = Modifier.clickable { preview(PreviewKind.TESTCASE, zentaoNumericId(case.zentaoCaseId)) },
                     )
                     if (case.bugs.isNotEmpty()) BugChips(case.bugs)
                 }
@@ -361,14 +371,17 @@ private fun BugChips(bugs: List<WbBug>) {
             val text = listOfNotNull(bug.bugId.takeIf { it.isNotBlank() }, bug.title.takeIf { it.isNotBlank() })
                 .joinToString(" ")
                 .ifBlank { "Bug#${bug.id}" }
-            Box(
+            Row(
                 Modifier
                     .border(1.dp, QaColors.SuccessBorder, RoundedCornerShape(QaRadius.sm))
                     .background(QaColors.SuccessContainer, RoundedCornerShape(QaRadius.sm))
                     .clickable { preview(PreviewKind.BUG, zentaoNumericId(bug.bugId)) }
                     .padding(horizontal = QaSpacing.sm, vertical = QaSpacing.xxs),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("$text 🔍", style = MaterialTheme.typography.labelSmall, color = QaColors.Success)
+                Text(text, style = MaterialTheme.typography.labelSmall, color = QaColors.Success)
+                Spacer(Modifier.width(QaSpacing.xxs))
+                Icon(Icons.Outlined.Visibility, contentDescription = "预览", tint = QaColors.Success, modifier = Modifier.size(13.dp))
             }
         }
     }

@@ -18,6 +18,8 @@ mobile/
   待 iOS 启动时提升为 `shared/` 给 SwiftUI 复用。
 - **设计统一**：`shared-design/design-tokens.json` 为唯一设计真源，两端各自映射到 Compose Theme / SwiftUI。
   信息架构与流程两端一致；iOS 仅在材质层叠加 Liquid Glass。
+- **视觉语言**：`shared-design/VISUAL_LANGUAGE.md` 描述移动端审美、组件规则与 iOS Liquid Glass 映射，
+  后续让 AI 生成页面时优先引用该文件和 `design-tokens.json`。
 
 ## 后端对接
 

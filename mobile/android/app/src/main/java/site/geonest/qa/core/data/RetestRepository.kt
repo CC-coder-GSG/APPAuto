@@ -26,9 +26,16 @@ class RetestRepository @Inject constructor(
     private val api: QaApi,
     private val json: Json,
 ) {
-    /** 跨版本列出所有待复测需求（最适合移动端"待办队列"）。 */
-    suspend fun workbench(): ApiResult<List<RetestRequirement>> = runCatchingApi {
-        api.retestWorkbench(mode = "all_pending").map { it.toDomain() }
+    /**
+     * 待复测需求。mode=all_pending 跨版本待办；mode=version 限定某大版本。
+     * majorVersionId 仅在 version 模式必填；softwareId 作为可选过滤。
+     */
+    suspend fun workbench(
+        mode: String = "all_pending",
+        majorVersionId: Int? = null,
+        softwareId: Int? = null,
+    ): ApiResult<List<RetestRequirement>> = runCatchingApi {
+        api.retestWorkbench(mode = mode, majorVersionId = majorVersionId, softwareId = softwareId).map { it.toDomain() }
     }
 
     /** 标记复测通过。后端会校验该需求是否仍有未闭环问题。 */

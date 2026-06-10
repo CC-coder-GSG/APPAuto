@@ -10,13 +10,19 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -102,9 +108,16 @@ fun PreviewHost(viewModel: PreviewViewModel = hiltViewModel()) {
                     }
                     val zentaoUrl = content?.zentaoUrl
                     if (!zentaoUrl.isNullOrBlank()) {
-                        TextButton(onClick = {
-                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(zentaoUrl))) }
-                        }) { Text("禅道打开 ↗") }
+                        TextButton(
+                            onClick = {
+                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(zentaoUrl))) }
+                            },
+                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = QaColors.Accent),
+                        ) {
+                            Icon(Icons.Outlined.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(QaSpacing.xxs))
+                            Text("禅道打开")
+                        }
                     }
                     TextButton(onClick = viewModel::close) { Text("关闭", color = QaColors.Danger) }
                 }

@@ -19,10 +19,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -37,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import site.geonest.qa.core.designsystem.QaColors
+import site.geonest.qa.core.designsystem.QaLinkLabel
 import site.geonest.qa.core.designsystem.QaRadius
 import site.geonest.qa.core.designsystem.QaSpacing
 import site.geonest.qa.core.domain.model.AssignRequirement
@@ -149,10 +155,9 @@ private fun AssignReqCard(req: AssignRequirement, ownerId: Int, ownerOptions: Li
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (req.zentaoReqId.isNotBlank()) { Badge(req.zentaoReqId); Spacer(Modifier.width(QaSpacing.sm)) }
             Text(req.title, style = MaterialTheme.typography.bodyLarge, color = QaColors.TextStrong, modifier = Modifier.weight(1f))
-            Text(
-                "🔍",
-                color = QaColors.Primary,
-                modifier = Modifier.clickable { preview(PreviewKind.STORY, zentaoNumericId(req.zentaoReqId)) }.padding(start = QaSpacing.sm),
+            QaLinkLabel(
+                text = "预览",
+                onClick = { preview(PreviewKind.STORY, zentaoNumericId(req.zentaoReqId)) },
             )
         }
         Spacer(Modifier.padding(QaSpacing.xxs))
@@ -202,13 +207,13 @@ private fun ProgressSection(ui: AssignUiState, vm: AssignViewModel) {
 private fun SummaryChips(s: ProgressSummary, pendingOnly: Boolean, onToggle: () -> Unit) {
     Column(cardMod()) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(QaSpacing.xs), verticalArrangement = Arrangement.spacedBy(QaSpacing.xs)) {
-            Chip("👥 ${s.owners}")
-            Chip("📄 ${s.requirements}")
-            Chip("🧪完成 ${s.caseDone}")
-            Chip("⏳用例待 ${s.casePending}")
-            Chip("✅测完 ${s.testDone}")
-            Chip("🚧测待 ${s.testPending}")
-            Chip("🔁待复测 ${s.retestPendingTotal}", QaColors.Danger)
+            Chip("负责人 ${s.owners}")
+            Chip("需求 ${s.requirements}")
+            Chip("用例完成 ${s.caseDone}", QaColors.Success)
+            Chip("用例待 ${s.casePending}")
+            Chip("测试完成 ${s.testDone}", QaColors.Success)
+            Chip("测试待 ${s.testPending}")
+            Chip("待复测 ${s.retestPendingTotal}", QaColors.Danger)
         }
         Row(Modifier.fillMaxWidth().padding(top = QaSpacing.xs), verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = pendingOnly, onCheckedChange = { onToggle() })
@@ -224,7 +229,11 @@ private fun OwnerCard(owner: OwnerProgress, pendingOnly: Boolean) {
     if (pendingOnly && reqs.isEmpty()) return
     val preview = LocalPreviewOpen.current
     Column(cardMod()) {
-        Text("👤 ${owner.ownerName}（${reqs.size}）", style = MaterialTheme.typography.titleSmall, color = QaColors.TextStrong)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Person, contentDescription = null, tint = QaColors.TextMuted, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(QaSpacing.xxs))
+            Text("${owner.ownerName}（${reqs.size}）", style = MaterialTheme.typography.titleSmall, color = QaColors.TextStrong)
+        }
         FlowRow(
             Modifier.padding(top = QaSpacing.xxs),
             horizontalArrangement = Arrangement.spacedBy(QaSpacing.xs),
@@ -243,16 +252,14 @@ private fun OwnerCard(owner: OwnerProgress, pendingOnly: Boolean) {
                     textDecoration = if (r.caseCompleted && r.testCompleted) TextDecoration.LineThrough else null,
                     modifier = Modifier.weight(1f),
                 )
-                Text(
-                    "${if (r.caseCompleted) "用✅" else "用⏳"} ${if (r.testCompleted) "测✅" else "测⏳"}",
+                MiniStatus("用例", r.caseCompleted)
+                Spacer(Modifier.width(QaSpacing.xs))
+                MiniStatus("测试", r.testCompleted)
+                Spacer(Modifier.width(QaSpacing.xs))
+                QaLinkLabel(
+                    text = "预览",
+                    onClick = { preview(PreviewKind.STORY, zentaoNumericId(r.zentaoReqId)) },
                     style = MaterialTheme.typography.labelSmall,
-                    color = QaColors.TextMuted,
-                )
-                Text(
-                    " 🔍",
-                    color = QaColors.Primary,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.clickable { preview(PreviewKind.STORY, zentaoNumericId(r.zentaoReqId)) },
                 )
             }
         }
@@ -327,6 +334,21 @@ private fun Chip(text: String, color: androidx.compose.ui.graphics.Color = QaCol
             .border(1.dp, QaColors.Border, RoundedCornerShape(QaRadius.sm))
             .padding(horizontal = QaSpacing.sm, vertical = QaSpacing.xxs),
     ) { Text(text, style = MaterialTheme.typography.labelSmall, color = color) }
+}
+
+/** 紧凑状态标记：完成显示对勾（绿），未完成显示时钟（灰）。 */
+@Composable
+private fun MiniStatus(label: String, done: Boolean) {
+    val color = if (done) QaColors.Success else QaColors.TextDisabled
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            if (done) Icons.Outlined.Check else Icons.Outlined.Schedule,
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.size(13.dp),
+        )
+        Text(label, style = MaterialTheme.typography.labelSmall, color = color, modifier = Modifier.padding(start = 1.dp))
+    }
 }
 
 @Composable

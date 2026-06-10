@@ -2,22 +2,40 @@ package site.geonest.qa.core.designsystem
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 private val QaLightColorScheme = lightColorScheme(
     primary = QaColors.Primary,
     onPrimary = QaColors.Card,
     primaryContainer = QaColors.PrimaryContainer,
     onPrimaryContainer = QaColors.OnPrimaryContainer,
+    secondary = QaColors.Accent,
+    onSecondary = QaColors.Card,
+    secondaryContainer = QaColors.AccentContainer,
+    tertiary = QaColors.Warning,
+    tertiaryContainer = QaColors.WarningContainer,
     background = QaColors.Background,
     onBackground = QaColors.TextStrong,
     surface = QaColors.Card,
     onSurface = QaColors.TextDefault,
-    surfaceVariant = QaColors.Background,
+    surfaceVariant = QaColors.SurfaceSubtle,
     onSurfaceVariant = QaColors.TextMuted,
     outline = QaColors.Border,
+    outlineVariant = QaColors.BorderStrong,
     error = QaColors.Danger,
+    errorContainer = QaColors.DangerContainer,
+    onErrorContainer = QaColors.Danger,
+)
+
+private val QaShapes = Shapes(
+    extraSmall = RoundedCornerShape(QaRadius.sm),
+    small = RoundedCornerShape(QaRadius.md),
+    medium = RoundedCornerShape(QaRadius.lg),
+    large = RoundedCornerShape(QaRadius.xl),
+    extraLarge = RoundedCornerShape(QaRadius.xl),
 )
 
 /**
@@ -32,6 +50,7 @@ fun QaTheme(
     MaterialTheme(
         colorScheme = QaLightColorScheme,
         typography = QaTypography,
+        shapes = QaShapes,
         content = content,
     )
 }
