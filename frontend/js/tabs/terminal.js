@@ -11,6 +11,7 @@ const STATUS_META = {
 };
 
 let playerBaseUrl = '';
+let playerName = '';         // ws-scrcpy 解码器：broadway / mse / tinyh264（后端可配）
 let heldDeviceId = null;     // 当前持有操作权的设备
 let heartbeatTimer = null;
 
@@ -23,6 +24,7 @@ export async function loadTerminalTab() {
     const res = await api('/api/terminals');
     const data = await res.json();
     playerBaseUrl = data.player_base_url || '';
+    playerName = data.player_name || '';
     renderDevices(data.devices || []);
   } catch (err) {
     if (grid) grid.innerHTML = `<div class="muted" style="padding:20px; color:#dc2626;">加载失败：${err.message || '未知错误'}</div>`;
@@ -36,6 +38,7 @@ export async function discoverTerminals() {
     const res = await api('/api/terminals/discover', { method: 'POST', headers: window.H });
     const data = await res.json();
     playerBaseUrl = data.player_base_url || '';
+    playerName = data.player_name || '';
     renderDevices(data.devices || []);
     window.showMessage && window.showMessage(`扫描完成：在线 ${data.online || 0} 台，新登记 ${data.created || 0} 台`, 'success');
   } catch (err) {
@@ -164,7 +167,10 @@ function openViewer(deviceId, ticket, control) {
     return;
   }
   const serial = ticket.serial || '';
-  const src = `${playerBaseUrl.replace(/\/$/, '')}/#!action=stream&udid=${encodeURIComponent(serial)}`;
+  // ws-scrcpy 的流深链必须带 player（解码器）。broadway=纯 JS 软解，兼容性最好；
+  // 想要更省 CPU 可改 mse（Chrome 硬解）。后端 APP_TERMINAL_PLAYER_NAME 可覆盖。
+  const player = playerName || 'broadway';
+  const src = `${playerBaseUrl.replace(/\/$/, '')}/#!action=stream&udid=${encodeURIComponent(serial)}&player=${encodeURIComponent(player)}`;
   frameWrap.innerHTML = `<iframe src="${src}" style="width:100%; height:640px; border:0; border-radius:8px; background:#000;" allow="autoplay; fullscreen"></iframe>`;
 }
 

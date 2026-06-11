@@ -61,6 +61,7 @@ def list_terminals(current_user: User = Depends(get_current_user), db: Session =
     return {
         "devices": DeviceLockService(db).list_devices(),
         "player_base_url": settings.terminal_player_url,
+        "player_name": settings.terminal_player_name,
     }
 
 
@@ -74,6 +75,7 @@ def discover_terminals(current_user: User = Depends(get_current_user), db: Sessi
         **stats,
         "devices": DeviceLockService(db).list_devices(),
         "player_base_url": settings.terminal_player_url,
+        "player_name": settings.terminal_player_name,
     }
 
 

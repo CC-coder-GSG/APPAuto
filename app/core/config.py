@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     # ws-scrcpy 播放器 Web UI 的对外可访问地址（前端 iframe 内嵌画面用），
     # 如 http://192.168.2.229:8000 或反代后的 /scrcpy。留空则前端显示「未配置」占位。
     terminal_player_url: str = Field(default_factory=lambda: os.getenv('APP_TERMINAL_PLAYER_URL', os.getenv('TERMINAL_PLAYER_URL', '')))
+    # ws-scrcpy 解码器名：broadway(软解,最兼容) / mse(Chrome 硬解,更省CPU) / tinyh264。
+    terminal_player_name: str = Field(default_factory=lambda: os.getenv('APP_TERMINAL_PLAYER_NAME', os.getenv('TERMINAL_PLAYER_NAME', 'broadway')))
     # Jenkins / 自动化侧回调 lock/unlock 用的共享密钥（X-Device-Sync-Key）。
     device_sync_api_key: str = Field(default_factory=lambda: os.getenv('APP_DEVICE_SYNC_API_KEY', os.getenv('DEVICE_SYNC_API_KEY', '')))
     # 手动操作锁心跳超时（秒）：超过该时长无心跳自动释放，避免占着不放。
