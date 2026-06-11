@@ -75,7 +75,36 @@ class DeviceLockService:
             .order_by(TerminalDevice.enabled.desc(), TerminalDevice.name.asc())
             .all()
         )
+        # 自愈：纠正 status 与真实锁不一致的脏数据（如 status=manual 但无活动锁）
+        changed = False
+        for d in devices:
+            if self._heal_status(d):
+                changed = True
+        if changed:
+            self.db.commit()
         return [self.serialize_device(d) for d in devices]
+
+    def _heal_status(self, device: TerminalDevice) -> bool:
+        """按当前活动锁纠正 device.status。返回是否发生变化。
+
+        offline 状态保留（需 adb 扫描才能确认在线）；其余按锁推导：
+        有 automation 锁→automation，有 manual 锁→manual，无锁→idle。
+        修复"状态卡在 manual/automation 但底下没锁"导致永远释放不掉的脏数据。
+        """
+        active = self.active_lock(device.id)
+        if active and active.lock_type == TerminalLockType.AUTOMATION.value:
+            target = TerminalDeviceStatus.AUTOMATION.value
+        elif active and active.lock_type == TerminalLockType.MANUAL.value:
+            target = TerminalDeviceStatus.MANUAL.value
+        elif device.status == TerminalDeviceStatus.OFFLINE.value:
+            target = TerminalDeviceStatus.OFFLINE.value
+        else:
+            target = TerminalDeviceStatus.IDLE.value
+        if device.status != target:
+            device.status = target
+            self._publish(device, "device.status_changed")
+            return True
+        return False
 
     def serialize_device(self, device: TerminalDevice) -> dict:
         lock = self.active_lock(device.id)
@@ -202,12 +231,16 @@ class DeviceLockService:
     def release_manual(self, device_id: int, user: User, *, force: bool = False) -> dict:
         device = self.get_device_or_404(device_id)
         active = self.active_lock(device_id)
-        if not active or active.lock_type != TerminalLockType.MANUAL.value:
-            return self.serialize_device(device)
-        if not force and active.holder_user_id != user.id:
-            raise DeviceConflict(403, {"reason": "not_holder", "message": "只能释放自己持有的操作权"})
-        self._release_lock(active, TerminalLockReleaseReason.FORCED if force else TerminalLockReleaseReason.NORMAL)
-        self._apply_status(device, None, online=True)
+        if active and active.lock_type == TerminalLockType.MANUAL.value:
+            if not force and active.holder_user_id != user.id:
+                raise DeviceConflict(403, {"reason": "not_holder", "message": "只能释放自己持有的操作权"})
+            self._release_lock(active, TerminalLockReleaseReason.FORCED if force else TerminalLockReleaseReason.NORMAL)
+        # flush 让刚释放的 released_at 落库，确保 _heal_status 重查 active_lock 时拿到 None
+        # （autoflush=False 时不 flush 会查到旧值）。
+        self.db.flush()
+        # 即便没有活动锁（status 与锁不一致的脏数据），也按真实锁状态重算 status，
+        # 让 force-release 能修复"卡在 manual 但无锁"的设备。
+        self._heal_status(device)
         self._publish(device, "device.lock_changed")
         self.db.commit()
         return self.serialize_device(device)

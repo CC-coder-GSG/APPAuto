@@ -178,6 +178,28 @@ def test_ticket_single_use(db_session):
         device_stream_service.validate_ticket(db_session, token=ticket["token"], device_id=device.id)
 
 
+def test_heal_orphan_manual_status(db_session):
+    """status=manual 但无活动锁的脏数据，应被自愈回 idle（list_devices / force-release 均可）。"""
+    admin = _make_user(db_session, "admin1", role=UserRole.ADMIN)
+    device = _make_device(db_session, status=TerminalDeviceStatus.MANUAL.value)  # 故意造脏：无锁却 manual
+    svc = DeviceLockService(db_session)
+    assert svc.active_lock(device.id) is None
+
+    # list_devices 自愈
+    rows = svc.list_devices()
+    assert rows[0]["status"] == TerminalDeviceStatus.IDLE.value
+    db_session.refresh(device)
+    assert device.status == TerminalDeviceStatus.IDLE.value
+
+
+def test_force_release_heals_orphan_status(db_session):
+    admin = _make_user(db_session, "admin1", role=UserRole.ADMIN)
+    device = _make_device(db_session, status=TerminalDeviceStatus.MANUAL.value)
+    svc = DeviceLockService(db_session)
+    result = svc.release_manual(device.id, admin, force=True)
+    assert result["status"] == TerminalDeviceStatus.IDLE.value
+
+
 def test_sync_online_marks_offline(db_session):
     device = _make_device(db_session, status=TerminalDeviceStatus.IDLE.value)
     svc = DeviceLockService(db_session)
