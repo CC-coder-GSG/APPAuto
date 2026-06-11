@@ -17,6 +17,7 @@ const REQUIRED_NAMESPACES = {
   OmniQADataTab: ['loadDataOverview', 'createUser', 'createVersion'],
   OmniQADispatchTab: ['loadDispatchedAll', 'searchDispatchBug', 'confirmDispatchBug'],
   OmniQATaskBoardTab: ['activate', 'load', 'openCreate', 'openEdit', 'submit'],
+  OmniQATerminalTab: ['loadTerminalTab', 'discoverTerminals', 'controlDevice', 'releaseDevice', 'viewDevice'],
 };
 
 const REQUIRED_DOM_IDS = [

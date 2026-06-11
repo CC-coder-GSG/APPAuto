@@ -71,6 +71,37 @@ class TaskBoardTargetType(str, Enum):
     MANUAL = "manual"
 
 
+class TerminalDeviceStatus(str, Enum):
+    """终端（安卓真机）当前状态。由设备状态机统一维护。"""
+
+    OFFLINE = "offline"      # adb 不可见 / 掉线
+    IDLE = "idle"            # 在线且无人占用，可申请操作
+    AUTOMATION = "automation"  # Appium/Jenkins 自动化占用，只读观看
+    MANUAL = "manual"        # 某用户持有手动操作权
+
+
+class TerminalLockType(str, Enum):
+    AUTOMATION = "automation"  # Jenkins 自动化测试占用
+    MANUAL = "manual"          # 人工远程操作占用
+
+
+class TerminalLockHolderKind(str, Enum):
+    JENKINS = "jenkins"
+    USER = "user"
+
+
+class TerminalLockReleaseReason(str, Enum):
+    NORMAL = "normal"        # 正常释放（用户释放 / Jenkins unlock）
+    TIMEOUT = "timeout"      # 心跳/TTL 超时自动释放
+    PREEMPTED = "preempted"  # 被人工抢占
+    FORCED = "forced"        # 管理员强制释放
+
+
+class TerminalControlMode(str, Enum):
+    VIEW = "view"        # 只读观看
+    CONTROL = "control"  # 可操作
+
+
 __all__ = [
     "UserRole",
     "VersionType",
@@ -81,4 +112,9 @@ __all__ = [
     "TaskBoardStatus",
     "TaskBoardPriority",
     "TaskBoardTargetType",
+    "TerminalDeviceStatus",
+    "TerminalLockType",
+    "TerminalLockHolderKind",
+    "TerminalLockReleaseReason",
+    "TerminalControlMode",
 ]

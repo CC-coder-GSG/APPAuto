@@ -34,6 +34,7 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'zentao-ai', path: './tabs/zentao-ai.js?v=20260422-2' },
   { name: 'jenkins', path: './tabs/jenkins.js?v=20260604-1' },
   { name: 'cad-test', path: './tabs/cad-test.js?v=20260608-5' },
+  { name: 'terminal', path: './tabs/terminal.js?v=20260611-1' },
 ];
 
 window.__omniqaOptionalModuleFailures = {};

@@ -12,6 +12,11 @@ from app.models.enums import (
     TaskBoardPriority,
     TaskBoardStatus,
     TaskBoardTargetType,
+    TerminalControlMode,
+    TerminalDeviceStatus,
+    TerminalLockHolderKind,
+    TerminalLockReleaseReason,
+    TerminalLockType,
     TestResultStatus,
     UserRole,
     VersionType,
@@ -27,6 +32,9 @@ from app.models.stage5 import BugStage5Record
 from app.models.story_ai_result import StoryAIResult
 from app.models.sync_lock import SyncLock
 from app.models.task_board import TaskBoardTask, TaskBoardUpdate
+from app.models.terminal_device import TerminalDevice
+from app.models.terminal_device_lock import TerminalDeviceLock
+from app.models.terminal_stream_ticket import TerminalStreamTicket
 from app.models.testcase import TestCase
 from app.models.user import User
 from app.models.user_ai_provider_config import UserAIProviderConfig
@@ -69,6 +77,14 @@ __all__ = [
     "TaskBoardTargetType",
     "TaskBoardTask",
     "TaskBoardUpdate",
+    "TerminalControlMode",
+    "TerminalDevice",
+    "TerminalDeviceLock",
+    "TerminalDeviceStatus",
+    "TerminalLockHolderKind",
+    "TerminalLockReleaseReason",
+    "TerminalLockType",
+    "TerminalStreamTicket",
     "TestCase",
     "TestExecution",
     "TestResultStatus",

@@ -63,6 +63,25 @@ class Settings(BaseSettings):
     # Rough AI run duration used by the frontend countdown toast. Seconds. Default 5 min.
     zentao_ai_expected_duration_seconds: int = Field(default_factory=lambda: int(os.getenv('APP_ZENTAO_AI_EXPECTED_DURATION_SECONDS', os.getenv('ZENTAO_AI_EXPECTED_DURATION_SECONDS', '300'))))
 
+    # ── 终端远程查看/操控（scrcpy + ws-scrcpy）────────────────────────────────
+    # 总开关：关闭时终端相关接口返回 403，前端隐藏「终端」入口。
+    terminal_control_enabled: bool = Field(default_factory=lambda: os.getenv('APP_TERMINAL_CONTROL_ENABLED', os.getenv('TERMINAL_CONTROL_ENABLED', 'false')).lower() == 'true')
+    # 服务器上 adb 可执行文件路径；用于扫描在线设备。
+    adb_path: str = Field(default_factory=lambda: os.getenv('APP_ADB_PATH', os.getenv('ADB_PATH', 'adb')))
+    # 旁路 ws-scrcpy 服务地址（内网），如 ws://127.0.0.1:8000。FastAPI 反代到此。
+    ws_scrcpy_url: str = Field(default_factory=lambda: os.getenv('APP_WS_SCRCPY_URL', os.getenv('WS_SCRCPY_URL', '')))
+    # ws-scrcpy 播放器 Web UI 的对外可访问地址（前端 iframe 内嵌画面用），
+    # 如 http://192.168.2.229:8000 或反代后的 /scrcpy。留空则前端显示「未配置」占位。
+    terminal_player_url: str = Field(default_factory=lambda: os.getenv('APP_TERMINAL_PLAYER_URL', os.getenv('TERMINAL_PLAYER_URL', '')))
+    # Jenkins / 自动化侧回调 lock/unlock 用的共享密钥（X-Device-Sync-Key）。
+    device_sync_api_key: str = Field(default_factory=lambda: os.getenv('APP_DEVICE_SYNC_API_KEY', os.getenv('DEVICE_SYNC_API_KEY', '')))
+    # 手动操作锁心跳超时（秒）：超过该时长无心跳自动释放，避免占着不放。
+    terminal_manual_lock_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv('APP_TERMINAL_MANUAL_LOCK_TTL_SECONDS', os.getenv('TERMINAL_MANUAL_LOCK_TTL_SECONDS', '300'))))
+    # 自动化锁兜底超时（秒）：防 Jenkins 异常退出不调 unlock，默认 2 小时。
+    terminal_automation_lock_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv('APP_TERMINAL_AUTOMATION_LOCK_TTL_SECONDS', os.getenv('TERMINAL_AUTOMATION_LOCK_TTL_SECONDS', '7200'))))
+    # 流票据有效期（秒）。
+    terminal_stream_ticket_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv('APP_TERMINAL_STREAM_TICKET_TTL_SECONDS', os.getenv('TERMINAL_STREAM_TICKET_TTL_SECONDS', '60'))))
+
     # CORS
     cors_allowed_origins_raw: str = Field(default_factory=lambda: os.getenv('APP_CORS_ALLOWED_ORIGINS', os.getenv('CORS_ALLOWED_ORIGINS', '')))
 
