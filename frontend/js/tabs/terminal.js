@@ -65,22 +65,28 @@ function renderCard(d) {
     ? `<div class="muted" style="font-size:12px;">占用：${d.lock.type === 'automation' ? '自动化' : '人工'}${holder ? ' · ' + holder : ''}${d.lock.jenkins_build ? ' (build ' + d.lock.jenkins_build + ')' : ''}</div>`
     : '';
   const isHeldByMe = heldDeviceId === d.id && d.status === 'manual';
+  const isAdmin = !!(window.currentUser && window.currentUser.role === 'admin');
+  const viewBtn = `<button class="secondary" onclick="window.OmniQATerminalTab.viewDevice(${d.id})">👁 只读观看</button>`;
 
   let actions = '';
   if (d.status === 'offline') {
     actions = '<button disabled>离线</button>';
   } else if (d.status === 'idle') {
-    actions = `<button onclick="window.OmniQATerminalTab.viewDevice(${d.id})">👁 观看</button>
+    actions = `${viewBtn}
                <button onclick="window.OmniQATerminalTab.controlDevice(${d.id})">🖐 操作</button>`;
   } else if (d.status === 'automation') {
-    actions = `<button onclick="window.OmniQATerminalTab.viewDevice(${d.id})">👁 观看</button>
+    actions = `${viewBtn}
                <button class="secondary" onclick="window.OmniQATerminalTab.preemptDevice(${d.id})" title="中断自动化并接管（管理员）">⚡ 抢占</button>`;
   } else if (d.status === 'manual') {
     if (isHeldByMe) {
       actions = `<button onclick="window.OmniQATerminalTab.viewDevice(${d.id}, true)">🖥 进入操作</button>
+                 ${viewBtn}
                  <button class="danger-btn" onclick="window.OmniQATerminalTab.releaseDevice(${d.id})">释放</button>`;
     } else {
-      actions = `<button onclick="window.OmniQATerminalTab.viewDevice(${d.id})">👁 观看</button>`;
+      // 被他人占用：可只读观看；管理员可强制释放（清理卡死/残留的锁）
+      actions = viewBtn + (isAdmin
+        ? ` <button class="secondary" onclick="window.OmniQATerminalTab.forceReleaseDevice(${d.id})" title="强制释放他人占用（管理员）">🔓 强制释放</button>`
+        : '');
     }
   }
 
@@ -118,6 +124,18 @@ export async function releaseDevice(deviceId) {
     await loadTerminalTab();
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '释放失败', 'error');
+  }
+}
+
+export async function forceReleaseDevice(deviceId) {
+  if (!confirm('强制释放将解除他人对该终端的占用，确定继续吗？')) return;
+  try {
+    await api(`/api/terminals/${deviceId}/control/force-release`, { method: 'POST', headers: window.H });
+    if (heldDeviceId === deviceId) { heldDeviceId = null; stopHeartbeat(); }
+    window.showMessage && window.showMessage('已强制释放', 'success');
+    await loadTerminalTab();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '强制释放失败', 'error');
   }
 }
 
@@ -177,7 +195,24 @@ function openViewer(deviceId, ticket, control) {
   const player = playerName || 'broadway';
   const innerWs = `${wsBase}/?action=proxy-adb&remote=tcp%3A8886&udid=${encodeURIComponent(serial)}`;
   const src = `${base}/#!action=stream&udid=${encodeURIComponent(serial)}&player=${encodeURIComponent(player)}&ws=${encodeURIComponent(innerWs)}`;
-  frameWrap.innerHTML = `<iframe src="${src}" style="width:100%; height:640px; border:0; border-radius:8px; background:#000;" allow="autoplay; fullscreen"></iframe>`;
+
+  // 只读模式用 pointer-events:none 让 iframe 不接收任何点击/滑动 → 真正只读，
+  // 防止"只读观看"也能操作设备。操作模式才放开交互。
+  const interactive = control ? 'auto' : 'none';
+  const badge = control
+    ? '<span style="position:absolute; top:8px; left:8px; z-index:2; font-size:12px; padding:2px 10px; border-radius:10px; color:#2563eb; background:#dbeafe;">🖐 操作模式</span>'
+    : '<span style="position:absolute; top:8px; left:8px; z-index:2; font-size:12px; padding:2px 10px; border-radius:10px; color:#475569; background:#e2e8f0;">👁 只读（不可操作）</span>';
+  // 竖屏手机：容器收窄、加高并居中，避免宽容器把画面挤到右侧/高度不够被截断。
+  frameWrap.innerHTML = `
+    <div style="display:flex; justify-content:center;">
+      <div style="position:relative; width:min(460px, 96vw); height:min(82vh, 900px); background:#000; border-radius:8px; overflow:hidden;">
+        ${badge}
+        <iframe src="${src}" style="width:100%; height:100%; border:0; pointer-events:${interactive};" allow="autoplay; fullscreen"></iframe>
+      </div>
+    </div>
+    <div class="muted" style="text-align:center; margin-top:8px; font-size:12px;">
+      画面偏小可 <a href="${src}" target="_blank" rel="noopener">在新窗口放大查看</a>${control ? '' : '（新窗口为 ws-scrcpy 原生页，可操作，请注意）'}
+    </div>`;
 }
 
 export function closeViewer() {
@@ -220,6 +255,7 @@ window.OmniQATerminalTab = {
   loadTerminalTab,
   discoverTerminals,
   controlDevice,
+  forceReleaseDevice,
   releaseDevice,
   preemptDevice,
   viewDevice,
