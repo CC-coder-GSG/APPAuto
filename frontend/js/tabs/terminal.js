@@ -167,10 +167,16 @@ function openViewer(deviceId, ticket, control) {
     return;
   }
   const serial = ticket.serial || '';
-  // ws-scrcpy 的流深链必须带 player（解码器）。broadway=纯 JS 软解，兼容性最好；
-  // 想要更省 CPU 可改 mse（Chrome 硬解）。后端 APP_TERMINAL_PLAYER_NAME 可覆盖。
+  // ws-scrcpy 的流深链必须同时带 player（解码器）和 ws（设备流 WebSocket 地址）。
+  // 缺 player → "Missing required parameter player"；缺 ws → "Missing required parameter ws"。
+  // player：broadway=纯 JS 软解，兼容性最好；mse=Chrome 硬解更省 CPU（APP_TERMINAL_PLAYER_NAME 可覆盖）。
+  // ws：固定走 proxy-adb，scrcpy 端口 8886 是 ws-scrcpy 的约定值（adb 转发，按 udid 区分）。
+  // 注意 remote 里的冒号要先 encode 成 %3A，整段 ws 再 encodeURIComponent 一次（对齐 ws-scrcpy 自身生成的链接）。
+  const base = playerBaseUrl.replace(/\/$/, '');
+  const wsBase = base.replace(/^http/i, 'ws');
   const player = playerName || 'broadway';
-  const src = `${playerBaseUrl.replace(/\/$/, '')}/#!action=stream&udid=${encodeURIComponent(serial)}&player=${encodeURIComponent(player)}`;
+  const innerWs = `${wsBase}/?action=proxy-adb&remote=tcp%3A8886&udid=${encodeURIComponent(serial)}`;
+  const src = `${base}/#!action=stream&udid=${encodeURIComponent(serial)}&player=${encodeURIComponent(player)}&ws=${encodeURIComponent(innerWs)}`;
   frameWrap.innerHTML = `<iframe src="${src}" style="width:100%; height:640px; border:0; border-radius:8px; background:#000;" allow="autoplay; fullscreen"></iframe>`;
 }
 
