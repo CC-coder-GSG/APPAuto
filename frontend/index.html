@@ -1517,6 +1517,21 @@
         <input id="createSoftwareName" placeholder="软件名称（如：WoSense）">
         <button onclick="createSoftware()">创建软件</button>
       </div>
+      <div class="muted" style="margin:10px 0 6px;">或：从禅道项目一键建软件并拉取版本（会把所选禅道项目锚定到该软件）</div>
+      <div class="row" style="align-items:flex-end; flex-wrap:wrap; gap:8px;">
+        <div>
+          <label style="font-size:12px; color:#64748b; display:block; margin-bottom:4px;">禅道项目</label>
+          <select id="createSoftwareZtProject" style="min-width:200px;"><option value="">-- 点右侧加载 --</option></select>
+        </div>
+        <div>
+          <label style="font-size:12px; color:#64748b; display:block; margin-bottom:4px;">同步子版本</label>
+          <select id="createSoftwareZtSyncMinor"><option value="1">是</option><option value="0">否</option></select>
+        </div>
+        <button class="secondary" onclick="loadCreateSoftwareZtProjects()">加载禅道项目</button>
+        <button id="createSoftwareFromZtBtn" onclick="createSoftwareFromZentao()">建软件并拉取</button>
+      </div>
+      <div class="muted" style="margin-top:6px; font-size:12px;">软件名留空时默认用所选禅道项目名。需先在右上角「🔌 禅道」完成账号绑定。</div>
+      <div id="createSoftwareFromZtResult" style="margin-top:10px; font-size:13px; color:#475569; display:none;"></div>
     </div>
 
     <div class="card">

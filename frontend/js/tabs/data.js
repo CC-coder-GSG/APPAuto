@@ -494,6 +494,72 @@ export async function createSoftware() {
   }
 }
 
+export async function loadCreateSoftwareZtProjects() {
+  const sel = document.getElementById('createSoftwareZtProject');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">-- 加载中... --</option>';
+  try {
+    const res = await api('/zentao/projects');
+    const projects = await res.json();
+    if (!Array.isArray(projects) || projects.length === 0) {
+      sel.innerHTML = '<option value="">-- 暂无可用项目（请先绑定禅道账号）--</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">请选择禅道项目</option>' + projects.map((p) => `<option value="${p.id}">${p.name}</option>`).join('');
+  } catch (err) {
+    sel.innerHTML = '<option value="">-- 加载失败 --</option>';
+    window.showMessage && window.showMessage(err.message || '加载禅道项目失败', 'error');
+  }
+}
+
+export async function createSoftwareFromZentao() {
+  const sel = document.getElementById('createSoftwareZtProject');
+  const projectId = Number(sel?.value || 0);
+  if (!projectId) {
+    window.showMessage && window.showMessage('请选择禅道项目', 'error');
+    return;
+  }
+  const projectName = (sel?.options[sel.selectedIndex]?.text || '').trim();
+  const name = (window.createSoftwareName?.value || '').trim() || projectName;
+  const syncMinor = document.getElementById('createSoftwareZtSyncMinor')?.value !== '0';
+  const btn = document.getElementById('createSoftwareFromZtBtn');
+  const resultEl = document.getElementById('createSoftwareFromZtResult');
+  if (btn) { btn.disabled = true; btn.textContent = '处理中...'; }
+  if (resultEl) { resultEl.style.display = 'none'; resultEl.textContent = ''; }
+  try {
+    const res = await api('/softwares/from-zentao', {
+      method: 'POST',
+      headers: window.H,
+      body: { name, zentao_project_id: projectId, zentao_project_name: projectName, sync_minor: syncMinor },
+    });
+    const data = await res.json();
+    if (window.createSoftwareName) window.createSoftwareName.value = '';
+    if (typeof window.loadSoftwares === 'function') {
+      await window.loadSoftwares();
+      const select = document.getElementById('softwareSwitch');
+      if (select && data?.software?.id) {
+        select.value = String(data.software.id);
+      }
+      await window.onSoftwareChange();
+    }
+    await window.loadVersions();
+    await loadDataOverview();
+    if (resultEl) {
+      resultEl.style.display = 'block';
+      resultEl.innerHTML = `<span style="color:#16a34a; font-weight:bold;">✅ 已创建软件「${data?.software?.name || name}」并同步</span>　${data?.sync?.summary || ''}`;
+    }
+    window.showMessage && window.showMessage('软件已创建并同步版本：' + (data?.sync?.summary || ''), 'success');
+  } catch (err) {
+    if (resultEl) {
+      resultEl.style.display = 'block';
+      resultEl.innerHTML = `<span style="color:#dc2626;">❌ 失败：${err.message || '未知错误'}</span>`;
+    }
+    window.showMessage && window.showMessage(err.message || '建软件并拉取失败', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '建软件并拉取'; }
+  }
+}
+
 export async function toggleTeamMember(userId, targetStatus) {
   const text = targetStatus ? '组员' : '编外人员';
   if (!confirm(`确定将该用户设为${text}吗？`)) return;
@@ -1142,6 +1208,8 @@ window.OmniQADataTab = {
   toggleMajorBody,
   loadZtProjects,
   syncZtVersions,
+  loadCreateSoftwareZtProjects,
+  createSoftwareFromZentao,
   runZentaoRecentSync,
   runZentaoNightlyFullSync,
   openRequirementStoryBindingModal,
@@ -1160,6 +1228,8 @@ window.OmniQADataTab = {
 window.toggleMajorBody = toggleMajorBody;
 window.loadZtProjects = loadZtProjects;
 window.syncZtVersions = syncZtVersions;
+window.loadCreateSoftwareZtProjects = loadCreateSoftwareZtProjects;
+window.createSoftwareFromZentao = createSoftwareFromZentao;
 window.runZentaoRecentSync = runZentaoRecentSync;
 window.runZentaoNightlyFullSync = runZentaoNightlyFullSync;
 window.openRequirementStoryBindingModal = openRequirementStoryBindingModal;
