@@ -51,11 +51,26 @@ export async function discoverTerminals() {
 function renderDevices(devices) {
   const grid = el('terminalGrid');
   if (!grid) return;
+  reconcileHeldLock(devices);
   if (!devices.length) {
     grid.innerHTML = '<div class="muted" style="padding:20px;">暂无终端。点「扫描设备」从服务器 adb 拉取，或确认已启用终端控制并连接设备。</div>';
     return;
   }
   grid.innerHTML = devices.map(renderCard).join('');
+}
+
+// 根据服务端锁归属对齐本地心跳：刷新页面后若我仍持有某设备的锁，恢复心跳续约；
+// 若我已不再持有任何设备，停掉心跳。避免"刷新后丢了释放按钮 + 锁还挂着"的卡死。
+function reconcileHeldLock(devices) {
+  const myId = Number((window.currentUser && window.currentUser.id) || 0);
+  const mine = (devices || []).find((d) => d.status === 'manual' && d.lock
+    && d.lock.holder_kind === 'user' && Number(d.lock.holder_user_id) === myId && myId > 0);
+  if (mine) {
+    if (heldDeviceId !== mine.id) { heldDeviceId = mine.id; startHeartbeat(mine.id); }
+  } else if (heldDeviceId) {
+    heldDeviceId = null;
+    stopHeartbeat();
+  }
 }
 
 function renderCard(d) {
@@ -64,7 +79,11 @@ function renderCard(d) {
   const holderLine = d.lock
     ? `<div class="muted" style="font-size:12px;">占用：${d.lock.type === 'automation' ? '自动化' : '人工'}${holder ? ' · ' + holder : ''}${d.lock.jenkins_build ? ' (build ' + d.lock.jenkins_build + ')' : ''}</div>`
     : '';
-  const isHeldByMe = heldDeviceId === d.id && d.status === 'manual';
+  // "我是否持有操作权"以服务端锁归属为准（而非前端内存），这样刷新页面后仍能
+  // 认出自己的锁、继续显示「释放」，不会把自己的锁当成别人的导致卡死。
+  const myId = Number((window.currentUser && window.currentUser.id) || 0);
+  const isHeldByMe = d.status === 'manual' && d.lock && d.lock.holder_kind === 'user'
+    && Number(d.lock.holder_user_id) === myId && myId > 0;
   const isAdmin = !!(window.currentUser && window.currentUser.role === 'admin');
   const viewBtn = `<button class="secondary" onclick="window.OmniQATerminalTab.viewDevice(${d.id})">👁 只读观看</button>`;
 
