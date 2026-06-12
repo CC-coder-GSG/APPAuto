@@ -62,8 +62,16 @@
 
 /* ── 1. 画布与排印 ─────────────────────────────────────── */
 body {
+  /* 压过 style.css 尾部的 SF Pro 栈：Windows 下让中文走微软雅黑，
+     字重渲染与 demo 一致 */
+  font-family: "PingFang SC", "Microsoft YaHei", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    "Noto Sans", sans-serif !important;
   background: var(--w-canvas) !important;
   color: var(--w-ink) !important;
+}
+h1, h2, h3 {
+  font-family: inherit !important;
 }
 h1, h2, h3 { color: var(--w-ink) !important; }
 a, .qa-ext-link { color: var(--w-accent); }
@@ -127,6 +135,7 @@ label { color: var(--w-ink-soft) !important; }
     border-radius: 10px !important;
     padding: 9px 12px !important;
     font-size: 13.5px !important;
+    font-weight: 600 !important;
     min-height: 38px;
     background: transparent !important;
     color: var(--w-ink-soft) !important;
@@ -184,7 +193,7 @@ label { color: var(--w-ink-soft) !important; }
   /* 窄屏退回顶部横滑条 */
   #weaveRailIndicator { box-shadow: none; background: var(--w-raised); }
   #tabs { background: var(--w-surface) !important; border: 1px solid var(--w-hairline) !important; }
-  #tabs button { position: relative; z-index: 1; }
+  #tabs button { position: relative; z-index: 1; font-weight: 600 !important; }
   #tabs button.active-tab { background: transparent !important; color: var(--w-ink) !important; }
 }
 
@@ -272,17 +281,38 @@ section.card > h2 { margin-bottom: 30px !important; }
   vertical-align: 4px;
 }
 
-/* 章节内的次级面板：降为 surface 色块，不再白卡描边 */
+/* 章节内的次级面板：全部铺到画布上，不再有"大白卡" */
 .qa-panel, .qa-panel-soft,
 .zentao-sync-shell-modern,
+.zentao-sync-left, .zentao-sync-right,
 .zentao-major-context {
-  background: var(--w-surface) !important;
+  background: transparent !important;
   border: none !important;
   box-shadow: none !important;
   border-radius: 14px !important;
 }
-section.card .card,
+/* 嵌套的通用 .card（如 #reportContent、分配台面板）一律平铺；
+   对象卡片（构建记录/禅道信息卡/图表盒）除外 */
+section.card .card:not(.build-record-card):not(.zentao-info-card):not(.chart-box) {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+/* 顶层面板（details 折叠块 / 带内联背景的 div）一律压平。
+   注意：JS 触碰过 el.style 后属性会被重新序列化为 rgb() 形式，
+   因此不能依赖 [style*="background:#fff"] 字符串匹配 */
+section.card > details,
+section.card > div[style*="background"] {
+  background: transparent !important;
+}
 section.card details {
+  border-color: var(--w-hairline) !important;
+}
+/* 分配台的候选需求滚动区 */
+#linkCandidatesArea {
+  background: transparent !important;
   border-color: var(--w-hairline) !important;
 }
 
@@ -372,7 +402,7 @@ td {
   border-bottom: 1px solid var(--w-hairline) !important;
 }
 tbody tr { transition: background var(--w-fast) ease-out, box-shadow var(--w-fast) ease-out; }
-tbody tr:hover td { background: var(--w-surface) !important; }
+tbody tr:hover td { background: rgba(28, 25, 23, 0.03) !important; }
 /* hover accent beam（首列内侧细条） */
 tbody tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--w-accent); }
 thead tr:hover th { background: transparent !important; box-shadow: none !important; }
@@ -493,7 +523,7 @@ thead tr:hover th { background: transparent !important; box-shadow: none !import
 #tab-mine details.mine-req-card:hover,
 #tab-retest details.retest-req-card:hover,
 .activity-feed-item:hover {
-  background: var(--w-surface) !important;
+  background: rgba(28, 25, 23, 0.03) !important;
   transform: translateX(4px);
 }
 #tab-mine details.mine-req-card::before,
@@ -515,10 +545,10 @@ thead tr:hover th { background: transparent !important; box-shadow: none !import
 #tab-mine details.mine-req-card:hover::before,
 #tab-retest details.retest-req-card:hover::before,
 .activity-feed-item:hover::before { opacity: 1; transform: scaleY(1); }
-/* 展开态的需求卡恢复 surface 底，便于聚焦 */
+/* 展开态的需求卡轻微染色，便于聚焦 */
 #tab-mine details.mine-req-card[open],
 #tab-retest details.retest-req-card[open] {
-  background: var(--w-surface) !important;
+  background: rgba(28, 25, 23, 0.025) !important;
   transform: none;
 }
 
@@ -573,7 +603,7 @@ thead tr:hover th { background: transparent !important; box-shadow: none !import
   color: var(--w-ink-soft) !important;
 }
 .zentao-sync-sticky-panel, .zentao-info-card {
-  background: var(--w-surface) !important;
+  background: transparent !important;
   border: none !important;
   box-shadow: none !important;
   border-radius: 14px !important;
@@ -584,9 +614,16 @@ thead tr:hover th { background: transparent !important; box-shadow: none !import
   background: var(--w-surface) !important;
   border: 1px solid var(--w-hairline) !important;
 }
-/* 旧的冷灰内联底色 → 暖灰 surface */
+/* 旧的冷灰内联底色（筛选条/工具栏）→ 直接铺在画布上 */
 [style*="background:#f8fafc"], [style*="background: #f8fafc"],
 [style*="background:#f1f5f9"], [style*="background: #f1f5f9"] {
+  background: transparent !important;
+}
+/* 但弹窗内部的这类色块保留浅染（白底弹窗里需要层次） */
+[data-modal-display] [style*="background:#f8fafc"],
+[data-modal-display] [style*="background: #f8fafc"],
+[data-modal-display] [style*="background:#f1f5f9"],
+[data-modal-display] [style*="background: #f1f5f9"] {
   background: var(--w-surface) !important;
 }
 [style*="border:1px solid #e2e8f0"], [style*="border: 1px solid #e2e8f0"] {
