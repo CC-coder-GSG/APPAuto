@@ -1,0 +1,624 @@
+/* ============================================================
+   织流 Weaveflow — 最终主题层
+   加载顺序：style.css → main.css → weave.css（本文件必须最后）
+   设计语言：画布分层（替代边框卡片）/ 章节排版 / 行式条目 /
+            对象卡片（任务卡·构建记录·设备）/ 极光 accent / 弹簧动效
+   ============================================================ */
+
+/* ── 0. Tokens ─────────────────────────────────────────── */
+:root {
+  /* 画布三级深度（暖灰） */
+  --w-canvas:  #f4f3f1;
+  --w-surface: #fbfaf8;
+  --w-raised:  #ffffff;
+  --w-hairline: rgba(28, 25, 23, 0.09);
+  --w-hairline-strong: rgba(28, 25, 23, 0.16);
+
+  /* 墨色文字 */
+  --w-ink:       #1c1917;
+  --w-ink-soft:  #57534e;
+  --w-ink-faint: #a8a29e;
+
+  /* 极光 accent */
+  --w-aurora: linear-gradient(120deg, #5b8cff, #8b5cf6 35%, #d946a0 70%, #f59e0b);
+  --w-accent:      #6d6cf5;
+  --w-accent-soft: rgba(109, 108, 245, 0.09);
+
+  /* 非线性缓动 */
+  --w-spring: linear(0, 0.009, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%,
+      0.938 16.7%, 1.017, 1.077 20.4%, 1.121, 1.149 24.3%, 1.159,
+      1.163 27%, 1.154, 1.129 32.8%, 1.051 39.6%, 1.017 43.1%,
+      0.991, 0.977 51%, 0.974 53.8%, 0.975 57.1%, 0.997 69.8%, 1);
+  --w-swift: cubic-bezier(0.22, 1, 0.36, 1);
+  --w-pop:   cubic-bezier(0.34, 1.56, 0.64, 1);
+  --w-exit:  cubic-bezier(0.4, 0, 0.8, 0.4);
+  --w-fast: 180ms;
+  --w-base: 320ms;
+  --w-slow: 560ms;
+
+  /* 旧 token 重映射（让存量组件自动跟随） */
+  --primary: var(--w-accent);
+  --primary-hover: #5a59e0;
+  --primary-light: var(--w-accent-soft);
+  --primary-ring: rgba(109, 108, 245, 0.22);
+  --bg-color: var(--w-canvas);
+  --bg-muted: var(--w-surface);
+  --card-bg: var(--w-raised);
+  --text-main: var(--w-ink);
+  --text-regular: #292524;
+  --text-muted: var(--w-ink-soft);
+  --text-faint: var(--w-ink-faint);
+  --border-light: var(--w-hairline);
+  --border-mid: var(--w-hairline-strong);
+}
+@supports not (animation-timing-function: linear(0, 1)) {
+  :root { --w-spring: cubic-bezier(0.34, 1.4, 0.44, 1); }
+}
+@property --w-ang {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+/* ── 1. 画布与排印 ─────────────────────────────────────── */
+body {
+  background: var(--w-canvas) !important;
+  color: var(--w-ink) !important;
+}
+h1, h2, h3 { color: var(--w-ink) !important; }
+a, .qa-ext-link { color: var(--w-accent); }
+a:hover, .qa-ext-link:hover { color: #5a59e0; }
+.muted { color: var(--w-ink-soft) !important; }
+label { color: var(--w-ink-soft) !important; }
+
+[style*="background: #fbfbfd"], [style*="background:#fbfbfd"] {
+  background: var(--w-surface) !important;
+}
+
+/* ── 2. 左侧导航 rail（≥901px） ────────────────────────── */
+@media (min-width: 901px) {
+  body { padding-left: 232px !important; }
+
+  #tabs {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 212px !important;
+    z-index: 1200 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 2px !important;
+    margin: 0 !important;
+    padding: 16px 12px 14px !important;
+    background: transparent !important;
+    border: none !important;
+    border-right: 1px solid var(--w-hairline) !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
+
+  /* rail 顶部品牌字：用伪元素生成，避免改动 index.html 结构 */
+  #tabs::before {
+    content: "OMNIQA · 测试平台";
+    display: block;
+    flex-shrink: 0;
+    padding: 4px 12px 16px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    color: var(--w-ink-faint);
+    background: var(--w-aurora);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    white-space: nowrap;
+  }
+
+  #tabs button {
+    position: relative !important;
+    z-index: 1 !important;
+    width: 100% !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
+    border-radius: 10px !important;
+    padding: 9px 12px !important;
+    font-size: 13.5px !important;
+    min-height: 38px;
+    background: transparent !important;
+    color: var(--w-ink-soft) !important;
+    border: none !important;
+    box-shadow: none !important;
+    transition: color var(--w-fast) ease-out, transform var(--w-fast) var(--w-swift) !important;
+  }
+  #tabs button:hover {
+    color: var(--w-ink) !important;
+    transform: translateX(2px);
+  }
+  #tabs button.active-tab {
+    background: transparent !important;
+    color: var(--w-ink) !important;
+    transform: none !important;
+  }
+  #tabs button.active-tab:hover { background: transparent !important; }
+
+  /* 实时连接徽标固定在 rail 底部 */
+  #tabs .sse-conn-badge {
+    margin-top: auto !important;
+    align-self: stretch !important;
+    justify-content: center !important;
+  }
+}
+
+/* 流体指示器（weave-motion.js 注入并驱动 transform） */
+#weaveRailIndicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--w-raised);
+  box-shadow: 0 1px 4px rgba(28, 25, 23, 0.08);
+  transition: transform var(--w-slow) var(--w-spring),
+              width var(--w-base) var(--w-swift),
+              height var(--w-base) var(--w-swift),
+              opacity var(--w-fast) ease-out;
+  pointer-events: none;
+  z-index: 0;
+}
+#weaveRailIndicator::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--w-aurora);
+}
+@media (max-width: 900px) {
+  /* 窄屏退回顶部横滑条 */
+  #weaveRailIndicator { box-shadow: none; background: var(--w-raised); }
+  #tabs { background: var(--w-surface) !important; border: 1px solid var(--w-hairline) !important; }
+  #tabs button { position: relative; z-index: 1; }
+  #tabs button.active-tab { background: transparent !important; color: var(--w-ink) !important; }
+}
+
+/* ── 3. 顶栏（去卡片化） ───────────────────────────────── */
+.app-header {
+  background: color-mix(in srgb, var(--w-canvas) 82%, transparent) !important;
+  backdrop-filter: saturate(160%) blur(14px) !important;
+  border: none !important;
+  border-bottom: 1px solid var(--w-hairline) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  top: 0 !important;
+  padding: 12px 4px !important;
+}
+.app-header-brand-text h1 { color: var(--w-ink) !important; }
+.app-header-brand-text span { color: var(--w-ink-faint) !important; }
+.header-software-pill,
+.header-user-pill {
+  background: var(--w-surface) !important;
+  border: 1px solid var(--w-hairline) !important;
+}
+.header-user-avatar { background: var(--w-aurora) !important; }
+.header-action-group button {
+  border-radius: 999px !important;
+  color: var(--w-ink-soft) !important;
+  border: 1px solid var(--w-hairline-strong) !important;
+  background: transparent !important;
+}
+.header-action-group button:hover {
+  color: var(--w-ink) !important;
+  border-color: var(--w-ink-faint) !important;
+  background: var(--w-surface) !important;
+}
+.header-action-group button.danger-btn {
+  color: #b4232a !important;
+  border-color: rgba(217, 44, 44, 0.35) !important;
+}
+
+/* ── 4. 章节化：section 不再是卡片 ─────────────────────── */
+section.card {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 8px 2px 24px !important;
+  margin-bottom: 8px !important;
+}
+section.card > h2 {
+  display: flex !important;
+  align-items: baseline !important;
+  gap: 14px !important;
+  font-size: 26px !important;
+  font-weight: 750 !important;
+  letter-spacing: -0.02em !important;
+  color: var(--w-ink) !important;
+  border-bottom: none !important;
+  padding-bottom: 0 !important;
+  margin-bottom: 10px !important;
+  position: relative;
+}
+/* 渐隐章节线 */
+section.card > h2::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -10px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--w-hairline-strong), transparent 85%);
+}
+section.card > h2 { margin-bottom: 30px !important; }
+
+/* 章节编号（weave-motion.js 注入） */
+.chapter-no {
+  font-size: 13px;
+  font-weight: 800;
+  font-feature-settings: "tnum";
+  letter-spacing: 0.06em;
+  background: var(--w-aurora);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  flex-shrink: 0;
+  margin-right: 12px;
+  vertical-align: 4px;
+}
+
+/* 章节内的次级面板：降为 surface 色块，不再白卡描边 */
+.qa-panel, .qa-panel-soft,
+.zentao-sync-shell-modern,
+.zentao-major-context {
+  background: var(--w-surface) !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 14px !important;
+}
+section.card .card,
+section.card details {
+  border-color: var(--w-hairline) !important;
+}
+
+/* ── 5. 按钮：墨色弹簧 ───────────────────────────────────
+   style.css 尾部的 Apple 覆盖段全部带 !important，
+   这里必须同级 !important 才能（凭加载顺序）胜出 */
+button {
+  border-radius: 999px !important;
+  background: var(--w-ink) !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.1px !important;
+  transition: transform var(--w-base) var(--w-spring),
+              box-shadow var(--w-base) var(--w-swift),
+              background var(--w-fast) ease-out,
+              border-color var(--w-fast) ease-out,
+              color var(--w-fast) ease-out !important;
+}
+button:hover {
+  background: #33302c !important;
+  box-shadow: 0 4px 18px rgba(139, 92, 246, 0.3) !important;
+  transform: translateY(-1px) !important;
+}
+button:active {
+  transform: scale(0.96) !important;
+  transition-duration: 80ms !important;
+  box-shadow: none !important;
+}
+button.secondary {
+  background: var(--w-raised) !important;
+  color: var(--w-ink) !important;
+  border: 1px solid var(--w-hairline-strong) !important;
+  box-shadow: none !important;
+}
+button.secondary:hover {
+  background: var(--w-raised) !important;
+  color: var(--w-ink) !important;
+  border-color: var(--w-ink-faint) !important;
+  box-shadow: 0 2px 10px rgba(28, 25, 23, 0.08) !important;
+}
+button.danger { background: #b4232a !important; }
+button.danger:hover { background: #962129 !important; box-shadow: 0 4px 14px rgba(180, 35, 42, 0.25) !important; }
+button:disabled { opacity: 0.4; transform: none !important; }
+/* 表格/卡片里的小操作按钮保持药丸形 */
+#tab-mine button, #tab-retest button, #tab-feedback button,
+#tab-field-test button, #tab-zentao-sync button, #tab-overall-test button {
+  border-radius: 999px !important;
+}
+
+/* ── 6. 输入控件 ──────────────────────────────────────── */
+input, select, textarea, .prefix-input {
+  background: var(--w-raised) !important;
+  border-color: var(--w-hairline-strong) !important;
+  border-radius: 10px !important;
+  color: var(--w-ink) !important;
+}
+input:focus, select:focus, textarea:focus, .prefix-input:focus-within {
+  border-color: var(--w-accent) !important;
+  box-shadow: 0 0 0 3px var(--primary-ring) !important;
+}
+button:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible,
+.prefix-input:focus-within {
+  outline: 2px solid var(--w-accent) !important;
+}
+.prefix-input span {
+  background: var(--w-surface) !important;
+  color: var(--w-ink-soft) !important;
+}
+input[type="checkbox"], input[type="radio"] { accent-color: var(--w-accent); }
+
+/* ── 7. 表格：毛细线行式 ───────────────────────────────── */
+table, .qa-table, .qa-table-feedback, .qa-table-zentao-sync, .qa-table-field-test {
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+th {
+  background: transparent !important;
+  color: var(--w-ink-faint) !important;
+  border-bottom: 1px solid var(--w-hairline-strong) !important;
+  font-size: 11.5px !important;
+  font-weight: 700 !important;
+}
+td {
+  color: var(--w-ink) !important;
+  border-bottom: 1px solid var(--w-hairline) !important;
+}
+tbody tr { transition: background var(--w-fast) ease-out, box-shadow var(--w-fast) ease-out; }
+tbody tr:hover td { background: var(--w-surface) !important; }
+/* hover accent beam（首列内侧细条） */
+tbody tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--w-accent); }
+thead tr:hover th { background: transparent !important; box-shadow: none !important; }
+
+/* ── 8. 指标：大数字（去卡片） ─────────────────────────── */
+.metric-card {
+  background: transparent !important;
+  border: none !important;
+  border-left: 1px solid var(--w-hairline) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 4px 16px !important;
+}
+.metric-title {
+  color: var(--w-ink-soft) !important;
+  font-size: 12px !important;
+  font-weight: 650 !important;
+}
+.metric-value {
+  font-size: 38px !important;
+  font-weight: 640 !important;
+  letter-spacing: -0.03em !important;
+  line-height: 1.12 !important;
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
+}
+
+/* 图表容器：白色 surface + 毛细线（图表需要稳定底色） */
+.chart-box {
+  background: var(--w-raised) !important;
+  border: 1px solid var(--w-hairline) !important;
+  border-radius: 14px !important;
+  box-shadow: none !important;
+}
+
+/* ── 9. 对象卡片：任务卡 / 构建记录 / 设备 ─────────────── */
+/* 任务看板列容器铺在画布上 */
+#taskBoardColumns > div {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 2px !important;
+}
+/* 看板顶部统计条：彩色小卡 → 平铺指标 */
+#taskBoardSummary > div {
+  background: transparent !important;
+  border: none !important;
+  border-left: 1px solid var(--w-hairline) !important;
+  border-radius: 0 !important;
+  padding: 4px 16px !important;
+}
+[data-task-card] {
+  background: var(--w-raised) !important;
+  border: 1px solid var(--w-hairline) !important;
+  border-radius: 14px !important;
+  box-shadow: none !important;
+  cursor: grab !important;
+  position: relative;
+  transition: transform var(--w-slow) var(--w-spring),
+              box-shadow var(--w-base) var(--w-swift),
+              border-color var(--w-fast) ease-out;
+}
+[data-task-card]:hover {
+  transform: translateY(-3px) scale(1.01);
+  box-shadow: 0 12px 28px rgba(28, 25, 23, 0.1) !important;
+  border-color: transparent !important;
+}
+[data-task-card]:active { cursor: grabbing !important; transform: scale(0.99); transition-duration: 80ms; }
+
+.build-record-card,
+#tab-terminal section.card .card,
+#tab-terminal .card {
+  background: var(--w-raised) !important;
+  border: 1px solid var(--w-hairline) !important;
+  border-radius: 14px !important;
+  box-shadow: none !important;
+  transition: transform var(--w-slow) var(--w-spring),
+              box-shadow var(--w-base) var(--w-swift),
+              border-color var(--w-fast) ease-out !important;
+}
+.build-record-card:hover {
+  transform: translateY(-3px) scale(1.005) !important;
+  box-shadow: 0 12px 28px rgba(28, 25, 23, 0.1) !important;
+  border-color: transparent !important;
+}
+
+/* 对象卡片 hover 左沿极光 beam */
+[data-task-card]::before,
+.build-record-card::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 24%;
+  bottom: 24%;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--w-aurora);
+  opacity: 0;
+  transform: scaleY(0.4);
+  transition: opacity var(--w-fast) ease-out, transform var(--w-base) var(--w-pop);
+  pointer-events: none;
+}
+[data-task-card]:hover::before,
+.build-record-card:hover::before { opacity: 1; transform: scaleY(1); }
+.build-record-card { position: relative; }
+
+/* ── 10. 行式条目：工作台/复测的需求卡降级为行 ─────────── */
+#tab-mine details.mine-req-card,
+#tab-retest details.retest-req-card,
+.activity-feed-item {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid var(--w-hairline) !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+  position: relative;
+  transition: transform var(--w-base) var(--w-swift), background var(--w-base) var(--w-swift) !important;
+}
+#tab-mine details.mine-req-card:hover,
+#tab-retest details.retest-req-card:hover,
+.activity-feed-item:hover {
+  background: var(--w-surface) !important;
+  transform: translateX(4px);
+}
+#tab-mine details.mine-req-card::before,
+#tab-retest details.retest-req-card::before,
+.activity-feed-item::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 22%;
+  bottom: 22%;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--w-aurora);
+  opacity: 0;
+  transform: scaleY(0.4);
+  transition: opacity var(--w-fast) ease-out, transform var(--w-base) var(--w-pop);
+  pointer-events: none;
+}
+#tab-mine details.mine-req-card:hover::before,
+#tab-retest details.retest-req-card:hover::before,
+.activity-feed-item:hover::before { opacity: 1; transform: scaleY(1); }
+/* 展开态的需求卡恢复 surface 底，便于聚焦 */
+#tab-mine details.mine-req-card[open],
+#tab-retest details.retest-req-card[open] {
+  background: var(--w-surface) !important;
+  transform: none;
+}
+
+/* ── 11. 模态：弹簧弹出（@starting-style 渐进增强） ────── */
+[data-modal-display] > div,
+.ft-modal-card {
+  border-radius: 18px !important;
+  border: none !important;
+  box-shadow: 0 24px 64px rgba(28, 25, 23, 0.22) !important;
+  transition: transform var(--w-slow) var(--w-spring), opacity var(--w-fast) ease-out;
+}
+@starting-style {
+  [data-modal-display] > div,
+  .ft-modal-mask:not(.hidden) .ft-modal-card {
+    transform: scale(0.92) translateY(10px);
+    opacity: 0;
+  }
+}
+.ft-modal-mask, [data-modal-display] {
+  background: rgba(28, 25, 23, 0.32) !important;
+  backdrop-filter: blur(2px);
+}
+
+/* ── 12. 杂项统一 ─────────────────────────────────────── */
+.timeline-dot {
+  background: var(--w-accent) !important;
+  box-shadow: 0 0 0 3px var(--w-accent-soft) !important;
+}
+.timeline-content { border-left-color: var(--w-hairline-strong); }
+.sse-inline-notice {
+  background: var(--w-accent-soft) !important;
+  border: 1px solid rgba(109, 108, 245, 0.3) !important;
+  color: var(--w-accent) !important;
+  border-radius: 10px !important;
+}
+.workbench-subnav button {
+  background: transparent !important;
+  border: 1px solid var(--w-hairline-strong) !important;
+  color: var(--w-ink-soft) !important;
+  border-radius: 999px !important;
+}
+.workbench-subnav button:hover { color: var(--w-ink) !important; transform: none; box-shadow: none; }
+.workbench-subnav button.active {
+  background: var(--w-ink) !important;
+  border-color: var(--w-ink) !important;
+  color: #fff !important;
+}
+#tabs .sse-conn-badge {
+  border-radius: 999px !important;
+  border-color: var(--w-hairline) !important;
+  background: var(--w-surface) !important;
+  color: var(--w-ink-soft) !important;
+}
+.zentao-sync-sticky-panel, .zentao-info-card {
+  background: var(--w-surface) !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 14px !important;
+}
+.zentao-info-card { background: var(--w-raised) !important; border: 1px solid var(--w-hairline) !important; }
+#healthPanel { border-left: 2px solid var(--w-accent) !important; }
+.free-bug-box {
+  background: var(--w-surface) !important;
+  border: 1px solid var(--w-hairline) !important;
+}
+/* 旧的冷灰内联底色 → 暖灰 surface */
+[style*="background:#f8fafc"], [style*="background: #f8fafc"],
+[style*="background:#f1f5f9"], [style*="background: #f1f5f9"] {
+  background: var(--w-surface) !important;
+}
+[style*="border:1px solid #e2e8f0"], [style*="border: 1px solid #e2e8f0"] {
+  border-color: var(--w-hairline) !important;
+}
+
+/* ── 13. 入场编排 ─────────────────────────────────────── */
+.weave-enter {
+  animation: weaveFloatIn var(--w-slow) var(--w-spring) backwards;
+  animation-delay: calc(var(--wi, 0) * 42ms);
+}
+@keyframes weaveFloatIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── 14. SSE 极光统一（沿用现有 glow 机制，仅调色） ────── */
+.sse-glow-wrap::before,
+tr.sse-glow-enter td:first-child {
+  /* 渐变采样自 --w-aurora，保持品牌一致 */
+  --sse-c1: #5b8cff;
+  --sse-c2: #8b5cf6;
+  --sse-c3: #d946a0;
+  --sse-c4: #f59e0b;
+}
+
+/* ── 15. 降级与无障碍 ─────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .weave-enter { animation: none !important; }
+  #weaveRailIndicator { transition: none !important; }
+  button, [data-task-card], .build-record-card,
+  #tab-mine details.mine-req-card, #tab-retest details.retest-req-card {
+    transition-duration: 0.01ms !important;
+  }
+}
