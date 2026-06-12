@@ -650,6 +650,176 @@ tr.sse-glow-enter td:first-child {
   --sse-c4: #f59e0b;
 }
 
+/* ============================================================
+   R2 修复轮（2026-06-12 用户反馈）：
+   - 消灭刺眼纯白：raised 改暖白、输入控件改"凹陷"暖色
+   - 焦点/悬停流光边缘（conic 渐变边框 + 旋转动画）
+   - 对象卡片统一 hover 轻浮动效
+   - 弹窗暖化 + 打开时锁定背景滚动
+   ============================================================ */
+:root {
+  --w-raised: #faf9f7;            /* 卡片/弹窗：暖白 */
+  --w-well: #edebe7;              /* 输入控件：比画布略深的凹陷色 */
+  --w-glow-ring: rgba(139, 92, 246, 0.16);
+  --w-aurora-conic: conic-gradient(from var(--w-ang),
+      #5b8cff, #8b5cf6, #d946a0, #f59e0b, #5b8cff);
+}
+@keyframes weaveAngSpin { to { --w-ang: 360deg; } }
+
+/* ── R2.1 输入控件：凹陷暖色 + 焦点流光边缘 ── */
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+select, textarea {
+  background: var(--w-well) !important;
+  border: 1px solid rgba(28, 25, 23, 0.12) !important;
+  border-radius: 10px !important;
+}
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
+select:focus, textarea:focus {
+  border-color: transparent !important;
+  background: linear-gradient(var(--w-well), var(--w-well)) padding-box,
+              var(--w-aurora-conic) border-box !important;
+  animation: weaveAngSpin 2.4s linear infinite;
+  box-shadow: 0 0 0 3px var(--w-glow-ring) !important;
+  outline: none !important;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: none !important;
+}
+/* prefix-input：外壳一体化（修复中缝横线 + 内部圆角），焦点流光 */
+.prefix-input {
+  background: var(--w-well) !important;
+  border: 1px solid rgba(28, 25, 23, 0.12) !important;
+  border-radius: 10px !important;
+}
+.prefix-input span {
+  background: transparent !important;
+  border-right: none !important;
+}
+.prefix-input input,
+.prefix-input input:focus {
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  animation: none !important;
+  outline: none !important;
+}
+.prefix-input:focus-within {
+  border-color: transparent !important;
+  background: linear-gradient(var(--w-well), var(--w-well)) padding-box,
+              var(--w-aurora-conic) border-box !important;
+  animation: weaveAngSpin 2.4s linear infinite;
+  box-shadow: 0 0 0 3px var(--w-glow-ring) !important;
+  outline: none !important;
+}
+
+/* header 药丸里的软件切换下拉保持隐形 */
+.header-software-pill select {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+
+/* ── R2.2 对象卡片统一：暖白底 + hover 轻浮 + 流光描边 ── */
+[data-task-card],
+.build-record-card,
+#terminalGrid .card,
+#tab-cad-test .card,
+#jenkinsDetailArea > div[style*="border"],
+#dataUsers > .card,
+#tab-mine details.mine-req-card,
+#tab-retest details.retest-req-card {
+  background: var(--w-raised) !important;
+  border: 1px solid var(--w-hairline) !important;
+  border-radius: 14px !important;
+  box-shadow: none !important;
+  padding: 14px 16px !important;
+  transition: transform var(--w-slow) var(--w-spring),
+              box-shadow var(--w-base) var(--w-swift),
+              background var(--w-fast) ease-out !important;
+}
+#tab-mine details.mine-req-card,
+#tab-retest details.retest-req-card {
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--w-hairline) !important;
+}
+[data-task-card]:hover,
+.build-record-card:hover,
+#terminalGrid .card:hover,
+#tab-cad-test .card:hover,
+#jenkinsDetailArea > div[style*="border"]:hover,
+#dataUsers > .card:hover,
+#tab-mine details.mine-req-card:hover,
+#tab-retest details.retest-req-card:hover {
+  transform: translateY(-3px) scale(1.005) !important;
+  border-color: transparent !important;
+  background: linear-gradient(var(--w-raised), var(--w-raised)) padding-box,
+              var(--w-aurora-conic) border-box !important;
+  animation: weaveAngSpin 3s linear infinite;
+  box-shadow: 0 12px 28px rgba(28, 25, 23, 0.1) !important;
+}
+/* CAD 异常卡保留暖化红底信号 */
+#tab-cad-test .card[style*="background:#fef2f2"] {
+  background: #f7ebe8 !important;
+  border-color: rgba(220, 38, 38, 0.25) !important;
+}
+#tab-cad-test .card[style*="background:#fef2f2"]:hover {
+  background: linear-gradient(#f7ebe8, #f7ebe8) padding-box,
+              var(--w-aurora-conic) border-box !important;
+}
+
+/* ── R2.3 表格行 hover：极光渐变 beam（替换纯色，统一 Jenkins） ── */
+tbody tr:hover td:first-child {
+  box-shadow: none !important;
+  background-image: linear-gradient(180deg, #5b8cff, #8b5cf6, #d946a0) !important;
+  background-size: 3px 62% !important;
+  background-position: 0 50% !important;
+  background-repeat: no-repeat !important;
+}
+/* Jenkins job 列表/详情内联白底压暖 */
+#jenkinsJobsArea table { background: transparent !important; border-color: var(--w-hairline) !important; }
+#jenkinsJobsArea thead tr { background: transparent !important; }
+#jenkinsDetailArea table { background: transparent !important; border-color: var(--w-hairline) !important; }
+
+/* 反馈筛选区：刷新按钮跟随关键字行，不独占整行 */
+#tab-feedback .qa-filter-grid-feedback .qa-filter-actions {
+  grid-column: auto;
+  margin-top: 0;
+  align-self: end;
+  justify-content: flex-start;
+}
+
+/* ── R2.4 列表条目兜底：外业测试 / 反馈表格不允许白底 ── */
+#tab-field-test .qa-table-field-test,
+#tab-field-test .qa-table-field-test td,
+#tab-field-test .field-test-row-card td,
+#tab-feedback .qa-table-feedback td {
+  background: transparent !important;
+}
+
+/* ── R2.5 图表盒暖化（报表中心） ── */
+.chart-box { background: var(--w-raised) !important; }
+
+/* ── R2.6 弹窗：暖白面板 + 背景滚动锁 ── */
+[data-modal-display] > div,
+.ft-modal-card,
+div[style*="position: fixed"][style*="inset: 0"] > div,
+div[style*="position:fixed"][style*="inset:0"] > div {
+  background: var(--w-raised) !important;
+}
+div[style*="position: fixed"][style*="inset: 24px"],
+div[style*="position:fixed"][style*="inset:24px"] {
+  background: var(--w-raised) !important;
+}
+/* 弹窗打开时锁定页面滚动（覆盖三类弹窗实现） */
+body:has([data-modal-display]:not(.hidden)),
+body:has(.ft-modal-mask:not(.hidden)),
+body:has(div[style*="position: fixed"][style*="inset: 0"]:not(.hidden):not([style*="display: none"])),
+body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*="display: none"]):not([style*="display:none"])) {
+  overflow: hidden !important;
+}
+
 /* ── 15. 降级与无障碍 ─────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .weave-enter { animation: none !important; }

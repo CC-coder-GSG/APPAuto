@@ -18,7 +18,7 @@
     assign: "tabAssignBtn", mine: "tabMineBtn", "task-board": "tabTaskBoardBtn",
     feedback: "tabFeedbackBtn", "field-test": "tabFieldTestBtn",
     "build-records": "tabBuildRecordsBtn", "testcase-center": "tabTestcaseCenterBtn",
-    "zentao-sync": "tabZentaoSyncBtn", report: "tabReportBtn", activity: "tabActivityBtn",
+    report: "tabReportBtn", activity: "tabActivityBtn",
     data: "tabDataBtn", dispatch: "tabDispatchBtn", "zentao-ai": "tabZentaoAiBtn",
     jenkins: "tabJenkinsBtn", "cad-test": "tabCadTestBtn", terminal: "tabTerminalBtn",
   };

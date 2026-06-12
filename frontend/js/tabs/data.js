@@ -11,7 +11,6 @@ const TAB_PERMISSION_OPTIONS = [
   { key: 'field-test', label: '外业测试' },
   { key: 'build-records', label: '构建记录' },
   { key: 'testcase-center', label: '用例中心' },
-  { key: 'zentao-sync', label: '禅道同步中心' },
   { key: 'report', label: '报表中心' },
   { key: 'activity', label: '活动中心' },
   { key: 'data', label: '数据管理台' },

@@ -35,12 +35,7 @@ class Settings(BaseSettings):
     jenkins_default_base_url: str = Field(default_factory=lambda: os.getenv('APP_JENKINS_BASE_URL', os.getenv('JENKINS_BASE_URL', 'http://192.168.2.229:8080')))
     jenkins_default_view: str = Field(default_factory=lambda: os.getenv('APP_JENKINS_DEFAULT_VIEW', os.getenv('JENKINS_DEFAULT_VIEW', '自动化测试')))
 
-    # Zentao browser sync integration
-    zentao_sync_enabled: bool = Field(default_factory=lambda: os.getenv('APP_ZENTAO_SYNC_ENABLED', os.getenv('ZENTAO_SYNC_ENABLED', 'true')).lower() == 'true')
-    zentao_sync_api_key: str = Field(default_factory=lambda: os.getenv('APP_ZENTAO_SYNC_API_KEY', os.getenv('ZENTAO_SYNC_API_KEY', '')))
-    zentao_sync_auto_map_testcase: bool = Field(default_factory=lambda: os.getenv('APP_ZENTAO_SYNC_AUTO_MAP_TESTCASE', os.getenv('ZENTAO_SYNC_AUTO_MAP_TESTCASE', 'true')).lower() == 'true')
-    zentao_sync_auto_apply_testcase: bool = Field(default_factory=lambda: os.getenv('APP_ZENTAO_SYNC_AUTO_APPLY_TESTCASE', os.getenv('ZENTAO_SYNC_AUTO_APPLY_TESTCASE', 'true')).lower() == 'true')
-    zentao_sync_auto_apply_bug: bool = Field(default_factory=lambda: os.getenv('APP_ZENTAO_SYNC_AUTO_APPLY_BUG', os.getenv('ZENTAO_SYNC_AUTO_APPLY_BUG', 'true')).lower() == 'true')
+    # Zentao background sync (workbench bug mirror reconciliation)
     zentao_background_sync_enabled: bool = Field(default_factory=lambda: os.getenv('APP_ZENTAO_BACKGROUND_SYNC_ENABLED', os.getenv('ZENTAO_BACKGROUND_SYNC_ENABLED', 'true')).lower() == 'true')
     zentao_background_sync_username: str = Field(default_factory=lambda: os.getenv('APP_ZENTAO_BACKGROUND_SYNC_USERNAME', os.getenv('ZENTAO_BACKGROUND_SYNC_USERNAME', '')).strip())
     zentao_workbench_recent_sync_interval_minutes: int = Field(default_factory=lambda: int(os.getenv('APP_ZENTAO_WORKBENCH_RECENT_SYNC_INTERVAL_MINUTES', os.getenv('ZENTAO_WORKBENCH_RECENT_SYNC_INTERVAL_MINUTES', '10'))))

@@ -1,14 +1,14 @@
-﻿<!doctype html>
+<!doctype html>
 <html>
 <head>
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20260612-6">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20260612-7">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
-  <script type="module" src="/static/js/app.js?v=20260608-5"></script>
+  <script type="module" src="/static/js/app.js?v=20260612-1"></script>
   <script src="/static/js/weave-motion.js?v=20260612-3" defer></script>
   <style>
     /* Header layout */
@@ -199,7 +199,6 @@
     <button id="tabFieldTestBtn" onclick="showTab('field-test')">外业测试</button>
     <button id="tabBuildRecordsBtn" class="hidden" onclick="showTab('build-records')">构建记录</button>
     <button id="tabTestcaseCenterBtn" class="hidden" onclick="showTab('testcase-center')">用例中心</button>
-    <button id="tabZentaoSyncBtn" class="hidden" onclick="showTab('zentao-sync')">禅道同步中心<span id="tabZentaoSyncBadge" class="nav-badge hidden"></span></button>
     <button id="tabReportBtn" onclick="showTab('report')">报表中心</button>
     <button id="tabActivityBtn" class="hidden" onclick="showTab('activity')">活动中心</button>
     <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
@@ -512,36 +511,59 @@
 
   <section id="tab-feedback" class="hidden card">
     <h2>反馈记录与处理</h2>
-    <div class="row" style="margin-bottom: 12px; flex-wrap: wrap;">
-      <label>大版本</label><select id="feedbackMajorSelect" onchange="loadFeedbackMinorOptions(); loadFeedbackBoard();"></select>
-      <label>小版本</label><select id="feedbackMinorSelect" onchange="loadFeedbackBoard()"></select>
-      <label>状态</label>
-      <select id="feedbackStatusSelect" onchange="loadFeedbackBoard()">
-        <option value="">全部</option>
-        <option value="pending">待处理</option>
-        <option value="processing">处理中</option>
-        <option value="resolved">已处理</option>
-        <option value="closed">已关闭</option>
-      </select>
-      <label>指派人</label><select id="feedbackAssigneeSelect" onchange="loadFeedbackBoard()"><option value="">全部</option></select>
-      <label>排序</label>
-      <select id="feedbackSortBy" onchange="loadFeedbackBoard(1)">
-        <option value="created_at">创建时间</option>
-        <option value="updated_at">更新时间</option>
-        <option value="status">状态</option>
-      </select>
-      <select id="feedbackSortOrder" onchange="loadFeedbackBoard(1)">
-        <option value="desc">倒序</option>
-        <option value="asc">正序</option>
-      </select>
-      <label>每页</label>
-      <select id="feedbackPageSize" onchange="loadFeedbackBoard(1)">
-        <option value="10">10</option>
-        <option value="20">20</option>
-        <option value="50">50</option>
-      </select>
-      <div class="prefix-input"><span>🔍</span><input id="feedbackKeyword" placeholder="按反馈编号/概览搜索"></div>
-      <button onclick="loadFeedbackBoard(1)">刷新列表</button>
+    <div class="qa-filter-grid qa-filter-grid-feedback" style="margin-bottom: 14px;">
+      <div class="qa-filter-item">
+        <label>大版本</label>
+        <select id="feedbackMajorSelect" onchange="loadFeedbackMinorOptions(); loadFeedbackBoard();"></select>
+      </div>
+      <div class="qa-filter-item">
+        <label>小版本</label>
+        <select id="feedbackMinorSelect" onchange="loadFeedbackBoard()"></select>
+      </div>
+      <div class="qa-filter-item">
+        <label>状态</label>
+        <select id="feedbackStatusSelect" onchange="loadFeedbackBoard()">
+          <option value="">全部</option>
+          <option value="pending">待处理</option>
+          <option value="processing">处理中</option>
+          <option value="resolved">已处理</option>
+          <option value="closed">已关闭</option>
+        </select>
+      </div>
+      <div class="qa-filter-item">
+        <label>指派人</label>
+        <select id="feedbackAssigneeSelect" onchange="loadFeedbackBoard()"><option value="">全部</option></select>
+      </div>
+      <div class="qa-filter-item">
+        <label>排序</label>
+        <select id="feedbackSortBy" onchange="loadFeedbackBoard(1)">
+          <option value="created_at">创建时间</option>
+          <option value="updated_at">更新时间</option>
+          <option value="status">状态</option>
+        </select>
+      </div>
+      <div class="qa-filter-item">
+        <label>顺序</label>
+        <select id="feedbackSortOrder" onchange="loadFeedbackBoard(1)">
+          <option value="desc">倒序</option>
+          <option value="asc">正序</option>
+        </select>
+      </div>
+      <div class="qa-filter-item">
+        <label>每页</label>
+        <select id="feedbackPageSize" onchange="loadFeedbackBoard(1)">
+          <option value="10">10</option>
+          <option value="20">20</option>
+          <option value="50">50</option>
+        </select>
+      </div>
+      <div class="qa-filter-item qa-filter-item-search">
+        <label>关键字</label>
+        <div class="prefix-input"><span>🔍</span><input id="feedbackKeyword" placeholder="按反馈编号/概览搜索"></div>
+      </div>
+      <div class="qa-filter-actions">
+        <button onclick="loadFeedbackBoard(1)">刷新列表</button>
+      </div>
     </div>
 
     <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;">
@@ -910,203 +932,6 @@
       <div id="buildRecordsMoreWrap" class="hidden" style="margin-top:14px; text-align:center;">
         <div id="buildRecordsLoadMoreMeta" class="muted" style="margin-bottom:8px;"></div>
         <button id="buildRecordsLoadMoreBtn" class="secondary" onclick="loadMoreBuildRecords()">加载更多</button>
-      </div>
-    </div>
-  </section>
-
-  <section id="tab-zentao-sync" class="hidden card">
-    <h2>禅道同步中心</h2>
-    <div class="qa-panel qa-panel-soft" style="margin-bottom:12px;">
-      <div class="qa-filter-grid qa-filter-grid-zentao">
-        <div class="qa-filter-item zt-filter-entity">
-          <label>类型</label>
-          <select id="zentaoSyncEntityType" onchange="loadZentaoSyncBoard(1)">
-            <option value="">全部</option>
-            <option value="bug">Bug</option>
-            <option value="testcase">用例</option>
-          </select>
-        </div>
-        <div class="qa-filter-item zt-filter-status">
-          <label>状态</label>
-          <select id="zentaoSyncStatus" onchange="loadZentaoSyncBoard(1)">
-            <option value="">全部</option>
-            <option value="received">已接收</option>
-            <option value="duplicate">重复事件</option>
-            <option value="auto_matched">自动匹配</option>
-            <option value="pending_mapping">待人工映射</option>
-            <option value="ready_to_apply">待应用</option>
-            <option value="applied">已应用</option>
-            <option value="ignored">已忽略</option>
-            <option value="failed">应用失败</option>
-          </select>
-        </div>
-        <div class="qa-filter-item zt-filter-product">
-          <label>产品</label>
-          <select id="zentaoSyncProductFilter" onchange="loadZentaoSyncBoard(1)">
-            <option value="">全部产品</option>
-          </select>
-        </div>
-        <div class="qa-filter-item zt-filter-bucket">
-          <label>归属范围</label>
-          <select id="zentaoSyncDisplayBucket" onchange="loadZentaoSyncBoard(1)">
-            <option value="">全部</option>
-            <option value="requirement">需求池</option>
-            <option value="overall">总览池</option>
-          </select>
-        </div>
-        <div class="qa-filter-item zt-filter-source">
-          <label>来源类型</label>
-          <select id="zentaoSyncSourceType" onchange="loadZentaoSyncBoard(1)">
-            <option value="">全部</option>
-            <option value="requirement">需求来源</option>
-            <option value="case">用例来源</option>
-            <option value="manual">人工录入</option>
-            <option value="legacy_bug">历史缺陷</option>
-            <option value="retest">复测来源</option>
-            <option value="field_test">外业测试</option>
-          </select>
-        </div>
-        <div class="qa-filter-item zt-filter-from">
-          <label>开始日期</label>
-          <input type="date" id="zentaoSyncDateFrom" onchange="loadZentaoSyncBoard(1)">
-        </div>
-        <div class="qa-filter-item zt-filter-to">
-          <label>结束日期</label>
-          <input type="date" id="zentaoSyncDateTo" onchange="loadZentaoSyncBoard(1)">
-        </div>
-        <div class="qa-filter-item qa-filter-item-check zt-filter-check">
-          <label><input type="checkbox" id="zentaoSyncOnlyUnapplied" onchange="loadZentaoSyncBoard(1)"> 仅看未应用</label>
-        </div>
-        <div class="qa-filter-item qa-filter-item-search zt-filter-keyword">
-          <label>关键字</label>
-          <div class="prefix-input"><span>🔍</span><input id="zentaoSyncKeyword" placeholder="标题/创建者/禅道编号关键字"></div>
-        </div>
-        <div class="qa-filter-actions zt-filter-actions">
-          <button onclick="loadZentaoSyncBoard(1)">刷新</button>
-          <button id="zentaoBatchApplyBtn" class="secondary" onclick="applyZentaoSyncBatch()">批量应用待应用事件</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="zentao-sync-shell zentao-sync-shell-modern">
-      <div class="zentao-sync-left">
-        <div id="zentaoSyncTopNotice" class="hidden muted sse-inline-notice" role="button" tabindex="0" style="margin-bottom:8px;" onclick="scrollZentaoSyncToTop()" onkeydown="onNoticeKeydown(event, scrollZentaoSyncToTop)">有 0 条新同步记录</div>
-        <div class="zentao-sync-table-wrap">
-        <table class="qa-table qa-table-zentao-sync">
-          <thead>
-            <tr>
-              <th>时间</th><th>类型</th><th>禅道编号</th><th class="col-text col-title">标题</th><th>创建者</th><th class="col-status">状态</th><th class="col-actions">操作</th>
-            </tr>
-          </thead>
-          <tbody id="zentaoSyncTableBody"></tbody>
-        </table>
-        </div>
-        <div class="row" style="justify-content:flex-end; align-items:center; gap:8px; margin-top:8px;">
-          <span id="zentaoSyncPageText" class="muted">第 1 / 1 页，共 0 条</span>
-          <button class="secondary" onclick="prevZentaoSyncPage()">上一页</button>
-          <button class="secondary" onclick="nextZentaoSyncPage()">下一页</button>
-        </div>
-      </div>
-      <div class="zentao-sync-right zentao-sync-sticky-panel">
-        <h3 id="zentaoSyncDetailTitle" style="margin:0; color:#0f172a;">请选择左侧事件查看详情</h3>
-        <div id="zentaoSyncDetailMeta" class="muted" style="margin-top:4px;"></div>
-
-        <div class="card zentao-info-card" style="margin-top:10px;">
-          <h4 style="margin-top:0;">禅道原始信息</h4>
-          <div id="zentaoSyncOriginInfo" class="muted">-</div>
-        </div>
-
-        <div class="card zentao-info-card" style="margin-top:10px;">
-          <h4 style="margin-top:0;">系统推荐结果</h4>
-          <div id="zentaoSyncRecommendInfo" class="muted">-</div>
-        </div>
-
-        <div class="card zentao-info-card zentao-map-card" style="margin-top:10px;">
-          <h4 style="margin-top:0;">人工确认</h4>
-          <div class="card zentao-major-context zentao-map-head" style="box-shadow:none; margin-bottom:8px;">
-            <div class="zentao-map-head-top">
-              <div class="muted zentao-map-head-item">当前大版本：<b id="zentaoMapCurrentMajorText">未识别</b></div>
-              <div class="muted zentao-map-head-item">识别来源：<span id="zentaoMapCurrentMajorSource">未识别</span></div>
-            </div>
-            <div class="zentao-map-head-actions">
-              <button class="secondary" onclick="toggleManualMajorSelector()">手动指定大版本</button>
-              <button class="secondary" onclick="resetZentaoManualMajor()">恢复自动</button>
-            </div>
-            <div id="zentaoMapManualMajorWrap" class="hidden zentao-map-manual-row">
-              <label>手动大版本</label>
-              <select id="zentaoMapManualMajorSelect" onchange="onZentaoManualMajorChange()">
-                <option value="">请选择大版本</option>
-              </select>
-            </div>
-            <div id="zentaoMapMajorHint" class="muted zentao-map-head-hint">请先从左侧选择事件；若自动识别不准确，可手动指定大版本作为筛选上下文。</div>
-          </div>
-          <div class="zentao-map-form">
-            <div class="zentao-map-grid">
-              <div class="zentao-map-field zentao-map-span-full zentao-map-product-row">
-                <label>产品/应用</label>
-                <select id="zentaoMapProductSelect" onchange="onZentaoProductChange()">
-                  <option value="">全部产品（不限制）</option>
-                </select>
-              </div>
-              <div class="zentao-map-field">
-                <label>需求</label>
-                <select id="zentaoMapRequirementSelect">
-                  <option value="">请选择需求</option>
-                </select>
-              </div>
-              <div class="zentao-map-field">
-                <label>小版本</label>
-                <select id="zentaoMapMinorSelect">
-                  <option value="">请选择小版本</option>
-                </select>
-              </div>
-              <div class="zentao-map-field">
-                <label>来源类型</label>
-                <select id="zentaoMapSourceType">
-                  <option value="manual">人工录入</option>
-                  <option value="case">用例来源</option>
-                  <option value="requirement">需求来源</option>
-                  <option value="legacy_bug">历史缺陷</option>
-                  <option value="retest">复测来源</option>
-                  <option value="field_test">外业测试</option>
-                </select>
-              </div>
-              <div class="zentao-map-field">
-                <label>归属范围</label>
-                <select id="zentaoMapDisplayBucket">
-                  <option value="">不修改</option>
-                  <option value="requirement">需求池</option>
-                  <option value="overall">总览池</option>
-                </select>
-              </div>
-              <div id="zentaoMapBucketHint" class="muted zentao-map-inline-hint zentao-map-span-full">需求池：挂到具体需求下，参与需求维度统计；总览池：仅归属到版本整体，不挂具体需求。</div>
-              <div class="zentao-map-field">
-                <label>关联用例</label>
-                <input id="zentaoMapLinkedCaseId" placeholder="请输入关联用例ID（可选）">
-              </div>
-              <div class="zentao-map-field">
-                <label>来源引用</label>
-                <input id="zentaoMapSourceRef" placeholder="请输入来源引用（可选）">
-              </div>
-              <div class="zentao-map-field zentao-map-span-full">
-                <label>备注</label>
-                <textarea id="zentaoMapNote" rows="2" placeholder="备注（可选）"></textarea>
-              </div>
-              <div id="zentaoMapAdminActions" class="zentao-map-actions zentao-map-span-full">
-                <button class="secondary" onclick="saveZentaoSyncMapping()">保存映射</button>
-                <button onclick="applyZentaoSyncEvent()">应用到业务</button>
-                <button class="secondary" style="color:#b91c1c; border-color:#fecaca; background:#fef2f2;" onclick="deleteZentaoSyncEvent()">删除</button>
-              </div>
-              <div id="zentaoMapRuleHint" class="muted zentao-map-inline-hint zentao-map-span-full">当前映射要求：请先从左侧选择一个同步事件。</div>
-              <div class="muted zentao-map-inline-hint zentao-map-span-full" id="zentaoSyncFailureReason">-</div>
-            </div>
-          </div>
-        </div>
-
-        <details class="card" style="margin-top:10px; box-shadow:none; border:1px solid #e2e8f0;">
-          <summary style="cursor:pointer;">原始 JSON</summary>
-          <pre id="zentaoSyncDetailRaw" style="white-space:pre-wrap; word-break:break-word; margin-top:10px; max-height:260px; overflow:auto;"></pre>
-        </details>
       </div>
     </div>
   </section>
@@ -2057,8 +1882,8 @@ function sourceTypeZh(v){
 }
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
-const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal'];
-const DEFAULT_ALLOWED_TABS=['mine','task-board','feedback','retest','overall-test','field-test','testcase-center','zentao-sync','report','jenkins'];
+const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal'];
+const DEFAULT_ALLOWED_TABS=['mine','task-board','feedback','retest','overall-test','field-test','testcase-center','report','jenkins'];
 const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test'];
 const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test' };
 const WORKBENCH_SUBTAB_LOADERS={
@@ -2236,7 +2061,7 @@ function applyTabVisibility(){
   const buttonMap={
     'assign':'tabAssignBtn','mine':'tabMineBtn','task-board':'tabTaskBoardBtn','feedback':'tabFeedbackBtn',
     'field-test':'tabFieldTestBtn','build-records':'tabBuildRecordsBtn','testcase-center':'tabTestcaseCenterBtn',
-    'zentao-sync':'tabZentaoSyncBtn','report':'tabReportBtn','activity':'tabActivityBtn',
+    'report':'tabReportBtn','activity':'tabActivityBtn',
     'data':'tabDataBtn','dispatch':'tabDispatchBtn','zentao-ai':'tabZentaoAiBtn','jenkins':'tabJenkinsBtn','cad-test':'tabCadTestBtn','terminal':'tabTerminalBtn'
   };
   ALL_TAB_KEYS.forEach((name)=>{
@@ -2249,7 +2074,7 @@ function applyTabVisibility(){
   }
 }
 function getDefaultVisibleTab(){
-  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal']
     .find((name)=>canAccessTab(name)) || 'mine';
 }
 function getTabNamespaceName(name){
@@ -2263,7 +2088,6 @@ function getTabNamespaceName(name){
     'field-test':'OmniQAFieldTestTab',
     'build-records':'OmniQABuildRecordsTab',
     'testcase-center':'OmniQATestcaseCenterTab',
-    'zentao-sync':'OmniQAZentaoSyncTab',
     report:'OmniQAReportTab',
     activity:'OmniQAActivityTab',
     data:'OmniQADataTab',
@@ -2280,7 +2104,7 @@ function isTabRuntimeReady(name){
   return !!window[nsName];
 }
 function getFirstRuntimeReadyTab(){
-  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal']
     .find((tabName)=>canAccessTab(tabName) && isTabRuntimeReady(tabName)) || null;
 }
 async function showTab(name){
@@ -2303,7 +2127,7 @@ async function showTab(name){
     if(!fallback || fallback===name) return;
     name = fallback;
   }
-  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal'].forEach(x=>{
+  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal'].forEach(x=>{
     const el=document.getElementById('tab-'+x);
     if(el) el.classList.add('hidden');
   });
@@ -2322,7 +2146,6 @@ async function showTab(name){
   if(name === 'field-test') { loadFieldTestBoard().catch(err=>showMessage(err.message||'加载外业测试失败','error')); }
   if(name === 'build-records') { loadBuildRecordsBoard().catch(err=>showMessage(err.message||'加载构建记录失败','error')); }
   if(name === 'testcase-center') { loadTestcaseCenter().catch(err=>showMessage(err.message||'加载用例中心失败','error')); }
-  if(name === 'zentao-sync') { initZentaoSyncBoard().catch(err=>showMessage(err.message||'加载禅道同步中心失败','error')); }
   if(name === 'activity') { loadActivityBoard().catch(err=>showMessage(err.message||'加载活动中心失败','error')); }
   if(name === 'zentao-ai') { window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.activate && window.OmniQAZentaoAiTab.activate().catch(err=>showMessage(err.message||'加载禅道AI用例生成失败','error')); }
   if(name === 'jenkins') { window.OmniQAJenkinsTab && window.OmniQAJenkinsTab.loadJenkinsTab && window.OmniQAJenkinsTab.loadJenkinsTab().catch(err=>showMessage(err.message||'加载自动化测试失败','error')); }
@@ -2465,7 +2288,7 @@ async function onSoftwareChange(){
   dataOverviewCache = null;
   await loadVersions();
   // 切换软件后，刷新当前页内容，确保旧软件数据不残留
-  const visible = ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','zentao-sync','report','activity','data','dispatch','zentao-ai'].find(x=>{
+  const visible = ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai'].find(x=>{
     const el=document.getElementById('tab-'+x);
     return el && !el.classList.contains('hidden');
   });
@@ -2477,7 +2300,6 @@ async function onSoftwareChange(){
     if(visible==='activity') await loadActivityBoard();
     if(visible==='field-test') await loadFieldTestBoard();
     if(visible==='build-records') await loadBuildRecordsBoard();
-    if(visible==='zentao-sync') await loadZentaoSyncBoard();
     if(visible==='data') await loadDataOverview();
     if(visible==='assign') await loadAssignBoard();
     if(visible==='dispatch') await loadDispatchedAll();
@@ -2941,108 +2763,6 @@ function closeBuildRecordLogModal(){
 
 async function revealBuildRealtimeNew(){
   return window.OmniQABuildRecordsTab.revealBuildRealtimeNew();
-}
-
-function getZentaoSyncTabOrWarn(actionName){
-  const tab = window.OmniQAZentaoSyncTab;
-  if(tab && typeof tab[actionName] === 'function'){
-    return tab;
-  }
-  const msg = '禅道同步前端模块未加载完成，请先强制刷新浏览器缓存后重试';
-  console.error('[OmniQA] ZentaoSync module missing:', actionName, window.OmniQAZentaoSyncTab);
-  window.showMessage && window.showMessage(msg, 'error');
-  return null;
-}
-
-async function loadZentaoSyncBoard(page){
-  const tab = getZentaoSyncTabOrWarn('loadZentaoSyncBoard');
-  if(!tab) return;
-  return tab.loadZentaoSyncBoard(page);
-}
-
-async function initZentaoSyncBoard(){
-  if(window.OmniQAZentaoSyncTab && typeof window.OmniQAZentaoSyncTab.initZentaoSyncBoard === 'function'){
-    return window.OmniQAZentaoSyncTab.initZentaoSyncBoard();
-  }
-  return loadZentaoSyncBoard(1);
-}
-
-function toggleManualMajorSelector(){
-  const tab = getZentaoSyncTabOrWarn('toggleManualMajorSelector');
-  if(!tab) return;
-  return tab.toggleManualMajorSelector();
-}
-
-function onZentaoManualMajorChange(){
-  const tab = getZentaoSyncTabOrWarn('onZentaoManualMajorChange');
-  if(!tab) return;
-  return tab.onZentaoManualMajorChange();
-}
-
-function resetZentaoManualMajor(){
-  const tab = getZentaoSyncTabOrWarn('resetZentaoManualMajor');
-  if(!tab) return;
-  return tab.resetZentaoManualMajor();
-}
-
-function onZentaoProductChange(){
-  const tab = getZentaoSyncTabOrWarn('onZentaoProductChange');
-  if(!tab) return;
-  return tab.onZentaoProductChange();
-}
-
-async function nextZentaoSyncPage(){
-  const tab = getZentaoSyncTabOrWarn('nextZentaoSyncPage');
-  if(!tab) return;
-  return tab.nextZentaoSyncPage();
-}
-
-async function prevZentaoSyncPage(){
-  const tab = getZentaoSyncTabOrWarn('prevZentaoSyncPage');
-  if(!tab) return;
-  return tab.prevZentaoSyncPage();
-}
-
-async function openZentaoSyncEventDetail(eventId){
-  const tab = getZentaoSyncTabOrWarn('openZentaoSyncEventDetail');
-  if(!tab) return;
-  return tab.openZentaoSyncEventDetail(eventId);
-}
-
-async function saveZentaoSyncMapping(){
-  const tab = getZentaoSyncTabOrWarn('saveZentaoSyncMapping');
-  if(!tab) return;
-  return tab.saveZentaoSyncMapping();
-}
-
-async function applyZentaoSyncEvent(){
-  const tab = getZentaoSyncTabOrWarn('applyZentaoSyncEvent');
-  if(!tab) return;
-  return tab.applyZentaoSyncEvent();
-}
-
-async function deleteZentaoSyncEvent(eventId){
-  const tab = getZentaoSyncTabOrWarn('deleteZentaoSyncEvent');
-  if(!tab) return;
-  return tab.deleteZentaoSyncEvent(eventId);
-}
-
-async function applyZentaoSyncBatch(){
-  const tab = getZentaoSyncTabOrWarn('applyZentaoSyncBatch');
-  if(!tab) return;
-  return tab.applyZentaoSyncBatch();
-}
-
-function closeZentaoSyncDetail(){
-  const tab = getZentaoSyncTabOrWarn('closeZentaoSyncDetail');
-  if(!tab) return;
-  return tab.closeZentaoSyncDetail();
-}
-
-function scrollZentaoSyncToTop(){
-  const tab = getZentaoSyncTabOrWarn('scrollZentaoSyncToTop');
-  if(!tab) return;
-  return tab.scrollZentaoSyncToTop();
 }
 
 function setActivityRange(days){

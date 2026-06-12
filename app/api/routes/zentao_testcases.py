@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Optional
 
@@ -25,7 +25,7 @@ def sync_zentao_testcases(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    ensure_tab_access(current_user, "zentao-sync")
+    ensure_tab_access(current_user, "testcase-center")
     return ZentaoTestCaseService(db).sync_software_testcases(
         software_id=payload.software_id,
         current_user=current_user,
@@ -41,7 +41,7 @@ def sync_zentao_testcases_recent(
     db: Session = Depends(get_db),
 ):
     """Incremental sync: pulls only the most recently edited cases."""
-    ensure_tab_access(current_user, "zentao-sync")
+    ensure_tab_access(current_user, "testcase-center")
     return ZentaoTestCaseService(db).sync_recent_software_testcases(
         software_id=payload.software_id,
         current_user=current_user,

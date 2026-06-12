@@ -1,4 +1,4 @@
-import './realtime/sse.js?v=20260417-3';
+import './realtime/sse.js?v=20260612-1';
 // 必须最先加载，确保 window.OmniQASSE 在各 tab 模块执行 bindXxxSSE() 前已就绪
 import './api.js?v=20260417-3';
 import './auth.js?v=20260417-3';
@@ -26,11 +26,10 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'field-test', path: './tabs/field-test.js?v=20260417-3' },
   { name: 'build-records', path: './tabs/build-records.js?v=20260513-1' },
   { name: 'testcase-center', path: './tabs/testcase-center.js?v=20260427-2' },
-  { name: 'zentao-sync', path: './tabs/zentao-sync.js?v=20260417-3' },
   { name: 'activity', path: './tabs/activity.js?v=20260417-3' },
   { name: 'assign', path: './tabs/assign.js?v=20260608-1' },
   { name: 'dispatch', path: './tabs/dispatch.js?v=20260417-3' },
-  { name: 'data', path: './tabs/data.js?v=20260513-1' },
+  { name: 'data', path: './tabs/data.js?v=20260612-1' },
   { name: 'zentao-ai', path: './tabs/zentao-ai.js?v=20260422-2' },
   { name: 'jenkins', path: './tabs/jenkins.js?v=20260604-1' },
   { name: 'cad-test', path: './tabs/cad-test.js?v=20260608-5' },
