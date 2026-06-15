@@ -729,7 +729,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 #jenkinsDetailArea > div[style*="border"],
 #dataUsers > .card,
 #tab-mine details.mine-req-card,
-#tab-retest details.retest-req-card {
+#tab-retest details.retest-req-card,
+#tab-learning .lc-topic {
   background: var(--w-raised) !important;
   border: 1px solid var(--w-hairline) !important;
   border-radius: 14px !important;
@@ -751,13 +752,21 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 #jenkinsDetailArea > div[style*="border"]:hover,
 #dataUsers > .card:hover,
 #tab-mine details.mine-req-card:hover,
-#tab-retest details.retest-req-card:hover {
+#tab-retest details.retest-req-card:hover,
+#tab-learning .lc-topic:hover,
+#tab-learning .lc-topic.active {
   transform: translateY(-3px) scale(1.005) !important;
   border-color: transparent !important;
   background: linear-gradient(var(--w-raised), var(--w-raised)) padding-box,
               var(--w-aurora-conic) border-box !important;
   animation: weaveAngSpin 3s linear infinite;
   box-shadow: 0 12px 28px rgba(28, 25, 23, 0.1) !important;
+}
+/* 展开态保持选中：略放慢流光、补一圈光晕（不上浮，避免与详情错位） */
+#tab-learning .lc-topic.active {
+  transform: none !important;
+  animation: weaveAngSpin 6s linear infinite;
+  box-shadow: 0 8px 22px rgba(28, 25, 23, 0.08), 0 0 0 3px var(--w-glow-ring) !important;
 }
 /* CAD 异常卡保留暖化红底信号 */
 #tab-cad-test .card[style*="background:#fef2f2"] {
@@ -827,29 +836,17 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
   display: grid !important;
   gap: 12px !important;
 }
-#tab-learning .lc-panel,
-#tab-learning .lc-topic {
+/* 区段面板：静态容器表面（暖白 + 发丝边 + 14px 圆角，与全站卡片一致）。
+   主题磁贴 .lc-topic 的升起/hover浮动/流光描边由上方共享对象卡规则统一提供。 */
+#tab-learning .lc-panel {
   background: var(--w-raised) !important;
   border: 1px solid var(--w-hairline) !important;
-  border-radius: 16px !important;
-  box-shadow: 0 1px 3px rgba(28, 25, 23, 0.05), 0 6px 18px rgba(28, 25, 23, 0.04) !important;
-  padding: 18px 20px !important;
+  border-radius: 14px !important;
+  box-shadow: 0 1px 3px rgba(28, 25, 23, 0.05) !important;
+  padding: 16px 18px !important;
+  margin-bottom: 16px !important;
 }
-#tab-learning .lc-panel { margin-bottom: 16px !important; }
-#tab-learning .lc-panel + .lc-panel { margin-top: 16px !important; }
-
-/* 主题列表磁贴：可点击、悬停升起 */
-#tab-learning .lc-topic {
-  cursor: pointer;
-  transition: transform var(--w-base) var(--w-spring),
-              box-shadow var(--w-base) var(--w-swift),
-              border-color var(--w-fast) ease-out !important;
-}
-#tab-learning .lc-topic:hover {
-  transform: translateY(-2px);
-  border-color: var(--w-hairline-strong) !important;
-  box-shadow: 0 2px 6px rgba(28, 25, 23, 0.07), 0 14px 30px rgba(28, 25, 23, 0.08) !important;
-}
+#tab-learning .lc-topic { cursor: pointer; }
 
 /* 面板内分区标题 */
 #tab-learning .lc-section-head {
@@ -881,15 +878,26 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
 #tab-learning .lc-row + .lc-row { border-top: 1px solid var(--w-hairline) !important; }
 #tab-learning .lc-row:hover { background: var(--w-surface) !important; }
 
-/* 题目/作答块：柔和次级表面 */
+/* 题目/作答块：柔和次级表面；获得焦点(焦点在内)时轻微弹出 + 流光边缘 */
 #tab-learning .lc-q {
   background: var(--w-surface) !important;
   border: 1px solid var(--w-hairline) !important;
   border-radius: 12px !important;
   padding: 14px 16px !important;
   margin-bottom: 12px !important;
+  transition: transform var(--w-base) var(--w-spring),
+              box-shadow var(--w-base) var(--w-swift),
+              background var(--w-fast) ease-out !important;
 }
 #tab-learning .lc-q:last-child { margin-bottom: 0 !important; }
+#tab-learning .lc-q:focus-within {
+  transform: translateY(-2px) scale(1.004);
+  border-color: transparent !important;
+  background: linear-gradient(var(--w-surface), var(--w-surface)) padding-box,
+              var(--w-aurora-conic) border-box !important;
+  animation: weaveAngSpin 3s linear infinite;
+  box-shadow: 0 10px 24px rgba(28, 25, 23, 0.08), 0 0 0 3px var(--w-glow-ring) !important;
+}
 
 /* 空状态 */
 #tab-learning .lc-empty {

@@ -20,8 +20,15 @@ const STATUS_LABEL = { drafting: '出题中', answering: '答题中', grading: '
 // ============================ 入口 ============================
 export async function loadLearningTab() {
   bindLearningSSE();
+  window._learningOpenTopicId = null;
   document.getElementById('learningDetailArea').innerHTML = '';
   await loadTopicList();
+}
+
+function markActiveTopic(topicId) {
+  document.querySelectorAll('#tab-learning .lc-topic').forEach((el) => {
+    el.classList.toggle('active', Number(el.getAttribute('data-topic-id')) === Number(topicId));
+  });
 }
 
 async function loadTopicList() {
@@ -39,7 +46,7 @@ async function loadTopicList() {
       const aBadge = la
         ? `<span class="badge" style="background:#eef2ff;color:#4338ca;">第${la.round_no}轮·${STATUS_LABEL[la.status] || la.status}</span>`
         : '<span class="badge">暂无考核</span>';
-      return `<div class="lc-topic" onclick="OmniQALearningTab.openTopic(${t.id})">
+      return `<div class="lc-topic" data-topic-id="${t.id}" onclick="OmniQALearningTab.openTopic(${t.id})">
         <div class="row" style="justify-content:space-between; align-items:center; gap:8px;">
           <div>
             <b style="font-size:16px;">${esc(t.title)}</b>
@@ -53,6 +60,8 @@ async function loadTopicList() {
         </div>
       </div>`;
     }).join('')}</div>`;
+    // 列表重渲染后恢复"当前展开主题"的选中流光态
+    if (window._learningOpenTopicId) markActiveTopic(window._learningOpenTopicId);
   } catch (err) {
     box.innerHTML = `<div class="muted" style="color:#dc2626;">${esc(err.message || '加载失败')}</div>`;
   }
@@ -73,6 +82,19 @@ export async function openCreateTopic() {
 
 // ============================ 主题详情 ============================
 export async function openTopic(topicId) {
+  // 再次点击已展开的主题 → 收起
+  if (Number(window._learningOpenTopicId) === Number(topicId)) {
+    window._learningOpenTopicId = null;
+    document.getElementById('learningDetailArea').innerHTML = '';
+    markActiveTopic(null);
+    return;
+  }
+  window._learningOpenTopicId = topicId;
+  markActiveTopic(topicId);
+  await renderTopicDetail(topicId);
+}
+
+async function renderTopicDetail(topicId) {
   const area = document.getElementById('learningDetailArea');
   area.innerHTML = '<div class="muted">加载中…</div>';
   try {
@@ -149,7 +171,11 @@ export async function openTopic(topicId) {
   }
 }
 
-export function refreshTopic(topicId) { return openTopic(topicId); }
+export function refreshTopic(topicId) {
+  window._learningOpenTopicId = topicId;
+  markActiveTopic(topicId);
+  return renderTopicDetail(topicId);
+}
 
 export async function uploadMaterial(topicId) {
   const input = document.getElementById(`learningMatFile_${topicId}`);
@@ -160,7 +186,7 @@ export async function uploadMaterial(topicId) {
   try {
     await api(`/learning/topics/${topicId}/materials`, { method: 'POST', body: form });
     window.showMessage && window.showMessage('资料上传成功', 'success');
-    await openTopic(topicId);
+    await refreshTopic(topicId);
     await loadTopicList();
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '上传失败', 'error');
@@ -195,7 +221,7 @@ export async function deleteMaterial(materialId, topicId) {
   try {
     await api(`/learning/materials/${materialId}`, { method: 'DELETE' });
     window.showMessage && window.showMessage('已删除', 'success');
-    await openTopic(topicId);
+    await refreshTopic(topicId);
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '删除失败', 'error');
   }
