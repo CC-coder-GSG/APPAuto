@@ -83,6 +83,31 @@ export async function loadRetest() {
     window.showMessage && window.showMessage('请选择大版本', 'error');
     return;
   }
+
+  // 该大版本若已进入最终测试阶段：复测流程暂停，不再统计待复测需求，
+  // 改为提示前往工作台处理。取消最终测试后自动恢复正常复测。
+  if (mode === 'version' && majorId) {
+    let finalTestEnabled = false;
+    try {
+      const st = await (await api(`/final-test/status?major_version_id=${majorId}`)).json();
+      finalTestEnabled = !!st.enabled;
+    } catch {
+      finalTestEnabled = false;
+    }
+    if (finalTestEnabled) {
+      state.currentRetestData = [];
+      const container = document.getElementById('retestCardsArea');
+      if (container) {
+        container.innerHTML = `<div class="card" style="padding:24px; text-align:center; border:2px solid #fcd34d; background:#fffbeb;">
+          <div style="font-size:18px; font-weight:700; color:#92400e;">🏁 当前版本已进入最终测试阶段</div>
+          <div class="muted" style="margin-top:8px; color:#92400e;">复测流程已暂停，不再统计待复测需求。请前往「我的工作台」对全部需求进行处理。</div>
+          <div class="muted" style="margin-top:4px; font-size:12px;">在「任务分配台」取消最终测试状态后，复测将自动恢复正常。</div>
+        </div>`;
+      }
+      return;
+    }
+  }
+
   const sid = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
   if (sid) {
     await preflightRetestData(sid);
