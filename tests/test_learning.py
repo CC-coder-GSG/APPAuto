@@ -144,6 +144,50 @@ def test_finalize_blocked_until_short_graded_then_results(db_session):
     assert any(p["user_name"] == absent.shown_name for p in results["absent"])
 
 
+def test_delete_topic_cascades_rows_and_files(db_session, tmp_path):
+    import app.services.learning_service as ls
+    from app.models import Assessment, AssessmentAnswer, AssessmentQuestion, AssessmentSubmission, LearningMaterial, LearningTopic
+
+    author = _user(db_session, "ln_del_author")
+    taker = _user(db_session, "ln_del_taker")
+    topic_id, aid = _setup_published(db_session, author)
+    qs = _questions(db_session, aid)
+    LearningService(db_session).submit_answers(
+        assessment_id=aid, answers={str(qs[0].id): "B", str(qs[4].id): "答"}, actor=taker
+    )
+
+    # 造一个真实的物理文件 + 资料行，验证删除主题会清理文件
+    folder = ls.UPLOAD_ROOT / "_test"
+    folder.mkdir(parents=True, exist_ok=True)
+    fpath = folder / "ln_del_file.txt"
+    fpath.write_text("hello", encoding="utf-8")
+    rel = str(fpath.relative_to(ls.PROJECT_ROOT)).replace("\\", "/")
+    mat = LearningMaterial(topic_id=topic_id, original_name="a.txt", stored_name="ln_del_file.txt", file_path=rel, file_size=5, uploaded_by_id=author.id)
+    db_session.add(mat)
+    db_session.commit()
+    assert fpath.exists()
+
+    LearningService(db_session).delete_topic(topic_id, author)
+
+    assert fpath.exists() is False  # 物理文件被清理
+    assert db_session.query(LearningTopic).filter(LearningTopic.id == topic_id).first() is None
+    assert db_session.query(LearningMaterial).filter(LearningMaterial.topic_id == topic_id).count() == 0
+    assert db_session.query(Assessment).filter(Assessment.id == aid).count() == 0
+    assert db_session.query(AssessmentQuestion).filter(AssessmentQuestion.assessment_id == aid).count() == 0
+    assert db_session.query(AssessmentSubmission).filter(AssessmentSubmission.assessment_id == aid).count() == 0
+    assert db_session.query(AssessmentAnswer).count() == 0
+
+
+def test_delete_topic_forbidden_for_non_creator(db_session):
+    author = _user(db_session, "ln_del_author2")
+    other = _user(db_session, "ln_del_other2")
+    svc = LearningService(db_session)
+    topic = svc.create_topic(title="T", description=None, actor=author)
+    with pytest.raises(Exception) as e:
+        svc.delete_topic(topic["id"], other)
+    assert getattr(e.value, "status_code", None) == 403
+
+
 def test_results_hidden_before_publish_for_non_author(db_session):
     author = _user(db_session, "ln_author8")
     taker = _user(db_session, "ln_taker8")

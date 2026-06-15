@@ -70,6 +70,7 @@ class LearningService:
                     "id": t.id,
                     "title": t.title,
                     "description": t.description,
+                    "created_by_id": t.created_by_id,
                     "created_by_name": t.created_by.shown_name if t.created_by else None,
                     "created_at": t.created_at.isoformat(),
                     "material_count": material_count,
@@ -129,6 +130,33 @@ class LearningService:
                 for a in assessments
             ],
         }
+
+    def delete_topic(self, topic_id: int, actor: User) -> dict:
+        topic = self.db.query(LearningTopic).filter(LearningTopic.id == topic_id).first()
+        if not topic:
+            raise HTTPException(status_code=404, detail="主题不存在")
+        if actor.role.value != "admin" and topic.created_by_id != actor.id:
+            raise HTTPException(status_code=403, detail="仅主题创建人或管理员可删除")
+
+        # 先删物理文件（资料原件 + LibreOffice 转出的预览 PDF），
+        # 再删主题（ORM cascade 连带删除资料/考核/题目/作答/批改记录）。
+        materials = self.db.query(LearningMaterial).filter(LearningMaterial.topic_id == topic_id).all()
+        for m in materials:
+            for rel in (m.file_path, m.preview_pdf_path):
+                if not rel:
+                    continue
+                p = PROJECT_ROOT / rel
+                if p.exists():
+                    try:
+                        p.unlink()
+                    except Exception:
+                        pass
+
+        title = topic.title
+        self.db.delete(topic)
+        self.db.commit()
+        audit(self.db, action="learning.delete_topic", target_type="learning_topic", actor_id=actor.id, target_id=str(topic_id), detail=title)
+        return {"message": "主题已删除"}
 
     def _material_view(self, m: LearningMaterial) -> dict:
         ext = (m.file_ext or "").lower()

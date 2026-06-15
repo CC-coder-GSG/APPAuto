@@ -56,6 +56,9 @@ async function loadTopicList() {
             <span class="badge">📎 资料 ${t.material_count}</span>
             ${aBadge}
             <span class="muted" style="font-size:12px;">创建人 ${esc(t.created_by_name || '—')}</span>
+            ${(t.created_by_id === currentUserId() || isAdmin())
+              ? `<button class="danger" style="padding:2px 10px; font-size:12px;" onclick="event.stopPropagation(); OmniQALearningTab.deleteTopic(${t.id}, '${esc(t.title).replace(/'/g, "\\'")}')">删除</button>`
+              : ''}
           </div>
         </div>
       </div>`;
@@ -77,6 +80,22 @@ export async function openCreateTopic() {
     await loadTopicList();
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '创建失败', 'error');
+  }
+}
+
+export async function deleteTopic(topicId, title) {
+  if (!confirm(`确定删除学习主题「${title || ''}」吗？\n\n将一并删除该主题下的全部资料文件、考核题目与作答/成绩记录，且不可恢复。`)) return;
+  try {
+    await api(`/learning/topics/${topicId}`, { method: 'DELETE' });
+    window.showMessage && window.showMessage('主题已删除', 'success');
+    // 若删的是当前展开主题，清空详情区
+    if (Number(window._learningOpenTopicId) === Number(topicId)) {
+      window._learningOpenTopicId = null;
+      document.getElementById('learningDetailArea').innerHTML = '';
+    }
+    await loadTopicList();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '删除失败', 'error');
   }
 }
 
@@ -155,6 +174,10 @@ async function renderTopicDetail(topicId) {
           <span class="row" style="gap:6px; align-items:center;"><input type="file" id="learningMatFile_${topicId}" style="font-size:12px;">
           <button class="secondary" style="padding:2px 10px;" onclick="OmniQALearningTab.uploadMaterial(${topicId})">上传</button></span>
         </div>
+        <div id="learningUploadProgress_${topicId}" class="lc-progress" style="display:none;">
+          <div class="lc-progress-track"><div id="learningUploadBar_${topicId}" class="lc-progress-bar" style="width:0%;"></div></div>
+          <span id="learningUploadLabel_${topicId}" class="lc-progress-label">0%</span>
+        </div>
         <div>${materialsHtml}</div>
       </div>
 
@@ -181,16 +204,66 @@ export async function uploadMaterial(topicId) {
   const input = document.getElementById(`learningMatFile_${topicId}`);
   const file = input?.files?.[0];
   if (!file) { window.showMessage && window.showMessage('请先选择文件', 'error'); return; }
+  const prog = document.getElementById(`learningUploadProgress_${topicId}`);
+  const bar = document.getElementById(`learningUploadBar_${topicId}`);
+  const label = document.getElementById(`learningUploadLabel_${topicId}`);
+  const setPct = (p, text) => {
+    if (bar) bar.style.width = `${p}%`;
+    if (label) label.textContent = text != null ? text : `${p}%`;
+  };
   const form = new FormData();
   form.append('file', file);
+  if (prog) prog.style.display = 'flex';
+  setPct(0, '准备上传…');
   try {
-    await api(`/learning/topics/${topicId}/materials`, { method: 'POST', body: form });
+    await uploadWithProgress(`/learning/topics/${topicId}/materials`, form, (p) => {
+      // 上传字节到 100% 后，服务端可能还在转 PDF，给出"处理中"提示
+      if (p >= 100) setPct(100, '上传完成，正在处理…');
+      else setPct(p, `上传中 ${p}%`);
+    });
+    setPct(100, '完成 ✓');
     window.showMessage && window.showMessage('资料上传成功', 'success');
+    if (input) input.value = '';
     await refreshTopic(topicId);
     await loadTopicList();
   } catch (err) {
+    if (prog) prog.style.display = 'none';
     window.showMessage && window.showMessage(err.message || '上传失败', 'error');
   }
+}
+
+// 带上传进度的 POST（fetch 无法读取上传进度，故用 XHR）。
+function uploadWithProgress(url, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    const token = localStorage.getItem('token');
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && typeof onProgress === 'function') {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status === 401) {
+        localStorage.removeItem('token');
+        window.location.href = '/login';
+        reject(new Error('401'));
+        return;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        let data = {};
+        try { data = JSON.parse(xhr.responseText); } catch {}
+        resolve(data);
+      } else {
+        let msg = `上传失败 (HTTP ${xhr.status})`;
+        try { const d = JSON.parse(xhr.responseText); msg = d.detail || d.message || msg; } catch {}
+        reject(new Error(msg));
+      }
+    };
+    xhr.onerror = () => reject(new Error('网络错误，上传失败'));
+    xhr.send(formData);
+  });
 }
 
 export function previewMaterial(materialId, kind) {
@@ -574,6 +647,7 @@ function bindLearningSSE() {
 window.OmniQALearningTab = {
   loadLearningTab,
   openCreateTopic,
+  deleteTopic,
   openTopic,
   refreshTopic,
   uploadMaterial,

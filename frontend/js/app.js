@@ -34,7 +34,7 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'jenkins', path: './tabs/jenkins.js?v=20260604-1' },
   { name: 'cad-test', path: './tabs/cad-test.js?v=20260608-5' },
   { name: 'terminal', path: './tabs/terminal.js?v=20260611-1' },
-  { name: 'learning', path: './tabs/learning.js?v=20260615-3' },
+  { name: 'learning', path: './tabs/learning.js?v=20260615-5' },
 ];
 
 window.__omniqaOptionalModuleFailures = {};

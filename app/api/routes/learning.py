@@ -61,6 +61,12 @@ def get_topic(topic_id: int, _: User = Depends(get_current_user), db: Session = 
     return LearningService(db).get_topic(topic_id)
 
 
+@router.delete("/topics/{topic_id}")
+def delete_topic(topic_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    ensure_tab_access(current_user, "learning")
+    return LearningService(db).delete_topic(topic_id, current_user)
+
+
 @router.post("/topics/{topic_id}/materials")
 def upload_material(topic_id: int, file: UploadFile, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     ensure_tab_access(current_user, "learning")
