@@ -8,7 +8,7 @@
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
-  <script type="module" src="/static/js/app.js?v=20260615-1"></script>
+  <script type="module" src="/static/js/app.js?v=20260615-2"></script>
   <script src="/static/js/weave-motion.js?v=20260612-3" defer></script>
   <style>
     /* Header layout */
@@ -207,6 +207,7 @@
     <button id="tabJenkinsBtn" class="hidden" onclick="showTab('jenkins')">Jenkins</button>
     <button id="tabCadTestBtn" class="hidden" onclick="showTab('cad-test')">CAD测试统计</button>
     <button id="tabTerminalBtn" class="hidden" onclick="showTab('terminal')">终端控制台</button>
+    <button id="tabLearningBtn" class="hidden" onclick="showTab('learning')">学习中心</button>
     <span id="sseConnectionState" class="sse-conn-badge hidden" aria-live="polite">实时连接中</span>
   </div>
 
@@ -250,6 +251,20 @@
       <h3 style="margin-top:0; color:#92400e;">🏁 最终测试阶段进度</h3>
       <div id="finalTestProgressArea"></div>
     </div>
+  </section>
+
+  <section id="tab-learning" class="hidden card">
+    <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h2 style="margin-bottom:4px;">学习中心</h2>
+        <div class="muted">知识资料学习 + 考核测验。每个主题对应一份考核，一轮 = 一个学习周期。</div>
+      </div>
+      <div class="row" style="gap:8px;">
+        <button id="learningNewTopicBtn" onclick="OmniQALearningTab.openCreateTopic()">+ 新建学习主题</button>
+      </div>
+    </div>
+    <div id="learningTopicList" style="margin-top:14px;"></div>
+    <div id="learningDetailArea" style="margin-top:14px;"></div>
   </section>
 
   <section id="tab-task-board" class="hidden card">
@@ -1887,8 +1902,8 @@ function sourceTypeZh(v){
 }
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
-const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal'];
-const DEFAULT_ALLOWED_TABS=['mine','task-board','feedback','retest','overall-test','field-test','testcase-center','report','jenkins'];
+const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal','learning'];
+const DEFAULT_ALLOWED_TABS=['mine','task-board','feedback','retest','overall-test','field-test','testcase-center','report','jenkins','learning'];
 const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test'];
 const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test' };
 const WORKBENCH_SUBTAB_LOADERS={
@@ -2067,7 +2082,7 @@ function applyTabVisibility(){
     'assign':'tabAssignBtn','mine':'tabMineBtn','task-board':'tabTaskBoardBtn','feedback':'tabFeedbackBtn',
     'field-test':'tabFieldTestBtn','build-records':'tabBuildRecordsBtn','testcase-center':'tabTestcaseCenterBtn',
     'report':'tabReportBtn','activity':'tabActivityBtn',
-    'data':'tabDataBtn','dispatch':'tabDispatchBtn','zentao-ai':'tabZentaoAiBtn','jenkins':'tabJenkinsBtn','cad-test':'tabCadTestBtn','terminal':'tabTerminalBtn'
+    'data':'tabDataBtn','dispatch':'tabDispatchBtn','zentao-ai':'tabZentaoAiBtn','jenkins':'tabJenkinsBtn','cad-test':'tabCadTestBtn','terminal':'tabTerminalBtn','learning':'tabLearningBtn'
   };
   ALL_TAB_KEYS.forEach((name)=>{
     const btn=document.getElementById(buttonMap[name]);
@@ -2079,7 +2094,7 @@ function applyTabVisibility(){
   }
 }
 function getDefaultVisibleTab(){
-  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal','learning']
     .find((name)=>canAccessTab(name)) || 'mine';
 }
 function getTabNamespaceName(name){
@@ -2101,6 +2116,7 @@ function getTabNamespaceName(name){
     jenkins:'OmniQAJenkinsTab',
     'cad-test':'OmniQACadTab',
     terminal:'OmniQATerminalTab',
+    learning:'OmniQALearningTab',
   }[name] || '';
 }
 function isTabRuntimeReady(name){
@@ -2132,7 +2148,7 @@ async function showTab(name){
     if(!fallback || fallback===name) return;
     name = fallback;
   }
-  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal'].forEach(x=>{
+  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal','learning'].forEach(x=>{
     const el=document.getElementById('tab-'+x);
     if(el) el.classList.add('hidden');
   });
@@ -2156,6 +2172,7 @@ async function showTab(name){
   if(name === 'jenkins') { window.OmniQAJenkinsTab && window.OmniQAJenkinsTab.loadJenkinsTab && window.OmniQAJenkinsTab.loadJenkinsTab().catch(err=>showMessage(err.message||'加载自动化测试失败','error')); }
   if(name === 'cad-test') { window.OmniQACadTab && window.OmniQACadTab.activate && window.OmniQACadTab.activate().catch(err=>showMessage(err.message||'加载CAD测试统计失败','error')); }
   if(name === 'terminal') { window.OmniQATerminalTab && window.OmniQATerminalTab.loadTerminalTab && window.OmniQATerminalTab.loadTerminalTab().catch(err=>showMessage(err.message||'加载终端控制台失败','error')); }
+  if(name === 'learning') { window.OmniQALearningTab && window.OmniQALearningTab.loadLearningTab && window.OmniQALearningTab.loadLearningTab().catch(err=>showMessage(err.message||'加载学习中心失败','error')); }
   if(name==='report'){loadReportOnDemand()}
 }
 function isAllUsersReport(){return currentUser && currentUser.role==='admin' && reportUserSelect && reportUserSelect.value==='0'}

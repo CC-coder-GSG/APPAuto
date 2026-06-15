@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     # 流票据有效期（秒）。
     terminal_stream_ticket_ttl_seconds: int = Field(default_factory=lambda: int(os.getenv('APP_TERMINAL_STREAM_TICKET_TTL_SECONDS', os.getenv('TERMINAL_STREAM_TICKET_TTL_SECONDS', '60'))))
 
+    # 学习中心：PPT/Word → PDF 在线预览所用的 LibreOffice 可执行文件。
+    # 默认 'soffice'；服务器未安装时自动降级为仅下载（不报错）。
+    libreoffice_bin: str = Field(default_factory=lambda: os.getenv('APP_LIBREOFFICE_BIN', os.getenv('LIBREOFFICE_BIN', 'soffice')))
+    # 单次转换超时（秒）。
+    libreoffice_convert_timeout_seconds: int = Field(default_factory=lambda: int(os.getenv('APP_LIBREOFFICE_CONVERT_TIMEOUT_SECONDS', os.getenv('LIBREOFFICE_CONVERT_TIMEOUT_SECONDS', '120'))))
+
     # CORS
     cors_allowed_origins_raw: str = Field(default_factory=lambda: os.getenv('APP_CORS_ALLOWED_ORIGINS', os.getenv('CORS_ALLOWED_ORIGINS', '')))
 

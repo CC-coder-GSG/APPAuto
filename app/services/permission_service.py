@@ -25,6 +25,7 @@ ALL_TAB_KEYS = [
     "zentao-ai",
     "cad-test",
     "terminal",
+    "learning",
 ]
 
 DEFAULT_USER_TAB_KEYS = [
@@ -36,6 +37,7 @@ DEFAULT_USER_TAB_KEYS = [
     "field-test",
     "testcase-center",
     "report",
+    "learning",
 ]
 
 # Legacy → canonical aliases applied when reading persisted permissions.

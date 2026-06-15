@@ -6,9 +6,12 @@ from app.models.build_record import BuildRecord
 from app.models.bug import BugTracking
 from app.models.cad_test import CadAttachment, CadBoard, CadCustomColumn, CadItem, CadItemFile, CadRecord, CadVersion
 from app.models.enums import (
+    AssessmentStatus,
     BugSourceType,
     FeedbackStatus,
+    QuestionType,
     RequirementStatus,
+    SubmissionStatus,
     TaskBoardPriority,
     TaskBoardStatus,
     TaskBoardTargetType,
@@ -25,6 +28,14 @@ from app.models.execution import TestExecution
 from app.models.feedback import FeedbackAttachment, FeedbackBugLink, FeedbackRecord
 from app.models.field_test import FieldTestBugLink, FieldTestPurposeType, FieldTestRecord, FieldTestResultStatus
 from app.models.final_test_record import FinalTestRecord
+from app.models.learning import (
+    Assessment,
+    AssessmentAnswer,
+    AssessmentQuestion,
+    AssessmentSubmission,
+    LearningMaterial,
+    LearningTopic,
+)
 from app.models.requirement import Requirement
 from app.models.requirement_retest_record import RequirementRetestRecord
 from app.models.requirement_status_history import RequirementStatusHistory
@@ -67,6 +78,15 @@ __all__ = [
     "FieldTestRecord",
     "FieldTestResultStatus",
     "FinalTestRecord",
+    "Assessment",
+    "AssessmentAnswer",
+    "AssessmentQuestion",
+    "AssessmentStatus",
+    "AssessmentSubmission",
+    "LearningMaterial",
+    "LearningTopic",
+    "QuestionType",
+    "SubmissionStatus",
     "Requirement",
     "RequirementRetestRecord",
     "RequirementStatusHistory",

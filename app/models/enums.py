@@ -102,6 +102,32 @@ class TerminalControlMode(str, Enum):
     CONTROL = "control"  # 可操作
 
 
+class QuestionType(str, Enum):
+    """学习考核题型。"""
+
+    SINGLE = "single"   # 单选
+    MULTI = "multi"     # 多选
+    JUDGE = "judge"     # 判断
+    BLANK = "blank"     # 填空
+    SHORT = "short"     # 简答（人工批改）
+
+
+class AssessmentStatus(str, Enum):
+    """考核状态机：出题中 → 答题中 → 批改中 → 公示。"""
+
+    DRAFTING = "drafting"     # 出题人编辑题目
+    ANSWERING = "answering"   # 已发布，其余成员答题
+    GRADING = "grading"       # 有简答待出题人批改
+    PUBLISHED = "published"   # 已公示成绩（本轮结束）
+
+
+class SubmissionStatus(str, Enum):
+    """单份作答状态。"""
+
+    SUBMITTED = "submitted"   # 已交，客观题已自动判，简答待批改
+    GRADED = "graded"         # 全部判分完成
+
+
 __all__ = [
     "UserRole",
     "VersionType",
@@ -117,4 +143,7 @@ __all__ = [
     "TerminalLockHolderKind",
     "TerminalLockReleaseReason",
     "TerminalControlMode",
+    "QuestionType",
+    "AssessmentStatus",
+    "SubmissionStatus",
 ]
