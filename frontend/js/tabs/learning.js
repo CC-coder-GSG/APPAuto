@@ -31,15 +31,15 @@ async function loadTopicList() {
   try {
     const topics = await (await api('/learning/topics')).json();
     if (!topics.length) {
-      box.innerHTML = '<div class="muted" style="padding:18px;text-align:center;background:#f8fafc;border-radius:8px;">还没有学习主题，点击右上角「新建学习主题」开始。</div>';
+      box.innerHTML = '<div class="lc-empty">还没有学习主题，点击右上角「新建学习主题」开始。</div>';
       return;
     }
-    box.innerHTML = topics.map((t) => {
+    box.innerHTML = `<div class="lc-topic-list">${topics.map((t) => {
       const la = t.latest_assessment;
       const aBadge = la
         ? `<span class="badge" style="background:#eef2ff;color:#4338ca;">第${la.round_no}轮·${STATUS_LABEL[la.status] || la.status}</span>`
         : '<span class="badge">暂无考核</span>';
-      return `<div class="card" style="margin-bottom:10px; cursor:pointer;" onclick="OmniQALearningTab.openTopic(${t.id})">
+      return `<div class="lc-topic" onclick="OmniQALearningTab.openTopic(${t.id})">
         <div class="row" style="justify-content:space-between; align-items:center; gap:8px;">
           <div>
             <b style="font-size:16px;">${esc(t.title)}</b>
@@ -52,7 +52,7 @@ async function loadTopicList() {
           </div>
         </div>
       </div>`;
-    }).join('');
+    }).join('')}</div>`;
   } catch (err) {
     box.innerHTML = `<div class="muted" style="color:#dc2626;">${esc(err.message || '加载失败')}</div>`;
   }
@@ -84,7 +84,7 @@ export async function openTopic(topicId) {
         ? `<button class="secondary" style="padding:2px 8px;font-size:12px;" onclick="OmniQALearningTab.previewMaterial(${m.id},'${m.preview_kind}','${esc(m.original_name)}')">预览</button>`
         : '';
       const delBtn = `<button class="danger" style="padding:2px 8px;font-size:12px;" onclick="OmniQALearningTab.deleteMaterial(${m.id},${topicId})">删除</button>`;
-      return `<div class="row" style="justify-content:space-between; border-bottom:1px dashed #e2e8f0; padding:6px 0; align-items:center;">
+      return `<div class="lc-row">
         <span>📄 ${esc(m.original_name)} <span class="muted" style="font-size:12px;">(${(m.file_size / 1024).toFixed(0)} KB)</span></span>
         <span class="row" style="gap:6px;">
           ${previewBtn}
@@ -92,7 +92,7 @@ export async function openTopic(topicId) {
           ${delBtn}
         </span>
       </div>`;
-    }).join('') || '<div class="muted">暂无资料</div>';
+    }).join('') || '<div class="lc-empty">暂无资料</div>';
 
     const assessmentsHtml = (t.assessments || []).map((a) => {
       const isAuthor = a.author_id === meId || isAdmin();
@@ -109,40 +109,40 @@ export async function openTopic(topicId) {
       if (a.status === 'published') {
         actions.push(`<button class="secondary" onclick="OmniQALearningTab.openResults(${a.id})">看成绩</button>`);
       }
-      return `<div class="row" style="justify-content:space-between; border-bottom:1px dashed #e2e8f0; padding:8px 0; align-items:center; flex-wrap:wrap; gap:6px;">
+      return `<div class="lc-row" style="flex-wrap:wrap;">
         <span>第 ${a.round_no} 轮 · <span class="badge">${STATUS_LABEL[a.status] || a.status}</span>
           <span class="muted" style="font-size:12px;">出题人 ${esc(a.author_name || '—')} · ${a.question_count} 题 / ${a.total_score} 分</span></span>
         <span class="row" style="gap:6px;">${actions.join('')}</span>
       </div>`;
-    }).join('') || '<div class="muted">暂无考核</div>';
+    }).join('') || '<div class="lc-empty">暂无考核</div>';
 
     const hasActive = (t.assessments || []).some((a) => a.status !== 'published');
 
     area.innerHTML = `
-      <div class="card" style="border:1px solid #e2e8f0;">
-        <div class="row" style="justify-content:space-between; align-items:center;">
-          <h3 style="margin:0;">${esc(t.title)}</h3>
+      <div class="lc-panel">
+        <div class="lc-section-head" style="border-bottom:none; margin-bottom:0; padding-bottom:0;">
+          <span class="lc-title" style="font-size:18px;">${esc(t.title)}</span>
           <button class="secondary" onclick="OmniQALearningTab.refreshTopic(${topicId})">刷新</button>
         </div>
-        <div class="muted" style="margin-top:4px;">${esc(t.description || '')}</div>
+        ${t.description ? `<div class="muted" style="margin-top:6px;">${esc(t.description)}</div>` : ''}
+      </div>
 
-        <div style="margin-top:14px;">
-          <div class="row" style="justify-content:space-between; align-items:center;">
-            <b>📚 知识资料</b>
-            <span><input type="file" id="learningMatFile_${topicId}" style="font-size:12px;">
-            <button class="secondary" style="padding:2px 8px;" onclick="OmniQALearningTab.uploadMaterial(${topicId})">上传</button></span>
-          </div>
-          <div style="margin-top:8px;">${materialsHtml}</div>
+      <div class="lc-panel">
+        <div class="lc-section-head">
+          <span class="lc-title">📚 知识资料</span>
+          <span class="row" style="gap:6px; align-items:center;"><input type="file" id="learningMatFile_${topicId}" style="font-size:12px;">
+          <button class="secondary" style="padding:2px 10px;" onclick="OmniQALearningTab.uploadMaterial(${topicId})">上传</button></span>
         </div>
+        <div>${materialsHtml}</div>
+      </div>
 
-        <div style="margin-top:18px;">
-          <div class="row" style="justify-content:space-between; align-items:center;">
-            <b>📝 考核（学习周期）</b>
-            ${hasActive ? '' : `<button onclick="OmniQALearningTab.createAssessment(${topicId})">+ 我来出题（新一轮）</button>`}
-          </div>
-          <div style="margin-top:8px;">${assessmentsHtml}</div>
-          ${hasActive ? '<div class="muted" style="font-size:12px;margin-top:6px;">本主题有进行中的考核，公示后才能开启新一轮。</div>' : ''}
+      <div class="lc-panel">
+        <div class="lc-section-head">
+          <span class="lc-title">📝 考核（学习周期）</span>
+          ${hasActive ? '' : `<button onclick="OmniQALearningTab.createAssessment(${topicId})">+ 我来出题（新一轮）</button>`}
         </div>
+        <div>${assessmentsHtml}</div>
+        ${hasActive ? '<div class="muted" style="font-size:12px;margin-top:10px;">本主题有进行中的考核，公示后才能开启新一轮。</div>' : ''}
       </div>`;
   } catch (err) {
     area.innerHTML = `<div class="muted" style="color:#dc2626;">${esc(err.message || '加载失败')}</div>`;
@@ -245,12 +245,12 @@ function renderEditor(assessmentId, meta) {
   const qs = window._learningEditQuestions;
   const rows = qs.map((q, i) => editorRow(q, i)).join('');
   area.innerHTML = `
-    <div class="card" style="border:1px solid #e2e8f0;">
-      <div class="row" style="justify-content:space-between; align-items:center;">
-        <h3 style="margin:0;">出题（第 ${meta.round_no} 轮）</h3>
+    <div class="lc-panel">
+      <div class="lc-section-head">
+        <span class="lc-title">出题（第 ${meta.round_no} 轮）</span>
         <span class="muted">题型：单选/多选/判断/填空/简答</span>
       </div>
-      <div id="learningQEditor" style="margin-top:10px;">${rows}</div>
+      <div id="learningQEditor">${rows}</div>
       <div class="row" style="gap:8px; margin-top:10px;">
         <button class="secondary" onclick="OmniQALearningTab.addQuestion()">+ 添加题目</button>
         <button class="secondary" onclick="OmniQALearningTab.saveQuestions(${assessmentId})">保存草稿</button>
@@ -274,7 +274,7 @@ function editorRow(q, i) {
   else if (q.type === 'blank') correctBlock = `<label>可接受答案(逗号分隔任一即对) <input style="width:240px;" value="${esc(q.correct)}" oninput="OmniQALearningTab.updateQ(${i},'correct',this.value)"></label>`;
   else if (q.type === 'short') correctBlock = `<label style="display:block;">参考答案(供你批改参考)<textarea rows="2" style="width:100%;" oninput="OmniQALearningTab.updateQ(${i},'correct',this.value)">${esc(q.correct)}</textarea></label>`;
 
-  return `<div class="card" style="background:#f8fafc; margin-bottom:8px;">
+  return `<div class="lc-q">
     <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
       <b>第 ${i + 1} 题</b>
       <select onchange="OmniQALearningTab.updateQ(${i},'type',this.value)">${typeSel}</select>
@@ -366,15 +366,15 @@ export async function openPaper(assessmentId) {
     return;
   }
   if (paper.already_submitted) {
-    area.innerHTML = `<div class="card"><div class="muted">您已提交本次考核（状态：${STATUS_LABEL[paper.my_submission_status] || paper.my_submission_status || '已提交'}）。成绩公示后可查看排行与解析。</div></div>`;
+    area.innerHTML = `<div class="lc-panel"><div class="muted">您已提交本次考核（状态：${STATUS_LABEL[paper.my_submission_status] || paper.my_submission_status || '已提交'}）。成绩公示后可查看排行与解析。</div></div>`;
     return;
   }
   const qHtml = (paper.questions || []).map((q, i) => paperQuestion(q, i)).join('');
   area.innerHTML = `
-    <div class="card" style="border:1px solid #e2e8f0;">
-      <h3 style="margin-top:0;">答题（第 ${paper.round_no} 轮 · 共 ${paper.total_score} 分）</h3>
+    <div class="lc-panel">
+      <div class="lc-section-head"><span class="lc-title">答题（第 ${paper.round_no} 轮 · 共 ${paper.total_score} 分）</span></div>
       <div id="learningPaper">${qHtml}</div>
-      <button onclick="OmniQALearningTab.submitPaper(${assessmentId})" style="margin-top:10px;">提交作答</button>
+      <button onclick="OmniQALearningTab.submitPaper(${assessmentId})" style="margin-top:12px;">提交作答</button>
     </div>`;
 }
 
@@ -391,7 +391,7 @@ function paperQuestion(q, i) {
   } else if (q.type === 'short') {
     body = `<textarea id="lq_${q.id}" rows="3" style="width:100%;" placeholder="简答"></textarea>`;
   }
-  return `<div class="card" style="background:#f8fafc; margin-bottom:8px;">
+  return `<div class="lc-q">
     <div><b>第 ${i + 1} 题</b> <span class="badge">${TYPE_LABEL[q.type]}</span> <span class="muted">(${q.score} 分)</span></div>
     <div style="margin:6px 0; white-space:pre-wrap;">${esc(q.prompt)}</div>
     <div data-qid="${q.id}" data-qtype="${q.type}">${body}</div>
@@ -436,24 +436,24 @@ export async function openGrading(assessmentId) {
     return;
   }
   const items = (data.items || []).map((it) => `
-    <div class="card" style="background:#f8fafc; margin-bottom:8px;">
+    <div class="lc-q">
       <div class="row" style="justify-content:space-between;"><b>${esc(it.user_name)}</b><span class="muted">满分 ${it.max_score}</span></div>
       <div class="muted" style="margin-top:4px;">题：${esc(it.question_prompt)}</div>
       <div style="margin-top:4px;">参考答案：<span class="muted">${esc(it.reference_answer || '无')}</span></div>
-      <div style="margin-top:4px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:6px; white-space:pre-wrap;">${esc(it.response || '（未作答）')}</div>
+      <div style="margin-top:6px; background:var(--w-raised); border:1px solid var(--w-hairline); border-radius:8px; padding:8px 10px; white-space:pre-wrap;">${esc(it.response || '（未作答）')}</div>
       <div class="row" style="gap:8px; margin-top:6px; align-items:center;">
         <label>得分 <input type="number" id="grade_${it.answer_id}" min="0" max="${it.max_score}" value="${it.current_score || 0}" style="width:80px;"></label>
         <input type="text" id="gradec_${it.answer_id}" placeholder="批注(可选)" style="width:40%;">
         <button class="secondary" onclick="OmniQALearningTab.gradeAnswer(${it.answer_id}, ${assessmentId})">赋分</button>
         ${it.graded ? '<span class="badge" style="background:#dcfce7;color:#166534;">已批</span>' : '<span class="badge" style="background:#fef9c3;color:#854d0e;">待批</span>'}
       </div>
-    </div>`).join('') || '<div class="muted">没有需要人工批改的简答题。</div>';
+    </div>`).join('') || '<div class="lc-empty">没有需要人工批改的简答题。</div>';
 
   area.innerHTML = `
-    <div class="card" style="border:1px solid #e2e8f0;">
-      <h3 style="margin-top:0;">简答批改 <span class="muted" style="font-size:13px;">待批 ${data.pending_count} / 共 ${data.total_short}</span></h3>
+    <div class="lc-panel">
+      <div class="lc-section-head"><span class="lc-title">简答批改</span><span class="muted" style="font-size:13px;">待批 ${data.pending_count} / 共 ${data.total_short}</span></div>
       <div>${items}</div>
-      <button onclick="OmniQALearningTab.finalize(${assessmentId})" style="margin-top:10px;">完成批改并公示成绩</button>
+      <button onclick="OmniQALearningTab.finalize(${assessmentId})" style="margin-top:12px;">完成批改并公示成绩</button>
       <div class="muted" style="font-size:12px;margin-top:6px;">公示前需把所有简答批改完（确为 0 分也请填写批注）。</div>
     </div>`;
 }
@@ -506,21 +506,20 @@ export async function openResults(assessmentId) {
         <div class="muted" style="font-size:12px;">正确答案：${esc(formatResp(q.answer))}${ans.grader_comment ? ' ｜ 批注：' + esc(ans.grader_comment) : ''}</div>
       </div>`;
     }).join('');
-    return `<details class="card" style="margin-bottom:8px;">
-      <summary style="cursor:pointer; font-weight:700;">${medal} ${esc(p.user_name)} — ${p.total_score} 分 <span class="muted" style="font-weight:400;">(客观 ${p.objective_score} + 主观 ${p.subjective_score})</span></summary>
+    return `<details class="lc-rank">
+      <summary>${medal} ${esc(p.user_name)} — ${p.total_score} 分 <span class="muted" style="font-weight:400;">(客观 ${p.objective_score} + 主观 ${p.subjective_score})</span></summary>
       <div style="margin-top:8px;">${detail}</div>
     </details>`;
-  }).join('') || '<div class="muted">暂无人作答</div>';
+  }).join('') || '<div class="lc-empty">暂无人作答</div>';
 
   const absent = (data.absent || []).length
     ? `<div class="muted" style="margin-top:8px;">缺考：${data.absent.map((a) => esc(a.user_name)).join('、')}</div>`
     : '';
 
   area.innerHTML = `
-    <div class="card" style="border:1px solid #e2e8f0;">
-      <h3 style="margin-top:0;">🏆 成绩公示（第 ${data.round_no} 轮 · 满分 ${data.total_score}）</h3>
-      <div class="muted">出题人：${esc(data.author_name || '—')}</div>
-      <div style="margin-top:10px;">${board}</div>
+    <div class="lc-panel">
+      <div class="lc-section-head"><span class="lc-title">🏆 成绩公示（第 ${data.round_no} 轮 · 满分 ${data.total_score}）</span><span class="muted">出题人 ${esc(data.author_name || '—')}</span></div>
+      <div>${board}</div>
       ${absent}
     </div>`;
 }
