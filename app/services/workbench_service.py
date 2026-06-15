@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Requirement, RequirementRetestRecord, User, Version
+from app.models import FinalTestRecord, Requirement, RequirementRetestRecord, User, Version
 from app.services.workbench_link_service import WorkbenchLinkService
 
 
@@ -20,24 +20,57 @@ class WorkbenchService:
         mode: str = "version",
         software_id: int | None = None,
     ) -> list[dict]:
-        query = (
-            self.db.query(Requirement)
-            .options(
-                joinedload(Requirement.major_version),
-                joinedload(Requirement.test_cases),
-                joinedload(Requirement.test_notes_updated_by),
-            )
-            .filter(Requirement.owner_id == current_user.id)
+        # 最终测试模式：所选大版本已开启 final_test 时，无视分配，返回该版本全部
+        # 需求，且勾选状态改用当前用户独立的 FinalTestRecord。
+        final_test_mode = False
+        if mode == "version" and major_version_id:
+            ft_flag = self.db.query(Version.final_test_enabled).filter(Version.id == major_version_id).first()
+            final_test_mode = bool(ft_flag[0]) if ft_flag else False
+
+        query = self.db.query(Requirement).options(
+            joinedload(Requirement.major_version),
+            joinedload(Requirement.test_cases),
+            joinedload(Requirement.test_notes_updated_by),
         )
 
-        if mode == "version" and major_version_id:
+        if final_test_mode:
             query = query.filter(Requirement.major_version_id == major_version_id)
-        elif mode == "all_pending":
-            query = query.filter(Requirement.test_completed.is_(False))
-        if software_id:
-            query = query.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
+        else:
+            query = query.filter(Requirement.owner_id == current_user.id)
+            if mode == "version" and major_version_id:
+                query = query.filter(Requirement.major_version_id == major_version_id)
+            elif mode == "all_pending":
+                query = query.filter(Requirement.test_completed.is_(False))
+            if software_id:
+                query = query.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
 
         reqs = query.order_by(Requirement.id.desc()).all()
+
+        # 当前用户在该版本的最终测试勾选状态
+        ft_record_map: dict[int, FinalTestRecord] = {}
+        if final_test_mode and reqs:
+            ft_records = (
+                self.db.query(FinalTestRecord)
+                .filter(
+                    FinalTestRecord.user_id == current_user.id,
+                    FinalTestRecord.requirement_id.in_([r.id for r in reqs]),
+                )
+                .all()
+            )
+            ft_record_map = {rec.requirement_id: rec for rec in ft_records}
+
+        def _case_done(r: Requirement) -> bool:
+            if final_test_mode:
+                rec = ft_record_map.get(r.id)
+                return bool(rec.case_completed) if rec else False
+            return r.case_completed
+
+        def _test_done(r: Requirement) -> bool:
+            if final_test_mode:
+                rec = ft_record_map.get(r.id)
+                return bool(rec.test_completed) if rec else False
+            return r.test_completed
+
         minors = self.link_service.minor_version_name_map()
         case_view_map = self.link_service.build_requirement_case_view(reqs, minors)
         free_bug_map, auto_story_bug_map = self.link_service.build_requirement_free_bug_view(
@@ -51,8 +84,9 @@ class WorkbenchService:
                 "id": r.id,
                 "zentao_req_id": r.zentao_req_id,
                 "title": r.title,
-                "case_completed": r.case_completed,
-                "test_completed": r.test_completed,
+                "final_test": final_test_mode,
+                "case_completed": _case_done(r),
+                "test_completed": _test_done(r),
                 "major_version_id": r.major_version_id,
                 "major_version_name": r.major_version.version_no if r.major_version else "",
                 "zentao_story_id": r.zentao_story_id,

@@ -193,6 +193,121 @@ export async function loadAssignBoard() {
 
   await loadAssignProgress();
   await loadLinkCandidates();
+  await refreshFinalTestState();
+}
+
+export async function refreshFinalTestState() {
+  const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
+  const btn = document.getElementById('finalTestToggleBtn');
+  const card = document.getElementById('finalTestProgressCard');
+  const area = document.getElementById('finalTestProgressArea');
+  if (!btn) return;
+
+  if (!majorId) {
+    btn.style.display = 'none';
+    if (card) card.style.display = 'none';
+    return;
+  }
+  btn.style.display = '';
+
+  let enabled = false;
+  try {
+    const status = await (await api(`/final-test/status?major_version_id=${majorId}`)).json();
+    enabled = !!status.enabled;
+  } catch {
+    enabled = false;
+  }
+
+  if (enabled) {
+    btn.textContent = '关闭最终测试';
+    btn.className = '';
+    btn.style.background = '#d97706';
+    btn.style.color = '#fff';
+  } else {
+    btn.textContent = '进入最终测试';
+    btn.className = 'secondary';
+    btn.style.background = '';
+    btn.style.color = '';
+  }
+
+  if (!enabled) {
+    if (card) card.style.display = 'none';
+    return;
+  }
+
+  // 已开启：拉取每人进度并渲染
+  try {
+    const data = await (await api(`/final-test/progress?major_version_id=${majorId}`)).json();
+    if (card) card.style.display = '';
+    if (area) area.innerHTML = renderFinalTestProgress(data);
+  } catch {
+    if (card) card.style.display = 'none';
+  }
+}
+
+function renderFinalTestProgress(data) {
+  const total = Number(data.total_requirements || 0);
+  const reqs = data.requirements || [];
+  const people = data.people || [];
+  if (people.length === 0) {
+    return `<div class="muted">该版本共 ${total} 个需求。暂无人员开始最终测试勾选。</div>`;
+  }
+  const summary = `<div class="row" style="gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+      <span class="badge">📄 需求总数：${total}</span>
+      <span class="badge">👥 参与人数：${people.length}</span>
+    </div>`;
+
+  const peopleCards = people.map((p) => {
+    const rows = reqs.map((r) => {
+      const st = (p.req_status || {})[r.id] || {};
+      return `<tr>
+        <td>${r.zentao_req_id || ''} ${r.title || ''}</td>
+        <td style="text-align:center;">${st.case_completed ? '✅' : '⏳'}</td>
+        <td style="text-align:center;">${st.test_completed ? '✅' : '⏳'}</td>
+      </tr>`;
+    }).join('');
+    return `<details class="card" style="margin-top:10px;">
+      <summary style="cursor:pointer; font-weight:700; color:#92400e;">👤 ${p.user_name}（用例 ${p.case_done}/${total}，测试 ${p.test_done}/${total}）</summary>
+      <table style="margin-top:8px;">
+        <thead><tr><th>需求</th><th>用例完成</th><th>测试完成</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="3" class="muted">暂无需求</td></tr>'}</tbody>
+      </table>
+    </details>`;
+  }).join('');
+
+  return summary + peopleCards;
+}
+
+export async function toggleFinalTest() {
+  const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
+  if (!majorId) {
+    window.showMessage && window.showMessage('请先选择一个具体大版本', 'error');
+    return;
+  }
+  let currentlyEnabled = false;
+  try {
+    const status = await (await api(`/final-test/status?major_version_id=${majorId}`)).json();
+    currentlyEnabled = !!status.enabled;
+  } catch {
+    currentlyEnabled = false;
+  }
+  const nextEnabled = !currentlyEnabled;
+  const msg = nextEnabled
+    ? '确认让该版本进入最终测试阶段？\n\n进入后：所有人在「我的工作台」选择该版本时都能看到全部需求，并各自独立勾选（不影响原有分配与勾选状态）。'
+    : '确认关闭该版本的最终测试阶段？\n\n关闭后恢复原有分配视图，最终测试数据会被保留，再次开启将延续。';
+  if (!confirm(msg)) return;
+
+  try {
+    await api('/final-test/toggle', {
+      method: 'POST',
+      headers: window.H,
+      body: { major_version_id: majorId, enabled: nextEnabled },
+    });
+    window.showMessage && window.showMessage(nextEnabled ? '已进入最终测试阶段' : '已关闭最终测试阶段', 'success');
+    await refreshFinalTestState();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '操作失败', 'error');
+  }
 }
 
 export async function loadAssignProgress() {
@@ -351,6 +466,9 @@ window.OmniQAAssignTab = {
   loadLinkCandidates,
   toggleLinkSelectAll,
   confirmLinkRequirements,
+  toggleFinalTest,
+  refreshFinalTestState,
 };
 window.toggleAssignProgressPendingOnly = toggleAssignProgressPendingOnly;
 window.syncAssignRequirementsFromZentao = syncAssignRequirementsFromZentao;
+window.toggleFinalTest = toggleFinalTest;

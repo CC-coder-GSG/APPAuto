@@ -24,6 +24,7 @@ from app.models.enums import (
 from app.models.execution import TestExecution
 from app.models.feedback import FeedbackAttachment, FeedbackBugLink, FeedbackRecord
 from app.models.field_test import FieldTestBugLink, FieldTestPurposeType, FieldTestRecord, FieldTestResultStatus
+from app.models.final_test_record import FinalTestRecord
 from app.models.requirement import Requirement
 from app.models.requirement_retest_record import RequirementRetestRecord
 from app.models.requirement_status_history import RequirementStatusHistory
@@ -65,6 +66,7 @@ __all__ = [
     "FieldTestPurposeType",
     "FieldTestRecord",
     "FieldTestResultStatus",
+    "FinalTestRecord",
     "Requirement",
     "RequirementRetestRecord",
     "RequirementStatusHistory",

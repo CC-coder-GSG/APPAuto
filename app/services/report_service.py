@@ -14,6 +14,7 @@ from app.models import (
     FeedbackBugLink,
     FeedbackRecord,
     FeedbackStatus,
+    FinalTestRecord,
     Requirement,
     RequirementStatus,
     RequirementStatusHistory,
@@ -250,6 +251,72 @@ class ReportService:
         }
         return scoped
 
+    def _execution_req_ids(
+        self,
+        sdt: datetime,
+        edt: datetime,
+        actor_ids: list[int] | None,
+        scoped_major_ids: list[int] | None,
+    ) -> set[int]:
+        """Distinct requirement ids with a TestExecution by the actors in range."""
+        if actor_ids is not None and not actor_ids:
+            return set()
+        if scoped_major_ids is not None and not scoped_major_ids:
+            return set()
+        q = (
+            self.db.query(TestExecution.requirement_id)
+            .join(Requirement, TestExecution.requirement_id == Requirement.id)
+            .filter(TestExecution.executed_at >= sdt, TestExecution.executed_at <= edt)
+        )
+        if actor_ids is not None:
+            q = q.filter(TestExecution.executed_by_id.in_(actor_ids))
+        if scoped_major_ids is not None:
+            q = q.filter(Requirement.major_version_id.in_(scoped_major_ids))
+        return {row[0] for row in q.distinct().all()}
+
+    def _final_test_req_ids(
+        self,
+        sdt: datetime,
+        edt: datetime,
+        actor_ids: list[int] | None,
+        scoped_major_ids: list[int] | None,
+    ) -> set[int]:
+        """
+        Distinct requirement ids the actors ticked「测试完成」in the final-test
+        phase within the range. Counted regardless of whether final test is
+        currently enabled, so toggling the phase off does not retroactively
+        change historical report numbers (the records are preserved).
+        """
+        if actor_ids is not None and not actor_ids:
+            return set()
+        if scoped_major_ids is not None and not scoped_major_ids:
+            return set()
+        q = self.db.query(FinalTestRecord.requirement_id).filter(
+            FinalTestRecord.test_completed.is_(True),
+            FinalTestRecord.test_completed_at.isnot(None),
+            FinalTestRecord.test_completed_at >= sdt,
+            FinalTestRecord.test_completed_at <= edt,
+        )
+        if actor_ids is not None:
+            q = q.filter(FinalTestRecord.user_id.in_(actor_ids))
+        if scoped_major_ids is not None:
+            q = q.join(Requirement, FinalTestRecord.requirement_id == Requirement.id).filter(
+                Requirement.major_version_id.in_(scoped_major_ids)
+            )
+        return {row[0] for row in q.distinct().all()}
+
+    def _executed_requirements_count(
+        self,
+        sdt: datetime,
+        edt: datetime,
+        actor_ids: list[int] | None,
+        scoped_major_ids: list[int] | None,
+    ) -> int:
+        """执行需求数 = 普通执行 ∪ 最终测试勾选完成（按需求去重）。"""
+        normal_ids = self._execution_req_ids(sdt, edt, actor_ids, scoped_major_ids)
+        final_ids = self._final_test_req_ids(sdt, edt, actor_ids, scoped_major_ids)
+        return len(normal_ids | final_ids)
+
     def summary(
         self,
         start_date: date,
@@ -437,12 +504,7 @@ class ReportService:
             return q.filter(False)
 
         def metrics_for_user(uid: int) -> dict:
-            executed_req_count = (
-                self.db.query(func.count(func.distinct(TestExecution.requirement_id)))
-                .join(Requirement, TestExecution.requirement_id == Requirement.id)
-                .filter(TestExecution.executed_by_id == uid, TestExecution.executed_at >= sdt, TestExecution.executed_at <= edt)
-            )
-            executed_req_count = filter_by_major_ids(executed_req_count, Requirement.major_version_id).scalar() or 0
+            executed_req_count = self._executed_requirements_count(sdt, edt, [uid], scoped_major_ids)
             case_count = (
                 self.db.query(func.count(TestCase.id))
                 .join(Requirement, TestCase.requirement_id == Requirement.id)
@@ -479,11 +541,6 @@ class ReportService:
             }
 
         if all_users_mode:
-            q_exec = (
-                self.db.query(func.count(func.distinct(TestExecution.requirement_id)))
-                .join(Requirement, TestExecution.requirement_id == Requirement.id)
-                .filter(TestExecution.executed_at >= sdt, TestExecution.executed_at <= edt, TestExecution.executed_by_id.in_(team_ids))
-            )
             q_case = (
                 self.db.query(func.count(TestCase.id))
                 .join(Requirement, TestCase.requirement_id == Requirement.id)
@@ -504,7 +561,7 @@ class ReportService:
                 FeedbackRecord.creator_id.in_(team_ids),
             )
             overview = {
-                "executed_requirements": filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0,
+                "executed_requirements": self._executed_requirements_count(sdt, edt, team_ids, scoped_major_ids),
                 "created_cases": filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0,
                 "created_bugs": filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0,
                 "retested_reqs": retest_transition_stats["total"],
@@ -521,11 +578,6 @@ class ReportService:
             day_s = datetime.combine(cur, datetime.min.time())
             day_e = datetime.combine(cur, datetime.max.time())
             if all_users_mode:
-                q_exec = (
-                    self.db.query(func.count(func.distinct(TestExecution.requirement_id)))
-                    .join(Requirement, TestExecution.requirement_id == Requirement.id)
-                    .filter(TestExecution.executed_at >= day_s, TestExecution.executed_at <= day_e, TestExecution.executed_by_id.in_(team_ids))
-                )
                 q_case = (
                     self.db.query(func.count(TestCase.id))
                     .join(Requirement, TestCase.requirement_id == Requirement.id)
@@ -545,7 +597,7 @@ class ReportService:
                     FeedbackRecord.created_at <= day_e,
                     FeedbackRecord.creator_id.in_(team_ids),
                 )
-                day_exec = filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0
+                day_exec = self._executed_requirements_count(day_s, day_e, team_ids, scoped_major_ids)
                 day_case = filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0
                 day_bug = filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0
                 day_retested = retest_transition_stats["by_day"].get(cur.isoformat(), 0)
@@ -553,11 +605,6 @@ class ReportService:
                 day_fb_created = filter_by_major_ids(q_fb_created, FeedbackRecord.major_version_id).scalar() or 0
                 day_fb_processed = processed_feedback_stats["by_day"].get(cur.isoformat(), 0)
             else:
-                q_exec = (
-                    self.db.query(func.count(func.distinct(TestExecution.requirement_id)))
-                    .join(Requirement, TestExecution.requirement_id == Requirement.id)
-                    .filter(TestExecution.executed_by_id == target_user_id, TestExecution.executed_at >= day_s, TestExecution.executed_at <= day_e)
-                )
                 q_case = (
                     self.db.query(func.count(TestCase.id))
                     .join(Requirement, TestCase.requirement_id == Requirement.id)
@@ -577,7 +624,7 @@ class ReportService:
                     FeedbackRecord.created_at <= day_e,
                     FeedbackRecord.creator_id == target_user_id,
                 )
-                day_exec = filter_by_major_ids(q_exec, Requirement.major_version_id).scalar() or 0
+                day_exec = self._executed_requirements_count(day_s, day_e, [target_user_id], scoped_major_ids)
                 day_case = filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0
                 day_bug = filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0
                 day_retested = retest_transition_stats["by_day"].get(cur.isoformat(), 0)

@@ -215,7 +215,7 @@
     <details id="assignCreateBlock" open style="border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; background:#fff;">
       <summary style="cursor:pointer; font-weight:700; color:#0f172a; list-style:none;">任务创建台<span id="assignReqCount" class="badge" style="margin-left:8px; font-weight:600; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe;">共 0 个需求</span></summary>
       <div style="margin-top:10px;">
-      <div class="row"><label>大版本</label><select id="assignMajorSelect" onchange="loadAssignBoard()"></select><button onclick="loadAssignBoard()">加载</button><button class="secondary" onclick="syncAssignRequirementsFromZentao()">同步禅道需求</button><button onclick="publishAssign()">一键发布（更新分配）</button></div>
+      <div class="row"><label>大版本</label><select id="assignMajorSelect" onchange="loadAssignBoard()"></select><button onclick="loadAssignBoard()">加载</button><button class="secondary" onclick="syncAssignRequirementsFromZentao()">同步禅道需求</button><button onclick="publishAssign()">一键发布（更新分配）</button><button id="finalTestToggleBtn" class="secondary" onclick="toggleFinalTest()">最终测试</button></div>
         <table><thead><tr><th>需求</th><th>负责人</th></tr></thead><tbody id="assignTable"></tbody></table>
       </div>
     </details>
@@ -244,6 +244,11 @@
     <div class="card" style="margin-top:16px; border:1px solid #e2e8f0; background:#f8fafc;">
       <h3 style="margin-top:0; color:#1e293b;">任务进行状态</h3>
       <div id="assignProgressArea"></div>
+    </div>
+
+    <div id="finalTestProgressCard" class="card" style="margin-top:16px; border:1px solid #fcd34d; background:#fffbeb; display:none;">
+      <h3 style="margin-top:0; color:#92400e;">🏁 最终测试阶段进度</h3>
+      <div id="finalTestProgressArea"></div>
     </div>
   </section>
 
@@ -2526,6 +2531,10 @@ async function setReqStatus(reqId, key, checked){
 
 async function handleTestCompletedToggle(reqId, checked, checkboxEl){
   return window.OmniQAMineTab.handleTestCompletedToggle(reqId, checked, checkboxEl);
+}
+
+async function setFinalTestStatus(reqId, key, checked, checkboxEl){
+  return window.OmniQAMineTab.setFinalTestStatus(reqId, key, checked, checkboxEl);
 }
 
 async function confirmMineTestExecutionModal(){

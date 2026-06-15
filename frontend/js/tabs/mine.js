@@ -606,8 +606,11 @@ export function renderMineCards() {
         </summary>
         <div style="margin-top: 12px;">
           <div class="row" style="margin-bottom:8px">
-            <label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked).then(()=>loadMyWorkbench())">✅用例完成</label>
-            <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">✅测试完成</label>
+            ${req.final_test
+              ? `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'case_completed', this.checked, this)">✅用例完成</label>
+            <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'test_completed', this.checked, this)">✅测试完成</label>`
+              : `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked).then(()=>loadMyWorkbench())">✅用例完成</label>
+            <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">✅测试完成</label>`}
             <span class="badge" style="background:${req.test_notes ? '#dcfce7' : '#f1f5f9'}; color:${req.test_notes ? '#166534' : '#64748b'}; border:1px solid ${req.test_notes ? '#bbf7d0' : '#e2e8f0'};">
               测试要点：${req.test_notes ? '已填写' : '未填写'}
             </span>
@@ -623,9 +626,16 @@ export function renderMineCards() {
       </details>`;
   }).join('');
 
+  const finalTestBanner = (state.currentMineData || []).some((r) => r.final_test)
+    ? `<div class="card" style="border:2px solid #f59e0b; background:#fffbeb; margin-bottom:16px;">
+         <b style="color:#92400e;">🏁 该版本已进入「最终测试」阶段</b>
+         <div class="muted" style="margin-top:4px;">以下为该版本全部需求（无视任务分配）。您的勾选独立记录，与原有测试状态互不影响。</div>
+       </div>`
+    : '';
+
   const mineCards = document.getElementById('mineCards');
   if (mineCards) {
-    mineCards.innerHTML = (state.currentFeedbackTodoHtml || '') + state.currentDispatchHtml + reqsHtml;
+    mineCards.innerHTML = finalTestBanner + (state.currentFeedbackTodoHtml || '') + state.currentDispatchHtml + reqsHtml;
     window.OmniQAZentao?.hydrateContainer(mineCards);
     window.OmniQAStoryAI?.refreshSlots?.(mineCards);
   }
@@ -747,6 +757,27 @@ export async function setReqStatus(reqId, key, checked) {
   }
 }
 
+export async function setFinalTestStatus(reqId, key, checked, checkboxEl) {
+  if (key === 'test_completed' && !checked) {
+    const ok = confirm('确认取消该需求的【测试完成】状态吗？');
+    if (!ok) {
+      if (checkboxEl) checkboxEl.checked = true;
+      return;
+    }
+  }
+  try {
+    const payload = {};
+    payload[key] = checked;
+    await api(`/final-test/requirements/${reqId}/status`, { method: 'PATCH', headers: window.H, body: payload });
+    window.showMessage && window.showMessage('最终测试状态已更新', 'success');
+  } catch (err) {
+    if (checkboxEl) checkboxEl.checked = !checked;
+    window.showMessage && window.showMessage(err.message || '状态更新失败', 'error');
+  } finally {
+    await loadMyWorkbench();
+  }
+}
+
 export async function addCase(reqId) {
   try {
     const n = document.getElementById(`new_case_${reqId}`).value;
@@ -835,6 +866,7 @@ window.OmniQAMineTab = {
   editWorkbenchBug,
   removeWorkbenchBug,
   setReqStatus,
+  setFinalTestStatus,
   addCase,
   deleteCase,
   promptCaseBug,

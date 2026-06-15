@@ -66,6 +66,18 @@ def ensure_software_schema_compat(db: Session) -> None:
         db.commit()
 
 
+def ensure_version_schema_compat(db: Session) -> None:
+    """Add final-test phase columns to historical `versions` tables."""
+    rows = db.execute(text("PRAGMA table_info(versions)")).fetchall()
+    cols = {r[1] for r in rows}
+    if "final_test_enabled" not in cols:
+        db.execute(text("ALTER TABLE versions ADD COLUMN final_test_enabled BOOLEAN NOT NULL DEFAULT 0"))
+        db.commit()
+    if "final_test_started_at" not in cols:
+        db.execute(text("ALTER TABLE versions ADD COLUMN final_test_started_at DATETIME"))
+        db.commit()
+
+
 def ensure_user_schema_compat(db: Session) -> None:
     rows = db.execute(text("PRAGMA table_info(users)")).fetchall()
     cols = {r[1] for r in rows}
