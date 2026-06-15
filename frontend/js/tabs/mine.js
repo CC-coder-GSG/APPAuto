@@ -857,6 +857,8 @@ export async function pushTest() {
 }
 
 window.rememberMineReqFold = rememberMineReqFold;
+// 直接挂到 window，避免依赖（可能被缓存的）index.html 内联包装函数
+window.setFinalTestStatus = setFinalTestStatus;
 window.OmniQAMineTab = {
   toggleMineMode,
   loadMyWorkbench,
