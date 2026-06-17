@@ -21,6 +21,7 @@
     report: "tabReportBtn", activity: "tabActivityBtn",
     data: "tabDataBtn", dispatch: "tabDispatchBtn", "zentao-ai": "tabZentaoAiBtn",
     jenkins: "tabJenkinsBtn", "cad-test": "tabCadTestBtn", terminal: "tabTerminalBtn",
+    learning: "tabLearningBtn",
   };
   // retest / overall-test 是工作台子页，归并到 mine
   const ALIAS = { retest: "mine", "overall-test": "mine" };
@@ -191,8 +192,18 @@
   }
 
   function currentVisibleTab() {
-    const section = document.querySelector("section.card[id^='tab-']:not(.hidden)");
-    return section ? section.id.replace(/^tab-/, "") : null;
+    // tab-retest / tab-overall-test 是「我的工作台」的子页，被 mountWorkbenchSubpages
+    // 搬进 tab-mine 内部，且自身永远不带 .hidden（仅靠祖先隐藏）。若按文档顺序直接取
+    // 第一个 :not(.hidden) 的 section，会在离开 mine 后误命中这段嵌套子页，导致排在
+    // mine 之后的 tab 拿不到指示器/入场动画。这里跳过子页，并用 offsetParent 排除
+    // 「祖先被隐藏」的实际不可见 section。
+    const list = document.querySelectorAll("section.card[id^='tab-']:not(.hidden)");
+    for (const s of list) {
+      if (s.id === "tab-retest" || s.id === "tab-overall-test") continue;
+      if (s.offsetParent === null) continue;
+      return s.id.replace(/^tab-/, "");
+    }
+    return null;
   }
 
   function init() {
