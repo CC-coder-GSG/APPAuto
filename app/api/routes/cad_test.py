@@ -3,10 +3,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from app.api.deps import get_current_user, get_db
 from app.core.auth import normalize_client_type, session_token_for
@@ -15,6 +16,7 @@ from app.models import User
 from app.schemas.cad_test import (
     CadBoardPayload,
     CadColumnPayload,
+    CadFolderPayload,
     CadItemPayload,
     CadRecordPayload,
     CadVersionPayload,
@@ -187,6 +189,48 @@ def download_item_cad_file(file_id: int, current_user: User = Depends(get_curren
 @router.delete("/cad-files/{file_id}")
 def delete_item_cad_file(file_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return _service(current_user, db).delete_item_cad_file(file_id, current_user)
+
+
+# ------------------------------------------ 条目级共享 CAD 文件夹（整组图纸/外部参照）
+@router.post("/items/{item_id}/cad-folder", status_code=201)
+def create_item_cad_folder(
+    item_id: int,
+    payload: CadFolderPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return _service(current_user, db).create_item_cad_folder(item_id, payload.name, current_user)
+
+
+@router.post("/cad-folders/{folder_id}/file")
+def upload_folder_file(
+    folder_id: int,
+    rel_path: str | None = Form(default=None),
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return _service(current_user, db).save_folder_file(folder_id, rel_path, file, current_user)
+
+
+@router.get("/cad-folders/{folder_id}/download")
+def download_cad_folder(folder_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    service = _service(current_user, db)
+    folder = service.get_item_cad_folder(folder_id)
+    if not folder.files:
+        raise HTTPException(status_code=404, detail="文件夹为空")
+    zip_path, filename = service.build_folder_zip(folder)
+    return FileResponse(
+        str(zip_path),
+        filename=filename,
+        media_type="application/zip",
+        background=BackgroundTask(service._safe_unlink, zip_path),
+    )
+
+
+@router.delete("/cad-folders/{folder_id}")
+def delete_cad_folder(folder_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _service(current_user, db).delete_item_cad_folder(folder_id, current_user)
 
 
 # --------------------------------------------------------------------- records

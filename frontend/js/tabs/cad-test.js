@@ -160,10 +160,11 @@ function renderCard(item, versionId) {
       <div class="row" style="gap:14px; align-items:center;">
         ${statusBadge}
       </div>
-      ${(item.cad_files && item.cad_files.length) ? `<div style="border:1px dashed #2563eb; background:#eff6ff; border-radius:8px; padding:6px 9px;">
+      ${((item.cad_files && item.cad_files.length) || (item.cad_folders && item.cad_folders.length)) ? `<div style="border:1px dashed #2563eb; background:#eff6ff; border-radius:8px; padding:6px 9px;">
         <div style="font-size:11px; color:#1d4ed8; display:flex; align-items:center; gap:4px;">📎 共享 CAD 文件 · 各测试版本通用</div>
         <div class="row" style="flex-wrap:wrap; gap:6px; margin-top:5px;">
-          ${item.cad_files.map((f) => `<button class="secondary" style="padding:4px 10px; font-size:12px;" onclick="window.OmniQACadTab._dlcad(${f.id})" title="下载：${esc(f.original_name)}">⬇ ${esc(f.original_name.length > 16 ? f.original_name.slice(0, 16) + '…' : f.original_name)}</button>`).join('')}
+          ${(item.cad_folders || []).map((fd) => `<button class="secondary" style="padding:4px 10px; font-size:12px;" onclick="window.OmniQACadTab._viewFolder(${fd.id},${item.id},${versionId})" title="查看文件夹：${esc(fd.name)}（${fd.file_count} 个文件）">📁 ${esc(fd.name.length > 14 ? fd.name.slice(0, 14) + '…' : fd.name)} (${fd.file_count})</button>`).join('')}
+          ${(item.cad_files || []).map((f) => `<button class="secondary" style="padding:4px 10px; font-size:12px;" onclick="window.OmniQACadTab._dlcad(${f.id})" title="下载：${esc(f.original_name)}">⬇ ${esc(f.original_name.length > 16 ? f.original_name.slice(0, 16) + '…' : f.original_name)}</button>`).join('')}
         </div>
       </div>` : ''}
       ${rec && rec.description ? `<div style="font-size:13px; color:#334155; white-space:pre-wrap; line-height:1.55; background:#f8fafc; border-left:3px solid ${hasAbnormal ? '#f87171' : '#94a3b8'}; border-radius:6px; padding:8px 10px;"><span style="color:#64748b; font-size:11px;">问题说明</span><br>${esc(rec.description)}</div>` : ''}
@@ -331,17 +332,29 @@ function _editRecord(itemId, versionId) {
       </div>` : ''}
       <div style="border-top:1px dashed #e2e8f0; padding-top:10px; border:1px dashed #2563eb; border-radius:8px; padding:10px; background:#eff6ff;">
         <div class="row" style="justify-content:space-between; align-items:center;">
-          <b style="font-size:13px; color:#1d4ed8;">📎 CAD 文件（上传后该条目各版本共享）</b>
-          <label class="secondary" style="cursor:pointer; padding:4px 10px; border:1px solid #bfdbfe; border-radius:8px; background:#fff;">+ 上传CAD
-            <input type="file" accept=".dwg,.dxf,.dwf,.dgn,.dwt" style="display:none;" onchange="window.OmniQACadTab._upload(${itemId},${versionId},'cad',this)">
-          </label>
+          <b style="font-size:13px; color:#1d4ed8;">📎 CAD 文件 / 文件夹（上传后该条目各版本共享）</b>
+          <div class="row" style="gap:6px;">
+            <label class="secondary" style="cursor:pointer; padding:4px 10px; border:1px solid #bfdbfe; border-radius:8px; background:#fff;">+ 上传CAD
+              <input type="file" accept=".dwg,.dxf,.dwf,.dgn,.dwt" style="display:none;" onchange="window.OmniQACadTab._upload(${itemId},${versionId},'cad',this)">
+            </label>
+            <label class="secondary" style="cursor:pointer; padding:4px 10px; border:1px solid #bfdbfe; border-radius:8px; background:#fff;" title="上传一整个文件夹（含外部参照/整组图纸）">📁 上传文件夹
+              <input type="file" webkitdirectory directory multiple style="display:none;" onchange="window.OmniQACadTab._uploadFolder(${itemId},${versionId},this)">
+            </label>
+          </div>
         </div>
-        <div style="font-size:11px; color:#1d4ed8; margin-top:4px;">同一条目（同一张图纸）的 CAD 在所有版本通用，无需每个版本重复上传。</div>
+        <div style="font-size:11px; color:#1d4ed8; margin-top:4px;">同一条目（同一张图纸 / 同一组图纸）的 CAD 在所有版本通用，无需每个版本重复上传。带外部参照或整组图纸时，可直接上传整个文件夹。</div>
+        ${(item && item.cad_folders && item.cad_folders.length) ? `<div id="cadRecFolderList" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+          ${item.cad_folders.map((fd) => `<span class="row" style="gap:6px; align-items:center; background:#fff; border:1px solid #bfdbfe; border-radius:8px; padding:3px 8px;">
+            <a class="qa-ext-link" href="javascript:void(0)" onclick="window.OmniQACadTab._viewFolder(${fd.id},${itemId},${versionId})" title="查看文件夹内容">📁 ${esc(fd.name)} <span style="color:#64748b;">(${fd.file_count})</span></a>
+            <button onclick="window.OmniQACadTab._dlFolder(${fd.id})" title="打包下载整个文件夹" style="border:none;background:none;color:#2563eb;cursor:pointer;">⬇</button>
+            <button onclick="window.OmniQACadTab._delFolder(${fd.id},${itemId},${versionId})" title="删除整个文件夹" style="border:none;background:none;color:#dc2626;cursor:pointer;">×</button>
+          </span>`).join('')}
+        </div>` : ''}
         <div id="cadRecCadList" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">
           ${(item && item.cad_files && item.cad_files.length) ? item.cad_files.map((f) => `<span class="row" style="gap:4px; align-items:center; background:#fff; border:1px solid #bfdbfe; border-radius:8px; padding:3px 8px;">
             <a class="qa-ext-link" href="javascript:void(0)" onclick="window.OmniQACadTab._dlcad(${f.id})">📐 ${esc(f.original_name)}</a>
             <button onclick="window.OmniQACadTab._delCad(${f.id},${itemId},${versionId})" title="删除" style="border:none;background:none;color:#dc2626;cursor:pointer;">×</button>
-          </span>`).join('') : '<span class="muted" style="font-size:12px;">无</span>'}
+          </span>`).join('') : ((item && item.cad_folders && item.cad_folders.length) ? '' : '<span class="muted" style="font-size:12px;">无</span>')}
         </div>
       </div>
       <div>
@@ -412,6 +425,41 @@ async function _upload(itemId, versionId, kind, inputEl) {
   inputEl.value = ''; // 允许再次选择同一文件
   await uploadCadFile(itemId, versionId, kind, file);
 }
+// 上传一整个文件夹（含外部参照/整组图纸）：先建文件夹，再逐个文件带相对路径上传。
+async function _uploadFolder(itemId, versionId, inputEl) {
+  const files = Array.from(inputEl.files || []);
+  inputEl.value = '';
+  if (!files.length) return;
+  // 文件夹名取自首个文件相对路径的顶层目录名。
+  const firstRel = files[0].webkitRelativePath || files[0].name;
+  const folderName = (firstRel.split('/')[0] || '上传文件夹').trim();
+  if (!confirm(`将把文件夹「${folderName}」中的 ${files.length} 个文件作为整组归档上传，确定继续？`)) return;
+
+  const prog = createProgressBar(`📁 ${folderName} 0/${files.length}`);
+  try {
+    const folder = await japi(`/api/cad/items/${itemId}/cad-folder`, { method: 'POST', body: { name: folderName } });
+    for (let i = 0; i < files.length; i += 1) {
+      const f = files[i];
+      // 相对路径去掉顶层目录名，仅保留文件夹内层级（含文件名）。
+      const rel = (f.webkitRelativePath || f.name).split('/').slice(1).join('/') || f.name;
+      prog.setLabel(`📁 ${folderName} ${i + 1}/${files.length} · ${f.name}`);
+      const fd = new FormData();
+      fd.append('file', f, f.name || 'upload');
+      fd.append('rel_path', rel);
+      // 总进度 = 已完成文件 + 当前文件分数，再除以总数。
+      await xhrUpload(`/api/cad/cad-folders/${folder.id}/file`, fd, (r) => prog.update((i + r) / files.length));
+    }
+    prog.done();
+    await loadBoard();
+    _editRecord(itemId, versionId);
+    toast(`文件夹「${folderName}」上传成功（${files.length} 个文件）`);
+  } catch (e) {
+    prog.fail();
+    toast(e.message || '文件夹上传失败', 'error');
+    await loadBoard();
+    _editRecord(itemId, versionId);
+  }
+}
 // 带上传进度的 POST（fetch 无法读取上传进度，故用 XHR）。
 function xhrUpload(url, formData, onProgress) {
   return new Promise((resolve, reject) => {
@@ -449,7 +497,7 @@ function createProgressBar(label) {
   item.style.cssText = 'background:#fff; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,.12); padding:10px 12px; font-size:12px;';
   item.innerHTML = `
     <div style="display:flex; justify-content:space-between; gap:8px; color:#334155;">
-      <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">⬆ ${esc(label)}</span>
+      <span data-label style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">⬆ ${esc(label)}</span>
       <span data-pct style="color:#2563eb; font-weight:600; flex-shrink:0;">0%</span>
     </div>
     <div style="height:6px; background:#eef2f7; border-radius:999px; margin-top:6px; overflow:hidden;">
@@ -458,9 +506,11 @@ function createProgressBar(label) {
   host.appendChild(item);
   const bar = item.querySelector('[data-bar]');
   const pct = item.querySelector('[data-pct]');
+  const labelEl = item.querySelector('[data-label]');
   const remove = (delay) => setTimeout(() => { item.remove(); if (host && !host.children.length) host.remove(); }, delay);
   return {
     update(r) { const p = Math.round(r * 100); bar.style.width = p + '%'; pct.textContent = p === 100 ? '处理中…' : p + '%'; },
+    setLabel(text) { if (labelEl) labelEl.textContent = '⬆ ' + text; },
     done() { pct.textContent = '完成'; pct.style.color = '#16a34a'; bar.style.background = '#16a34a'; bar.style.width = '100%'; remove(1200); },
     fail() { pct.textContent = '失败'; pct.style.color = '#dc2626'; bar.style.background = '#dc2626'; remove(2500); },
   };
@@ -547,6 +597,84 @@ async function _delCad(fileId, itemId, versionId) {
     toast('已删除');
   } catch (e) { toast(e.message, 'error'); }
 }
+// 在 state 中按文件夹 id 找到序列化好的文件夹数据。
+function findFolder(folderId) {
+  for (const it of (state.board?.items || [])) {
+    const fd = (it.cad_folders || []).find((x) => x.id === folderId);
+    if (fd) return { folder: fd, item: it };
+  }
+  return null;
+}
+function fmtSize(bytes) {
+  const b = Number(bytes || 0);
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / 1024 / 1024).toFixed(1)} MB`;
+}
+// 查看文件夹内容：列出文件，支持单独下载与整包下载。editable 时可删除文件夹/单文件。
+function _viewFolder(folderId, itemId, versionId) {
+  const found = findFolder(folderId);
+  if (!found) { toast('文件夹不存在', 'error'); return; }
+  const { folder } = found;
+  const editable = itemId != null && versionId != null;
+  const fileRows = (folder.files || []).map((f) => `
+    <div class="row" style="justify-content:space-between; align-items:center; gap:8px; padding:6px 8px; border:1px solid #e2e8f0; border-radius:8px; background:#fff;">
+      <a class="qa-ext-link" href="javascript:void(0)" onclick="window.OmniQACadTab._dlcad(${f.id})" title="下载 ${esc(f.rel_path)}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📄 ${esc(f.rel_path)}</a>
+      <span class="row" style="gap:8px; align-items:center; flex-shrink:0;">
+        <span class="muted" style="font-size:11px;">${fmtSize(f.file_size)}</span>
+        <button class="secondary" style="padding:2px 8px; font-size:12px;" onclick="window.OmniQACadTab._dlcad(${f.id})">⬇</button>
+        ${editable ? `<button title="删除该文件" style="border:none;background:none;color:#dc2626;cursor:pointer;" onclick="window.OmniQACadTab._delFolderFile(${f.id},${folderId},${itemId},${versionId})">×</button>` : ''}
+      </span>
+    </div>`).join('') || '<div class="muted" style="font-size:12px;">该文件夹暂无文件</div>';
+  const body = `
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div class="muted" style="font-size:12px;">📁 ${esc(folder.name)} · 共 ${folder.file_count} 个文件 · ${fmtSize(folder.total_size)}</div>
+        <button onclick="window.OmniQACadTab._dlFolder(${folderId})">⬇ 下载整个文件夹(.zip)</button>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:6px; max-height:50vh; overflow:auto;">${fileRows}</div>
+    </div>`;
+  openModal(`文件夹：${folder.name}`, body);
+}
+async function _dlFolder(folderId) {
+  const prog = createProgressBar('打包下载中…');
+  try {
+    const r = await fetch(`/api/cad/cad-folders/${folderId}/download`, { headers: authHeaders() });
+    if (!r.ok) { let m = '下载失败'; try { m = (await r.json()).detail || m; } catch {} throw new Error(m); }
+    const blob = await r.blob();
+    const dispo = r.headers.get('Content-Disposition') || '';
+    const m = /filename\*?=(?:UTF-8'')?"?([^";]+)/i.exec(dispo);
+    const name = m ? decodeURIComponent(m[1]) : `cad_folder_${folderId}.zip`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    prog.done();
+  } catch (e) { prog.fail(); toast(e.message, 'error'); }
+}
+async function _delFolder(folderId, itemId, versionId) {
+  const found = findFolder(folderId);
+  if (!confirm(`删除整个文件夹「${found?.folder?.name || ''}」？其中所有文件将一并删除，该条目各版本都将不再显示。`)) return;
+  try {
+    await japi(`/api/cad/cad-folders/${folderId}`, { method: 'DELETE' });
+    await loadBoard();
+    if (itemId != null && versionId != null) _editRecord(itemId, versionId);
+    else closeModal();
+    toast('已删除文件夹');
+  } catch (e) { toast(e.message, 'error'); }
+}
+async function _delFolderFile(fileId, folderId, itemId, versionId) {
+  if (!confirm('从该文件夹中删除这个文件？')) return;
+  try {
+    await japi(`/api/cad/cad-files/${fileId}`, { method: 'DELETE' });
+    await loadBoard();
+    // 刷新文件夹内容弹窗（若文件夹已空则回到记录弹窗）。
+    const found = findFolder(folderId);
+    if (found && found.folder.file_count > 0) _viewFolder(folderId, itemId, versionId);
+    else if (itemId != null && versionId != null) _editRecord(itemId, versionId);
+    else closeModal();
+    toast('已删除');
+  } catch (e) { toast(e.message, 'error'); }
+}
 async function _delAtt(attId, itemId, versionId) {
   if (!confirm('删除该附件？')) return;
   try {
@@ -620,5 +748,6 @@ window.OmniQACadTab = {
   _newItem, _editItem, _saveItem, _delItem,
   _editRecord, _saveRecord, _upload, _pasteShot, _delAtt, _download, _viewShot, _viewVideo,
   _dlcad, _delCad,
+  _uploadFolder, _viewFolder, _dlFolder, _delFolder, _delFolderFile,
   _close: closeModal,
 };

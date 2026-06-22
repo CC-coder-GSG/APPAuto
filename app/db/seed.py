@@ -494,3 +494,22 @@ def ensure_build_record_schema_compat(db: Session) -> None:
         if col not in cols:
             db.execute(text(f"ALTER TABLE build_records ADD COLUMN {col} {sql_type}"))
             db.commit()
+
+
+def ensure_cad_schema_compat(db: Session) -> None:
+    """为已存在的 cad_item_files 表补齐「文件夹归档」相关列（folder_id / rel_path）。
+    cad_item_folders 新表由 create_all 自动建立，此处仅处理旧表的列增量。"""
+    rows = db.execute(text("PRAGMA table_info(cad_item_files)")).fetchall()
+    cols = {r[1] for r in rows}
+    if not cols:
+        return
+    column_defs = {
+        "folder_id": "INTEGER",
+        "rel_path": "TEXT",
+    }
+    for col, sql_type in column_defs.items():
+        if col not in cols:
+            db.execute(text(f"ALTER TABLE cad_item_files ADD COLUMN {col} {sql_type}"))
+            db.commit()
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_cad_item_files_folder_id ON cad_item_files (folder_id)"))
+    db.commit()

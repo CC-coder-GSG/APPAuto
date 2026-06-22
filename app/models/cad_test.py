@@ -77,9 +77,14 @@ class CadItem(Base):
 
     board = relationship("CadBoard", back_populates="items")
     records = relationship("CadRecord", back_populates="item", cascade="all, delete-orphan")
-    # 条目级共享 CAD 文件：上传一次，该条目在所有版本下通用。
+    # 条目级共享 CAD 文件（含散装文件与文件夹内文件）：上传一次，该条目在所有版本下通用。
+    # 唯一的 delete-orphan 父级，避免与文件夹关系产生双父级 orphan 冲突。
     cad_files = relationship(
         "CadItemFile", back_populates="item", cascade="all, delete-orphan", order_by="CadItemFile.id"
+    )
+    # 条目级共享 CAD 文件夹：整组图纸（含外部参照）打包归档，跨版本通用。
+    cad_folders = relationship(
+        "CadItemFolder", back_populates="item", cascade="all, delete-orphan", order_by="CadItemFolder.id"
     )
 
 
@@ -128,13 +133,42 @@ class CadAttachment(Base):
     record = relationship("CadRecord", back_populates="attachments")
 
 
+class CadItemFolder(Base):
+    """条目级共享 CAD 文件夹：整组图纸（含外部参照）作为一个文件夹归档，跨所有版本通用。"""
+
+    __tablename__ = "cad_item_folders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("cad_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)  # 文件夹名（取自上传时的顶层目录名）
+    uploaded_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
+
+    item = relationship("CadItem", back_populates="cad_folders")
+    # 只读视图：文件夹内的文件。其生命周期由 CadItem.cad_files（唯一 delete-orphan 父级）与
+    # 服务层显式删除负责，避免双父级 orphan 冲突。
+    files = relationship(
+        "CadItemFile",
+        back_populates="folder",
+        viewonly=True,
+        order_by="CadItemFile.rel_path, CadItemFile.id",
+    )
+
+
 class CadItemFile(Base):
-    """条目级共享 CAD 文件：跨所有版本通用，独立于版本记录的生命周期。"""
+    """条目级共享 CAD 文件：跨所有版本通用，独立于版本记录的生命周期。
+    folder_id 为空表示散装单文件；非空表示隶属于某个上传的文件夹，rel_path 保存其在文件夹内的相对路径。"""
 
     __tablename__ = "cad_item_files"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     item_id: Mapped[int] = mapped_column(ForeignKey("cad_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    # 隶属文件夹（可空：NULL=散装单文件，保持原有行为）。
+    folder_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cad_item_folders.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # 在文件夹内的相对路径（含子目录与文件名，如 "外部参照/ref1.dwg"）；散装文件为空。
+    rel_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     original_name: Mapped[str] = mapped_column(String(255), nullable=False)
     stored_name: Mapped[str] = mapped_column(String(120), nullable=False)
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
@@ -145,6 +179,7 @@ class CadItemFile(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
 
     item = relationship("CadItem", back_populates="cad_files")
+    folder = relationship("CadItemFolder", back_populates="files")
 
 
 __all__ = [
@@ -155,4 +190,5 @@ __all__ = [
     "CadRecord",
     "CadAttachment",
     "CadItemFile",
+    "CadItemFolder",
 ]

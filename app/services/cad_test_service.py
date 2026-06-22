@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
+import re
+import tempfile
 import uuid
+import zipfile
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
@@ -15,6 +19,7 @@ from app.models import (
     CadCustomColumn,
     CadItem,
     CadItemFile,
+    CadItemFolder,
     CadRecord,
     CadVersion,
     User,
@@ -80,6 +85,7 @@ class CadTestService:
                 joinedload(CadBoard.versions),
                 joinedload(CadBoard.columns),
                 joinedload(CadBoard.items).joinedload(CadItem.cad_files),
+                joinedload(CadBoard.items).joinedload(CadItem.cad_folders).joinedload(CadItemFolder.files),
             )
             .filter(CadBoard.id == board_id)
             .first()
@@ -139,7 +145,7 @@ class CadTestService:
                 else None
             ),
             "sort_order": item.sort_order,
-            # 条目级共享 CAD 文件（所有版本通用）。
+            # 条目级共享「散装」CAD 文件（folder_id 为空，所有版本通用）。
             "cad_files": [
                 {
                     "id": f.id,
@@ -149,6 +155,30 @@ class CadTestService:
                     "download_url": f"/api/cad/cad-files/{f.id}/download",
                 }
                 for f in sorted(item.cad_files, key=lambda x: x.id)
+                if f.folder_id is None
+            ],
+            # 条目级共享 CAD 文件夹（整组图纸/外部参照）。
+            "cad_folders": [self._serialize_folder(folder) for folder in sorted(item.cad_folders, key=lambda x: x.id)],
+        }
+
+    def _serialize_folder(self, folder: CadItemFolder) -> dict:
+        files = sorted(folder.files, key=lambda x: (x.rel_path or x.original_name, x.id))
+        return {
+            "id": folder.id,
+            "name": folder.name,
+            "file_count": len(files),
+            "total_size": sum(int(f.file_size or 0) for f in files),
+            "download_url": f"/api/cad/cad-folders/{folder.id}/download",
+            "files": [
+                {
+                    "id": f.id,
+                    "original_name": f.original_name,
+                    "rel_path": f.rel_path or f.original_name,
+                    "file_ext": f.file_ext,
+                    "file_size": f.file_size,
+                    "download_url": f"/api/cad/cad-files/{f.id}/download",
+                }
+                for f in files
             ],
         }
 
@@ -423,6 +453,118 @@ class CadTestService:
         self.db.commit()
         audit(self.db, action="cad.item_cad.delete", target_type="cad_item_file", actor_id=actor.id, target_id=str(file_id))
         return {"message": "已删除"}
+
+    # --------------------------------------------------- item-level CAD folders
+    def create_item_cad_folder(self, item_id: int, name: str, actor: User) -> dict:
+        item = self._get_item(item_id)
+        folder = CadItemFolder(
+            item_id=item.id,
+            name=(name or "").strip() or "未命名文件夹",
+            uploaded_by_id=actor.id,
+        )
+        self.db.add(folder)
+        self.db.commit()
+        self.db.refresh(folder)
+        audit(self.db, action="cad.item_folder.create", target_type="cad_item", actor_id=actor.id, target_id=str(item.id), detail=folder.name)
+        return self._serialize_folder(folder)
+
+    def save_folder_file(self, folder_id: int, rel_path: str | None, upload_file: UploadFile, actor: User) -> dict:
+        folder = self.get_item_cad_folder(folder_id)
+        suffix = Path(upload_file.filename or "").suffix.lower()
+        now = local_now()
+        dest = UPLOAD_ROOT / "cad_files" / now.strftime("%Y") / now.strftime("%m")
+        dest.mkdir(parents=True, exist_ok=True)
+        stored_name = f"{uuid.uuid4().hex}{suffix}"
+        full_path = dest / stored_name
+        content = upload_file.file.read()
+        with open(full_path, "wb") as f:
+            f.write(content)
+        guessed = upload_file.content_type or mimetypes.guess_type(upload_file.filename or "")[0] or "application/octet-stream"
+        rel = self._sanitize_rel_path(rel_path) or (upload_file.filename or stored_name)
+        cf = CadItemFile(
+            item_id=folder.item_id,
+            folder_id=folder.id,
+            rel_path=rel,
+            original_name=upload_file.filename or stored_name,
+            stored_name=stored_name,
+            file_path=str(full_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+            file_type=guessed,
+            file_ext=suffix.lstrip("."),
+            file_size=len(content),
+            uploaded_by_id=actor.id,
+        )
+        self.db.add(cf)
+        self.db.commit()
+        self.db.refresh(cf)
+        return {
+            "id": cf.id,
+            "folder_id": folder.id,
+            "original_name": cf.original_name,
+            "rel_path": cf.rel_path,
+            "file_ext": cf.file_ext,
+            "file_size": cf.file_size,
+            "download_url": f"/api/cad/cad-files/{cf.id}/download",
+        }
+
+    def get_item_cad_folder(self, folder_id: int) -> CadItemFolder:
+        folder = self.db.query(CadItemFolder).filter(CadItemFolder.id == folder_id).first()
+        if not folder:
+            raise HTTPException(status_code=404, detail="文件夹不存在")
+        return folder
+
+    def build_folder_zip(self, folder: CadItemFolder) -> tuple[Path, str]:
+        """把文件夹内的文件按相对路径打包为临时 zip，返回 (zip 路径, 下载文件名)。
+        调用方负责在响应结束后删除临时 zip。"""
+        files = list(folder.files)
+        tmp = tempfile.NamedTemporaryFile(prefix="cad_folder_", suffix=".zip", delete=False)
+        tmp.close()
+        zip_path = Path(tmp.name)
+        used: set[str] = set()
+        try:
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for f in files:
+                    src = self.item_cad_file_abs_path(f)
+                    if not src.exists():
+                        continue
+                    arcname = self._safe_arcname(f.rel_path or f.original_name, used)
+                    zf.write(src, arcname)
+        except Exception:
+            self._safe_unlink(zip_path)
+            raise
+        safe_name = re.sub(r'[\\/:*?"<>|]', "_", folder.name or "cad_folder").strip() or "cad_folder"
+        return zip_path, f"{safe_name}.zip"
+
+    def delete_item_cad_folder(self, folder_id: int, actor: User) -> dict:
+        folder = self.get_item_cad_folder(folder_id)
+        for f in list(folder.files):
+            self._safe_unlink(self.item_cad_file_abs_path(f))
+            self.db.delete(f)
+        self.db.delete(folder)
+        self.db.commit()
+        audit(self.db, action="cad.item_folder.delete", target_type="cad_item_folder", actor_id=actor.id, target_id=str(folder_id))
+        return {"message": "已删除"}
+
+    @staticmethod
+    def _sanitize_rel_path(rel_path: str | None) -> str | None:
+        """归一化文件夹内相对路径，剔除盘符/绝对路径/.. 等，防止目录穿越。"""
+        if not rel_path:
+            return None
+        cleaned = rel_path.replace("\\", "/").strip().lstrip("/")
+        parts = [p for p in cleaned.split("/") if p and p not in (".", "..")]
+        return "/".join(parts) or None
+
+    @staticmethod
+    def _safe_arcname(rel_path: str, used: set[str]) -> str:
+        base = CadTestService._sanitize_rel_path(rel_path) or "file"
+        name = base
+        i = 1
+        # 同名相对路径去重，避免 zip 内条目覆盖。
+        while name.lower() in used:
+            stem, dot, ext = base.rpartition(".")
+            name = f"{stem}({i}){dot}{ext}" if dot else f"{base}({i})"
+            i += 1
+        used.add(name.lower())
+        return name
 
     # ------------------------------------------------------------------ helpers
     def _delete_record_files(self, rec: CadRecord) -> None:

@@ -34,6 +34,10 @@ class CadRecordPayload(BaseModel):
     custom_values: Optional[dict[str, str]] = None
 
 
+class CadFolderPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
 class CadReorderPayload(BaseModel):
     # 有序 id 列表，按数组顺序写回 sort_order
     ids: list[int] = Field(default_factory=list)

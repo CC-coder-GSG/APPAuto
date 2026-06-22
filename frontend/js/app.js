@@ -32,7 +32,7 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'data', path: './tabs/data.js?v=20260612-1' },
   { name: 'zentao-ai', path: './tabs/zentao-ai.js?v=20260422-2' },
   { name: 'jenkins', path: './tabs/jenkins.js?v=20260604-1' },
-  { name: 'cad-test', path: './tabs/cad-test.js?v=20260608-5' },
+  { name: 'cad-test', path: './tabs/cad-test.js?v=20260622-1' },
   { name: 'terminal', path: './tabs/terminal.js?v=20260611-1' },
   { name: 'learning', path: './tabs/learning.js?v=20260615-5' },
 ];
