@@ -85,6 +85,15 @@ class Settings(BaseSettings):
     # 单次转换超时（秒）。
     libreoffice_convert_timeout_seconds: int = Field(default_factory=lambda: int(os.getenv('APP_LIBREOFFICE_CONVERT_TIMEOUT_SECONDS', os.getenv('LIBREOFFICE_CONVERT_TIMEOUT_SECONDS', '120'))))
 
+    # ── 企业微信 AI 机器人 / 第三方只读+轻量写 API ─────────────────────────────
+    # 对外开放的机器人 API 用固定密钥头 X-Bot-Api-Key 鉴权（仿照 device_sync_api_key）。
+    # 留空则 /api/bot/* 全部返回 503，相当于功能关闭，避免误开放到公网。
+    # 生成示例：python -c "import secrets; print(secrets.token_urlsafe(32))"
+    bot_api_key: str = Field(default_factory=lambda: os.getenv('APP_BOT_API_KEY', os.getenv('BOT_API_KEY', '')).strip())
+    # 机器人写操作（创建反馈、触发推送等）所用的「执行身份」用户名；
+    # 需为已存在的管理员账号。留空则自动选用任意一个管理员账号。
+    bot_api_username: str = Field(default_factory=lambda: os.getenv('APP_BOT_API_USERNAME', os.getenv('BOT_API_USERNAME', '')).strip())
+
     # CORS
     cors_allowed_origins_raw: str = Field(default_factory=lambda: os.getenv('APP_CORS_ALLOWED_ORIGINS', os.getenv('CORS_ALLOWED_ORIGINS', '')))
 

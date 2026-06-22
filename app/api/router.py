@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.routes import admin, auth, bugs, cad_test, device_integrations, executions, export, feedback, field_test, final_test, jenkins, learning, overall_test, push, reports, requirements, retest, software, sse, stage5 as overall_test_legacy, task_board, terminals, user_ai_config, users, versions, workbench, zentao_ai, zentao_binding, zentao_bug_actions, zentao_hydrate, zentao_testcases, zentao_version
+from app.api.routes import admin, auth, bot_api, bugs, cad_test, device_integrations, executions, export, feedback, field_test, final_test, jenkins, learning, overall_test, push, reports, requirements, retest, software, sse, stage5 as overall_test_legacy, task_board, terminals, user_ai_config, users, versions, workbench, zentao_ai, zentao_binding, zentao_bug_actions, zentao_hydrate, zentao_testcases, zentao_version
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
@@ -34,4 +34,5 @@ api_router.include_router(jenkins.router)
 api_router.include_router(cad_test.router)
 api_router.include_router(terminals.router)
 api_router.include_router(device_integrations.router)
+api_router.include_router(bot_api.router)
 api_router.include_router(sse.router)
