@@ -154,6 +154,8 @@ function renderRows() {
 export async function loadTestcaseCenter(page = 1) {
   testcaseCenterState.page = page;
   await refreshModuleOptions();
+  // 回填记忆的筛选项（状态 + 模块），再据此查询
+  window.SelectMemory && window.SelectMemory.applyMany(['testcaseCenterStatus', 'testcaseCenterModule']);
   const query = currentQuery();
   const params = new URLSearchParams();
   Object.entries(query).forEach(([key, value]) => {

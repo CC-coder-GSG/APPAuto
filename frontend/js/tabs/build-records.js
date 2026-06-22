@@ -386,6 +386,8 @@ export async function loadBuildRecordsBoard() {
     const data = await (await api('/api/admin/build-records?limit=100&offset=0')).json();
     state.records = data.items || [];
     fillMajorFilterOptions();
+    // 回填记忆的筛选项（大版本选项依赖刚加载的数据，需在渲染前回填）
+    window.SelectMemory && window.SelectMemory.applyMany(['buildRecordsMajorFilter', 'buildRecordsStatusFilter']);
     renderCards();
     clearBuildTopNotice();
   } catch (err) {

@@ -8,7 +8,8 @@
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
-  <script type="module" src="/static/js/app.js?v=20260615-6"></script>
+  <script src="/static/js/select-memory.js?v=20260622-1"></script>
+  <script type="module" src="/static/js/app.js?v=20260622-1"></script>
   <script src="/static/js/weave-motion.js?v=20260612-3" defer></script>
   <style>
     /* Header layout */
@@ -2264,6 +2265,8 @@ async function init(){
   window.addEventListener('resize', scheduleWorkbenchViewportResize);
   applyTabVisibility();
   fillReportUsers();
+  // 回填所有工作页面下拉框记忆的选择（版本已在 fillVersionSelects 中同步回填，这里覆盖静态筛选器）
+  if(window.SelectMemory) window.SelectMemory.applyAll();
   await showTab(getDefaultVisibleTab());
 }
 
@@ -2377,7 +2380,18 @@ function fillVersionSelects(){
       ? "<option value='0'>全部版本</option>" + majors.map(v=>`<option value='${v.id}'>${v.version_no}</option>`).join('')
       : "<option value='0'>全部版本</option>";
   }
+  // 先回填记忆的「大版本」选择（必须在子版本联动之前，确保子版本按记忆的大版本来填充）
+  if(window.SelectMemory){
+    window.SelectMemory.applyMany([
+      'mineMajorSelect','retestMajorSelect','s5MajorSelect','linkSourceMajorSelect',
+      'assignMajorSelect','feedbackMajorSelect','reportMajorSelect','vbMajorSelect'
+    ]);
+  }
   refreshAllLinkedMinorSelects();
+  // 子版本填充完成后，回填记忆的「小版本」选择
+  if(window.SelectMemory){
+    window.SelectMemory.applyMany(['mineMinorSelect','feedbackMinorSelect','retestMinorSelect','s5MinorSelect']);
+  }
   bindMajorMinorCascade();
 }
 function fillSelect(id,list){

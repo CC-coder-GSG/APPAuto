@@ -507,7 +507,10 @@ function ensureInited() {
   if (filterMajorSel) {
     filterMajorSel.innerHTML = majorOptionsHtml(true);
     if (prevFilterMajor) filterMajorSel.value = prevFilterMajor;
+    // 回填记忆的筛选大版本，再据此填充并回填小版本
+    window.SelectMemory && window.SelectMemory.apply('fieldTestFilterMajor');
     fillMinorByMajor('fieldTestFilterMajor', 'fieldTestFilterMinor', true);
+    window.SelectMemory && window.SelectMemory.apply('fieldTestFilterMinor');
   }
 
   if (isAdmin()) {
@@ -516,10 +519,13 @@ function ensureInited() {
     if (testerSel) {
       testerSel.innerHTML = `<option value="">全部</option>${users.map((u) => `<option value="${u.id}">${u.display_name || u.username}</option>`).join('')}`;
       if (prevTester) testerSel.value = prevTester;
+      window.SelectMemory && window.SelectMemory.apply('fieldTestFilterTester');
     }
   } else {
     testerWrap?.classList.add('hidden');
   }
+  // 静态筛选项（测试目的、每页条数）的记忆回填
+  window.SelectMemory && window.SelectMemory.applyMany(['fieldTestFilterPurpose', 'fieldTestPageSize']);
 
   if (state.inited) return;
 

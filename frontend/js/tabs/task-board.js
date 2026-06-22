@@ -104,6 +104,8 @@ function buildQuery() {
 export async function load() {
   ensureDateInput();
   if (!state.candidates.length) await fetchCandidates();
+  // 回填记忆的筛选项（指派人 + 状态）
+  window.SelectMemory && window.SelectMemory.applyMany(['taskBoardAssigneeFilter', 'taskBoardStatusFilter']);
   const qs = buildQuery();
   try {
     const data = await (await api('/task-board/tasks' + (qs ? `?${qs}` : ''))).json();
