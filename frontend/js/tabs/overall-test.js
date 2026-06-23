@@ -921,7 +921,7 @@ function _renderPreviewFiles(preview) {
       <div style="font-size:13px; font-weight:600; color:#334155; margin-bottom:8px;">文件附件</div>
       <div style="display:flex; flex-wrap:wrap; gap:8px;">
         ${otherFiles.map((item) => item?.url ? `
-          <a href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener noreferrer" class="badge" style="background:#eff6ff; color:#2563eb; text-decoration:none;">
+          <a href="${escapeHtml(item.url || '#')}" data-filename="${escapeHtml(item.title || '')}" target="_blank" rel="noopener noreferrer" class="badge" style="background:#eff6ff; color:#2563eb; text-decoration:none; cursor:pointer;">
             ${escapeHtml(item.title || '附件')}
           </a>
         ` : `
@@ -1053,19 +1053,77 @@ function _renderPreviewActions(preview) {
   `).join('');
 }
 
+// 代理地址（/zentao/files/{id}）需要 JWT，浏览器原生 <img src>/<a href> 不带
+// token 会被后端拒为 401 Not authenticated。统一通过带鉴权的 api() 拉成 blob，
+// 同一地址只拉一次并缓存，供缩略图 / 灯箱 / 附件下载复用。
+const _proxyBlobCache = new Map();
+
+async function _resolveProxyUrl(url) {
+  if (!url || !url.startsWith('/zentao/files/')) return url;
+  if (_proxyBlobCache.has(url)) return _proxyBlobCache.get(url);
+  const resp = await api(url);
+  const blob = await resp.blob();
+  const objUrl = URL.createObjectURL(blob);
+  _proxyBlobCache.set(url, objUrl);
+  return objUrl;
+}
+
+function _filenameFromProxyUrl(url) {
+  try {
+    const tail = String(url).split('?')[0].split('#')[0];
+    return decodeURIComponent(tail.substring(tail.lastIndexOf('/') + 1)) || 'download';
+  } catch (_e) {
+    return 'download';
+  }
+}
+
 async function _loadProxyImages(containerEl) {
   if (!containerEl) return;
   const imgs = Array.from(containerEl.querySelectorAll('img[src^="/zentao/files/"]'));
   await Promise.all(imgs.map(async (img) => {
-    const src = img.getAttribute('src');
     try {
-      const resp = await api(src);
-      const blob = await resp.blob();
-      img.src = URL.createObjectURL(blob);
+      img.src = await _resolveProxyUrl(img.getAttribute('src'));
     } catch (_e) {
       // 保持破图状态，不干扰其他内容
     }
   }));
+  // 把图片画廊（灯箱）里的代理地址也换成 blob，否则打开大图时同样 401。
+  await Promise.all(_zentaoPreviewImageGallery.map(async (item) => {
+    if (item?.url && item.url.startsWith('/zentao/files/')) {
+      try { item.url = await _resolveProxyUrl(item.url); } catch (_e) { /* 保留原地址 */ }
+    }
+  }));
+}
+
+// 非图片附件链接（文件下载）拦截点击，经鉴权 api() 拉成 blob 触发下载。
+function _wireProxyDownloads(containerEl) {
+  if (!containerEl) return;
+  const links = Array.from(containerEl.querySelectorAll('a[href^="/zentao/files/"]'));
+  links.forEach((a) => {
+    if (a.dataset.proxyWired || a.querySelector('img')) return;
+    a.dataset.proxyWired = '1';
+    const url = a.getAttribute('href');
+    const filename = a.getAttribute('data-filename') || _filenameFromProxyUrl(url);
+    a.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const prevOpacity = a.style.opacity;
+      a.style.opacity = '0.5';
+      try {
+        const objUrl = await _resolveProxyUrl(url);
+        const tmp = document.createElement('a');
+        tmp.href = objUrl;
+        tmp.download = filename;
+        document.body.appendChild(tmp);
+        tmp.click();
+        tmp.remove();
+      } catch (err) {
+        if (window.showMessage) window.showMessage(err?.message || '文件下载失败', 'error');
+        else alert('文件下载失败：' + (err?.message || '未知错误'));
+      } finally {
+        a.style.opacity = prevOpacity;
+      }
+    });
+  });
 }
 
 export async function openZentaoBugPreview(ztId, bugRow = null) {
@@ -1117,6 +1175,7 @@ export async function openZentaoBugPreview(ztId, bugRow = null) {
       </div>
     `;
     await _loadProxyImages(bodyEl);
+    _wireProxyDownloads(bodyEl);
   } catch (err) {
     _setZentaoPreviewImageGallery([]);
     errorEl.innerText = err.message || '加载禅道 Bug 详情失败';
