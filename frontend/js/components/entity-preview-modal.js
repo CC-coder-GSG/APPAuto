@@ -108,6 +108,9 @@ function _sanitize(html) {
 
 // Replace <img src="/zentao/files/..."> with blob URLs fetched through the
 // authenticated api() wrapper, so the proxy endpoint sees our Bearer token.
+// Also rewrite any wrapping <a href="/zentao/files/..."> to the blob URL so
+// clicking the thumbnail to view the full image doesn't hit the proxy
+// un-authenticated (which would render {"detail":"Not authenticated"}).
 async function _loadProxyImages(containerEl) {
   if (!containerEl) return;
   const imgs = Array.from(containerEl.querySelectorAll('img[src^="/zentao/files/"]'));
@@ -116,12 +119,65 @@ async function _loadProxyImages(containerEl) {
     try {
       const resp = await api(src);
       const blob = await resp.blob();
-      img.src = URL.createObjectURL(blob);
+      const objUrl = URL.createObjectURL(blob);
+      img.src = objUrl;
+      const anchor = img.closest('a[href^="/zentao/files/"]');
+      if (anchor) {
+        anchor.href = objUrl;
+        anchor.target = '_blank';
+        anchor.rel = 'noopener noreferrer';
+      }
     } catch {
       img.alt = '图片加载失败';
       img.style.opacity = '0.5';
     }
   }));
+}
+
+function _filenameFromUrl(url) {
+  try {
+    const path = String(url).split('?')[0].split('#')[0];
+    const tail = path.substring(path.lastIndexOf('/') + 1);
+    return decodeURIComponent(tail) || 'download';
+  } catch {
+    return 'download';
+  }
+}
+
+// Non-image attachment links point at the authed /zentao/files/ proxy. A raw
+// <a href> navigation carries no Bearer token, so the proxy answers with
+// {"detail":"Not authenticated"}. Intercept the click, fetch the file through
+// the api() wrapper, and trigger a real download from the resulting blob.
+function _wireProxyDownloads(containerEl) {
+  if (!containerEl) return;
+  const links = Array.from(containerEl.querySelectorAll('a[href^="/zentao/files/"]'));
+  links.forEach((a) => {
+    if (a.dataset.proxyWired || a.querySelector('img')) return; // images handled by _loadProxyImages
+    a.dataset.proxyWired = '1';
+    const url = a.getAttribute('href');
+    const filename = a.getAttribute('data-filename') || _filenameFromUrl(url);
+    a.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const original = a.style.opacity;
+      a.style.opacity = '0.5';
+      try {
+        const resp = await api(url);
+        const blob = await resp.blob();
+        const objUrl = URL.createObjectURL(blob);
+        const tmp = document.createElement('a');
+        tmp.href = objUrl;
+        tmp.download = filename;
+        document.body.appendChild(tmp);
+        tmp.click();
+        tmp.remove();
+        setTimeout(() => URL.revokeObjectURL(objUrl), 10000);
+      } catch (err) {
+        alert('文件下载失败：' + (err?.message || '未知错误'));
+      } finally {
+        a.style.opacity = original;
+      }
+    });
+  });
 }
 
 function _fmtDate(s) {
@@ -268,6 +324,7 @@ function _renderStory(data) {
     <div style="margin-top:10px; font-size:11px; color:#94a3b8; text-align:right;">数据实时来自禅道，浏览器侧缓存 60 秒</div>
   `;
   _loadProxyImages(body);
+  _wireProxyDownloads(body);
 }
 
 // ─── Bug renderer ───────────────────────────────────────────────────────────
@@ -290,7 +347,7 @@ function _renderBug(data) {
   const filesHtml = (data.files || []).length
     ? `<div style="display:flex; flex-wrap:wrap; gap:8px;">${data.files.map((f) => f.is_image
         ? `<a href="${escapeHtml(f.url)}" target="_blank"><img src="${escapeHtml(f.url)}" alt="${escapeHtml(f.title)}" style="max-width:160px; max-height:120px; border:1px solid #e2e8f0; border-radius:6px;"></a>`
-        : `<a href="${escapeHtml(f.url)}" target="_blank" style="display:inline-flex; align-items:center; gap:4px; border:1px solid #cbd5e1; border-radius:6px; padding:4px 10px; color:#0f172a; text-decoration:none; font-size:12px; background:#f8fafc;">📎 ${escapeHtml(f.title || f.url)}</a>`
+        : `<a href="${escapeHtml(f.url)}" data-filename="${escapeHtml(f.title || '')}" target="_blank" style="display:inline-flex; align-items:center; gap:4px; border:1px solid #cbd5e1; border-radius:6px; padding:4px 10px; color:#0f172a; text-decoration:none; font-size:12px; background:#f8fafc; cursor:pointer;">📎 ${escapeHtml(f.title || f.url)}</a>`
       ).join('')}</div>`
     : '<span style="color:#94a3b8; font-size:12px;">无附件</span>';
 
@@ -318,6 +375,7 @@ function _renderBug(data) {
     <div style="margin-top:10px; font-size:11px; color:#94a3b8; text-align:right;">数据实时来自禅道，浏览器侧缓存 60 秒</div>
   `;
   _loadProxyImages(body);
+  _wireProxyDownloads(body);
 }
 
 // ─── Testcase renderer ──────────────────────────────────────────────────────
@@ -364,6 +422,7 @@ function _renderTestcase(data) {
     <div style="margin-top:10px; font-size:11px; color:#94a3b8; text-align:right;">数据实时来自禅道，浏览器侧缓存 60 秒</div>
   `;
   _loadProxyImages(body);
+  _wireProxyDownloads(body);
 }
 
 // ─── Public open functions ──────────────────────────────────────────────────
