@@ -8,11 +8,12 @@
 """
 from __future__ import annotations
 
+import difflib
 import re
 from datetime import date, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -24,7 +25,7 @@ from app.models import (
     User,
     Version,
 )
-from app.models.enums import FeedbackStatus, UserRole, VersionType
+from app.models.enums import FeedbackStatus, RequirementStatus, UserRole, VersionType
 from app.services.overall_test_service import _bug_effective_status
 from app.services.zentao_matcher import MAJOR_V_RE, VERSION_PREFIX_RE
 from app.utils.time_utils import local_now
@@ -66,6 +67,31 @@ def _candidate_build_codes(q: str) -> set[str]:
     codes = set(_BUILD_IN_PARENS_RE.findall(norm))
     codes.update(re.findall(r"\d{5,}", norm))
     return codes
+
+
+# --------------------------------------------------------- Bug / 需求 搜索辅助
+# 形如 "b#29875"、"bug 29875"、"需求 5604"、"#5604"、"5604" 都视为「按 id 精确查」。
+_ID_QUERY_RE = re.compile(r"^\s*(?:b#|r#|bug|缺陷|req|story|需求|故事)?\s*#?\s*(\d+)\s*$", re.IGNORECASE)
+
+
+def _extract_id_query(q: str) -> str | None:
+    m = _ID_QUERY_RE.match(q or "")
+    return m.group(1) if m else None
+
+
+def _fuzzy_score(query: str, text: str) -> float:
+    """标题模糊匹配打分（0~1）。子串命中给高分，否则用编辑距离相似度。"""
+    q = (query or "").strip().lower()
+    t = (text or "").strip().lower()
+    if not q or not t:
+        return 0.0
+    if q in t:
+        return 0.9 + 0.1 * min(len(q) / len(t), 1.0)
+    return difflib.SequenceMatcher(None, q, t).ratio()
+
+
+def _fmt_dt(dt: datetime | None) -> str | None:
+    return dt.strftime("%Y-%m-%d %H:%M") if dt else None
 
 
 class BotApiService:
@@ -249,6 +275,193 @@ class BotApiService:
                 "pending": fb["pending"],
                 "by_status": fb["by_status"],
             },
+        }
+
+    # --------------------------------------------------------------- Bug 查询
+    def _bug_brief(self, b: BugTracking, score: int, match: str) -> dict:
+        return {
+            "zentao_bug_id": b.zentao_bug_id,
+            "bug_id": b.bug_id,
+            "title": b.zentao_bug_title or "",
+            "status": _bug_effective_status(b),
+            "assigned_to": b.zentao_assigned_to_name or "",
+            "score": score,
+            "match": match,
+        }
+
+    def search_bugs(self, q: str, limit: int = 5) -> dict:
+        """按禅道 Bug id（纯数字→精确）或标题（→模糊）搜索，返回最可能的若干候选。"""
+        raw = (q or "").strip()
+        if not raw:
+            raise HTTPException(status_code=422, detail="q 不能为空")
+        limit = max(1, min(int(limit or 5), 20))
+        id_digits = _extract_id_query(raw)
+        matches: list[dict] = []
+
+        if id_digits:
+            rows = (
+                self.db.query(BugTracking)
+                .filter(BugTracking.zentao_deleted.is_(False))
+                .filter(or_(BugTracking.zentao_bug_id == id_digits, BugTracking.bug_id == id_digits))
+                .all()
+            )
+            matches = [self._bug_brief(b, 100, "id_exact") for b in rows]
+
+        if not matches:
+            # 标题模糊：仅取 id+标题两列做评分，再对 Top-N 回查完整行
+            cols = (
+                self.db.query(BugTracking.id, BugTracking.zentao_bug_title)
+                .filter(BugTracking.zentao_deleted.is_(False))
+                .all()
+            )
+            scored = [(bid, _fuzzy_score(raw, title or "")) for bid, title in cols]
+            scored = sorted([s for s in scored if s[1] >= 0.3], key=lambda x: -x[1])[:limit]
+            if scored:
+                id2score = dict(scored)
+                rows = self.db.query(BugTracking).filter(BugTracking.id.in_(list(id2score))).all()
+                rows.sort(key=lambda b: -id2score.get(b.id, 0))
+                matches = [self._bug_brief(b, round(id2score[b.id] * 100), "title_fuzzy") for b in rows]
+
+        return {"query": raw, "match_count": len(matches[:limit]), "matches": matches[:limit]}
+
+    def bug_detail(self, zentao_bug_id: str) -> dict:
+        """已知禅道 Bug id 的精细信息：状态/指派/标题/受影响版本/关联需求/关闭信息等。"""
+        zid = str(zentao_bug_id or "").strip()
+        if not zid:
+            raise HTTPException(status_code=422, detail="zentao_bug_id 不能为空")
+        b = self.db.query(BugTracking).filter(BugTracking.zentao_bug_id == zid).first()
+        if not b:
+            raise HTTPException(status_code=404, detail="未找到该禅道 Bug")
+
+        def _vno(vid: int | None) -> str | None:
+            if not vid:
+                return None
+            v = self.db.query(Version).filter(Version.id == vid).first()
+            return v.version_no if v else None
+
+        req = b.requirement
+        return {
+            "zentao_bug_id": b.zentao_bug_id,
+            "bug_id": b.bug_id,
+            "title": b.zentao_bug_title or "",
+            "status": _bug_effective_status(b),
+            "live_status": b.zentao_live_status or "",
+            "closed": bool(b.closed),
+            "is_retest_failed": bool(b.is_retest_failed),
+            "assigned_to": b.zentao_assigned_to_name or "",
+            "opened_by": b.zentao_opened_by_name or b.zentao_creator_name or "",
+            "opened_at": _fmt_dt(b.zentao_opened_at),
+            "source_type": b.source_type.value if b.source_type else None,
+            "zentao_source_type": b.zentao_source_type or "",
+            "affected_version": b.zentao_affected_version or "",
+            "major_version_no": _vno(b.major_version_id),
+            "found_minor_version_no": _vno(b.found_minor_version_id),
+            "fixed_minor_version_no": _vno(b.fixed_minor_version_id),
+            "product_name": b.zentao_product_name or "",
+            "execution_name": b.zentao_execution_name or "",
+            "linked_requirement": {
+                "zentao_requirement_id": b.zentao_requirement_id or (str(req.zentao_req_id) if req else None),
+                "title": (b.zentao_requirement_name or (req.title if req else "")) or "",
+            },
+            "linked_case_label": b.zentao_linked_case_label or "",
+            "resolution": b.resolution or "",
+            "closed_by": b.zentao_closed_by_name or "",
+            "close_date": _fmt_dt(b.zentao_close_date),
+            "close_comment": b.zentao_close_comment or "",
+            "zentao_bug_url": b.zentao_bug_url or "",
+            "last_zentao_synced_at": _fmt_dt(b.last_zentao_synced_at),
+            "note": "完整复现步骤/正文请见禅道原始链接 zentao_bug_url",
+        }
+
+    # --------------------------------------------------------------- 需求 查询
+    def _req_brief(self, r: Requirement, score: int, match: str) -> dict:
+        major = r.major_version
+        return {
+            "id": r.id,
+            "zentao_req_id": r.zentao_req_id,
+            "title": r.title or "",
+            "major_version_no": major.version_no if major else None,
+            "status": r.status.value if r.status else None,
+            "owner": r.owner.shown_name if r.owner else None,
+            "score": score,
+            "match": match,
+        }
+
+    def search_requirements(self, q: str, limit: int = 5) -> dict:
+        """按禅道需求 id（纯数字→精确）或标题（→模糊）搜索，返回最可能的若干候选。"""
+        raw = (q or "").strip()
+        if not raw:
+            raise HTTPException(status_code=422, detail="q 不能为空")
+        limit = max(1, min(int(limit or 5), 20))
+        id_digits = _extract_id_query(raw)
+        matches: list[dict] = []
+
+        if id_digits:
+            conds = [Requirement.zentao_req_id == id_digits, Requirement.zentao_req_id == f"r#{id_digits}"]
+            if id_digits.isdigit():
+                conds.append(Requirement.zentao_story_id == int(id_digits))
+            rows = self.db.query(Requirement).filter(or_(*conds)).all()
+            matches = [self._req_brief(r, 100, "id_exact") for r in rows]
+
+        if not matches:
+            cols = self.db.query(Requirement.id, Requirement.title).all()
+            scored = [(rid, _fuzzy_score(raw, title or "")) for rid, title in cols]
+            scored = sorted([s for s in scored if s[1] >= 0.3], key=lambda x: -x[1])[:limit]
+            if scored:
+                id2score = dict(scored)
+                rows = self.db.query(Requirement).filter(Requirement.id.in_(list(id2score))).all()
+                rows.sort(key=lambda r: -id2score.get(r.id, 0))
+                matches = [self._req_brief(r, round(id2score[r.id] * 100), "title_fuzzy") for r in rows]
+
+        return {"query": raw, "match_count": len(matches[:limit]), "matches": matches[:limit]}
+
+    def requirement_detail(self, zentao_req_id: str, major_version_id: int | None = None) -> dict:
+        """已知禅道需求 id 的精细信息。同一 id 可能存在于多个大版本，未指定大版本且命中多条时回候选。"""
+        rid = str(zentao_req_id or "").strip()
+        if not rid:
+            raise HTTPException(status_code=422, detail="zentao_req_id 不能为空")
+        q = self.db.query(Requirement).filter(Requirement.zentao_req_id == rid)
+        if major_version_id:
+            q = q.filter(Requirement.major_version_id == int(major_version_id))
+        rows = q.all()
+        if not rows:
+            raise HTTPException(status_code=404, detail="未找到该禅道需求")
+        if len(rows) > 1:
+            return {
+                "zentao_req_id": rid,
+                "resolved": False,
+                "ambiguous": True,
+                "candidates": [self._req_brief(r, 100, "id_exact") for r in rows],
+                "message": "该需求 id 存在于多个大版本，请补充 major_version_id",
+            }
+
+        r = rows[0]
+        major = r.major_version
+        bugs = [b for b in r.bug_tracks if not b.zentao_deleted]
+        bug_open = sum(1 for b in bugs if _bug_effective_status(b) != "closed")
+        return {
+            "zentao_req_id": r.zentao_req_id,
+            "resolved": True,
+            "id": r.id,
+            "title": r.title or "",
+            "status": r.status.value if r.status else None,
+            "major_version_id": r.major_version_id,
+            "major_version_no": major.version_no if major else None,
+            "owner": r.owner.shown_name if r.owner else None,
+            "zentao_story_id": r.zentao_story_id,
+            "plan_title": r.zentao_plan_title_cache or "",
+            "case_completed": bool(r.case_completed),
+            "test_completed": bool(r.test_completed),
+            "test_completed_at": _fmt_dt(r.test_completed_at),
+            "retest_completed": bool(r.retest_completed),
+            "retest_passed": r.retest_passed,
+            "retested_by": r.retester.shown_name if r.retester else None,
+            "test_notes": r.test_notes or "",
+            "case_count": len(r.test_cases),
+            "bug_count": len(bugs),
+            "bug_open": bug_open,
+            "linked_bug_ids": [b.zentao_bug_id for b in bugs if b.zentao_bug_id][:10],
+            "note": "完整需求正文（spec）请见禅道原始页面",
         }
 
     def version_progress(self, major_version_id: int) -> dict:

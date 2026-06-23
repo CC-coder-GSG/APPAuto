@@ -219,6 +219,99 @@ curl -H "X-Bot-Api-Key: YOUR_KEY" https://qa.geonest.site/api/bot/v1/ping
 ```
 - 字段含义：`active`=活跃未解决；`resolved`=已解决待验证；`closed`=已关闭；`local`=仅本地未同步禅道；`open`=活跃+已解决+本地（即未关闭）。
 
+### 4.5.1 搜索 Bug `GET /api/bot/v1/bugs/search` ⭐
+
+- **用途**：用户报"29875 这个 bug 怎么样了"或只记得标题大意时，先定位到具体 Bug。**纯数字按禅道 Bug id 精确匹配，否则按标题模糊匹配**，返回最可能的若干候选。
+- **URL**：`https://qa.geonest.site/api/bot/v1/bugs/search?q=地图崩溃`
+- **参数**（Query）：
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `q` | 是 | 禅道 Bug id（`29875` / `b#29875`）或标题关键词（`地图崩溃`） |
+| `limit` | 否 | 返回候选数上限，默认 5，最大 20 |
+
+- **响应**：
+```json
+{
+  "query": "地图崩溃",
+  "match_count": 2,
+  "matches": [
+    { "zentao_bug_id": "29875", "bug_id": "b#12", "title": "地图加载时偶发崩溃",
+      "status": "active", "assigned_to": "李四", "score": 90, "match": "title_fuzzy" }
+  ]
+}
+```
+- `status`：`active` 活跃 / `resolved` 已解决 / `closed` 已关闭 / `local` 仅本地；`match`：`id_exact` 或 `title_fuzzy`。
+- **机器人用法**：拿 `matches[0].zentao_bug_id` 调 4.5.2 查精细内容；多候选时把标题列给用户选。
+
+### 4.5.2 Bug 精细内容 `GET /api/bot/v1/bugs/detail` ⭐
+
+- **用途**：已确定禅道 Bug id 后，查该 Bug 的详细信息（字段较丰富）。
+- **URL**：`https://qa.geonest.site/api/bot/v1/bugs/detail?zentao_bug_id=29875`
+- **参数**（Query）：`zentao_bug_id`（必填）
+- **响应**（节选，字段较多）：
+```json
+{
+  "zentao_bug_id": "29875", "bug_id": "b#12", "title": "地图加载时偶发崩溃",
+  "status": "active", "live_status": "active", "closed": false, "is_retest_failed": false,
+  "assigned_to": "李四", "opened_by": "王五", "opened_at": "2026-06-10 09:12",
+  "source_type": "requirement", "affected_version": "4.0.3.0.260310(40300103)",
+  "major_version_no": "V4.0.3.0", "found_minor_version_no": "4.0.3.0.260310(40300103)",
+  "fixed_minor_version_no": null, "product_name": "Survey Master", "execution_name": "s4030",
+  "linked_requirement": { "zentao_requirement_id": "5604", "title": "支持野外离线地图缓存" },
+  "linked_case_label": "", "resolution": "fixed",
+  "closed_by": "", "close_date": null, "close_comment": "",
+  "zentao_bug_url": "https://zentao.../bug-view-29875.html",
+  "last_zentao_synced_at": "2026-06-22 18:00",
+  "note": "完整复现步骤/正文请见禅道原始链接 zentao_bug_url"
+}
+```
+> 说明：本系统本地库存的是 Bug 的**标题与元数据**（状态/指派/版本/关联需求等），**完整复现步骤正文存在禅道**——需要时让用户点 `zentao_bug_url` 查看。
+
+### 4.5.3 搜索需求 `GET /api/bot/v1/requirements/search` ⭐
+
+- **用途**：同 4.5.1，但针对**需求**。纯数字按禅道需求 id 精确匹配，否则按标题模糊匹配。
+- **URL**：`https://qa.geonest.site/api/bot/v1/requirements/search?q=离线地图`
+- **参数**（Query）：`q`（必填）、`limit`（可选，默认 5）
+- **响应**：
+```json
+{
+  "query": "离线地图", "match_count": 1,
+  "matches": [
+    { "id": 88, "zentao_req_id": "r#5604", "title": "支持野外离线地图缓存",
+      "major_version_no": "V4.0.3.0", "status": "pending", "owner": "张三",
+      "score": 90, "match": "title_fuzzy" }
+  ]
+}
+```
+- **机器人用法**：拿 `matches[0].zentao_req_id`（必要时加 `major_version_no` 对应的 id）调 4.5.4。
+
+### 4.5.4 需求精细内容 `GET /api/bot/v1/requirements/detail` ⭐
+
+- **用途**：已确定禅道需求 id 后，查该需求的详细信息与测试进展。
+- **URL**：`https://qa.geonest.site/api/bot/v1/requirements/detail?zentao_req_id=r%235604`
+- **参数**（Query）：
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `zentao_req_id` | 是 | 禅道需求 id（用 4.5.3 返回的 `zentao_req_id` 原样回传） |
+| `major_version_id` | 否 | 同一需求 id 跨多个大版本时用于消歧 |
+
+- **响应（唯一命中）**：
+```json
+{
+  "zentao_req_id": "r#5604", "resolved": true, "id": 88, "title": "支持野外离线地图缓存",
+  "status": "pending", "major_version_id": 1, "major_version_no": "V4.0.3.0", "owner": "张三",
+  "zentao_story_id": 5604, "plan_title": "4.0.3 计划",
+  "case_completed": true, "test_completed": false, "test_completed_at": null,
+  "retest_completed": false, "retest_passed": null, "retested_by": null,
+  "test_notes": "离线瓦片需覆盖到 18 级",
+  "case_count": 12, "bug_count": 3, "bug_open": 1, "linked_bug_ids": ["29875"],
+  "note": "完整需求正文（spec）请见禅道原始页面"
+}
+```
+- **响应（跨多个大版本，需消歧）**：`resolved=false` + `ambiguous=true` + `candidates`（各含 `major_version_no`），请补 `major_version_id` 再查。
+
 ### 4.6 反馈统计 `GET /api/bot/v1/feedback/summary`
 - **用途**：按状态统计用户反馈数量。
 - **URL**：`https://qa.geonest.site/api/bot/v1/feedback/summary?software_id=1`
@@ -330,6 +423,10 @@ curl -H "X-Bot-Api-Key: YOUR_KEY" https://qa.geonest.site/api/bot/v1/ping
 |---|---|---|---|
 | **查某版本整体情况（首选）** | GET | `/api/bot/v1/version-status` | `q`（用户原话版本） |
 | 解析口语化版本号 | GET | `/api/bot/v1/resolve-version` | `q`（用户原话版本） |
+| 搜索 Bug（id/标题） | GET | `/api/bot/v1/bugs/search` | `q` |
+| 查 Bug 精细内容 | GET | `/api/bot/v1/bugs/detail` | `zentao_bug_id` |
+| 搜索需求（id/标题） | GET | `/api/bot/v1/requirements/search` | `q` |
+| 查需求精细内容 | GET | `/api/bot/v1/requirements/detail` | `zentao_req_id` |
 | 查软件产品列表 | GET | `/api/bot/v1/softwares` | 无 |
 | 查版本列表 | GET | `/api/bot/v1/versions` | `software_id`(可选) |
 | 查版本测试进度 | GET | `/api/bot/v1/version-progress` | `major_version_id` |

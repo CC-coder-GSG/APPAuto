@@ -81,6 +81,41 @@ def version_progress(major_version_id: int, _: None = _guard, db: Session = Depe
     return BotApiService(db).version_progress(major_version_id)
 
 
+@router.get("/bugs/search")
+def search_bugs(q: str, limit: int = 5, _: None = _guard, db: Session = Depends(get_db)):
+    """搜索 Bug：纯数字按禅道 Bug id 精确匹配，否则按标题模糊匹配，返回最可能的若干候选。
+
+    候选含 zentao_bug_id，确定目标后用 /bugs/detail 查精细内容。
+    """
+    return BotApiService(db).search_bugs(q, limit)
+
+
+@router.get("/bugs/detail")
+def bug_detail(zentao_bug_id: str, _: None = _guard, db: Session = Depends(get_db)):
+    """已知禅道 Bug id 的精细信息：状态/指派/标题/受影响版本/关联需求/关闭信息等。"""
+    return BotApiService(db).bug_detail(zentao_bug_id)
+
+
+@router.get("/requirements/search")
+def search_requirements(q: str, limit: int = 5, _: None = _guard, db: Session = Depends(get_db)):
+    """搜索需求：纯数字按禅道需求 id 精确匹配，否则按标题模糊匹配，返回最可能的若干候选。
+
+    候选含 zentao_req_id（+ major_version_no），确定目标后用 /requirements/detail 查精细内容。
+    """
+    return BotApiService(db).search_requirements(q, limit)
+
+
+@router.get("/requirements/detail")
+def requirement_detail(
+    zentao_req_id: str,
+    major_version_id: Optional[int] = None,
+    _: None = _guard,
+    db: Session = Depends(get_db),
+):
+    """已知禅道需求 id 的精细信息。同一 id 跨多个大版本且未指定 major_version_id 时返回候选列表。"""
+    return BotApiService(db).requirement_detail(zentao_req_id, major_version_id)
+
+
 @router.get("/bugs/summary")
 def bugs_summary(
     software_id: Optional[int] = None,

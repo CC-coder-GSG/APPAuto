@@ -1,4 +1,6 @@
-from app.models import Requirement, RequirementStatus, Version, VersionType
+import pytest
+
+from app.models import BugTracking, Requirement, RequirementStatus, Version, VersionType
 from app.services.bot_api_service import BotApiService
 
 
@@ -63,6 +65,98 @@ def test_version_status_aggregates(db_session):
     assert out["progress"]["case_completed"] == 1
     assert "by_status" in out["bugs"]
     assert "by_status" in out["feedback"]
+
+
+def _bug(db_session, major, *, zentao_bug_id, title, bug_id="b#1", assignee="张三", live="active"):
+    row = BugTracking(
+        major_version_id=major.id,
+        bug_id=bug_id,
+        zentao_bug_id=zentao_bug_id,
+        zentao_bug_title=title,
+        zentao_assigned_to_name=assignee,
+        zentao_live_status=live,
+    )
+    db_session.add(row)
+    db_session.commit()
+    db_session.refresh(row)
+    return row
+
+
+def _req(db_session, major, *, zentao_req_id, title, status=RequirementStatus.PENDING):
+    row = Requirement(zentao_req_id=zentao_req_id, title=title, major_version_id=major.id, status=status)
+    db_session.add(row)
+    db_session.commit()
+    db_session.refresh(row)
+    return row
+
+
+def test_search_bugs_by_id_exact(db_session):
+    major = _major(db_session, "V4.0.3.0")
+    _bug(db_session, major, zentao_bug_id="29875", title="地图加载崩溃")
+    _bug(db_session, major, zentao_bug_id="30001", title="导出失败", bug_id="b#2")
+    out = BotApiService(db_session).search_bugs("b#29875")
+    assert out["match_count"] == 1
+    assert out["matches"][0]["zentao_bug_id"] == "29875"
+    assert out["matches"][0]["match"] == "id_exact"
+
+
+def test_search_bugs_by_title_fuzzy(db_session):
+    major = _major(db_session, "V4.0.3.0")
+    _bug(db_session, major, zentao_bug_id="29875", title="地图加载时偶发崩溃")
+    _bug(db_session, major, zentao_bug_id="30001", title="导出 Excel 失败", bug_id="b#2")
+    out = BotApiService(db_session).search_bugs("地图崩溃")
+    assert out["match_count"] >= 1
+    assert out["matches"][0]["zentao_bug_id"] == "29875"
+    assert out["matches"][0]["match"] == "title_fuzzy"
+
+
+def test_bug_detail_rich(db_session):
+    major = _major(db_session, "V4.0.3.0")
+    _bug(db_session, major, zentao_bug_id="29875", title="地图崩溃", assignee="李四")
+    out = BotApiService(db_session).bug_detail("29875")
+    assert out["zentao_bug_id"] == "29875"
+    assert out["title"] == "地图崩溃"
+    assert out["assigned_to"] == "李四"
+    assert out["major_version_no"] == "V4.0.3.0"
+    assert out["status"] == "active"
+
+
+def test_bug_detail_not_found(db_session):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as ei:
+        BotApiService(db_session).bug_detail("99999")
+    assert ei.value.status_code == 404
+
+
+def test_search_requirements_fuzzy_and_detail(db_session):
+    major = _major(db_session, "V4.0.3.0")
+    _req(db_session, major, zentao_req_id="r#5604", title="支持野外离线地图缓存")
+    _req(db_session, major, zentao_req_id="r#5605", title="导出报表加水印")
+    svc = BotApiService(db_session)
+
+    found = svc.search_requirements("离线地图")
+    assert found["matches"][0]["zentao_req_id"] == "r#5604"
+
+    by_id = svc.search_requirements("5604")
+    assert by_id["match_count"] == 1
+    assert by_id["matches"][0]["match"] == "id_exact"
+
+    detail = svc.requirement_detail("r#5604")
+    assert detail["resolved"] is True
+    assert detail["title"] == "支持野外离线地图缓存"
+    assert detail["major_version_no"] == "V4.0.3.0"
+
+
+def test_requirement_detail_ambiguous_across_majors(db_session):
+    a = _major(db_session, "V4.0.3.0")
+    b = _major(db_session, "V4.0.3.1")
+    _req(db_session, a, zentao_req_id="r#5604", title="离线地图 v0")
+    _req(db_session, b, zentao_req_id="r#5604", title="离线地图 v1")
+    out = BotApiService(db_session).requirement_detail("r#5604")
+    assert out["resolved"] is False
+    assert out["ambiguous"] is True
+    assert len(out["candidates"]) == 2
 
 
 def test_version_status_ambiguous(db_session):
