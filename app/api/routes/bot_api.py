@@ -56,6 +56,25 @@ def list_versions(software_id: Optional[int] = None, _: None = _guard, db: Sessi
     return BotApiService(db).list_versions(software_id)
 
 
+@router.get("/resolve-version")
+def resolve_version(q: str, _: None = _guard, db: Session = Depends(get_db)):
+    """版本解析：把口语化版本（'V4.0.3.1' / '40315' / '40300103'）解析为候选大版本及其 id。
+
+    - resolved=true：唯一高置信，matches[0] 即目标，可直接拿 major_version_id 调后续接口。
+    - ambiguous=true：多个候选，请让用户从 matches 里指明。
+    """
+    return BotApiService(db).resolve_version(q)
+
+
+@router.get("/version-status")
+def version_status(q: str, _: None = _guard, db: Session = Depends(get_db)):
+    """一问到底：按自由文本版本解析，并返回该大版本的进度+Bug+反馈紧凑汇总（单次调用、JSON 体积受控）。
+
+    解析不唯一时返回 resolved=false + candidates 候选，便于机器人追问。
+    """
+    return BotApiService(db).version_status(q)
+
+
 @router.get("/version-progress")
 def version_progress(major_version_id: int, _: None = _guard, db: Session = Depends(get_db)):
     """某大版本的需求测试 / 用例编写 / 复测进度概览。"""

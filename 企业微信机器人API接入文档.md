@@ -109,6 +109,66 @@ curl -H "X-Bot-Api-Key: YOUR_KEY" https://qa.geonest.site/api/bot/v1/ping
 ]
 ```
 
+### 4.3.1 版本解析（口语化版本 → id）`GET /api/bot/v1/resolve-version` ⭐
+
+- **用途**：用户问"V4.0.3.1 怎么样了""40315 这个版本""构建 40300103"时，版本号往往不规范。本接口把**自由文本**解析为带 `id` 的候选大版本，**机器人无需再自己拉全量 `/versions` 去猜**。
+- **URL**：`https://qa.geonest.site/api/bot/v1/resolve-version?q=40315`
+- **参数**（Query）：
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `q` | 是 | 用户原话里的版本片段，如 `V4.0.3.1` / `40315` / `40300103` / `4.0.3.0 那个版本` |
+
+- **解析规则**：纯数字串前 3 位视为 `a.b.c`、其余为尾段（`40315 → V4.0.3.15`）；5 位以上数字也会当作**构建号**去匹子版本，命中后回溯其父大版本。
+- **响应**：
+```json
+{
+  "query": "40315",
+  "resolved": true,
+  "ambiguous": false,
+  "match_count": 1,
+  "matches": [
+    { "major_version_id": 7, "major_version_no": "V4.0.3.15", "software_id": 1,
+      "minor_version_id": null, "minor_version_no": null, "match": "exact_major", "score": 95 }
+  ]
+}
+```
+- **机器人使用建议**：
+  - `resolved=true` → 直接取 `matches[0].major_version_id` 调用后续接口（进度/Bug/反馈）。
+  - `ambiguous=true` → 把 `matches` 里的 `major_version_no` 列给用户，请其指明是哪个大版本。
+  - `match_count=0` → 回复"没找到该版本，请确认版本号"。
+
+### 4.3.2 版本一问到底（解析+汇总，推荐）`GET /api/bot/v1/version-status` ⭐⭐
+
+- **用途**：用户问"某版本怎么样了"的**首选接口**——一次调用完成「版本解析 + 进度 + Bug + 反馈」聚合，返回**紧凑 JSON**（无明细数组，体积受控，不会触发 2048 截断）。
+- **URL**：`https://qa.geonest.site/api/bot/v1/version-status?q=40315`
+- **参数**（Query）：同 4.3.1（`q`，必填）
+- **响应（解析成功）**：
+```json
+{
+  "query": "40315",
+  "resolved": true,
+  "major_version_id": 7,
+  "major_version_no": "V4.0.3.15",
+  "software_id": 1,
+  "matched_minor_version_no": null,
+  "progress": { "requirement_total": 120, "case_completed": 100, "case_completed_rate": 83.3,
+                "test_completed": 95, "test_completed_rate": 79.2, "test_pending": 25,
+                "retest_pending": 5, "retest_done": 90 },
+  "bugs": { "total": 88, "open": 80, "by_status": { "active": 70, "resolved": 10, "closed": 8, "local": 0 }, "retest_failed": 0 },
+  "feedback": { "total": 12, "pending": 4, "by_status": { "pending": 4, "processing": 0, "resolved": 8, "closed": 0 } }
+}
+```
+- **响应（解析不唯一）**：返回候选，便于机器人追问：
+```json
+{ "query": "4030", "resolved": false, "ambiguous": true,
+  "candidates": [ { "major_version_id": 1, "major_version_no": "V4.0.3.0" },
+                  { "major_version_id": 9, "major_version_no": "V4.0.3.0.1" } ],
+  "message": "匹配到多个版本，请指明具体大版本" }
+```
+
+> 提示：把 4.3.2 配成机器人的**主力工具**（描述写成"查某个版本的整体情况/进度/怎么样了"），多数提问一步到位；只有需要单独维度时再用 4.4 / 4.5 / 4.6。
+
 ### 4.4 版本测试进度 `GET /api/bot/v1/version-progress`
 - **用途**：查某个大版本的需求测试 / 用例编写 / 复测进度。
 - **URL**：`https://qa.geonest.site/api/bot/v1/version-progress?major_version_id=1`
@@ -268,6 +328,8 @@ curl -H "X-Bot-Api-Key: YOUR_KEY" https://qa.geonest.site/api/bot/v1/ping
 
 | 机器人工具（中文名） | 方法 | URL | 关键参数 |
 |---|---|---|---|
+| **查某版本整体情况（首选）** | GET | `/api/bot/v1/version-status` | `q`（用户原话版本） |
+| 解析口语化版本号 | GET | `/api/bot/v1/resolve-version` | `q`（用户原话版本） |
 | 查软件产品列表 | GET | `/api/bot/v1/softwares` | 无 |
 | 查版本列表 | GET | `/api/bot/v1/versions` | `software_id`(可选) |
 | 查版本测试进度 | GET | `/api/bot/v1/version-progress` | `major_version_id` |

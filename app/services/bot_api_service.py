@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 
 from fastapi import HTTPException
@@ -25,7 +26,46 @@ from app.models import (
 )
 from app.models.enums import FeedbackStatus, UserRole, VersionType
 from app.services.overall_test_service import _bug_effective_status
+from app.services.zentao_matcher import MAJOR_V_RE, VERSION_PREFIX_RE
 from app.utils.time_utils import local_now
+
+# ----------------------------------------------------------------- 版本解析辅助
+# 用户口语化输入（"V4.0.3.1"、"40315"、"40300103 这个版本"）→ 规范大版本号 / 构建号。
+# 复用 zentao_matcher 的正则，约定与 parse_job_name_to_major_version_no 一致：
+# 纯数字串前 3 位 = a.b.c，其余为尾段（4030→V4.0.3.0，40315→V4.0.3.15）。
+_BUILD_IN_PARENS_RE = re.compile(r"\((\d{5,})\)")
+_DIGIT_RUN_RE = re.compile(r"\d+")
+
+
+def _digits_to_major_no(d: str) -> str | None:
+    if len(d) < 4:  # 少于 4 位无法确定尾段
+        return None
+    return f"V{d[0]}.{d[1]}.{d[2]}.{d[3:]}"
+
+
+def _candidate_major_nos(q: str) -> set[str]:
+    """从自由文本里推断出所有可能的大版本号（大写、带 V 前缀）。"""
+    norm = q.replace("（", "(").replace("）", ")")
+    out: set[str] = set()
+    m = MAJOR_V_RE.search(norm)
+    if m:
+        out.add(m.group(0).upper())
+    v = VERSION_PREFIX_RE.search(norm)
+    if v:
+        out.add(("V" + v.group(0)).upper())
+    for d in _DIGIT_RUN_RE.findall(norm):
+        mv = _digits_to_major_no(d)
+        if mv:
+            out.add(mv.upper())
+    return out
+
+
+def _candidate_build_codes(q: str) -> set[str]:
+    """从自由文本里抽出可能的构建号：括号内 5+ 位优先，其次任意 5+ 位连续数字。"""
+    norm = q.replace("（", "(").replace("）", ")")
+    codes = set(_BUILD_IN_PARENS_RE.findall(norm))
+    codes.update(re.findall(r"\d{5,}", norm))
+    return codes
 
 
 class BotApiService:
@@ -95,6 +135,121 @@ class BotApiService:
                 }
             )
         return result
+
+    # ----------------------------------------------------------- 版本解析 / 聚合
+    def _match_versions(self, q: str) -> list[dict]:
+        """把自由文本解析成一组排序后的大版本候选（最多 5 个）。"""
+        raw = (q or "").strip()
+        if not raw:
+            return []
+        majors = self.db.query(Version).filter(Version.version_type == VersionType.MAJOR).all()
+        minors = self.db.query(Version).filter(Version.version_type == VersionType.MINOR).all()
+        major_by_no = {(m.version_no or "").upper(): m for m in majors}
+        major_by_id = {m.id: m for m in majors}
+        best: dict[int, dict] = {}
+
+        def consider(major: Version | None, score: int, match: str, minor: Version | None = None) -> None:
+            if major is None:
+                return
+            cur = best.get(major.id)
+            if cur and cur["score"] >= score:
+                return
+            best[major.id] = {
+                "major_version_id": major.id,
+                "major_version_no": major.version_no,
+                "software_id": major.software_id,
+                "minor_version_id": minor.id if minor else None,
+                "minor_version_no": minor.version_no if minor else None,
+                "match": match,
+                "score": score,
+            }
+
+        # 1) 精确匹配大版本号（V4.0.3.1 / 4.0.3.1 / 40315 推断而来）
+        for token in _candidate_major_nos(raw):
+            consider(major_by_no.get(token), 95, "exact_major")
+
+        # 2) 构建号匹配子版本 → 回溯其父大版本（顺带带回精确子版本 id）
+        codes = _candidate_build_codes(raw)
+        if codes:
+            for mn in minors:
+                no = mn.version_no or ""
+                parent = major_by_id.get(mn.parent_id) if mn.parent_id else None
+                if not parent:
+                    continue
+                for c in codes:
+                    if f"({c})" in no:
+                        consider(parent, 92, "build_code", mn)
+                    elif c in no:
+                        consider(parent, 78, "build_code", mn)
+
+        # 3) 兜底：大版本号子串包含
+        if not best:
+            ql = raw.upper().lstrip("V")
+            if ql:
+                for no, m in major_by_no.items():
+                    if ql in no or no.lstrip("V") in ql:
+                        consider(m, 60, "substring")
+
+        ranked = sorted(best.values(), key=lambda x: (-x["score"], x["major_version_id"]))
+        return ranked[:5]
+
+    def resolve_version(self, q: str) -> dict:
+        """把口语化版本解析为带 id 的候选大版本。唯一高置信→resolved=true。"""
+        matches = self._match_versions(q)
+        resolved = False
+        if matches:
+            top = matches[0]["score"]
+            second = matches[1]["score"] if len(matches) > 1 else 0
+            resolved = top >= 90 and (len(matches) == 1 or top - second >= 10)
+        return {
+            "query": (q or "").strip(),
+            "resolved": resolved,
+            "ambiguous": len(matches) > 1 and not resolved,
+            "match_count": len(matches),
+            "matches": matches,
+        }
+
+    def version_status(self, q: str) -> dict:
+        """一问到底：解析版本后返回该大版本的进度+Bug+反馈紧凑汇总（无明细数组，体积受控）。"""
+        res = self.resolve_version(q)
+        if not res["resolved"]:
+            return {
+                "query": res["query"],
+                "resolved": False,
+                "ambiguous": res["ambiguous"],
+                "candidates": [
+                    {"major_version_id": m["major_version_id"], "major_version_no": m["major_version_no"]}
+                    for m in res["matches"]
+                ],
+                "message": (
+                    "未找到匹配版本，请确认版本号" if not res["matches"] else "匹配到多个版本，请指明具体大版本"
+                ),
+            }
+        top = res["matches"][0]
+        mid = top["major_version_id"]
+        prog = self.version_progress(mid)
+        bugs = self.bug_summary(major_version_id=mid)
+        fb = self.feedback_summary(major_version_id=mid)
+        return {
+            "query": res["query"],
+            "resolved": True,
+            "major_version_id": mid,
+            "major_version_no": top["major_version_no"],
+            "software_id": top["software_id"],
+            "matched_minor_version_no": top["minor_version_no"],
+            "progress": prog,
+            "bugs": {
+                "total": bugs["total"],
+                "open": bugs["open"],
+                "by_status": bugs["by_status"],
+                "retest_failed": bugs["retest_failed"],
+            },
+            "feedback": {
+                "total": fb["total"],
+                "pending": fb["pending"],
+                "by_status": fb["by_status"],
+            },
+        }
 
     def version_progress(self, major_version_id: int) -> dict:
         """某大版本的需求测试 / 用例编写 / 复测进度概览。"""
