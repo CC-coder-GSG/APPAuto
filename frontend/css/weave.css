@@ -1088,8 +1088,9 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
   transition: background var(--w-fast) var(--w-swift) !important;
 }
 .ftree-menu-item:hover { background: var(--w-accent-soft) !important; }
-.ftree-menu-item.danger { color: #dc2626 !important; }
-.ftree-menu-item.danger:hover { background: rgba(220,38,38,0.08) !important; }
+/* 双类选择器优先级高于全局 button.danger，避免被实心红底覆盖文字 */
+.ftree-menu-item.danger { color: #dc2626 !important; background: transparent !important; box-shadow: none !important; }
+.ftree-menu-item.danger:hover { background: rgba(220,38,38,0.10) !important; color: #dc2626 !important; }
 
 /* tooltip（备注 / 标记说明气泡，ECharts 注入 body） */
 .ftree-tip-name { font-weight: 800; color: var(--w-ink); margin-bottom: 5px; }
