@@ -20,6 +20,7 @@ class VersionService:
                 "version_type": row.version_type.value,
                 "parent_id": row.parent_id,
                 "software_id": row.software_id,
+                "final_test_enabled": row.final_test_enabled,
                 "zentao_execution_id": row.zentao_execution_id,
             }
             for row in rows

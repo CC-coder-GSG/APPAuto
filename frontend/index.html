@@ -164,6 +164,7 @@
         <label>软件</label>
         <select id="softwareSwitch" onchange="onSoftwareChange()"></select>
       </div>
+      <button id="featureTreeMapBtn" class="ftree-entry-btn" onclick="window.OmniQAFeatureTreeTab?.open('design')" title="查看 / 编辑该软件的功能图谱（设计态）">🌳 功能图谱</button>
       <div class="header-user-pill">
         <div class="header-user-avatar">👤</div>
         <span id="me"></span>
@@ -211,6 +212,51 @@
     <button id="tabLearningBtn" class="hidden" onclick="showTab('learning')">学习中心</button>
     <span id="sseConnectionState" class="sse-conn-badge hidden" aria-live="polite">实时连接中</span>
   </div>
+
+  <section id="tab-feature-tree" class="hidden card ftree-section">
+    <div class="ftree-topbar">
+      <button class="ftree-back" onclick="window.OmniQAFeatureTreeTab?.close()" title="返回">← 返回</button>
+      <div class="ftree-title">
+        <span class="ftree-title-icon">🌳</span>
+        <span id="ftreeTitleText">功能图谱</span>
+        <span id="ftreeModeBadge" class="ftree-mode-badge"></span>
+      </div>
+      <div class="ftree-toolbar">
+        <span id="ftreeLegend" class="ftree-legend"></span>
+        <button class="secondary" onclick="window.OmniQAFeatureTreeTab?.fit()" title="重置视图">⤢ 居中</button>
+        <button class="secondary" onclick="window.OmniQAFeatureTreeTab?.reload()" title="刷新">🔄 刷新</button>
+      </div>
+    </div>
+    <div id="ftreeCanvas" class="ftree-canvas"></div>
+    <div id="ftreeHint" class="ftree-hint">点击节点可添加分支 / 重命名 / 备注。📝 表示有功能备注，彩色圆点表示测试人已标记。</div>
+
+    <!-- 节点操作浮层（点击节点弹出） -->
+    <div id="ftreeMenu" class="ftree-menu hidden"></div>
+    <!-- 气泡（备注 / 标记说明展示） -->
+    <div id="ftreeBubble" class="ftree-bubble hidden"></div>
+
+    <!-- 富文本编辑弹窗（备注 / 标记说明共用） -->
+    <div id="ftreeEditorModal" class="ftree-modal-overlay hidden">
+      <div class="ftree-modal">
+        <div class="ftree-modal-head">
+          <h3 id="ftreeEditorTitle">编辑备注</h3>
+          <button class="ftree-modal-close" onclick="window.OmniQAFeatureTreeTab?.closeEditor()">✕</button>
+        </div>
+        <div class="ftree-editor-toolbar">
+          <button type="button" data-cmd="bold" title="加粗"><b>B</b></button>
+          <button type="button" data-cmd="italic" title="斜体"><i>I</i></button>
+          <button type="button" data-cmd="insertUnorderedList" title="列表">• 列表</button>
+          <button type="button" id="ftreeEditorImageBtn" title="插入图片（也可直接 Ctrl+V 粘贴）">🖼 图片</button>
+          <input type="file" id="ftreeEditorImageInput" accept="image/*" class="hidden">
+        </div>
+        <div id="ftreeEditor" class="ftree-editor" contenteditable="true" data-placeholder="支持富文本：加粗 / 列表 / 粘贴图片（Ctrl+V）"></div>
+        <div class="ftree-modal-foot">
+          <button class="secondary" onclick="window.OmniQAFeatureTreeTab?.closeEditor()">取消</button>
+          <button onclick="window.OmniQAFeatureTreeTab?.saveEditor()">保存</button>
+        </div>
+      </div>
+    </div>
+  </section>
 
   <section id="tab-assign" class="hidden card">
     <h2>任务分配台</h2>
@@ -439,6 +485,7 @@
         <input id="mineSearchInput" oninput="renderMineCards()" placeholder="搜索需求编号或名称..." style="width:100%; border:none; outline:none; background:transparent;">
       </div>
       <button onclick="loadMyWorkbench()">刷新工作台</button>
+      <button id="featureTreeTestBtn" class="ftree-entry-btn ftree-entry-btn--test hidden" onclick="window.OmniQAFeatureTreeTab?.openFromWorkbench()" title="进入全量测试功能树状图">🌳 全量测试树状图</button>
       </div>
 
               <div id="mineSummaryText" style="margin-bottom: 16px; font-weight: bold; color: #ea580c; background: #ffedd5; padding: 10px 16px; border-radius: 6px; display: none; border-left: 4px solid #f97316;"></div>
@@ -1936,6 +1983,7 @@ function canAccessWorkbench(){
   return WORKBENCH_SUBTAB_ORDER.some((name)=>canAccessWorkbenchSubtab(name));
 }
 function canAccessTab(name){
+  if(name==='feature-tree') return true; // 功能图谱：全员可访问，仅经入口按钮进入
   if(name==='mine') return canAccessWorkbench();
   return canAccessRawTab(name);
 }
@@ -2076,6 +2124,7 @@ async function switchWorkbenchSubtab(name, options={}){
 
   scheduleWorkbenchViewportResize();
   if(options.load!==false) await loadWorkbenchSubtab(target);
+  if(target==='demand') window.OmniQAFeatureTreeTab?.refreshWorkbenchEntry?.();
 }
 window.switchWorkbenchSubtab = switchWorkbenchSubtab;
 function applyTabVisibility(){
@@ -2118,6 +2167,7 @@ function getTabNamespaceName(name){
     'cad-test':'OmniQACadTab',
     terminal:'OmniQATerminalTab',
     learning:'OmniQALearningTab',
+    'feature-tree':'OmniQAFeatureTreeTab',
   }[name] || '';
 }
 function isTabRuntimeReady(name){
@@ -2149,7 +2199,7 @@ async function showTab(name){
     if(!fallback || fallback===name) return;
     name = fallback;
   }
-  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal','learning'].forEach(x=>{
+  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal','learning','feature-tree'].forEach(x=>{
     const el=document.getElementById('tab-'+x);
     if(el) el.classList.add('hidden');
   });

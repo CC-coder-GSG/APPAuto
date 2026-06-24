@@ -25,6 +25,7 @@ from app.models.enums import (
     VersionType,
 )
 from app.models.execution import TestExecution
+from app.models.feature_tree import FeatureTreeMark, FeatureTreeNode
 from app.models.feedback import FeedbackAttachment, FeedbackBugLink, FeedbackRecord
 from app.models.field_test import FieldTestBugLink, FieldTestPurposeType, FieldTestRecord, FieldTestResultStatus
 from app.models.final_test_record import FinalTestRecord
@@ -70,6 +71,8 @@ __all__ = [
     "CadItemFolder",
     "CadRecord",
     "CadVersion",
+    "FeatureTreeMark",
+    "FeatureTreeNode",
     "FeedbackStatus",
     "FeedbackAttachment",
     "FeedbackBugLink",

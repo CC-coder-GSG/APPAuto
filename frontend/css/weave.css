@@ -836,8 +836,8 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
   display: grid !important;
   gap: 12px !important;
 }
-/* 区段面板：静态容器表面（暖白 + 发丝边 + 14px 圆角，与全站卡片一致）。
-   主题磁贴 .lc-topic 的升起/hover浮动/流光描边由上方共享对象卡规则统一提供。 */
+/* 区段面板：升起表面（暖白 + 发丝边 + 14px 圆角，与全站卡片一致）。
+   主题磁贴 .lc-topic 的 hover 浮动/流光描边由上方共享对象卡规则统一提供。 */
 #tab-learning .lc-panel {
   background: var(--w-raised) !important;
   border: 1px solid var(--w-hairline) !important;
@@ -845,8 +845,25 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
   box-shadow: 0 1px 3px rgba(28, 25, 23, 0.05) !important;
   padding: 16px 18px !important;
   margin-bottom: 16px !important;
+  transition: transform var(--w-slow) var(--w-spring),
+              box-shadow var(--w-base) var(--w-swift),
+              background var(--w-fast) ease-out !important;
 }
 #tab-learning .lc-topic { cursor: pointer; }
+
+/* 展开内容也"活起来"：面板/行/名次条 hover、题块 hover 或聚焦时
+   轻微弹出 + 旋转极光描边（与全站对象卡一致）。
+   面板用 :has() 让位于内部条目——hover 内部行/题块时只让内部条目弹出，
+   避免父面板与子条目同时位移造成的抖动。 */
+#tab-learning .lc-panel:hover:not(:has(.lc-row:hover, .lc-q:hover, .lc-q:focus-within, details.lc-rank:hover)),
+#tab-learning .lc-row:hover {
+  transform: translateY(-3px) scale(1.005);
+  border-color: transparent !important;
+  background: linear-gradient(var(--w-raised), var(--w-raised)) padding-box,
+              var(--w-aurora-conic) border-box !important;
+  animation: weaveAngSpin 3s linear infinite;
+  box-shadow: 0 12px 28px rgba(28, 25, 23, 0.1), 0 0 0 3px var(--w-glow-ring) !important;
+}
 
 /* 面板内分区标题 */
 #tab-learning .lc-section-head {
@@ -872,11 +889,13 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
   justify-content: space-between !important;
   gap: 10px;
   padding: 10px 12px !important;
+  border: 1px solid transparent !important;
   border-radius: 10px !important;
-  transition: background var(--w-fast) ease-out !important;
+  transition: transform var(--w-base) var(--w-spring),
+              box-shadow var(--w-base) var(--w-swift),
+              background var(--w-fast) ease-out !important;
 }
-#tab-learning .lc-row + .lc-row { border-top: 1px solid var(--w-hairline) !important; }
-#tab-learning .lc-row:hover { background: var(--w-surface) !important; }
+#tab-learning .lc-row + .lc-row { border-top-color: var(--w-hairline) !important; }
 
 /* 题目/作答块：柔和次级表面；获得焦点(焦点在内)时轻微弹出 + 流光边缘 */
 #tab-learning .lc-q {
@@ -890,13 +909,47 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
               background var(--w-fast) ease-out !important;
 }
 #tab-learning .lc-q:last-child { margin-bottom: 0 !important; }
-#tab-learning .lc-q:focus-within {
-  transform: translateY(-2px) scale(1.004);
+#tab-learning .lc-q:hover,
+#tab-learning .lc-q:focus-within,
+#tab-learning details.lc-rank:hover {
+  transform: translateY(-3px) scale(1.005);
   border-color: transparent !important;
   background: linear-gradient(var(--w-surface), var(--w-surface)) padding-box,
               var(--w-aurora-conic) border-box !important;
   animation: weaveAngSpin 3s linear infinite;
-  box-shadow: 0 10px 24px rgba(28, 25, 23, 0.08), 0 0 0 3px var(--w-glow-ring) !important;
+  box-shadow: 0 12px 28px rgba(28, 25, 23, 0.1), 0 0 0 3px var(--w-glow-ring) !important;
+}
+
+/* 上传进度条：极光填充 + 百分比 */
+#tab-learning .lc-progress {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px;
+  margin: 2px 0 14px !important;
+}
+#tab-learning .lc-progress-track {
+  flex: 1;
+  height: 8px;
+  background: var(--w-well) !important;
+  border-radius: 999px !important;
+  overflow: hidden;
+}
+#tab-learning .lc-progress-bar {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--w-aurora) !important;
+  background-size: 200% 100%;
+  animation: weaveProgFlow 1.6s linear infinite;
+  transition: width 0.2s ease-out;
+}
+@keyframes weaveProgFlow { to { background-position: 200% 0; } }
+#tab-learning .lc-progress-label {
+  font-size: 12px;
+  color: var(--w-ink-soft) !important;
+  min-width: 96px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 空状态 */
@@ -916,6 +969,9 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
   border-radius: 12px !important;
   padding: 10px 14px !important;
   margin-bottom: 10px !important;
+  transition: transform var(--w-base) var(--w-spring),
+              box-shadow var(--w-base) var(--w-swift),
+              background var(--w-fast) ease-out !important;
 }
 #tab-learning details.lc-rank > summary { list-style: none; cursor: pointer; font-weight: 700; }
 
@@ -927,5 +983,156 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
   #tab-mine details.mine-req-card, #tab-retest details.retest-req-card {
     transition-duration: 0.01ms !important;
   }
-  #tab-learning .lc-topic { transition-duration: 0.01ms !important; }
+  #tab-learning .lc-topic,
+  #tab-learning .lc-panel,
+  #tab-learning .lc-row,
+  #tab-learning .lc-q,
+  #tab-learning details.lc-rank { transition-duration: 0.01ms !important; }
+  #tab-learning .lc-topic.active,
+  #tab-learning .lc-panel:hover,
+  #tab-learning .lc-row:hover,
+  #tab-learning .lc-q:hover,
+  #tab-learning .lc-q:focus-within,
+  #tab-learning details.lc-rank:hover { animation: none !important; }
+  #tab-learning .lc-progress-bar { animation: none !important; }
 }
+
+/* ── 12. 功能树状图谱 Feature Tree ─────────────────────── */
+
+/* 入口按钮（顶部"功能图谱" / 工作台"全量测试树状图"） */
+.ftree-entry-btn {
+  border: 1px solid var(--w-hairline-strong) !important;
+  background: var(--w-raised) !important;
+  color: var(--w-ink) !important;
+  border-radius: 10px !important;
+  padding: 7px 13px !important;
+  font-weight: 600 !important;
+  cursor: pointer;
+  transition: transform var(--w-fast) var(--w-pop), box-shadow var(--w-base) var(--w-swift) !important;
+}
+.ftree-entry-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(109, 108, 245, 0.22) !important;
+}
+.ftree-entry-btn--test {
+  position: relative;
+  color: #fff !important;
+  border-color: transparent !important;
+  background: var(--w-aurora) !important;
+  background-size: 200% 100% !important;
+  animation: ftree-aurora-pan 6s linear infinite;
+}
+@keyframes ftree-aurora-pan { to { background-position: 200% 0; } }
+
+/* 整页画布 */
+.ftree-section {
+  padding: 0 !important;
+  overflow: hidden !important;
+  position: relative;
+}
+.ftree-topbar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--w-hairline);
+  background: var(--w-surface);
+}
+.ftree-back {
+  border: 1px solid var(--w-hairline-strong) !important;
+  background: var(--w-raised) !important;
+  border-radius: 9px !important; padding: 6px 12px !important;
+  color: var(--w-ink-soft) !important; cursor: pointer; font-weight: 600 !important;
+}
+.ftree-title { display: flex; align-items: center; gap: 9px; font-size: 17px; font-weight: 800; color: var(--w-ink); }
+.ftree-title-icon { font-size: 19px; }
+.ftree-mode-badge {
+  font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+  background: var(--w-accent-soft); color: var(--w-accent); letter-spacing: 0.02em;
+}
+.ftree-mode-badge--test { color: #fff; background: var(--w-aurora); background-size: 200% 100%; animation: ftree-aurora-pan 6s linear infinite; }
+.ftree-toolbar { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.ftree-legend { display: flex; flex-wrap: wrap; gap: 10px; max-width: 46vw; overflow: hidden; }
+.ftree-legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--w-ink-soft); }
+.ftree-legend-dot { width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(255,255,255,0.85); }
+.ftree-legend-empty { font-size: 12.5px; color: var(--w-ink-faint); }
+
+.ftree-canvas {
+  width: 100%;
+  height: calc(100vh - 150px);
+  min-height: 540px;
+  /* 中心向外发散：径向辉光底纹强化"中心" */
+  background:
+    radial-gradient(circle at 50% 48%, rgba(109,108,245,0.10), rgba(109,108,245,0) 42%),
+    var(--w-canvas);
+}
+.ftree-hint {
+  position: absolute; left: 18px; bottom: 14px;
+  font-size: 12px; color: var(--w-ink-faint);
+  background: rgba(255,255,255,0.7); padding: 5px 10px; border-radius: 8px;
+  border: 1px solid var(--w-hairline); pointer-events: none;
+}
+
+/* 节点操作浮层 */
+.ftree-menu {
+  position: fixed; z-index: 4000; min-width: 184px;
+  background: var(--w-raised); border: 1px solid var(--w-hairline-strong);
+  border-radius: 14px; padding: 7px; box-shadow: 0 16px 44px rgba(28,25,23,0.20);
+  animation: ftree-pop var(--w-base) var(--w-spring);
+}
+@keyframes ftree-pop { from { opacity: 0; transform: scale(0.9) translateY(6px); } to { opacity: 1; transform: none; } }
+.ftree-menu-title { font-size: 12px; font-weight: 700; color: var(--w-ink-faint); padding: 5px 10px 7px; border-bottom: 1px solid var(--w-hairline); margin-bottom: 5px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ftree-menu-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  background: transparent !important; border: none !important; cursor: pointer;
+  padding: 9px 11px !important; border-radius: 9px !important; font-size: 14px !important;
+  color: var(--w-ink) !important; text-align: left;
+  transition: background var(--w-fast) var(--w-swift) !important;
+}
+.ftree-menu-item:hover { background: var(--w-accent-soft) !important; }
+.ftree-menu-item.danger { color: #dc2626 !important; }
+.ftree-menu-item.danger:hover { background: rgba(220,38,38,0.08) !important; }
+
+/* tooltip（备注 / 标记说明气泡，ECharts 注入 body） */
+.ftree-tip-name { font-weight: 800; color: var(--w-ink); margin-bottom: 5px; }
+.ftree-tip-note { font-size: 13px; color: var(--w-ink-soft); line-height: 1.55; }
+.ftree-tip-note img, .ftree-tip-markbody img { max-width: 100%; border-radius: 6px; }
+.ftree-tip-mark { margin-top: 7px; font-size: 12.5px; color: var(--w-ink); display: flex; align-items: flex-start; gap: 6px; flex-wrap: wrap; }
+.ftree-tip-dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+.ftree-tip-markbody { flex-basis: 100%; margin-top: 3px; color: var(--w-ink-soft); line-height: 1.5; }
+
+/* 富文本编辑弹窗 */
+.ftree-modal-overlay {
+  position: fixed; inset: 0; z-index: 4200;
+  background: rgba(28,25,23,0.34); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+  animation: ftree-fade var(--w-base) var(--w-swift);
+}
+@keyframes ftree-fade { from { opacity: 0; } to { opacity: 1; } }
+.ftree-modal {
+  width: min(640px, 92vw); background: var(--w-raised);
+  border-radius: 18px; box-shadow: 0 28px 70px rgba(28,25,23,0.32);
+  overflow: hidden; animation: ftree-pop var(--w-base) var(--w-spring);
+}
+.ftree-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--w-hairline); }
+.ftree-modal-head h3 { margin: 0 !important; font-size: 16px !important; }
+.ftree-modal-close { background: transparent !important; border: none !important; font-size: 18px !important; color: var(--w-ink-faint) !important; cursor: pointer; }
+.ftree-editor-toolbar { display: flex; gap: 6px; padding: 10px 20px 0; }
+.ftree-editor-toolbar button {
+  border: 1px solid var(--w-hairline-strong) !important; background: var(--w-surface) !important;
+  border-radius: 8px !important; padding: 5px 11px !important; cursor: pointer; font-size: 13px !important; color: var(--w-ink) !important;
+}
+.ftree-editor-toolbar button:hover { background: var(--w-accent-soft) !important; }
+.ftree-editor {
+  margin: 12px 20px; padding: 12px 14px; min-height: 220px; max-height: 50vh; overflow-y: auto;
+  border: 1px solid var(--w-hairline-strong); border-radius: 12px; outline: none;
+  font-size: 14px; line-height: 1.6; background: #fff; color: var(--w-ink);
+}
+.ftree-editor:focus { border-color: var(--w-accent); box-shadow: 0 0 0 3px var(--primary-ring); }
+.ftree-editor:empty::before { content: attr(data-placeholder); color: var(--w-ink-faint); }
+.ftree-editor img { max-width: 100%; border-radius: 6px; }
+.ftree-modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 0 20px 18px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ftree-menu, .ftree-modal, .ftree-modal-overlay { animation: none !important; }
+  .ftree-entry-btn--test, .ftree-mode-badge--test { animation: none !important; }
+}
+
