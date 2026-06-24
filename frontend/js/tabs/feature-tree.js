@@ -298,7 +298,10 @@ function openMenu(node, x, y) {
   const py = Math.min(y, window.innerHeight - r.height - 12);
   menu.style.left = Math.max(8, px) + 'px';
   menu.style.top = Math.max(8, py) + 'px';
+  // 标记"本次点击刚打开菜单"，让随后冒泡到 document 的同一次 click 不要立刻关掉它。
+  menuJustOpened = true;
 }
+let menuJustOpened = false;
 function hideMenu() { const m = $('ftreeMenu'); if (m) m.classList.add('hidden'); }
 
 function currentUserId() { return (window.currentUser && window.currentUser.id) || 0; }
@@ -380,6 +383,8 @@ function bindEditorTools() {
   const modal = $('ftreeEditorModal');
   if (!modal || modal._toolsBound) return;
   modal._toolsBound = true;
+  // 点遮罩（弹窗内容之外）关闭编辑弹窗
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeEditor(); });
   modal.querySelectorAll('.ftree-editor-toolbar [data-cmd]').forEach((btn) => {
     btn.addEventListener('mousedown', (e) => { e.preventDefault(); document.execCommand(btn.dataset.cmd, false, null); });
   });
@@ -431,12 +436,22 @@ function bindSSE() {
   });
 }
 
-// 关闭浮层：点击空白处
+// 关闭操作菜单：点菜单外任意处（含画布空白）都关；点菜单内部不关。
+// 打开菜单的那一次 click 由 menuJustOpened 吸收，避免开了又被自己关掉。
 document.addEventListener('click', (e) => {
   const menu = $('ftreeMenu');
-  if (menu && !menu.classList.contains('hidden') && !menu.contains(e.target) && !(e.target.closest && e.target.closest('#ftreeCanvas'))) {
-    hideMenu();
-  }
+  if (!menu || menu.classList.contains('hidden')) return;
+  if (menuJustOpened) { menuJustOpened = false; return; }
+  if (!menu.contains(e.target)) hideMenu();
+});
+
+// ESC：优先关编辑弹窗，否则关操作菜单
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const modal = $('ftreeEditorModal');
+  if (modal && !modal.classList.contains('hidden')) { closeEditor(); return; }
+  const menu = $('ftreeMenu');
+  if (menu && !menu.classList.contains('hidden')) hideMenu();
 });
 
 // 需求工作台里改"显示模式 / 大版本"时，实时刷新"全量测试树状图"入口按钮的显隐。
