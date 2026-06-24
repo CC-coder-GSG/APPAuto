@@ -439,6 +439,13 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// 需求工作台里改"显示模式 / 大版本"时，实时刷新"全量测试树状图"入口按钮的显隐。
+// 用事件委托，不依赖元素渲染时机，也不覆盖下拉框已有的内联 onchange。
+document.addEventListener('change', (e) => {
+  const id = e.target && e.target.id;
+  if (id === 'mineDisplayMode' || id === 'mineMajorSelect') refreshWorkbenchEntry();
+});
+
 window.OmniQAFeatureTreeTab = {
   open, openFromWorkbench, refreshWorkbenchEntry, close, fit, reload,
   closeEditor, saveEditor,

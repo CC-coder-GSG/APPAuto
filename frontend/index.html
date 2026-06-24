@@ -9,7 +9,7 @@
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20260622-1"></script>
+  <script type="module" src="/static/js/app.js?v=20260624-1"></script>
   <script src="/static/js/weave-motion.js?v=20260612-3" defer></script>
   <style>
     /* Header layout */
@@ -2362,6 +2362,7 @@ async function onSoftwareChange(){
   window.currentSoftwareId = currentSoftwareId;
   dataOverviewCache = null;
   await loadVersions();
+  window.OmniQAFeatureTreeTab?.refreshWorkbenchEntry?.();
   // 切换软件后，刷新当前页内容，确保旧软件数据不残留
   const visible = ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai'].find(x=>{
     const el=document.getElementById('tab-'+x);
