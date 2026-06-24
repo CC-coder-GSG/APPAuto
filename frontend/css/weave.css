@@ -1081,12 +1081,15 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
 @keyframes ftree-pop { from { opacity: 0; transform: scale(0.9) translateY(6px); } to { opacity: 1; transform: none; } }
 .ftree-menu-title { font-size: 12px; font-weight: 700; color: var(--w-ink-faint); padding: 5px 10px 7px; border-bottom: 1px solid var(--w-hairline); margin-bottom: 5px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ftree-menu-item {
-  display: flex; align-items: center; gap: 9px; width: 100%;
+  display: flex; align-items: center; gap: 8px; width: 100%;
   background: transparent !important; border: none !important; cursor: pointer;
   padding: 9px 11px !important; border-radius: 9px !important; font-size: 14px !important;
   color: var(--w-ink) !important; text-align: left;
   transition: background var(--w-fast) var(--w-swift) !important;
 }
+/* 图标列等宽居中，文字才会左对齐，不受 emoji 宽度差影响 */
+.ftree-menu-icon { flex: 0 0 1.5em; width: 1.5em; text-align: center; font-size: 15px; line-height: 1; font-family: "Segoe UI Emoji", "Apple Color Emoji", sans-serif; }
+.ftree-menu-label { flex: 1 1 auto; }
 .ftree-menu-item:hover { background: var(--w-accent-soft) !important; }
 /* 双类选择器优先级高于全局 button.danger，避免被实心红底覆盖文字 */
 .ftree-menu-item.danger { color: #dc2626 !important; background: transparent !important; box-shadow: none !important; }

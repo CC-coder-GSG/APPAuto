@@ -304,10 +304,10 @@ function openMenu(node, x, y) {
     items.push({ icon: '✅', label: mine ? '编辑我的测试标记' : '标记我已测', act: () => openEditor(node, 'mark') });
     if (mine) items.push({ icon: '❌', label: '取消我的标记', danger: true, act: () => removeMark(node) });
   }
-  if (!node.is_root) items.push({ icon: '🗑', label: '删除分支', danger: true, act: () => deleteNode(node) });
+  if (!node.is_root) items.push({ icon: '🗑️', label: '删除分支', danger: true, act: () => deleteNode(node) });
 
   menu.innerHTML = `<div class="ftree-menu-title">${escapeHtml(node.name)}</div>`
-    + items.map((it, i) => `<button class="ftree-menu-item${it.danger ? ' danger' : ''}" data-i="${i}"><span>${it.icon}</span>${it.label}</button>`).join('');
+    + items.map((it, i) => `<button class="ftree-menu-item${it.danger ? ' danger' : ''}" data-i="${i}"><span class="ftree-menu-icon">${it.icon}</span><span class="ftree-menu-label">${it.label}</span></button>`).join('');
   menu.querySelectorAll('.ftree-menu-item').forEach((btn) => {
     btn.onclick = () => { hideMenu(); items[Number(btn.dataset.i)].act(); };
   });
