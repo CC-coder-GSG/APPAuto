@@ -60,6 +60,7 @@ class FeatureTreeService:
                     "display_name": (u.display_name or u.username) if u else f"#{m.user_id}",
                     "color": user_color(m.user_id),
                     "comment_html": m.comment_html or "",
+                    "is_auto": bool(m.is_auto),
                     "updated_at": m.updated_at.isoformat() if m.updated_at else None,
                 })
 
@@ -130,6 +131,10 @@ class FeatureTreeService:
             created_by=user.id,
         )
         self.db.add(node)
+        self.db.flush()
+        # 新增的子分支默认未标记 → 让原本"已全标自动汇总"的父链标记失效
+        for v, u in self._marks_vu([parent_id]):
+            self._propagate_auto(parent_id, v, u)
         self.db.commit()
         self.db.refresh(node)
         self._notify(software_id)
@@ -156,7 +161,14 @@ class FeatureTreeService:
         if node.is_root:
             raise ValidationFailed("根节点不可删除")
         software_id = node.software_id
+        parent_id = node.parent_id
         self.db.delete(node)  # 子树与标记经 cascade 级联删除
+        self.db.flush()
+        # 子树消失后父链可能"变全标"（少了未标的子）或"残留失效自动标记"，重算
+        if parent_id is not None:
+            remaining = [c.id for c in self._children(parent_id)]
+            for v, u in self._marks_vu(remaining + [parent_id]):
+                self._propagate_auto(parent_id, v, u)
         self.db.commit()
         self._notify(software_id)
         return {"deleted": node_id}
@@ -165,43 +177,92 @@ class FeatureTreeService:
         node = self._get_node(node_id)
         if not version_id:
             raise ValidationFailed("缺少最终测试版本")
-        mark = (
-            self.db.query(FeatureTreeMark)
-            .filter(
-                FeatureTreeMark.node_id == node_id,
-                FeatureTreeMark.version_id == version_id,
-                FeatureTreeMark.user_id == user.id,
-            )
-            .first()
-        )
+        if self._children(node_id):
+            raise ValidationFailed("含子分支的节点会在其所有子分支都标记后自动汇总，无法手动标记")
+        mark = self._mark_row(node_id, version_id, user.id)
         if mark:
+            if mark.is_auto:
+                # 理论上叶子不会有自动标记，防御性处理：转为手动
+                mark.is_auto = False
             mark.comment_html = comment_html
             mark.updated_at = local_now()
         else:
             mark = FeatureTreeMark(
-                node_id=node_id, version_id=version_id, user_id=user.id, comment_html=comment_html,
+                node_id=node_id, version_id=version_id, user_id=user.id,
+                comment_html=comment_html, is_auto=False,
             )
             self.db.add(mark)
+        self.db.flush()
+        self._propagate_auto(node_id, version_id, user.id)  # 向上汇总
         self.db.commit()
         self._notify(node.software_id)
         return {"node_id": node_id, "user_id": user.id, "color": user_color(user.id)}
 
     def delete_mark(self, node_id: int, version_id: int, user: User) -> dict[str, Any]:
         node = self._get_node(node_id)
-        mark = (
+        mark = self._mark_row(node_id, version_id, user.id)
+        if mark:
+            if mark.is_auto:
+                raise ValidationFailed("该标记由子分支自动汇总产生，请取消对应子分支的标记")
+            self.db.delete(mark)
+            self.db.flush()
+            self._propagate_auto(node_id, version_id, user.id)  # 取消后向上撤销自动汇总
+            self.db.commit()
+            self._notify(node.software_id)
+        return {"node_id": node_id, "user_id": user.id}
+
+    # ── 自动汇总（子节点全标 → 父节点自动标记，逐级向上）──────
+    def _children(self, node_id: int) -> list[FeatureTreeNode]:
+        return self.db.query(FeatureTreeNode).filter(FeatureTreeNode.parent_id == node_id).all()
+
+    def _mark_row(self, node_id: int, version_id: int, user_id: int) -> Optional[FeatureTreeMark]:
+        return (
             self.db.query(FeatureTreeMark)
             .filter(
                 FeatureTreeMark.node_id == node_id,
                 FeatureTreeMark.version_id == version_id,
-                FeatureTreeMark.user_id == user.id,
+                FeatureTreeMark.user_id == user_id,
             )
             .first()
         )
-        if mark:
-            self.db.delete(mark)
-            self.db.commit()
-            self._notify(node.software_id)
-        return {"node_id": node_id, "user_id": user.id}
+
+    def _has_mark(self, node_id: int, version_id: int, user_id: int) -> bool:
+        return self._mark_row(node_id, version_id, user_id) is not None
+
+    def _marks_vu(self, node_ids: list[int]) -> set[tuple[int, int]]:
+        """收集给定节点上出现过的 (version_id, user_id) 组合，作为重算候选。"""
+        if not node_ids:
+            return set()
+        rows = (
+            self.db.query(FeatureTreeMark.version_id, FeatureTreeMark.user_id)
+            .filter(FeatureTreeMark.node_id.in_(node_ids))
+            .distinct()
+            .all()
+        )
+        return {(r[0], r[1]) for r in rows}
+
+    def _propagate_auto(self, start_node_id: int, version_id: int, user_id: int) -> None:
+        """从 start_node 沿父链逐级评估某 (version,user) 的自动标记：
+        - 有子节点且子节点全部已被该用户标记 → 该节点应有自动标记（缺则补）
+        - 否则该节点不应有自动标记（有则撤；手动标记不动）
+        """
+        cur_id: Optional[int] = start_node_id
+        while cur_id is not None:
+            cur = self.db.query(FeatureTreeNode).filter(FeatureTreeNode.id == cur_id).first()
+            if cur is None:
+                break
+            children = self._children(cur.id)
+            should = bool(children) and all(self._has_mark(c.id, version_id, user_id) for c in children)
+            row = self._mark_row(cur.id, version_id, user_id)
+            if should and row is None:
+                self.db.add(FeatureTreeMark(
+                    node_id=cur.id, version_id=version_id, user_id=user_id, is_auto=True,
+                ))
+                self.db.flush()
+            elif not should and row is not None and row.is_auto:
+                self.db.delete(row)
+                self.db.flush()
+            cur_id = cur.parent_id
 
     def _notify(self, software_id: int) -> None:
         sse_publish("feature_tree_updated", {"software_id": software_id})

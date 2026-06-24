@@ -78,6 +78,17 @@ def ensure_version_schema_compat(db: Session) -> None:
         db.commit()
 
 
+def ensure_feature_tree_schema_compat(db: Session) -> None:
+    """给历史 feature_tree_marks 表补 is_auto 列（自动汇总标记标识）。"""
+    rows = db.execute(text("PRAGMA table_info(feature_tree_marks)")).fetchall()
+    if not rows:
+        return  # 表尚未建立（全新库由 create_all 直接建出含该列）
+    cols = {r[1] for r in rows}
+    if "is_auto" not in cols:
+        db.execute(text("ALTER TABLE feature_tree_marks ADD COLUMN is_auto BOOLEAN NOT NULL DEFAULT 0"))
+        db.commit()
+
+
 def ensure_user_schema_compat(db: Session) -> None:
     rows = db.execute(text("PRAGMA table_info(users)")).fetchall()
     cols = {r[1] for r in rows}

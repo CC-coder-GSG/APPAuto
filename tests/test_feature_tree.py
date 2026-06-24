@@ -157,3 +157,112 @@ def test_root_cannot_be_deleted(db_session):
     root_id = svc.get_tree(sw.id)["tree"]["id"]
     with pytest.raises(ValidationFailed):
         svc.delete_node(root_id)
+
+
+# ── 自动汇总规则 ────────────────────────────────────────────
+def _marks_of(node):
+    return {m["user_id"]: m for m in node["marks"]}
+
+
+def test_cannot_manually_mark_node_with_children(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    svc.create_node(sw.id, root_id, "子", user)  # root 现在有子节点
+    with pytest.raises(ValidationFailed):
+        svc.set_mark(root_id, 1, "", user)
+
+
+def test_marking_all_children_auto_marks_parent(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    a = svc.create_node(sw.id, root_id, "A", user)
+    b = svc.create_node(sw.id, root_id, "B", user)
+    v = 500
+
+    svc.set_mark(a["id"], v, "", user)
+    # 只标了 A，root 不应自动标记
+    assert _marks_of(svc.get_tree(sw.id, version_id=v)["tree"]) == {}
+
+    svc.set_mark(b["id"], v, "", user)
+    # A、B 全标 → root 自动标记，且 is_auto=True
+    root_marks = _marks_of(svc.get_tree(sw.id, version_id=v)["tree"])
+    assert user.id in root_marks
+    assert root_marks[user.id]["is_auto"] is True
+
+
+def test_auto_propagates_to_grandparent(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    p = svc.create_node(sw.id, root_id, "P", user)
+    c1 = svc.create_node(sw.id, p["id"], "c1", user)
+    c2 = svc.create_node(sw.id, p["id"], "c2", user)
+    v = 7
+
+    svc.set_mark(c1["id"], v, "", user)
+    svc.set_mark(c2["id"], v, "", user)
+
+    tree = svc.get_tree(sw.id, version_id=v)["tree"]
+    p_node = tree["children"][0]
+    assert _marks_of(p_node)[user.id]["is_auto"] is True       # 父自动
+    assert _marks_of(tree)[user.id]["is_auto"] is True          # 祖父（root）也自动
+
+
+def test_unmarking_child_removes_parent_auto(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    a = svc.create_node(sw.id, root_id, "A", user)
+    v = 3
+    svc.set_mark(a["id"], v, "", user)
+    assert user.id in _marks_of(svc.get_tree(sw.id, version_id=v)["tree"])  # root 自动
+
+    svc.delete_mark(a["id"], v, user)
+    assert _marks_of(svc.get_tree(sw.id, version_id=v)["tree"]) == {}        # 自动撤销
+
+
+def test_cannot_delete_auto_mark(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    a = svc.create_node(sw.id, root_id, "A", user)
+    v = 9
+    svc.set_mark(a["id"], v, "", user)  # root 得到自动标记
+    with pytest.raises(ValidationFailed):
+        svc.delete_mark(root_id, v, user)
+
+
+def test_adding_child_invalidates_parent_auto(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    a = svc.create_node(sw.id, root_id, "A", user)
+    v = 11
+    svc.set_mark(a["id"], v, "", user)
+    assert user.id in _marks_of(svc.get_tree(sw.id, version_id=v)["tree"])  # root 自动
+
+    svc.create_node(sw.id, root_id, "B", user)  # 新增未标记子分支
+    assert _marks_of(svc.get_tree(sw.id, version_id=v)["tree"]) == {}        # root 自动失效
+
+
+def test_deleting_unmarked_child_triggers_parent_auto(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    a = svc.create_node(sw.id, root_id, "A", user)
+    b = svc.create_node(sw.id, root_id, "B", user)
+    v = 13
+    svc.set_mark(a["id"], v, "", user)  # 只标 A，B 未标 → root 未自动
+    assert _marks_of(svc.get_tree(sw.id, version_id=v)["tree"]) == {}
+
+    svc.delete_node(b["id"])  # 删掉未标记的 B → 剩余子(A)全标 → root 自动
+    assert _marks_of(svc.get_tree(sw.id, version_id=v)["tree"])[user.id]["is_auto"] is True

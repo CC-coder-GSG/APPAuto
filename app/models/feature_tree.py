@@ -66,6 +66,8 @@ class FeatureTreeMark(Base):
     version_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     comment_html: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # True 表示该标记是"子节点全部标记后自动汇总"产生的（非测试人手动所打）。
+    is_auto: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False)
 

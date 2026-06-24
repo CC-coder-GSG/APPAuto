@@ -214,6 +214,7 @@ function tooltipFormatter(params) {
   (m.marks || []).forEach((mk) => {
     h += `<div class="ftree-tip-mark"><span class="ftree-tip-dot" style="background:${mk.color}"></span>`
       + `<b>${escapeHtml(mk.display_name)}</b> 已测`
+      + (mk.is_auto ? `<span class="ftree-tip-auto">（自动：子分支均已标记）</span>` : '')
       + (mk.comment_html ? `<div class="ftree-tip-markbody">${mk.comment_html}</div>` : '')
       + `</div>`;
   });
@@ -374,15 +375,22 @@ function openMenu(node, x, y) {
   if (!node.is_root) items.push({ icon: '✏️', label: '重命名', act: () => renameNode(node) });
   items.push({ icon: '📝', label: node.has_note ? '编辑备注' : '添加备注', act: () => openEditor(node, 'note') });
   if (state.mode === 'test') {
+    const isLeaf = !node.children || node.children.length === 0;
     const mine = (node.marks || []).find((mk) => Number(mk.user_id) === Number(currentUserId()));
-    items.push({ icon: '✅', label: mine ? '编辑我的测试标记' : '标记我已测', act: () => openEditor(node, 'mark') });
-    if (mine) items.push({ icon: '❌', label: '取消我的标记', danger: true, act: () => removeMark(node) });
+    if (isLeaf) {
+      // 叶子节点：手动打标记 / 编辑说明 / 取消
+      items.push({ icon: '✅', label: mine ? '编辑我的测试标记' : '标记我已测', act: () => openEditor(node, 'mark') });
+      if (mine) items.push({ icon: '❌', label: '取消我的标记', danger: true, act: () => removeMark(node) });
+    } else {
+      // 含子分支：标记由子分支自动汇总，不能手动打
+      items.push({ icon: '🧩', label: '子分支全部标记后自动汇总', disabled: true, act: () => {} });
+    }
   }
   if (!node.is_root) items.push({ icon: '🗑️', label: '删除分支', danger: true, act: () => deleteNode(node) });
 
   menu.innerHTML = `<div class="ftree-menu-title">${escapeHtml(node.name)}</div>`
-    + items.map((it, i) => `<button class="ftree-menu-item${it.danger ? ' danger' : ''}" data-i="${i}"><span class="ftree-menu-icon">${it.icon}</span><span class="ftree-menu-label">${it.label}</span></button>`).join('');
-  menu.querySelectorAll('.ftree-menu-item').forEach((btn) => {
+    + items.map((it, i) => `<button class="ftree-menu-item${it.danger ? ' danger' : ''}${it.disabled ? ' ftree-menu-item--hint' : ''}" data-i="${i}"${it.disabled ? ' disabled' : ''}><span class="ftree-menu-icon">${it.icon}</span><span class="ftree-menu-label">${it.label}</span></button>`).join('');
+  menu.querySelectorAll('.ftree-menu-item:not([disabled])').forEach((btn) => {
     btn.onclick = () => { hideMenu(); items[Number(btn.dataset.i)].act(); };
   });
   // 定位（避免溢出视口）

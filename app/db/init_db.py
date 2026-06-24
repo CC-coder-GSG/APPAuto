@@ -8,6 +8,7 @@ from app.db.seed import (
     ensure_cad_schema_compat,
     ensure_default_admin,
     ensure_default_software_and_backfill,
+    ensure_feature_tree_schema_compat,
     ensure_requirement_schema_compat,
     ensure_software_schema_compat,
     ensure_stage5_schema_compat,
@@ -66,6 +67,7 @@ def init_db() -> None:
         ensure_browser_sync_schema_compat(db)
         ensure_build_record_schema_compat(db)
         Base.metadata.create_all(bind=engine)
+        ensure_feature_tree_schema_compat(db)
         ensure_cad_schema_compat(db)
         ensure_default_admin(db)
         ensure_zentao_sync_bot(db)
