@@ -89,8 +89,8 @@ async function open(mode, ctx = {}) {
   window.showTab && window.showTab('feature-tree');
   updateChrome();
   bindSSE();
-  // 等待 section 显示获得尺寸后再初始化/重绘
-  requestAnimationFrame(() => { renderChart(); });
+  // 等待 section 显示获得尺寸后再初始化/重绘（恢复上次视角）
+  requestAnimationFrame(() => { renderChart({ view: 'restore' }); });
 }
 
 // 从需求工作台进入：解析 test 模式所属的最终测试大版本
@@ -220,22 +220,15 @@ function tooltipFormatter(params) {
   return h;
 }
 
-function renderChart() {
-  const dom = $('ftreeCanvas');
-  if (!dom || !window.echarts) return;
-  if (!state.chart || state.chart.isDisposed && state.chart.isDisposed()) {
-    state.chart = window.echarts.getInstanceByDom(dom) || window.echarts.init(dom);
-    state.chart.on('click', onNodeClick);
-    window.addEventListener('resize', resize);
-  }
-  const option = {
+function buildOption(seriesData) {
+  return {
     backgroundColor: 'transparent',
     tooltip: { trigger: 'item', enterable: true, appendToBody: true, confine: true,
       extraCssText: 'max-width:340px;white-space:normal;', borderColor: 'rgba(28,25,23,0.12)',
       formatter: tooltipFormatter },
     series: [{
       type: 'tree',
-      data: [toEchartNode(state.data)],
+      data: seriesData,
       layout: 'radial',
       roam: true,
       initialTreeDepth: -1,
@@ -251,12 +244,93 @@ function renderChart() {
       animationEasing: 'cubicOut',
     }],
   };
-  state.chart.setOption(option, { notMerge: true });
+}
+
+// view: 'keep'（数据更新，merge 保留缩放/平移）| 'restore'（首次/刷新，恢复上次视角）
+//       | 'reset'（居中按钮，回全图）
+function renderChart({ view = 'restore' } = {}) {
+  const dom = $('ftreeCanvas');
+  if (!dom || !window.echarts) return;
+  let firstInit = false;
+  if (!state.chart || (state.chart.isDisposed && state.chart.isDisposed())) {
+    state.chart = window.echarts.getInstanceByDom(dom) || window.echarts.init(dom);
+    state.chart.on('click', onNodeClick);
+    window.addEventListener('resize', resize);
+    bindRoamPersist();
+    firstInit = true;
+  }
+  const seriesData = [toEchartNode(state.data)];
+  if (view === 'keep' && state.rendered && !firstInit) {
+    // 合并更新数据，不动坐标系 → 当前缩放/平移保留
+    state.chart.setOption({ series: [{ data: seriesData }] });
+  } else {
+    state.chart.setOption(buildOption(seriesData), { notMerge: true });
+    if (view === 'restore') restorePersistedView();
+    else if (view === 'reset') clearPersistedView();
+  }
+  state.rendered = true;
   resize();
 }
 
 function resize() { if (state.chart && !(state.chart.isDisposed && state.chart.isDisposed())) state.chart.resize(); }
-function fit() { renderChart(); }
+function fit() { renderChart({ view: 'reset' }); }
+
+// ── 视角（缩放/平移）持久化：让操作/刷新后停留在原位 ────────
+function viewStorageKey() {
+  return `ftreeView:${state.softwareId}:${state.mode}:${state.versionId || 0}`;
+}
+// 取径向树的可平移/缩放渲染组（ECharts tree 内部 _mainGroup）。
+// 用内部结构，全部 try/catch 包裹：取不到就降级（不报错、仅不持久化）。
+function getRoamGroup() {
+  try {
+    const views = state.chart && state.chart._chartsViews;
+    if (!views || !views.length) return null;
+    const v = views.find((x) => x && x.__model && x.__model.subType === 'tree');
+    return (v && (v._mainGroup || v.group)) || null;
+  } catch (e) { return null; }
+}
+function captureView() {
+  const g = getRoamGroup();
+  if (!g) return null;
+  return { x: g.x, y: g.y, sx: g.scaleX, sy: g.scaleY };
+}
+function applyView(t) {
+  if (!t) return;
+  const g = getRoamGroup();
+  if (!g) return;
+  try {
+    g.x = t.x; g.y = t.y; g.scaleX = t.sx; g.scaleY = t.sy;
+    g.dirty && g.dirty();
+    state.chart.getZr().refresh();
+  } catch (e) { /* 忽略 */ }
+}
+function persistView() {
+  const t = captureView();
+  if (!t) return;
+  try { localStorage.setItem(viewStorageKey(), JSON.stringify(t)); } catch (e) { /* 忽略 */ }
+}
+function clearPersistedView() {
+  try { localStorage.removeItem(viewStorageKey()); } catch (e) { /* 忽略 */ }
+}
+function restorePersistedView() {
+  let t = null;
+  try { t = JSON.parse(localStorage.getItem(viewStorageKey()) || 'null'); } catch (e) { t = null; }
+  if (!t) return;
+  // 等 ECharts 完成本次布局后再套用变换
+  requestAnimationFrame(() => applyView(t));
+}
+let _roamPersistBound = false;
+function bindRoamPersist() {
+  if (_roamPersistBound || !state.chart) return;
+  _roamPersistBound = true;
+  let timer = null;
+  const save = () => { clearTimeout(timer); timer = setTimeout(persistView, 300); };
+  try {
+    const zr = state.chart.getZr();
+    zr.on('mouseup', save);
+    zr.on('mousewheel', save);
+  } catch (e) { /* 忽略 */ }
+}
 
 // 内容指纹：节点 id/名称/备注更新时间/各标记的人与更新时间。用于跳过"无变化"的重绘，
 // 避免自己刚改完被自己的广播再重绘一次、以及无关事件造成视图（缩放/平移）被重置。
@@ -278,7 +352,7 @@ async function reload({ force = false } = {}) {
     if (!force && sig === state.lastSig) return; // 内容无变化，不重绘
     state.lastSig = sig;
     updateChrome();
-    renderChart();
+    renderChart({ view: 'keep' }); // 数据更新保留当前缩放/平移
   } catch (err) { window.showMessage && window.showMessage(err.message || '刷新失败', 'error'); }
 }
 
