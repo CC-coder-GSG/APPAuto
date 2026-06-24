@@ -253,6 +253,27 @@ def test_adding_child_invalidates_parent_auto(db_session):
     assert _marks_of(svc.get_tree(sw.id, version_id=v)["tree"]) == {}        # root 自动失效
 
 
+def test_clearing_note_removes_has_note(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    node = svc.create_node(sw.id, root_id, "功能X", user)
+
+    svc.update_node(node["id"], user, note_html="<b>用途</b>")
+    assert svc.get_tree(sw.id)["tree"]["children"][0]["has_note"] is True
+
+    # 清空后只剩 contenteditable 残留标签 → 视为无备注
+    svc.update_node(node["id"], user, note_html="<div><br></div>&nbsp; ")
+    n = svc.get_tree(sw.id)["tree"]["children"][0]
+    assert n["has_note"] is False
+    assert n["note_html"] == ""
+
+    # 含图片仍算有备注
+    svc.update_node(node["id"], user, note_html='<div><img src="/x.png"></div>')
+    assert svc.get_tree(sw.id)["tree"]["children"][0]["has_note"] is True
+
+
 def test_deleting_unmarked_child_triggers_parent_auto(db_session):
     sw = _software(db_session)
     user = _user(db_session, "u")

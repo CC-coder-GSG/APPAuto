@@ -40,6 +40,15 @@ function escapeHtml(s) {
 // rich 标签里 { } | \ 有特殊含义，节点名展示前先净化（完整名仍在 tooltip / 菜单里）
 function sanitizeLabel(s) { return String(s || '').replace(/[{}|\\]/g, ' '); }
 
+// 富文本是否为空：含图片/媒体算有内容；否则剥离标签与 &nbsp;/空白后判断。
+// contenteditable 清空后常残留 <br>/<div><br></div>/&nbsp;，需据此判空。
+function isBlankHtml(html) {
+  if (!html) return true;
+  if (/<(img|video|svg|iframe|audio)\b/i.test(html)) return false;
+  const text = html.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, '').replace(/ /g, '');
+  return !text.trim();
+}
+
 function getVisibleTabName() {
   const ids = ['assign', 'mine', 'task-board', 'feedback', 'field-test', 'build-records',
     'testcase-center', 'report', 'activity', 'data', 'dispatch', 'zentao-ai', 'jenkins',
@@ -474,7 +483,8 @@ function closeEditor() {
 async function saveEditor() {
   if (!state.editor) return;
   const ed = $('ftreeEditor');
-  const html = ed ? ed.innerHTML.trim() : '';
+  let html = ed ? ed.innerHTML.trim() : '';
+  if (isBlankHtml(html)) html = ''; // 空内容（仅残留 <br>/&nbsp;）统一存空串
   const { nodeId, kind } = state.editor;
   try {
     if (kind === 'note') {

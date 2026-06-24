@@ -35,7 +35,7 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'cad-test', path: './tabs/cad-test.js?v=20260622-1' },
   { name: 'terminal', path: './tabs/terminal.js?v=20260611-1' },
   { name: 'learning', path: './tabs/learning.js?v=20260615-5' },
-  { name: 'feature-tree', path: './tabs/feature-tree.js?v=20260624-7' },
+  { name: 'feature-tree', path: './tabs/feature-tree.js?v=20260624-8' },
 ];
 
 window.__omniqaOptionalModuleFailures = {};

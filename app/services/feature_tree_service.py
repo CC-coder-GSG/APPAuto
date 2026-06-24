@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -8,6 +9,20 @@ from app.core.exceptions import ValidationFailed
 from app.models import FeatureTreeMark, FeatureTreeNode, SoftwareProduct, User
 from app.services.sse_service import sse_publish
 from app.utils.time_utils import local_now
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_MEDIA_RE = re.compile(r"<(img|video|svg|iframe|audio)\b", re.IGNORECASE)
+
+
+def html_has_content(html: Optional[str]) -> bool:
+    """富文本是否有实际内容：含图片/媒体，或剥离标签后仍有可见文字。
+    contenteditable 清空后常残留 <br>/<div><br></div>/&nbsp;，需据此判空。"""
+    if not html:
+        return False
+    if _MEDIA_RE.search(html):
+        return True
+    text = _TAG_RE.sub("", html).replace("&nbsp;", "").replace(" ", "")
+    return bool(text.strip())
 
 # 测试人配色板：按 user_id 取模确定性配色，保证"每人不同颜色"且全局稳定，
 # 前端 weave 图例用同一组色值（见 frontend/js/tabs/feature-tree.js）。
@@ -82,8 +97,8 @@ class FeatureTreeService:
             "parent_id": n.parent_id,
             "name": n.name,
             "is_root": n.is_root,
-            "note_html": n.note_html or "",
-            "has_note": bool((n.note_html or "").strip()),
+            "note_html": n.note_html if html_has_content(n.note_html) else "",
+            "has_note": html_has_content(n.note_html),
             "note_updated_at": n.note_updated_at.isoformat() if n.note_updated_at else None,
             "marks": marks,
             "children": [],
@@ -149,7 +164,8 @@ class FeatureTreeService:
                 raise ValidationFailed("名称不能为空")
             node.name = name
         if note_html is not None:
-            node.note_html = note_html
+            # 空备注（仅残留 <br>/&nbsp; 等）规整为真正空串，避免显示空图标/空预览
+            node.note_html = note_html if html_has_content(note_html) else ""
             node.note_updated_by = user.id
             node.note_updated_at = local_now()
         self.db.commit()
