@@ -257,9 +257,29 @@ function renderChart() {
 
 function resize() { if (state.chart && !(state.chart.isDisposed && state.chart.isDisposed())) state.chart.resize(); }
 function fit() { renderChart(); }
-async function reload() {
-  try { await fetchTree(); updateChrome(); renderChart(); }
-  catch (err) { window.showMessage && window.showMessage(err.message || '刷新失败', 'error'); }
+
+// 内容指纹：节点 id/名称/备注更新时间/各标记的人与更新时间。用于跳过"无变化"的重绘，
+// 避免自己刚改完被自己的广播再重绘一次、以及无关事件造成视图（缩放/平移）被重置。
+function treeSignature(node) {
+  const parts = [];
+  const walk = (n) => {
+    if (!n) return;
+    parts.push(`${n.id}:${n.name}:${n.note_updated_at || ''}:${(n.marks || []).map((m) => m.user_id + '@' + (m.updated_at || '')).join(',')}`);
+    (n.children || []).forEach(walk);
+  };
+  walk(node);
+  return parts.join('|');
+}
+
+async function reload({ force = false } = {}) {
+  try {
+    await fetchTree();
+    const sig = treeSignature(state.data);
+    if (!force && sig === state.lastSig) return; // 内容无变化，不重绘
+    state.lastSig = sig;
+    updateChrome();
+    renderChart();
+  } catch (err) { window.showMessage && window.showMessage(err.message || '刷新失败', 'error'); }
 }
 
 // ── 节点点击 → 操作浮层 ───────────────────────────────────
@@ -361,7 +381,13 @@ function openEditor(node, kind) {
   modal.classList.remove('hidden');
   ed.focus();
 }
-function closeEditor() { const m = $('ftreeEditorModal'); if (m) m.classList.add('hidden'); state.editor = null; }
+function closeEditor() {
+  const m = $('ftreeEditorModal');
+  if (m) m.classList.add('hidden');
+  state.editor = null;
+  // 编辑期间若有别人推来的更新被挂起，关闭后补刷一次
+  if (state.pendingRemote) { state.pendingRemote = false; scheduleRemoteReload(); }
+}
 
 async function saveEditor() {
   if (!state.editor) return;
@@ -425,14 +451,22 @@ async function uploadAndInsert(file) {
 }
 
 // ── SSE 实时刷新 ─────────────────────────────────────────
+let remoteReloadTimer = null;
+// 远端更新（别人加分支/备注/打标记）：防抖合并连发；正在编辑富文本时先挂起，
+// 等关闭弹窗再刷新，避免在用户编辑途中把树重绘、视图被重置。
+function scheduleRemoteReload() {
+  const sec = $('tab-feature-tree');
+  if (!sec || sec.classList.contains('hidden')) return;
+  if (state.editor) { state.pendingRemote = true; return; }
+  clearTimeout(remoteReloadTimer);
+  remoteReloadTimer = setTimeout(() => reload(), 400);
+}
 function bindSSE() {
   if (state.sseBound || !window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
   state.sseBound = true;
   window.OmniQASSE.subscribe('feature_tree_updated', ({ payload }) => {
-    const sec = $('tab-feature-tree');
-    if (!sec || sec.classList.contains('hidden')) return;
     if (Number(payload && payload.software_id) !== Number(state.softwareId)) return;
-    reload();
+    scheduleRemoteReload();
   });
 }
 
@@ -462,6 +496,7 @@ document.addEventListener('change', (e) => {
 });
 
 window.OmniQAFeatureTreeTab = {
-  open, openFromWorkbench, refreshWorkbenchEntry, close, fit, reload,
+  open, openFromWorkbench, refreshWorkbenchEntry, close, fit,
+  reload: () => reload({ force: true }), // 手动"刷新"按钮：强制重绘
   closeEditor, saveEditor,
 };
