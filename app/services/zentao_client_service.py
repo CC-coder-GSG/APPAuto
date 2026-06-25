@@ -63,6 +63,19 @@ class ZentaoAPIError(Exception):
         super().__init__(f"ZentaoAPI {status_code}: {message}")
 
 
+def _loads_lenient(text: str) -> Any:
+    """
+    json.loads that tolerates a leading UTF-8 BOM (﻿) and surrounding
+    whitespace.
+
+    某些禅道 IPD 部署在响应正文前会带一个 UTF-8 BOM（渲染成 ﻿），标准
+    json.loads / httpx 的 .json() 会直接抛 "Expecting value: line 1
+    column 1 (char 0)"，导致被误判成"非 JSON 响应"。这里统一先剥掉 BOM
+    再解析。
+    """
+    return json.loads(text.strip("﻿ \t\r\n"))
+
+
 def _parse_write_response(resp: "httpx.Response") -> dict | list:
     """
     Parse body of a POST/PUT response defensively.
@@ -71,11 +84,11 @@ def _parse_write_response(resp: "httpx.Response") -> dict | list:
     some return an empty body on success, some return `id=xxx` plain
     text, and PHP warnings can leak HTML with a 200 status.
     """
-    text = (resp.text or "").strip()
+    text = (resp.text or "").lstrip("﻿").strip()
     if not text:
         return {"message": "success"}
     try:
-        return resp.json()
+        return _loads_lenient(text)
     except ValueError:
         lowered = text.lower()
         if "fatal error" in lowered:
@@ -119,13 +132,18 @@ class ZentaoClient:
                 return None
             if resp.status_code not in (200, 201):
                 raise ZentaoAPIError(resp.status_code, resp.text[:500])
+            body = resp.text or ""
             try:
-                return resp.json()
+                # 优先用宽松解析（剥 BOM），失败再退回 httpx 的 .json()
+                return _loads_lenient(body)
             except Exception:
-                body = resp.text or ""
+                try:
+                    return resp.json()
+                except Exception:
+                    pass
                 if "Fatal error" in body or "fatal error" in body:
                     raise ZentaoAPIError(500, "禅道服务器内部错误（PHP Fatal Error），该 Bug 数据可能存在异常，请联系禅道管理员检查。")
-                raise ZentaoAPIError(502, f"禅道返回了非 JSON 响应: {body[:200]}")
+                raise ZentaoAPIError(502, f"禅道返回了非 JSON 响应: {body.lstrip(chr(0xFEFF)).strip()[:200]}")
         except ZentaoAPIError:
             raise
         except Exception as e:
@@ -193,12 +211,15 @@ class ZentaoClient:
                 return None
             if resp.status_code != 200:
                 return None
-            result = resp.json()
+            try:
+                result = _loads_lenient(resp.text or "")
+            except Exception:
+                result = resp.json()
             # Zentao page JSON often wraps the actual payload inside:
             # {"status":"success","data":"{\"users\":{...},...}"}
             if isinstance(result, dict) and isinstance(result.get("data"), str):
                 try:
-                    decoded = json.loads(result["data"])
+                    decoded = _loads_lenient(result["data"])
                     if isinstance(decoded, dict):
                         return decoded
                 except Exception:
