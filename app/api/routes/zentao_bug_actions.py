@@ -553,20 +553,24 @@ def get_bug_preview(
         raw = client.get_bug(zt_id)
     except ZentaoAPIError as exc:
         if exc.status_code == 401:
+            # token 过期：刷新后重试一次；仍失败就交给下面的页面 JSON 兜底
             invalidate_token(current_user.id, db)
             client = _get_client(current_user.id, db)
             if client is None:
                 raise HTTPException(status_code=400, detail="禅道 token 刷新失败")
             try:
                 raw = client.get_bug(zt_id)
-            except ZentaoAPIError as exc2:
-                if exc2.status_code != 500:
-                    raise HTTPException(status_code=exc2.status_code or 502, detail=f"禅道获取Bug详情失败: {exc2.message}")
-        elif exc.status_code != 500:
-            raise HTTPException(status_code=exc.status_code or 502, detail=f"禅道获取Bug详情失败: {exc.message}")
+            except ZentaoAPIError:
+                raw = None
+        else:
+            # PHP Fatal Error(500) / 非 JSON 响应(502) / 其它异常——一律不直接
+            # 抛错，落到下方页面 JSON 兜底（bug-view-{id}.json 数据更全且更稳）。
+            logger.warning("get_bug_preview: v1 API 失败 zt_id=%s status=%s msg=%s",
+                           zt_id, exc.status_code, exc.message)
+            raw = None
 
-    # v1 API 返回 PHP Fatal Error（如操作记录含附件时的禅道 IPD 扩展 bug）时
-    # fallback 到页面 JSON 接口
+    # v1 API 异常（PHP Fatal Error / 仅返回 BOM 的空响应 / 非 JSON 等）时
+    # fallback 到页面 JSON 接口（bug-view-{id}.json），它带完整 bug + actions + users
     if raw is None:
         page_data = client.get_page(f"bug-view-{zt_id}.json")
         if isinstance(page_data, dict):

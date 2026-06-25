@@ -133,6 +133,11 @@ class ZentaoClient:
             if resp.status_code not in (200, 201):
                 raise ZentaoAPIError(resp.status_code, resp.text[:500])
             body = resp.text or ""
+            # 禅道 IPD 对某些异常 Bug 的 v1 接口会返回 200 + 仅一个 UTF-8 BOM
+            # （3 字节、无 JSON 正文）。这种"空响应"等同于拿不到数据，返回 None
+            # 让上层走页面 JSON 兜底，而不是当成"非 JSON 响应"直接报错。
+            if not body.strip("﻿ \t\r\n"):
+                return None
             try:
                 # 优先用宽松解析（剥 BOM），失败再退回 httpx 的 .json()
                 return _loads_lenient(body)
