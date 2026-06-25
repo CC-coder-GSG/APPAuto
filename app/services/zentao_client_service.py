@@ -304,6 +304,39 @@ class ZentaoClient:
     def get_bug(self, bug_id: int) -> dict | None:
         return self.get(f"bugs/{bug_id}")
 
+    def get_bug_with_fallback(self, bug_id: int) -> dict | None:
+        """
+        Return a bug's raw dict, falling back to the page JSON
+        (`bug-view-{id}.json`) when the v1 API yields no usable body.
+
+        禅道 IPD 对部分异常 Bug 的 v1 接口会返回 200 + 仅一个 UTF-8 BOM（空响应），
+        或直接抛 PHP Fatal Error。这种情况下 v1 拿不到数据，但页面 JSON 接口
+        仍返回完整的 bug（含 assignedTo）+ actions + users，所以统一在这里兜底。
+
+        401（token 失效）会原样抛出，交给调用方刷新 token 后重试——页面 JSON
+        兜底不应吞掉 token 过期信号。页面 JSON 顶层的 actions 会合并进返回的
+        bug dict，供详情 normalizer 使用。
+        """
+        raw: dict | list | None = None
+        try:
+            raw = self.get_bug(bug_id)
+        except ZentaoAPIError as exc:
+            if exc.status_code == 401:
+                raise
+            logger.info("get_bug_with_fallback: v1 失败 bug_id=%s status=%s，回退页面 JSON",
+                        bug_id, exc.status_code)
+            raw = None
+        if raw:
+            return raw
+
+        page = self.get_page(f"bug-view-{bug_id}.json")
+        if isinstance(page, dict):
+            bug = page.get("bug") or page
+            if isinstance(bug, dict) and "actions" not in bug and "actions" in page:
+                bug = {**bug, "actions": page["actions"]}
+            return bug
+        return None
+
     def get_story(self, story_id: int) -> dict | None:
         return self.get(f"stories/{story_id}")
 

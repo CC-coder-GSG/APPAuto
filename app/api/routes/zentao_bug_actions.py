@@ -548,38 +548,27 @@ def get_bug_preview(
     binding = db.query(UserZentaoBinding).filter(UserZentaoBinding.user_id == current_user.id).first()
     base_url = (binding.base_url or "").rstrip("/") if binding else ""
 
+    # get_bug_with_fallback 内部已处理 v1 异常（PHP Fatal Error / 仅返回 BOM 的
+    # 空响应 / 非 JSON 等）→ 回退页面 JSON（bug-view-{id}.json，带完整 bug +
+    # actions + users）。只有 401 会抛出，交由这里刷新 token 后重试。
     raw = None
     try:
-        raw = client.get_bug(zt_id)
+        raw = client.get_bug_with_fallback(zt_id)
     except ZentaoAPIError as exc:
         if exc.status_code == 401:
-            # token 过期：刷新后重试一次；仍失败就交给下面的页面 JSON 兜底
             invalidate_token(current_user.id, db)
             client = _get_client(current_user.id, db)
             if client is None:
                 raise HTTPException(status_code=400, detail="禅道 token 刷新失败")
             try:
-                raw = client.get_bug(zt_id)
-            except ZentaoAPIError:
-                raw = None
+                raw = client.get_bug_with_fallback(zt_id)
+            except ZentaoAPIError as exc2:
+                raise HTTPException(status_code=exc2.status_code or 502, detail=f"禅道获取Bug详情失败: {exc2.message}")
         else:
-            # PHP Fatal Error(500) / 非 JSON 响应(502) / 其它异常——一律不直接
-            # 抛错，落到下方页面 JSON 兜底（bug-view-{id}.json 数据更全且更稳）。
-            logger.warning("get_bug_preview: v1 API 失败 zt_id=%s status=%s msg=%s",
-                           zt_id, exc.status_code, exc.message)
-            raw = None
+            raise HTTPException(status_code=exc.status_code or 502, detail=f"禅道获取Bug详情失败: {exc.message}")
 
-    # v1 API 异常（PHP Fatal Error / 仅返回 BOM 的空响应 / 非 JSON 等）时
-    # fallback 到页面 JSON 接口（bug-view-{id}.json），它带完整 bug + actions + users
-    if raw is None:
-        page_data = client.get_page(f"bug-view-{zt_id}.json")
-        if isinstance(page_data, dict):
-            raw = page_data.get("bug") or page_data
-            # 页面 JSON 的 actions 在顶层，合并进 bug 给 normalizer 使用
-            if isinstance(raw, dict) and "actions" not in raw and "actions" in page_data:
-                raw["actions"] = page_data["actions"]
-        if not raw:
-            raise HTTPException(status_code=502, detail="禅道 Bug 详情获取失败（v1 API 异常，页面接口也无数据）")
+    if not raw:
+        raise HTTPException(status_code=502, detail="禅道 Bug 详情获取失败（v1 API 异常，页面接口也无数据）")
 
     preview = normalize_bug_detail(raw, base_url=base_url)
     if not preview:

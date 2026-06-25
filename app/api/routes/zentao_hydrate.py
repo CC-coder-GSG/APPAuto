@@ -271,7 +271,7 @@ async def _fetch_bugs_concurrent(
         nonlocal got_401
         async with sem:
             try:
-                raw = await asyncio.to_thread(client.get_bug, bug_id)
+                raw = await asyncio.to_thread(client.get_bug_with_fallback, bug_id)
                 if raw:
                     data = normalize_bug(raw)
                     data["zentao_url"] = f"{base_url}/bug-view-{bug_id}.html"
