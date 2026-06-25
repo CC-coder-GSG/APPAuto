@@ -179,12 +179,22 @@ function toEchartNode(n) {
   let borderColor = isRoot ? '#fff' : '#8b8af7';
   let borderWidth = isRoot ? 3 : 1.5;
   let shadowBlur = isRoot ? 24 : 0;
-  if (markCount && n.marks[0]) { borderColor = n.marks[0].color; borderWidth = 3; }
+  let shadowColor = 'rgba(109,108,245,0.55)';
+  // 已测试节点：在彩色描边的基础上，把节点本体也换成测试人颜色（白描边 + 同色辉光），
+  // 让"已测"节点在一片浅紫未测节点中显著跳出来。
+  if (markCount && n.marks[0]) {
+    const mc = n.marks[0].color;
+    color = mc;
+    borderColor = '#ffffff';
+    borderWidth = 3;
+    shadowBlur = 14;
+    shadowColor = mc;
+  }
   return {
     name: n.name,
     value: n.id,
     _meta: n,
-    itemStyle: { color, borderColor, borderWidth, shadowBlur, shadowColor: 'rgba(109,108,245,0.55)' },
+    itemStyle: { color, borderColor, borderWidth, shadowBlur, shadowColor },
     children: (n.children || []).map(toEchartNode),
   };
 }
