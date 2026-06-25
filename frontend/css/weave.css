@@ -1071,6 +1071,29 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
   border: 1px solid var(--w-hairline); pointer-events: none;
 }
 
+/* 复制节点选择态：顶部横幅 + 画布"可选"光标 */
+.ftree-copy-banner {
+  position: absolute; left: 50%; top: 16px; transform: translateX(-50%);
+  z-index: 4001; display: flex; align-items: center; gap: 14px;
+  max-width: min(92%, 680px);
+  font-size: 13px; color: #fff;
+  background: var(--w-aurora); background-size: 200% 100%;
+  animation: ftree-aurora-pan 6s linear infinite;
+  padding: 9px 14px; border-radius: 999px;
+  box-shadow: 0 10px 30px rgba(28,25,23,0.22);
+}
+.ftree-copy-banner-text { line-height: 1.4; }
+.ftree-copy-banner-text b { font-weight: 800; }
+.ftree-copy-banner-cancel {
+  flex: 0 0 auto; cursor: pointer; white-space: nowrap;
+  background: rgba(255,255,255,0.22) !important; color: #fff !important;
+  border: 1px solid rgba(255,255,255,0.5) !important;
+  border-radius: 999px !important; padding: 5px 12px !important; font-size: 12.5px !important;
+  box-shadow: none !important; transition: background var(--w-fast) var(--w-swift) !important;
+}
+.ftree-copy-banner-cancel:hover { background: rgba(255,255,255,0.34) !important; }
+.ftree-copying .ftree-canvas { cursor: copy; }
+
 /* 节点操作浮层 */
 .ftree-menu {
   position: fixed; z-index: 4000; min-width: 184px;

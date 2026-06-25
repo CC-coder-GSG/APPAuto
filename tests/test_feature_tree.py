@@ -274,6 +274,92 @@ def test_clearing_note_removes_has_note(db_session):
     assert svc.get_tree(sw.id)["tree"]["children"][0]["has_note"] is True
 
 
+# ── 复制节点 ────────────────────────────────────────────────
+def test_copy_subtree_clones_structure_and_notes_without_marks(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+
+    # 源：父「绘图」→ 子「直线」「圆」，给「直线」加备注 + 测试标记
+    src = svc.create_node(sw.id, root_id, "绘图", user)
+    line = svc.create_node(sw.id, src["id"], "直线", user)
+    svc.create_node(sw.id, src["id"], "圆", user)
+    svc.update_node(line["id"], user, note_html="<b>画线注意事项</b>")
+    v = 42
+    svc.set_mark(line["id"], v, "已测", user)
+
+    # 目标：另起一个分支
+    target = svc.create_node(sw.id, root_id, "目标分支", user)
+
+    res = svc.copy_subtree(src["id"], target["id"], user)
+
+    tree = svc.get_tree(sw.id, version_id=v)["tree"]
+    target_node = next(c for c in tree["children"] if c["id"] == target["id"])
+    assert len(target_node["children"]) == 1
+    clone = target_node["children"][0]
+    assert clone["id"] == res["new_node_id"]
+    assert clone["name"] == "绘图"
+    # 结构与名称都复制
+    clone_child_names = sorted(c["name"] for c in clone["children"])
+    assert clone_child_names == ["圆", "直线"]
+    # 备注复制
+    clone_line = next(c for c in clone["children"] if c["name"] == "直线")
+    assert clone_line["has_note"] is True
+    assert "画线注意事项" in clone_line["note_html"]
+    # 测试标记不复制
+    assert clone_line["marks"] == []
+    assert clone["marks"] == []
+    # 原节点不受影响
+    src_node = next(c for c in tree["children"] if c["id"] == src["id"])
+    src_line = next(c for c in src_node["children"] if c["name"] == "直线")
+    assert any(m["user_id"] == user.id for m in src_line["marks"])
+
+
+def test_copy_rejects_self_and_descendant_targets(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    parent = svc.create_node(sw.id, root_id, "父", user)
+    child = svc.create_node(sw.id, parent["id"], "子", user)
+
+    with pytest.raises(ValidationFailed):
+        svc.copy_subtree(parent["id"], parent["id"], user)   # 复制到自身
+    with pytest.raises(ValidationFailed):
+        svc.copy_subtree(parent["id"], child["id"], user)    # 复制到自己的子分支
+
+
+def test_copy_into_fully_marked_target_invalidates_its_auto(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    # 目标父「T」下有唯一子「t1」，标记后 T 自动汇总
+    t = svc.create_node(sw.id, root_id, "T", user)
+    t1 = svc.create_node(sw.id, t["id"], "t1", user)
+    v = 77
+    svc.set_mark(t1["id"], v, "", user)
+    assert _marks_of(svc.get_tree(sw.id, version_id=v)["tree"]["children"][0])[user.id]["is_auto"] is True
+
+    # 另一处的源子树复制到 T 下 → T 多了未测子树 → 自动汇总应失效
+    src = svc.create_node(sw.id, root_id, "源", user)
+    svc.copy_subtree(src["id"], t["id"], user)
+
+    t_node = next(c for c in svc.get_tree(sw.id, version_id=v)["tree"]["children"] if c["id"] == t["id"])
+    assert _marks_of(t_node) == {}
+
+
+def test_root_cannot_be_copied(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    target = svc.create_node(sw.id, root_id, "随便", user)
+    with pytest.raises(ValidationFailed):
+        svc.copy_subtree(root_id, target["id"], user)
+
+
 def test_deleting_unmarked_child_triggers_parent_auto(db_session):
     sw = _software(db_session)
     user = _user(db_session, "u")

@@ -230,6 +230,12 @@
     <div id="ftreeCanvas" class="ftree-canvas"></div>
     <div id="ftreeHint" class="ftree-hint">点击节点可添加分支 / 重命名 / 备注。📝 表示有功能备注，彩色圆点表示测试人已标记。</div>
 
+    <!-- 复制节点选择态横幅 -->
+    <div id="ftreeCopyBanner" class="ftree-copy-banner hidden">
+      <span class="ftree-copy-banner-text"></span>
+      <button class="ftree-copy-banner-cancel" onclick="window.OmniQAFeatureTreeTab?.cancelCopy()">取消复制（Esc）</button>
+    </div>
+
     <!-- 节点操作浮层（点击节点弹出） -->
     <div id="ftreeMenu" class="ftree-menu hidden"></div>
     <!-- 气泡（备注 / 标记说明展示） -->

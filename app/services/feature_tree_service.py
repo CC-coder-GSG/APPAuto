@@ -155,6 +155,77 @@ class FeatureTreeService:
         self._notify(software_id)
         return {"id": node.id, "name": node.name, "parent_id": node.parent_id}
 
+    def copy_subtree(self, source_id: int, target_id: int, user: User) -> dict[str, Any]:
+        """把 source 节点及其所有子分支，深拷贝接到 target 节点下。
+
+        只复制「节点结构 + 名称 + 功能备注（note_html）」，不复制任何测试标记
+        （FeatureTreeMark）——复制出来的子树一律为"未测"。常用于"多个完全一样
+        的功能"，复制一份再微调，省去逐个手建分支。
+        """
+        source = self._get_node(source_id)
+        target = self._get_node(target_id)
+        if source.is_root:
+            raise ValidationFailed("根节点不可复制")
+        if source.software_id != target.software_id:
+            raise ValidationFailed("只能在同一软件的功能图谱内复制")
+        if target_id == source_id:
+            raise ValidationFailed("不能把节点复制到它自身")
+        if target_id in self._descendant_ids(source_id):
+            raise ValidationFailed("不能把节点复制到它自己的子分支下")
+
+        max_order = (
+            self.db.query(FeatureTreeNode.sort_order)
+            .filter(FeatureTreeNode.parent_id == target_id)
+            .order_by(FeatureTreeNode.sort_order.desc())
+            .first()
+        )
+        clone = self._clone_node_recursive(
+            source, target_id, target.software_id, user.id,
+            sort_order=((max_order[0] + 1) if max_order else 0),
+        )
+        self.db.flush()
+        # target 下新接入了一整棵"未测"子树 → 其原有"子分支全标自动汇总"的标记需失效
+        for v, u in self._marks_vu([target_id]):
+            self._propagate_auto(target_id, v, u)
+        self.db.commit()
+        self.db.refresh(clone)
+        self._notify(target.software_id)
+        return {"new_node_id": clone.id, "source_id": source_id, "target_id": target_id}
+
+    def _descendant_ids(self, node_id: int) -> set[int]:
+        """返回 node_id 的所有后代节点 id（不含自身）。"""
+        ids: set[int] = set()
+        stack = [node_id]
+        while stack:
+            for child in self._children(stack.pop()):
+                if child.id not in ids:
+                    ids.add(child.id)
+                    stack.append(child.id)
+        return ids
+
+    def _clone_node_recursive(self, src: FeatureTreeNode, new_parent_id: int,
+                              software_id: int, user_id: int, sort_order: int) -> FeatureTreeNode:
+        has_note = html_has_content(src.note_html)
+        clone = FeatureTreeNode(
+            software_id=software_id, parent_id=new_parent_id, name=src.name,
+            is_root=False, sort_order=sort_order,
+            note_html=src.note_html if has_note else None,
+            note_updated_by=user_id if has_note else None,
+            note_updated_at=local_now() if has_note else None,
+            created_by=user_id,
+        )
+        self.db.add(clone)
+        self.db.flush()
+        children = (
+            self.db.query(FeatureTreeNode)
+            .filter(FeatureTreeNode.parent_id == src.id)
+            .order_by(FeatureTreeNode.sort_order, FeatureTreeNode.id)
+            .all()
+        )
+        for i, child in enumerate(children):
+            self._clone_node_recursive(child, clone.id, software_id, user_id, i)
+        return clone
+
     def update_node(self, node_id: int, user: User, *, name: Optional[str] = None,
                     note_html: Optional[str] = None) -> dict[str, Any]:
         node = self._get_node(node_id)

@@ -29,6 +29,7 @@ const state = {
   editor: null,        // { nodeId, kind:'note'|'mark' }
   sseBound: false,
   imgPasteBound: false,
+  copyMode: null,      // 复制节点选择态：{ sourceId, sourceName }
 };
 
 function $(id) { return document.getElementById(id); }
@@ -139,6 +140,7 @@ function refreshWorkbenchEntry() {
 }
 
 function close() {
+  cancelCopy();
   window.showTab && window.showTab(state.originTab || 'mine');
 }
 
@@ -380,10 +382,66 @@ async function reload({ force = false } = {}) {
 function onNodeClick(params) {
   const m = params.data && params.data._meta;
   if (!m) return;
+  // 复制选择态：点击节点 = 选定目标，而非打开操作菜单
+  if (state.copyMode) { chooseCopyTarget(m); return; }
   const ev = params.event && params.event.event;
   const x = ev ? ev.clientX : window.innerWidth / 2;
   const y = ev ? ev.clientY : window.innerHeight / 2;
   openMenu(m, x, y);
+}
+
+// ── 复制节点（子树深拷贝到另一节点下，仅节点+备注，不含测试状态）─────
+function startCopy(node) {
+  state.copyMode = { sourceId: node.id, sourceName: node.name };
+  const sec = $('tab-feature-tree');
+  if (sec) sec.classList.add('ftree-copying');
+  const banner = $('ftreeCopyBanner');
+  if (banner) {
+    const txt = banner.querySelector('.ftree-copy-banner-text');
+    if (txt) txt.innerHTML = `复制「<b>${escapeHtml(node.name)}</b>」中：拖动/缩放画面，点选要接入的目标节点`;
+    banner.classList.remove('hidden');
+  }
+}
+
+function cancelCopy() {
+  state.copyMode = null;
+  const sec = $('tab-feature-tree');
+  if (sec) sec.classList.remove('ftree-copying');
+  const banner = $('ftreeCopyBanner');
+  if (banner) banner.classList.add('hidden');
+}
+
+// target 是否为 ancestorId 的后代（用嵌套 state.flat 节点走子树判断）
+function isDescendant(ancestorId, nodeId) {
+  const anc = state.flat.get(ancestorId);
+  if (!anc) return false;
+  let found = false;
+  const walk = (n) => (n.children || []).forEach((c) => { if (c.id === nodeId) found = true; walk(c); });
+  walk(anc);
+  return found;
+}
+
+function chooseCopyTarget(target) {
+  const { sourceId, sourceName } = state.copyMode;
+  if (target.id === sourceId) {
+    window.showMessage && window.showMessage('不能复制到自身，请另选目标节点', 'error');
+    return;
+  }
+  if (isDescendant(sourceId, target.id)) {
+    window.showMessage && window.showMessage('不能复制到它自己的子分支下，请另选目标节点', 'error');
+    return;
+  }
+  if (!window.confirm(`将「${sourceName}」及其所有子分支复制到「${target.name}」下？\n（仅复制节点与功能备注，不保留测试状态/测试说明）`)) return;
+  doCopy(sourceId, target.id);
+}
+
+async function doCopy(sourceId, targetId) {
+  try {
+    await api(`/feature-tree/nodes/${sourceId}/copy`, { method: 'POST', body: { target_id: targetId } });
+    cancelCopy();
+    await reload();
+    window.showMessage && window.showMessage('复制成功');
+  } catch (err) { window.showMessage && window.showMessage(err.message || '复制失败', 'error'); }
 }
 
 function openMenu(node, x, y) {
@@ -392,6 +450,7 @@ function openMenu(node, x, y) {
   const items = [];
   items.push({ icon: '➕', label: '添加子分支', act: () => addBranch(node) });
   if (!node.is_root) items.push({ icon: '✏️', label: '重命名', act: () => renameNode(node) });
+  if (!node.is_root) items.push({ icon: '📋', label: '复制节点', act: () => startCopy(node) });
   items.push({ icon: '📝', label: node.has_note ? '编辑备注' : '添加备注', act: () => openEditor(node, 'note') });
   if (state.mode === 'test') {
     const isLeaf = !node.children || node.children.length === 0;
@@ -586,6 +645,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   const modal = $('ftreeEditorModal');
   if (modal && !modal.classList.contains('hidden')) { closeEditor(); return; }
+  if (state.copyMode) { cancelCopy(); return; }
   const menu = $('ftreeMenu');
   if (menu && !menu.classList.contains('hidden')) hideMenu();
 });
@@ -600,5 +660,5 @@ document.addEventListener('change', (e) => {
 window.OmniQAFeatureTreeTab = {
   open, openFromWorkbench, refreshWorkbenchEntry, close, fit,
   reload: () => reload({ force: true }), // 手动"刷新"按钮：强制重绘
-  closeEditor, saveEditor,
+  closeEditor, saveEditor, cancelCopy,
 };

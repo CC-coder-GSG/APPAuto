@@ -36,6 +36,10 @@ class MarkPayload(BaseModel):
     comment_html: Optional[str] = None
 
 
+class NodeCopyPayload(BaseModel):
+    target_id: int
+
+
 @router.get("/feature-tree")
 def get_feature_tree(
     software_id: int,
@@ -67,6 +71,17 @@ def update_node(
     return FeatureTreeService(db).update_node(
         node_id, current_user, name=payload.name, note_html=payload.note_html
     )
+
+
+@router.post("/feature-tree/nodes/{node_id}/copy", status_code=201)
+def copy_node(
+    node_id: int,
+    payload: NodeCopyPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """把 node_id 子树深拷贝到 target_id 下（仅节点+备注，不含测试标记）。"""
+    return FeatureTreeService(db).copy_subtree(node_id, payload.target_id, current_user)
 
 
 @router.delete("/feature-tree/nodes/{node_id}")
