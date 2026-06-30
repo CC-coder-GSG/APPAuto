@@ -482,6 +482,11 @@ def _writeback_bug_fields(db: Session, result: dict, base_url: str) -> None:
             if status and row.zentao_live_status != status:
                 row.zentao_live_status = status
                 any_changed = True
+            # 禅道已删除：实时核对到 deleted 即回写标记，供大盘排除统计/筛选并红色展示。
+            if data.get("deleted") and not row.zentao_deleted:
+                row.zentao_deleted = True
+                row.zentao_sync_message = "禅道已删除（页面核对）"
+                any_changed = True
         if any_changed:
             db.commit()
     except Exception as exc:

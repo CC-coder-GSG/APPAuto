@@ -137,6 +137,11 @@ function _escHtml(str) {
 function _renderBugSlot(d, { showTitle = false } = {}) {
   if (!d) return `<span class="zt-miss" title="禅道中未找到此Bug">—</span>`;
 
+  // 禅道已删除：只显示红色「已删除」，不再展示状态/指派等会误导的信息。
+  if (d.deleted) {
+    return `<span class="badge" style="background:#dc2626;color:#fff;font-weight:bold;font-size:10px;padding:1px 5px;border-radius:4px;" title="该Bug已在禅道删除">🗑️ 已删除</span>`;
+  }
+
   const sc = _BUG_STATUS_COLOR[d.status] || { bg: '#f1f5f9', color: '#475569' };
   const statusBadge = `<span style="background:${sc.bg};color:${sc.color};padding:1px 5px;border-radius:4px;font-size:10px;font-weight:600;">${d.status_zh || d.status}</span>`;
 

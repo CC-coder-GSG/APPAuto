@@ -62,11 +62,15 @@ def normalize_bug(raw: dict) -> dict:
     except (TypeError, ValueError):
         sev_int = 0
 
+    deleted_raw = bug.get("deleted")
+    is_deleted = deleted_raw is True or str(deleted_raw).strip() in ("1", "true", "True")
+
     return {
         "id": bug.get("id"),
         "title": bug.get("title") or "",
         "status": status,
         "status_zh": _BUG_STATUS_ZH.get(status, status),
+        "deleted": is_deleted,
         "resolution": resolution,
         "resolution_zh": _BUG_RESOLUTION_ZH.get(resolution, resolution) if resolution else "",
         "severity": sev_int,
