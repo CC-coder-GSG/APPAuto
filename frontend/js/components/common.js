@@ -29,14 +29,13 @@ function _ensureLoadingEl() {
     st.textContent = '@keyframes omniqaSpin{to{transform:rotate(360deg)}}';
     document.head.appendChild(st);
   }
+  // 顶部非阻塞加载条：靠上居中、pointer-events:none，加载时仍可操作/切换页面。
   const el = document.createElement('div');
   el.id = 'omniqaLoadingOverlay';
-  el.style.cssText = 'position:fixed; inset:0; z-index:4000; display:none; align-items:center; justify-content:center; background:rgba(15,23,42,.32); backdrop-filter:blur(2px);';
+  el.style.cssText = 'position:fixed; top:18px; left:50%; transform:translateX(-50%); z-index:4000; display:none; align-items:center; gap:10px; background:#fff; border-radius:12px; box-shadow:0 8px 28px rgba(2,6,23,.22); padding:11px 18px; pointer-events:none; max-width:90vw;';
   el.innerHTML = `
-    <div style="min-width:240px; max-width:80vw; background:#fff; border-radius:16px; box-shadow:0 12px 40px rgba(2,6,23,.28); padding:26px 32px; display:flex; flex-direction:column; align-items:center; gap:14px;">
-      <div style="width:38px; height:38px; border:3px solid #e2e8f0; border-top-color:#6366f1; border-radius:50%; animation:omniqaSpin .8s linear infinite;"></div>
-      <div id="omniqaLoadingMsg" style="font-size:14px; color:#334155; font-weight:600; text-align:center; line-height:1.5;">处理中，请稍候…</div>
-    </div>`;
+    <div style="width:20px; height:20px; border:2.5px solid #e2e8f0; border-top-color:#6366f1; border-radius:50%; animation:omniqaSpin .8s linear infinite; flex:none;"></div>
+    <div id="omniqaLoadingMsg" style="font-size:13px; color:#334155; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">处理中，请稍候…</div>`;
   document.body.appendChild(el);
   _loadingEl = el;
   _loadingMsgEl = el.querySelector('#omniqaLoadingMsg');
