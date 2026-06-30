@@ -475,6 +475,13 @@ function _renderTask(data) {
   const body = document.getElementById('entityPreviewBody');
   const statusZh = _TASK_STATUS_ZH[data.status] || data.status || '';
   const bits = [];
+  // 父/子任务标识
+  if (data.is_parent) {
+    bits.push('<span style="background:#ecfeff; color:#0e7490; padding:1px 6px; border-radius:4px;">父任务</span>');
+  } else if (data.parent) {
+    const pn = data.parent_name ? `：${escapeHtml(data.parent_name)}` : ` #${escapeHtml(data.parent)}`;
+    bits.push(`<span style="background:#f5f3ff; color:#6d28d9; padding:1px 6px; border-radius:4px;">子任务</span> <span style="color:#64748b;">父任务${pn}</span>`);
+  }
   if (statusZh) bits.push(`状态：<b>${escapeHtml(statusZh)}</b>`);
   if (data.assigned_to) bits.push(`指派：${escapeHtml(data.assigned_to)}`);
   if (data.story) bits.push(`关联需求：s#${escapeHtml(data.story)}`);
@@ -483,7 +490,11 @@ function _renderTask(data) {
   const row = (label, val) => (val || val === 0)
     ? `<tr><td style="padding:6px 10px; color:#64748b; white-space:nowrap;">${label}</td><td style="padding:6px 10px; color:#0f172a;">${escapeHtml(val)}</td></tr>`
     : '';
+  const ztBtn = data.url
+    ? `<div style="margin-bottom:10px;"><a href="${escapeHtml(data.url)}" target="_blank" rel="noopener noreferrer" style="display:inline-flex; align-items:center; gap:6px; background:#6366f1; color:#fff; padding:7px 14px; border-radius:8px; font-size:13px; font-weight:600; text-decoration:none;">🔗 在禅道中打开任务</a></div>`
+    : '';
   body.innerHTML = `
+    ${ztBtn}
     <div style="border:1px solid #e2e8f0; border-radius:10px; padding:8px 12px; background:#f8fafc;">
       <table style="width:100%; border-collapse:collapse; font-size:14px;">
         ${row('预计工时', data.estimate != null ? data.estimate + ' h' : '')}

@@ -297,6 +297,23 @@ def get_task_detail(
         dt = parse_external_datetime_to_local_naive(v) if v else None
         return dt.isoformat() if dt else None
 
+    # 父/子任务判定：isParent=1 为父任务；parent>0 为子任务（其父为 parent_id）。
+    is_parent = str(raw.get("isParent") or "0").strip() in ("1", "true", "True")
+    try:
+        parent_id = int(raw.get("parent") or 0)
+    except (TypeError, ValueError):
+        parent_id = 0
+    parent_name = None
+    if parent_id > 0:
+        try:
+            pctx = _get_client_ctx(current_user.id, db)
+            if pctx:
+                praw = pctx[0].get_task(parent_id)
+                if isinstance(praw, dict):
+                    parent_name = praw.get("name")
+        except Exception:  # noqa: BLE001
+            parent_name = None
+
     return {
         "id": raw.get("id"),
         "name": raw.get("name"),
@@ -305,7 +322,9 @@ def get_task_detail(
         "pri": raw.get("pri"),
         "story": raw.get("story"),
         "story_title": raw.get("storyTitle"),
-        "parent": raw.get("parent"),
+        "parent": parent_id or None,
+        "is_parent": is_parent,
+        "parent_name": parent_name,
         "assigned_to": _acc(raw.get("assignedTo")),
         "estimate": raw.get("estimate"),
         "consumed": raw.get("consumed"),

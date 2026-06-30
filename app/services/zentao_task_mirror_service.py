@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.models import User, Version, VersionType
 from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.services.zentao_system_client import get_system_zentao_client
-from app.utils.time_utils import parse_external_datetime_to_local_naive
+from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +59,19 @@ class ZentaoTaskMirrorService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _account_to_user(self) -> dict[str, int]:
-        rows = self.db.query(User).filter(User.zentao_account.isnot(None)).all()
-        return {u.zentao_account: u.id for u in rows if u.zentao_account}
+    def _build_user_maps(self) -> tuple[dict[str, int], dict[str, int]]:
+        """返回 (禅道账号→user_id, 真实姓名→user_id)。多数用户没设 zentao_account，
+        故同时按真实姓名兜底映射，保证任务看板 scope=mine 能匹配到本人。"""
+        rows = self.db.query(User).all()
+        by_account: dict[str, int] = {}
+        by_name: dict[str, int] = {}
+        for u in rows:
+            if u.zentao_account:
+                by_account[u.zentao_account.strip().lower()] = u.id
+            nm = (u.shown_name or "").strip()
+            if nm:
+                by_name.setdefault(nm, u.id)
+        return by_account, by_name
 
     def sync_all(self) -> dict[str, Any]:
         """遍历所有绑定了禅道执行的大版本，刷新其任务镜像。"""
@@ -73,12 +83,12 @@ class ZentaoTaskMirrorService:
             .filter(Version.version_type == VersionType.MAJOR, Version.zentao_execution_id.isnot(None))
             .all()
         )
-        acc_to_uid = self._account_to_user()
+        by_account, by_name = self._build_user_maps()
         synced = 0
         errors: list[str] = []
         for major in majors:
             try:
-                synced += self._sync_execution(client, major, acc_to_uid)
+                synced += self._sync_execution(client, major, by_account, by_name)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("mirror sync exec %s failed: %s", major.zentao_execution_id, exc)
                 errors.append(f"执行 {major.zentao_execution_id}: {exc}")
@@ -92,16 +102,16 @@ class ZentaoTaskMirrorService:
         major = self.db.query(Version).filter(Version.id == major_version_id).first()
         if not major or not major.zentao_execution_id:
             return {"ok": False, "error": "大版本未绑定禅道执行", "synced": 0}
-        acc_to_uid = self._account_to_user()
+        by_account, by_name = self._build_user_maps()
         try:
-            n = self._sync_execution(client, major, acc_to_uid)
+            n = self._sync_execution(client, major, by_account, by_name)
             self.db.commit()
             return {"ok": True, "synced": n}
         except Exception as exc:  # noqa: BLE001
             self.db.rollback()
             return {"ok": False, "error": str(exc), "synced": 0}
 
-    def _sync_execution(self, client, major: Version, acc_to_uid: dict[str, int]) -> int:
+    def _sync_execution(self, client, major: Version, by_account: dict[str, int], by_name: dict[str, int]) -> int:
         exec_id = int(major.zentao_execution_id)
         tasks = client.list_execution_tasks(exec_id) or []
         n = 0
@@ -128,7 +138,13 @@ class ZentaoTaskMirrorService:
             row.story = _coerce_int(t.get("story"))
             row.assigned_to = account
             row.assigned_to_realname = realname or t.get("assignedToRealName")
-            row.assignee_user_id = acc_to_uid.get(account) if account else None
+            # 先按禅道账号映射本地用户；没设账号的用户用真实姓名兜底，确保看板能匹配到本人。
+            uid = by_account.get((account or "").strip().lower()) if account else None
+            if uid is None:
+                nm = (row.assigned_to_realname or "").strip()
+                if nm:
+                    uid = by_name.get(nm)
+            row.assignee_user_id = uid
             row.estimate = _as_float(t.get("estimate"))
             row.consumed = _as_float(t.get("consumed"))
             row.left = _as_float(t.get("left"))
@@ -136,6 +152,7 @@ class ZentaoTaskMirrorService:
             row.deadline = _parse_date(t.get("deadline"))
             row.real_started = _parse_dt(t.get("realStarted"))
             row.finished_date = _parse_dt(t.get("finishedDate"))
+            row.synced_at = local_now()
             n += 1
         return n
 
