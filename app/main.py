@@ -129,19 +129,24 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.message, "code": exc.code})
 
 
+# HTML 入口页永不强缓存：作为缓存锚点必须每次回源校验，否则浏览器启发式缓存
+# 会用旧 index.html（连带加载旧版 JS 模块，导致前端改动「拉了也不生效」）。
+_NO_CACHE_HTML = {"Cache-Control": "no-cache, must-revalidate"}
+
+
 @app.get("/", include_in_schema=False)
 def root_page():
-    return FileResponse(str(FRONTEND_DIR / "index.html"))
+    return FileResponse(str(FRONTEND_DIR / "index.html"), headers=_NO_CACHE_HTML)
 
 
 @app.get("/login", include_in_schema=False)
 def login_page():
-    return FileResponse(str(FRONTEND_DIR / "login.html"))
+    return FileResponse(str(FRONTEND_DIR / "login.html"), headers=_NO_CACHE_HTML)
 
 
 @app.get("/dashboard", include_in_schema=False)
 def dashboard_page():
-    return FileResponse(str(FRONTEND_DIR / "index.html"))
+    return FileResponse(str(FRONTEND_DIR / "index.html"), headers=_NO_CACHE_HTML)
 
 
 def _push_daily_report() -> None:
