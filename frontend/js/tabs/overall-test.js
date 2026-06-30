@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { state } from '../state.js';
 import { withPrefix, sourceTypeZh, escapeHtml } from '../utils.js';
+import { showLoading, hideLoading } from '../components/common.js';
 
 let overallTestSseBound = false;
 let overallTestUnreadClearTimer = null;
@@ -137,6 +138,15 @@ export function resetS5Filters() {
 }
 
 export async function loadOverallTest(options = {}) {
+  showLoading('正在加载测试工作台，请稍候…');
+  try {
+    return await _loadOverallTestImpl(options);
+  } finally {
+    hideLoading();
+  }
+}
+
+async function _loadOverallTestImpl(options = {}) {
   const {
     syncBeforeLoad = true,
     silentSync = true,
@@ -560,6 +570,15 @@ export function applyS5PageSize() {
 }
 
 export async function syncOverallTestFromZentao(options = {}) {
+  showLoading('正在同步禅道数据，请稍候…');
+  try {
+    return await _syncOverallTestFromZentaoImpl(options);
+  } finally {
+    hideLoading();
+  }
+}
+
+async function _syncOverallTestFromZentaoImpl(options = {}) {
   const { silent = false, reloadAfter = true, force = true } = options;
   const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
   const softwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
@@ -625,6 +644,15 @@ export async function syncOverallTestFromZentao(options = {}) {
 }
 
 export async function syncOverallTestRecentFromZentao(options = {}) {
+  showLoading('正在增量同步禅道，请稍候…');
+  try {
+    return await _syncOverallTestRecentFromZentaoImpl(options);
+  } finally {
+    hideLoading();
+  }
+}
+
+async function _syncOverallTestRecentFromZentaoImpl(options = {}) {
   const { silent = false, reloadAfter = true } = options;
   const softwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
   if (!softwareId) {
@@ -671,6 +699,15 @@ export function toggleS5CloseComment(bugId, checked) {
 }
 
 export async function saveS5(id) {
+  showLoading('正在保存并同步禅道，请稍候…');
+  try {
+    return await _saveS5Impl(id);
+  } finally {
+    hideLoading();
+  }
+}
+
+async function _saveS5Impl(id) {
   const bug = state.overallTestRows.find((b) => b.id === id);
   const isZentaoBug = !!(bug?.zentao_bug_id);
   const zentaoBugId = bug?.zentao_bug_id || '';

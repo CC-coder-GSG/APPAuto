@@ -937,6 +937,7 @@ def close_zentao_bug(
 
     already_closed = live_status == "closed"
     if not already_closed:
+        active_client = client
         try:
             client.close_bug(zt_id, payload.comment)
         except ZentaoAPIError as exc:
@@ -947,10 +948,20 @@ def close_zentao_bug(
                     raise HTTPException(status_code=400, detail="禅道 token 刷新失败")
                 try:
                     client2.close_bug(zt_id, payload.comment)
+                    active_client = client2
                 except ZentaoAPIError as exc2:
                     raise HTTPException(status_code=exc2.status_code or 502, detail=f"禅道关闭失败: {exc2.message}")
             else:
                 raise HTTPException(status_code=exc.status_code or 502, detail=f"禅道关闭失败: {exc.message}")
+
+        # 关闭后回读禅道状态确认确实已关闭：禅道写接口可能返回空体/软失败而未真正关闭，
+        # 此时绝不落本地闭环状态，避免本地与远端不一致。（读不到状态则不阻断，按原逻辑继续）
+        verify_status = _fetch_live_status(active_client, zt_id)
+        if verify_status and verify_status != "closed":
+            raise HTTPException(
+                status_code=502,
+                detail=f"禅道未成功关闭（当前状态：{verify_status}），本地未记录闭环，请稍后重试",
+            )
 
     _update_local_live_status(db, str(zt_id), "closed")
     _apply_local_close_side_effects(db, str(zt_id), current_user, comment=payload.comment)
