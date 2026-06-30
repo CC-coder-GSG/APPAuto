@@ -593,15 +593,16 @@ class ZentaoClient:
         `task-create-{execId}.json` 的 `users`/`members` 字典（value 形如 "C:陈文博"）。
         """
         page = self.get_page(f"task-create-{execution_id}.json") or {}
-        data = page.get("data") if isinstance(page, dict) else None
-        if isinstance(data, str):
+        # 禅道不同版本：users/members 可能挂在 data 下，也可能直接在页面顶层。
+        container = page.get("data") if isinstance(page, dict) else None
+        if isinstance(container, str):
             try:
-                data = _loads_lenient(data)
+                container = _loads_lenient(container)
             except Exception:
-                data = None
-        if not isinstance(data, dict):
-            return {}
-        raw = data.get("users") or data.get("members") or {}
+                container = None
+        if not isinstance(container, dict):
+            container = page if isinstance(page, dict) else {}
+        raw = container.get("users") or container.get("members") or {}
         out: dict[str, str] = {}
         if isinstance(raw, dict):
             for account, label in raw.items():
