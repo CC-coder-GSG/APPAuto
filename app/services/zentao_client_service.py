@@ -491,6 +491,130 @@ class ZentaoClient:
         return self.delete(f"builds/{build_id}")
 
     # ------------------------------------------------------------------
+    # Task read + write（禅道任务联动，2026-06-29）
+    # 字段/行为见 docs/2026-06-29-禅道任务联动-实现计划.md 第三节附录（已实测）。
+    # ------------------------------------------------------------------
+
+    def list_execution_tasks(self, execution_id: int, limit: int = 500) -> list[dict]:
+        """GET /v1/executions/{id}/tasks —— 该执行下的任务（含父/子）。"""
+        data = self.get(f"executions/{execution_id}/tasks", params={"limit": limit}) or {}
+        rows = data.get("tasks") if isinstance(data, dict) else []
+        return rows if isinstance(rows, list) else []
+
+    def get_task(self, task_id: int) -> dict | None:
+        """GET /v1/tasks/{id}"""
+        return self.get(f"tasks/{task_id}")
+
+    def create_execution_task(
+        self,
+        execution_id: int,
+        *,
+        name: str,
+        assigned_to: str | None = None,
+        task_type: str = "test",
+        story: int | None = None,
+        est_started: str | None = None,
+        deadline: str | None = None,
+        estimate: float | None = None,
+        pri: int = 3,
+        desc: str | None = None,
+    ) -> dict | None:
+        """POST /v1/executions/{id}/tasks —— 建任务，返回完整对象(含 id)。
+
+        ⚠️ 实测：`parent` 在 create 时被忽略，建子任务须建完再 PUT 设 parent
+        （见 link_task_parent）。datetime/date 一律按上海本地传，禅道存为 UTC。
+        """
+        body: dict[str, Any] = {"name": name, "type": task_type, "pri": pri}
+        if assigned_to:
+            body["assignedTo"] = assigned_to
+        if story:
+            body["story"] = story
+        if est_started:
+            body["estStarted"] = est_started
+        if deadline:
+            body["deadline"] = deadline
+        if estimate is not None:
+            body["estimate"] = estimate
+        if desc is not None:
+            body["desc"] = desc
+        return self.post(f"executions/{execution_id}/tasks", body)
+
+    def update_task(self, task_id: int, data: dict) -> dict | None:
+        """PUT /v1/tasks/{id} —— 改派(assignedTo)/设父子(parent)/改 estimate 等。"""
+        return self.put(f"tasks/{task_id}", data)
+
+    def link_task_parent(self, child_task_id: int, parent_task_id: int) -> dict | None:
+        """把子任务挂到父任务下（create 不认 parent，须事后 PUT）。"""
+        return self.put(f"tasks/{child_task_id}", {"parent": parent_task_id})
+
+    def reassign_task(self, task_id: int, assigned_to: str) -> dict | None:
+        """改派任务负责人。"""
+        return self.put(f"tasks/{task_id}", {"assignedTo": assigned_to})
+
+    def start_task(self, task_id: int, *, real_started: str | None = None, left: float | None = None) -> dict | None:
+        """POST /v1/tasks/{id}/start —— 开始任务（status→doing）。"""
+        body: dict[str, Any] = {}
+        if real_started:
+            body["realStarted"] = real_started
+        if left is not None:
+            body["left"] = left
+        return self.post(f"tasks/{task_id}/start", body)
+
+    def finish_task(
+        self,
+        task_id: int,
+        *,
+        current_consumed: float,
+        finished_date: str | None = None,
+        assigned_to: str | None = None,
+    ) -> dict | None:
+        """POST /v1/tasks/{id}/finish —— 完成任务。
+
+        ⚠️ `currentConsumed`（本次消耗）必须 >0，否则禅道 400。
+        """
+        body: dict[str, Any] = {"currentConsumed": current_consumed}
+        if finished_date:
+            body["finishedDate"] = finished_date
+        if assigned_to:
+            body["assignedTo"] = assigned_to
+        return self.post(f"tasks/{task_id}/finish", body)
+
+    def restart_task(self, task_id: int, *, consumed: float, left: float) -> dict | None:
+        """POST /v1/tasks/{id}/restart —— 重新激活已完成任务（status→doing）。
+
+        ⚠️ `consumed` 与 `left`(>0) 必填，否则禅道 400。无 /activate 端点。
+        """
+        return self.post(f"tasks/{task_id}/restart", {"consumed": consumed, "left": left})
+
+    def list_assignable_users(self, execution_id: int) -> dict[str, str]:
+        """该执行可指派用户 {account: realname}。
+
+        禅道 `/v1/users` 需 company-browse 权限（当前账号 400），改走任务创建页 JSON
+        `task-create-{execId}.json` 的 `users`/`members` 字典（value 形如 "C:陈文博"）。
+        """
+        page = self.get_page(f"task-create-{execution_id}.json") or {}
+        data = page.get("data") if isinstance(page, dict) else None
+        if isinstance(data, str):
+            try:
+                data = _loads_lenient(data)
+            except Exception:
+                data = None
+        if not isinstance(data, dict):
+            return {}
+        raw = data.get("users") or data.get("members") or {}
+        out: dict[str, str] = {}
+        if isinstance(raw, dict):
+            for account, label in raw.items():
+                acc = str(account or "").strip()
+                if not acc:
+                    continue
+                text = str(label or "").strip()
+                # value 形如 "C:陈文博" —— 去掉首字母分组前缀
+                realname = text.split(":", 1)[1].strip() if ":" in text else text
+                out[acc] = realname or acc
+        return out
+
+    # ------------------------------------------------------------------
     # Bug write actions
     # ------------------------------------------------------------------
 

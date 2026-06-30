@@ -300,6 +300,7 @@ export function renderDataOverview() {
       : (data.users || []).map((u) => {
         const safeUsername = String(u.username || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const safeDisplayName = String(u.display_name || u.username || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const safeZentaoAcc = String(u.zentao_account || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const safeAllowedTabs = encodeURIComponent(JSON.stringify(u.allowed_tabs || []));
         return `<div class="card" style="margin-bottom:12px; padding:14px 16px; border:1px solid #e2e8f0; box-shadow:none;">
           <div style="display:grid; grid-template-columns:minmax(220px, 1fr) auto; gap:12px; align-items:center;">
@@ -309,10 +310,12 @@ export function renderDataOverview() {
               <span class="badge" style="background:${u.role === 'admin' ? '#dbeafe' : '#f1f5f9'}; color:${u.role === 'admin' ? '#1d4ed8' : '#475569'}">${u.role === 'admin' ? '管理员' : '普通用户'}</span>
               <span class="badge" style="background:${u.is_team_member ? '#dcfce7' : '#fee2e2'}; color:${u.is_team_member ? '#166534' : '#991b1b'}">${u.is_team_member ? '组员' : '编外'}</span>
               ${Array.isArray(u.allowed_tabs) && u.allowed_tabs.length ? `<span class="badge" style="background:#eef2ff; color:#4338ca;">页面权限 ${u.allowed_tabs.length} 项</span>` : ''}
+              <span class="badge" style="background:${u.zentao_account ? '#fef3c7' : '#f1f5f9'}; color:${u.zentao_account ? '#b45309' : '#94a3b8'};">禅道账号: ${u.zentao_account || '未设置'}</span>
             </div>
             <div class="row" style="justify-content:flex-end; gap:8px; margin:0; flex-wrap:wrap; ${isAdmin ? '' : 'display:none;'}">
               <button class="secondary" onclick="openUserTabPermissionModal(${u.id}, '${safeUsername}', decodeURIComponent('${safeAllowedTabs}'))">页面权限</button>
               <button class="secondary" onclick="renameUserDisplayName(${u.id}, '${safeDisplayName}', '${safeUsername}')">重命名</button>
+              <button class="secondary" onclick="editUserZentaoAccount(${u.id}, '${safeZentaoAcc}', '${safeUsername}')">禅道账号</button>
               <button onclick="toggleRole(${u.id},'${u.role}')">设为${u.role === 'admin' ? '普通用户' : '管理员'}</button>
               <button class="secondary" onclick="toggleTeamMember(${u.id}, ${u.is_team_member ? false : true})">${u.is_team_member ? '设为编外人员' : '设为组员'}</button>
               <button class="secondary" onclick="resetUserPassword(${u.id}, '${safeUsername}')">重置密码</button>
@@ -814,6 +817,20 @@ export async function renameUserDisplayName(userId, currentDisplayName, username
   }
 }
 
+export async function editUserZentaoAccount(userId, currentAccount, username) {
+  const next = prompt(`请输入用户【${username}】对应的禅道账号（account，留空清除）：`, currentAccount || '');
+  if (next === null) return;  // 取消
+  const clean = String(next).trim();
+  try {
+    await api(`/users/${userId}/zentao-account`, { method: 'PUT', headers: window.H, body: { zentao_account: clean || null } });
+    window.showMessage && window.showMessage('禅道账号已更新', 'success');
+    await loadDataOverview();
+    await window.loadUsers();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '更新禅道账号失败', 'error');
+  }
+}
+
 export async function removeVersion(id) {
   if (!confirm('高危操作：删除版本将级联删除所有下挂需求、用例和 Bug，确定继续吗？')) return;
   await api('/versions/' + id, { method: 'DELETE' });
@@ -1198,6 +1215,7 @@ window.OmniQADataTab = {
   toggleTeamMember,
   removeUser,
   renameUserDisplayName,
+  editUserZentaoAccount,
   removeVersion,
   removeReq,
   removeBug,

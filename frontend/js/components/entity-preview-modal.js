@@ -7,7 +7,7 @@ import { api } from '../api.js';
 
 const MODAL_ID = 'entityPreviewModal';
 const CACHE_TTL_MS = 60_000;
-const _cache = { story: new Map(), bug: new Map(), testcase: new Map() };
+const _cache = { story: new Map(), bug: new Map(), testcase: new Map(), task: new Map() };
 
 function _cacheGet(type, id) {
   const entry = _cache[type].get(id);
@@ -243,7 +243,10 @@ const _KIND_BADGE = {
   story:    { label: '需求', bg: '#dbeafe', color: '#1d4ed8' },
   bug:      { label: 'Bug',  bg: '#fee2e2', color: '#b91c1c' },
   testcase: { label: '用例', bg: '#dcfce7', color: '#166534' },
+  task:     { label: '任务', bg: '#fef3c7', color: '#b45309' },
 };
+
+const _KIND_PREFIX = { story: 's#', bug: 'b#', testcase: 'case#', task: 'task#' };
 
 function _setHeader(kind, data) {
   const root = ensureModalRoot();
@@ -257,11 +260,12 @@ function _setHeader(kind, data) {
   kindBadge.style.background = kinfo.bg;
   kindBadge.style.color = kinfo.color;
 
-  const prefix = kind === 'story' ? 's#' : kind === 'bug' ? 'b#' : 'case#';
-  title.innerHTML = `${prefix}${escapeHtml(data.id)} ${escapeHtml(data.title || '')}`;
+  const prefix = _KIND_PREFIX[kind] || 's#';
+  title.innerHTML = `${prefix}${escapeHtml(data.id)} ${escapeHtml(data.title || data.name || '')}`;
 
-  if (data.zentao_url) {
-    ext.href = data.zentao_url;
+  const extUrl = data.zentao_url || data.url;
+  if (extUrl) {
+    ext.href = extUrl;
     ext.style.display = 'inline-flex';
   } else {
     ext.style.display = 'none';
@@ -290,7 +294,7 @@ function _renderLoading(kind, id) {
   kindBadge.style.background = kinfo.bg;
   kindBadge.style.color = kinfo.color;
 
-  const prefix = kind === 'story' ? 's#' : kind === 'bug' ? 'b#' : 'case#';
+  const prefix = _KIND_PREFIX[kind] || 's#';
   title.textContent = `${prefix}${id}`;
   meta.textContent = '';
   ext.style.display = 'none';
@@ -463,6 +467,48 @@ function openTestcase(id) {
   return _genericOpen('testcase', id, `/zentao/testcase/${Number(id)}/detail`, _renderTestcase);
 }
 
+// ─── Task renderer ──────────────────────────────────────────────────────────
+const _TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
+
+function _renderTask(data) {
+  const { meta } = _setHeader('task', data);
+  const body = document.getElementById('entityPreviewBody');
+  const statusZh = _TASK_STATUS_ZH[data.status] || data.status || '';
+  const bits = [];
+  if (statusZh) bits.push(`状态：<b>${escapeHtml(statusZh)}</b>`);
+  if (data.assigned_to) bits.push(`指派：${escapeHtml(data.assigned_to)}`);
+  if (data.story) bits.push(`关联需求：s#${escapeHtml(data.story)}`);
+  meta.innerHTML = bits.join(' · ');
+
+  const row = (label, val) => (val || val === 0)
+    ? `<tr><td style="padding:6px 10px; color:#64748b; white-space:nowrap;">${label}</td><td style="padding:6px 10px; color:#0f172a;">${escapeHtml(val)}</td></tr>`
+    : '';
+  body.innerHTML = `
+    <div style="border:1px solid #e2e8f0; border-radius:10px; padding:8px 12px; background:#f8fafc;">
+      <table style="width:100%; border-collapse:collapse; font-size:14px;">
+        ${row('预计工时', data.estimate != null ? data.estimate + ' h' : '')}
+        ${row('已消耗', data.consumed != null ? data.consumed + ' h' : '')}
+        ${row('剩余', data.left != null ? data.left + ' h' : '')}
+        ${row('预计开始', data.est_started)}
+        ${row('截止日期', data.deadline)}
+        ${row('实际开始', _fmtDate(data.real_started))}
+        ${row('完成时间', _fmtDate(data.finished_date))}
+      </table>
+    </div>
+    ${data.desc ? `<div style="border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; background:#fff; margin-top:12px;">
+        <div style="font-weight:600; color:#0f172a; margin-bottom:8px;">📝 任务描述</div>
+        <div class="entity-preview-rich">${_sanitize(data.desc)}</div>
+      </div>` : ''}
+    <div style="margin-top:10px; font-size:11px; color:#94a3b8; text-align:right;">数据实时来自禅道，浏览器侧缓存 60 秒</div>
+  `;
+  _loadProxyImages(body);
+  _wireProxyDownloads(body);
+}
+
+function openTask(id) {
+  return _genericOpen('task', id, `/zentao/task/${Number(id)}/detail`, _renderTask);
+}
+
 (function injectStyles() {
   if (document.getElementById('entity-preview-styles')) return;
   const style = document.createElement('style');
@@ -491,6 +537,6 @@ function openTestcase(id) {
   document.head.appendChild(style);
 })();
 
-window.OmniQAPreview = { openStory, openBug, openTestcase, close };
+window.OmniQAPreview = { openStory, openBug, openTestcase, openTask, close };
 // Backwards-compat: original story-only API still works.
 window.OmniQAStoryPreview = { open: openStory, closeModal: close };

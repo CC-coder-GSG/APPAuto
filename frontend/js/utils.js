@@ -75,8 +75,8 @@ const _PREVIEW_ICON_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentC
 export function renderPreviewBtn(type, id, opts = {}) {
   const numericId = String(id || '').replace(/\D/g, '');
   if (!numericId) return '';
-  const fn = type === 'bug' ? 'openBug' : type === 'testcase' ? 'openTestcase' : 'openStory';
-  const tip = opts.title || (type === 'bug' ? '预览禅道 Bug' : type === 'testcase' ? '预览禅道用例' : '预览禅道需求正文');
+  const fn = type === 'bug' ? 'openBug' : type === 'testcase' ? 'openTestcase' : type === 'task' ? 'openTask' : 'openStory';
+  const tip = opts.title || (type === 'bug' ? '预览禅道 Bug' : type === 'testcase' ? '预览禅道用例' : type === 'task' ? '预览禅道任务' : '预览禅道需求正文');
   const extra = opts.extraStyle || '';
   return `<a href="javascript:void(0)" class="qa-preview-btn" title="${escapeHtml(tip)}" style="${extra}"
     onclick="event.preventDefault(); event.stopPropagation(); window.OmniQAPreview && window.OmniQAPreview.${fn}(${numericId})">${_PREVIEW_ICON_SVG}</a>`;

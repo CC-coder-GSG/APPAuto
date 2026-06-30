@@ -27,6 +27,9 @@ class User(Base):
     session_token: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     # 移动端会话令牌，与 web 端 session_token 独立，实现"不同终端并存、相同终端互斥"。
     session_token_mobile: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    # 禅道账号（account），用于把测试系统用户映射到禅道指派人。可由「按姓名匹配」自动回填，
+    # 也允许管理员手填以处理重名/特例。为空时建任务无法指派给该用户。
+    zentao_account: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
 
     assigned_requirements = relationship("Requirement", back_populates="owner", foreign_keys="Requirement.owner_id")

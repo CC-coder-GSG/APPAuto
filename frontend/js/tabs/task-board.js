@@ -446,6 +446,114 @@ function bindSSE() {
   state.sseBound = true;
 }
 
+// ─── 禅道任务面板（能力 D）────────────────────────────────────────────────
+const ZT_STATUS_META = {
+  wait:   { label: '未开始', bg: '#f1f5f9', color: '#475569' },
+  doing:  { label: '进行中', bg: '#eff6ff', color: '#1d4ed8' },
+  done:   { label: '已完成', bg: '#f0fdf4', color: '#15803d' },
+  pause:  { label: '已暂停', bg: '#fefce8', color: '#a16207' },
+  cancel: { label: '已取消', bg: '#f1f5f9', color: '#94a3b8' },
+  closed: { label: '已关闭', bg: '#f1f5f9', color: '#94a3b8' },
+};
+
+function populateZentaoExecSelect() {
+  const sel = document.getElementById('taskBoardZentaoExec');
+  if (!sel) return;
+  const majors = (window.versions || (window.state && window.state.versions) || [])
+    .filter((v) => v.version_type === 'major' && v.zentao_execution_id);
+  const current = sel.value;
+  sel.innerHTML = '<option value="">全部执行</option>' +
+    majors.map((v) => `<option value="${v.id}">${escapeHtml(v.version_no)}</option>`).join('');
+  sel.value = current || '';
+}
+
+export async function loadZentao() {
+  const panel = document.getElementById('taskBoardZentaoPanel');
+  if (!panel || !panel.open) return;  // 折叠时不拉
+  populateZentaoExecSelect();
+  const scope = document.getElementById('taskBoardZentaoScope')?.value || 'mine';
+  const majorId = document.getElementById('taskBoardZentaoExec')?.value || '';
+  const hint = document.getElementById('taskBoardZentaoHint');
+  const params = new URLSearchParams({ scope });
+  if (majorId) params.set('major_version_id', majorId);
+  try {
+    const data = await (await api('/task-board/zentao-tasks?' + params.toString())).json();
+    renderZentaoTasks(data.tasks || []);
+    if (hint) hint.textContent = `共 ${data.tasks ? data.tasks.length : 0} 个任务`;
+  } catch (err) {
+    if (hint) hint.textContent = err.message || '加载禅道任务失败';
+  }
+}
+
+export async function refreshZentao() {
+  const majorId = document.getElementById('taskBoardZentaoExec')?.value || '';
+  const hint = document.getElementById('taskBoardZentaoHint');
+  if (hint) hint.textContent = '正在从禅道同步…';
+  const scope = document.getElementById('taskBoardZentaoScope')?.value || 'mine';
+  const params = new URLSearchParams({ scope, refresh: 'true' });
+  if (majorId) params.set('major_version_id', majorId);
+  try {
+    const data = await (await api('/task-board/zentao-tasks?' + params.toString())).json();
+    renderZentaoTasks(data.tasks || []);
+    const synced = data.refreshed && data.refreshed.synced;
+    if (hint) hint.textContent = `同步完成${synced != null ? `（${synced} 个）` : ''}，共 ${data.tasks ? data.tasks.length : 0} 个任务`;
+  } catch (err) {
+    if (hint) hint.textContent = err.message || '同步禅道任务失败';
+  }
+}
+
+function renderZentaoTasks(tasks) {
+  const root = document.getElementById('taskBoardZentaoList');
+  if (!root) return;
+  if (!tasks.length) {
+    root.innerHTML = '<div class="muted" style="padding:16px 0; text-align:center; font-size:13px;">暂无禅道任务（可点「⟳ 同步禅道」刷新缓存）</div>';
+    return;
+  }
+  // 按指派人分组
+  const groups = {};
+  tasks.forEach((t) => {
+    const key = t.assigned_to_realname || t.assigned_to || '未指派';
+    (groups[key] = groups[key] || []).push(t);
+  });
+  root.innerHTML = Object.entries(groups).map(([person, items]) => `
+    <div style="margin-bottom:14px;">
+      <div style="font-weight:700; color:#334155; margin-bottom:6px;">👤 ${escapeHtml(person)} <span class="muted" style="font-weight:400; font-size:12px;">(${items.length})</span></div>
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        ${items.map(renderZentaoTaskRow).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderZentaoTaskRow(t) {
+  const meta = ZT_STATUS_META[t.status] || { label: t.status || '', bg: '#f1f5f9', color: '#475569' };
+  // 持续多天：显示日期跨度
+  const span = (t.est_started || t.deadline)
+    ? `${t.est_started || '—'} → ${t.deadline || '—'}`
+    : '';
+  const spanIsMultiDay = t.est_started && t.deadline && t.est_started !== t.deadline;
+  const hours = [];
+  if (t.estimate != null) hours.push(`预计 ${t.estimate}h`);
+  if (t.consumed != null && t.consumed > 0) hours.push(`已耗 ${t.consumed}h`);
+  if (t.left != null && t.left > 0) hours.push(`剩 ${t.left}h`);
+  const preview = window.OmniQAUtils && window.OmniQAUtils.renderPreviewBtn
+    ? window.OmniQAUtils.renderPreviewBtn('task', t.task_id)
+    : '';
+  return `
+    <div style="background:#fff; border:1px solid #e2e8f0; border-left:3px solid ${meta.color}; border-radius:8px; padding:8px 10px;">
+      <div class="row" style="justify-content:space-between; gap:6px; flex-wrap:wrap;">
+        <div style="font-weight:600; color:#0f172a;">${escapeHtml(t.name)} ${preview}</div>
+        <span class="badge" style="background:${meta.bg}; color:${meta.color};">${meta.label}</span>
+      </div>
+      <div class="muted" style="font-size:11px; margin-top:4px; display:flex; gap:10px; flex-wrap:wrap;">
+        <span>🏷️ ${escapeHtml(t.execution_name || '')}</span>
+        ${span ? `<span style="${spanIsMultiDay ? 'color:#1d4ed8; font-weight:600;' : ''}">🗓️ ${escapeHtml(span)}${spanIsMultiDay ? '（多日）' : ''}</span>` : ''}
+        ${hours.length ? `<span>⏱ ${hours.join(' · ')}</span>` : ''}
+      </div>
+    </div>
+  `;
+}
+
 window.OmniQATaskBoardTab = {
   activate,
   load,
@@ -458,6 +566,8 @@ window.OmniQATaskBoardTab = {
   carryOver,
   shiftDate,
   gotoToday,
+  loadZentao,
+  refreshZentao,
 };
 
 bindSSE();

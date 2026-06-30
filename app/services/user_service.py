@@ -16,6 +16,7 @@ def _user_to_dict(user: User) -> dict:
         "role": user.role.value,
         "is_team_member": user.is_team_member,
         "allowed_tabs": get_allowed_tabs(user),
+        "zentao_account": user.zentao_account,
         "created_at": user.created_at.isoformat(),
     }
 
@@ -59,6 +60,56 @@ class UserService:
             detail=f"display_name={user.display_name}",
         )
         return {"message": "显示名称已更新", "display_name": user.display_name}
+
+    @staticmethod
+    def set_zentao_account(db: Session, user_id: int, zentao_account: str | None, actor_id: int | None = None) -> dict:
+        """手动设置/清空某用户的禅道账号。"""
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        clean = (zentao_account or "").strip() or None
+        user.zentao_account = clean
+        db.commit()
+        audit(
+            db,
+            action="user.set_zentao_account",
+            target_type="user",
+            actor_id=actor_id,
+            target_id=str(user.id),
+            detail=f"zentao_account={clean}",
+        )
+        return {"message": "禅道账号已更新", "zentao_account": clean}
+
+    @staticmethod
+    def auto_match_zentao_accounts(db: Session, account_to_name: dict[str, str], *, overwrite: bool = False, actor_id: int | None = None) -> dict:
+        """按真实姓名/用户名把禅道账号映射回填到本地用户。
+
+        account_to_name：{account: realname}（来自禅道任务创建页 JSON）。
+        overwrite=False 时只填空缺；True 时强制覆盖。返回匹配/未匹配统计。
+        """
+        # realname -> account（重名时后者覆盖；无法消歧由人工纠偏）
+        name_to_acc: dict[str, str] = {}
+        for acc, name in account_to_name.items():
+            n = (name or "").strip()
+            if n:
+                name_to_acc[n] = acc
+        matched: list[dict] = []
+        unmatched: list[dict] = []
+        for user in db.query(User).all():
+            if user.zentao_account and not overwrite:
+                continue
+            acc = name_to_acc.get((user.shown_name or "").strip())
+            if not acc and (user.username or "").strip().lower() in {a.lower() for a in account_to_name}:
+                # 用户名直接等于某禅道账号
+                acc = next((a for a in account_to_name if a.lower() == user.username.strip().lower()), None)
+            if acc:
+                user.zentao_account = acc
+                matched.append({"user_id": user.id, "name": user.shown_name, "zentao_account": acc})
+            else:
+                unmatched.append({"user_id": user.id, "name": user.shown_name})
+        db.commit()
+        audit(db, action="user.auto_match_zentao", target_type="user", actor_id=actor_id, target_id="*", detail=f"matched={len(matched)}")
+        return {"matched": matched, "unmatched": unmatched}
 
     @staticmethod
     def update_role(db: Session, user_id: int, role, actor_id: int | None = None) -> dict:

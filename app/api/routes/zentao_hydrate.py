@@ -248,6 +248,77 @@ def get_testcase_detail(
     return detail
 
 
+@router.get("/task/{task_id}/detail")
+def get_task_detail(
+    task_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """拉取单个禅道任务详情，供需求测试台「子任务预览」用。
+
+    时刻字段转上海本地；assignedTo 兼容对象/字符串。失败时返回 error 键。
+    """
+    from app.utils.time_utils import parse_external_datetime_to_local_naive
+
+    ctx = _get_client_ctx(current_user.id, db)
+    if ctx is None:
+        return {"error": "no_binding", "message": "当前用户未绑定禅道账号"}
+    client, base_url = ctx
+
+    def _fetch(c: ZentaoClient):
+        try:
+            return c.get_task(task_id), None
+        except ZentaoAPIError as exc:
+            return None, exc.status_code
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_task_detail task=%s err=%s", task_id, exc)
+            return None, -1
+
+    raw, err_code = _fetch(client)
+    if err_code == 401:
+        invalidate_token(current_user.id, db)
+        ctx2 = _get_client_ctx(current_user.id, db)
+        if ctx2 is None:
+            return {"error": "no_binding", "message": "禅道 token 失效且无法续期"}
+        client2, base_url = ctx2
+        raw, err_code = _fetch(client2)
+
+    if not isinstance(raw, dict):
+        if err_code == 404:
+            return {"error": "not_found", "message": f"禅道中找不到任务 #{task_id}"}
+        return {"error": "fetch_failed", "message": "拉取禅道任务详情失败"}
+
+    def _acc(v):
+        if isinstance(v, dict):
+            return v.get("realname") or v.get("account") or ""
+        return str(v or "")
+
+    def _local(v):
+        dt = parse_external_datetime_to_local_naive(v) if v else None
+        return dt.isoformat() if dt else None
+
+    return {
+        "id": raw.get("id"),
+        "name": raw.get("name"),
+        "type": raw.get("type"),
+        "status": raw.get("status"),
+        "pri": raw.get("pri"),
+        "story": raw.get("story"),
+        "story_title": raw.get("storyTitle"),
+        "parent": raw.get("parent"),
+        "assigned_to": _acc(raw.get("assignedTo")),
+        "estimate": raw.get("estimate"),
+        "consumed": raw.get("consumed"),
+        "left": raw.get("left"),
+        "est_started": raw.get("estStarted"),
+        "deadline": raw.get("deadline"),
+        "real_started": _local(raw.get("realStarted")),
+        "finished_date": _local(raw.get("finishedDate")),
+        "desc": _rewrite_file_urls(raw.get("desc")),
+        "url": f"{base_url}/task-view-{task_id}.html",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Concurrent fetch helpers
 # ---------------------------------------------------------------------------

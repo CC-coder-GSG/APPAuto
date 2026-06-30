@@ -430,8 +430,32 @@ class RequirementService:
         requirement.test_completed = bool(test_completed)
         if test_completed and not was_completed:
             requirement.test_completed_at = local_now()
+            self._sync_zentao_task_on_test_completed(requirement, finished=True)
         elif not test_completed and was_completed:
             requirement.test_completed_at = None
+            self._sync_zentao_task_on_test_completed(requirement, finished=False)
+
+    def _sync_zentao_task_on_test_completed(self, requirement: Requirement, *, finished: bool) -> None:
+        """测试完成勾选/取消 → 禅道子任务 完成 / 重新激活。
+
+        仅在该需求绑定了禅道子任务时才动作；任何异常都吞掉，不影响本地状态流转
+        （禅道为辅，本地为主）。
+        """
+        if not requirement.zentao_task_id:
+            return
+        try:
+            from app.services.zentao_task_sync_service import ZentaoTaskSyncService
+            svc = ZentaoTaskSyncService(self.db)
+            if finished:
+                svc.finish_requirement_task(requirement)
+            else:
+                svc.reactivate_requirement_task(requirement)
+        except Exception as exc:  # noqa: BLE001 — 禅道侧失败不阻断本地
+            import logging
+            logging.getLogger(__name__).warning(
+                "zentao task sync on test_completed=%s req=%s failed: %s",
+                finished, requirement.id, exc,
+            )
 
     def recalculate_requirement_status(self, requirement: Requirement, actor_id: int | None = None) -> Requirement:
         old_status_obj = requirement.status
@@ -491,6 +515,41 @@ class RequirementService:
             }
             for r in rows
         ]
+
+    def _get_owned_requirement(self, requirement_id: int, current_user: User) -> Requirement:
+        req = self.db.query(Requirement).filter(Requirement.id == requirement_id).first()
+        if not req:
+            raise HTTPException(status_code=404, detail="需求不存在")
+        if current_user.role != UserRole.ADMIN and req.owner_id != current_user.id:
+            raise HTTPException(status_code=403, detail="只有负责人可以操作该需求的任务")
+        return req
+
+    def update_estimated_test_hours(self, requirement_id: int, hours: float, current_user: User) -> dict:
+        """更新需求的预计测试用时（小时）。"""
+        req = self._get_owned_requirement(requirement_id, current_user)
+        try:
+            h = float(hours)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="预计用时必须是数字")
+        if h <= 0 or h > 999:
+            raise HTTPException(status_code=400, detail="预计用时需在 0~999 小时之间")
+        req.estimated_test_hours = round(h, 2)
+        self.db.commit()
+        return {"message": "预计测试用时已更新", "estimated_test_hours": req.estimated_test_hours}
+
+    def start_requirement_task(self, requirement_id: int, current_user: User, hours: float | None = None) -> dict:
+        """点击「开始」：记录开始时刻并让禅道子任务开始。"""
+        req = self._get_owned_requirement(requirement_id, current_user)
+        from app.services.zentao_task_sync_service import ZentaoTaskSyncService
+        result = ZentaoTaskSyncService(self.db).start_requirement_task(req, hours=hours)
+        self.db.refresh(req)
+        return {
+            "message": "任务已开始" if result.get("ok") else "任务已开始（禅道侧部分失败）",
+            "task_started_at": req.task_started_at.isoformat() if req.task_started_at else None,
+            "zentao_task_id": req.zentao_task_id,
+            "zentao_task_status": req.zentao_task_status_cache,
+            "errors": result.get("errors", []),
+        }
 
     def update_test_notes(self, requirement_id: int, test_notes: str | None, current_user: User) -> dict:
         req = (

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Optional
 
@@ -14,8 +15,10 @@ from app.integrations.wecom import send_markdown
 from app.services.activity_service import ActivityService
 from app.services.permission_service import ensure_admin, ensure_tab_access
 from app.services.requirement_service import RequirementService
+from app.services.zentao_task_sync_service import ZentaoTaskSyncService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 U_PATTERN = re.compile(r"^u#\d+$")
 
@@ -48,6 +51,10 @@ class AssignItemPayload(BaseModel):
 class AssignPublishPayload(BaseModel):
     major_version_id: int
     assignments: list[AssignItemPayload]
+    # 禅道任务联动（2026-06-29）：父任务起止日期；提供则在禅道建测试任务。
+    task_start_date: Optional[str] = None
+    task_deadline: Optional[str] = None
+    create_zentao_tasks: bool = True
 
 class LinkMajorPayload(BaseModel):
     target_major_version_id: int
@@ -68,6 +75,14 @@ class CaseUpdatePayload(BaseModel):
 
 class ReqTestNotesPayload(BaseModel):
     test_notes: Optional[str] = None
+
+
+class EstimatedHoursPayload(BaseModel):
+    estimated_test_hours: float = Field(gt=0, le=999)
+
+
+class StartTaskPayload(BaseModel):
+    hours: Optional[float] = None
 
 
 class RequirementStoryBindingPayload(BaseModel):
@@ -402,6 +417,12 @@ def my_workbench(
             "test_completed": r.test_completed,
             "major_version_id": r.major_version_id,
             "major_version_name": r.major_version.version_no if r.major_version else "",
+            # 禅道任务联动
+            "estimated_test_hours": r.estimated_test_hours,
+            "zentao_task_id": r.zentao_task_id,
+            "zentao_task_status": r.zentao_task_status_cache,
+            "task_started_at": r.task_started_at.isoformat() if r.task_started_at else None,
+            "task_finished_at": r.task_finished_at.isoformat() if r.task_finished_at else None,
             "test_notes": r.test_notes,
             "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
             "test_notes_updated_by_name": r.test_notes_updated_by.shown_name if r.test_notes_updated_by else None,
@@ -488,6 +509,22 @@ async def assign_and_publish(payload: AssignPublishPayload, current_user=Depends
     major = db.query(Version).filter(Version.id == payload.major_version_id).first()
     major_text = major.version_no if major else f"ID:{payload.major_version_id}"
 
+    # 禅道任务联动：在禅道建/改派测试任务（失败不影响本地分配，partial 返回）
+    zentao_result: dict | None = None
+    if payload.create_zentao_tasks:
+        try:
+            task_service = ZentaoTaskSyncService(db)
+            zentao_result = task_service.create_tasks_for_assignment(
+                payload.major_version_id,
+                [{"requirement_id": item.requirement_id, "owner_id": item.owner_id} for item in payload.assignments],
+                est_started=payload.task_start_date,
+                deadline=payload.task_deadline,
+                actor=current_user,
+            )
+        except Exception as exc:  # 兜底，绝不让禅道异常打断分配发布
+            logger.warning("assign_and_publish zentao task sync failed: %s", exc)
+            zentao_result = {"ok": False, "errors": [str(exc)]}
+
     if result.get("change_msgs"):
         md = (
             "### 📢 需求负责人变更通知\n"
@@ -498,7 +535,7 @@ async def assign_and_publish(payload: AssignPublishPayload, current_user=Depends
         await send_markdown(md)
     else:
         await send_markdown(f"✅ 需求分配状态已更新发布\n> 大版本：**{major_text}**")
-    return {"message": result.get("message", "Assignments updated")}
+    return {"message": result.get("message", "Assignments updated"), "zentao": zentao_result}
 
 
 @router.patch("/requirements/{requirement_id}/status")
@@ -515,6 +552,28 @@ def patch_requirement_status(
         case_completed=payload.case_completed,
         test_completed=payload.test_completed,
     )
+
+
+@router.put("/requirements/{requirement_id}/estimated-hours")
+def update_requirement_estimated_hours(
+    requirement_id: int,
+    payload: EstimatedHoursPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = RequirementService(db)
+    return service.update_estimated_test_hours(requirement_id, payload.estimated_test_hours, current_user)
+
+
+@router.post("/requirements/{requirement_id}/task/start")
+def start_requirement_task(
+    requirement_id: int,
+    payload: StartTaskPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = RequirementService(db)
+    return service.start_requirement_task(requirement_id, current_user, hours=payload.hours)
 
 
 @router.put("/requirements/{requirement_id}/test-notes")

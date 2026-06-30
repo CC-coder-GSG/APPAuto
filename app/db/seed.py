@@ -101,6 +101,9 @@ def ensure_user_schema_compat(db: Session) -> None:
     if "session_token_mobile" not in cols:
         db.execute(text("ALTER TABLE users ADD COLUMN session_token_mobile VARCHAR(36)"))
         db.commit()
+    if "zentao_account" not in cols:
+        db.execute(text("ALTER TABLE users ADD COLUMN zentao_account VARCHAR(120)"))
+        db.commit()
     db.execute(text("UPDATE users SET display_name = username WHERE display_name IS NULL OR TRIM(display_name) = ''"))
     db.commit()
 
@@ -158,6 +161,25 @@ def ensure_requirement_schema_compat(db: Session) -> None:
         db.commit()
     if "zentao_plan_title_cache" not in req_cols:
         db.execute(text("ALTER TABLE requirements ADD COLUMN zentao_plan_title_cache VARCHAR(255)"))
+        db.commit()
+    # 禅道任务联动（2026-06-29）
+    if "estimated_test_hours" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN estimated_test_hours FLOAT NOT NULL DEFAULT 4.0"))
+        db.commit()
+    if "zentao_task_id" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN zentao_task_id INTEGER"))
+        db.commit()
+    if "zentao_parent_task_id" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN zentao_parent_task_id INTEGER"))
+        db.commit()
+    if "task_started_at" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN task_started_at DATETIME"))
+        db.commit()
+    if "task_finished_at" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN task_finished_at DATETIME"))
+        db.commit()
+    if "zentao_task_status_cache" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN zentao_task_status_cache VARCHAR(20)"))
         db.commit()
     if "test_completed_at" not in req_cols:
         db.execute(text("ALTER TABLE requirements ADD COLUMN test_completed_at DATETIME"))

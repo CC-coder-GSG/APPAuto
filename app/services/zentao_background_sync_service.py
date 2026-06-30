@@ -65,6 +65,16 @@ class ZentaoBackgroundSyncService:
                 })
                 failed += 1
 
+        # 顺带刷新禅道任务镜像（任务看板用），失败不影响主流程
+        task_mirror = None
+        try:
+            from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+            task_mirror = ZentaoTaskMirrorService(self.db).sync_all()
+        except Exception as exc:
+            self.db.rollback()
+            logger.warning("background task-mirror sync failed: %s", exc)
+            task_mirror = {"ok": False, "error": str(exc)}
+
         return {
             "mode": "recent",
             "actor_id": actor.id,
@@ -73,6 +83,7 @@ class ZentaoBackgroundSyncService:
             "success": success,
             "failed": failed,
             "items": items,
+            "task_mirror": task_mirror,
         }
 
     def run_nightly_full_sync_for_all_software(self) -> dict[str, Any]:

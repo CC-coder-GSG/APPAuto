@@ -558,6 +558,34 @@ export async function loadMyWorkbench() {
   renderMineCards();
 }
 
+const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
+
+// 「开始」按钮（放在用例/测试勾选框之前）。已完成测试则不显示；已开始则显示「进行中」禁用态。
+function renderTaskStartControl(req) {
+  if (req.test_completed) return '';
+  const started = !!req.task_started_at;
+  if (started && req.zentao_task_status === 'doing') {
+    return `<button class="secondary" disabled style="padding:2px 10px; font-size:12px; opacity:.7;">⏱ 进行中</button>`;
+  }
+  return `<button style="padding:2px 10px; font-size:12px; background:#16a34a;" onclick="startReqTask(${req.id})" title="开始测试，禅道子任务同步开始">▶ 开始</button>`;
+}
+
+// 子任务标签 + 预览 + 预计用时输入
+function renderTaskMeta(req) {
+  const est = (req.estimated_test_hours != null ? req.estimated_test_hours : 4);
+  const estInput = `<label class="badge" style="background:#f8fafc; color:#475569; border:1px solid #e2e8f0; display:inline-flex; align-items:center; gap:4px;">预计用时
+      <input type="number" min="0.5" step="0.5" value="${est}" style="width:54px; padding:1px 4px; border:1px solid #cbd5e1; border-radius:4px;" onchange="setReqEstimatedHours(${req.id}, this.value)" onclick="event.stopPropagation()">h</label>`;
+  let taskTag = '';
+  if (req.zentao_task_id) {
+    const zh = TASK_STATUS_ZH[req.zentao_task_status] || req.zentao_task_status || '';
+    const done = req.zentao_task_status === 'done';
+    taskTag = `<span class="badge" style="background:${done ? '#dcfce7' : '#eff6ff'}; color:${done ? '#166534' : '#1d4ed8'}; border:1px solid ${done ? '#bbf7d0' : '#bfdbfe'};">禅道子任务 #${req.zentao_task_id}${zh ? '·' + zh : ''}</span>${renderPreviewBtn('task', req.zentao_task_id)}`;
+  } else {
+    taskTag = `<span class="badge" style="background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;">未关联禅道任务</span>`;
+  }
+  return `${estInput}${taskTag}`;
+}
+
 export function renderMineCards() {
   const searchKw = (document.getElementById('mineSearchInput')?.value || '').trim().toLowerCase();
   const filteredData = state.currentMineData.filter((req) => !searchKw || (req.zentao_req_id && req.zentao_req_id.toLowerCase().includes(searchKw)) || (req.title && req.title.toLowerCase().includes(searchKw)));
@@ -606,11 +634,13 @@ export function renderMineCards() {
         </summary>
         <div style="margin-top: 12px;">
           <div class="row" style="margin-bottom:8px">
+            ${renderTaskStartControl(req)}
             ${req.final_test
               ? `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'case_completed', this.checked, this)">✅用例完成</label>
             <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'test_completed', this.checked, this)">✅测试完成</label>`
               : `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked).then(()=>loadMyWorkbench())">✅用例完成</label>
             <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">✅测试完成</label>`}
+            ${renderTaskMeta(req)}
             <span class="badge" style="background:${req.test_notes ? '#dcfce7' : '#f1f5f9'}; color:${req.test_notes ? '#166534' : '#64748b'}; border:1px solid ${req.test_notes ? '#bbf7d0' : '#e2e8f0'};">
               测试要点：${req.test_notes ? '已填写' : '未填写'}
             </span>
@@ -757,6 +787,41 @@ export async function setReqStatus(reqId, key, checked) {
   }
 }
 
+// 禅道任务联动：点击「开始」→ 记录开始时刻并让禅道子任务开始
+export async function startReqTask(reqId) {
+  try {
+    const res = await api(`/requirements/${reqId}/task/start`, { method: 'POST', headers: window.H, body: {} });
+    let data = null;
+    try { data = await res.json(); } catch (_) { /* ignore */ }
+    const errs = (data && data.errors) || [];
+    if (errs.length) {
+      window.showMessage && window.showMessage(`任务已开始（禅道侧部分失败：${errs[0]}）`, 'error');
+    } else {
+      window.showMessage && window.showMessage('任务已开始', 'success');
+    }
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '开始任务失败', 'error');
+  } finally {
+    await loadMyWorkbench();
+  }
+}
+
+// 修改某需求的预计测试用时（小时）
+export async function setReqEstimatedHours(reqId, value) {
+  const hours = Number(value);
+  if (!Number.isFinite(hours) || hours <= 0) {
+    window.showMessage && window.showMessage('预计用时必须是正数', 'error');
+    return;
+  }
+  try {
+    await api(`/requirements/${reqId}/estimated-hours`, { method: 'PUT', headers: window.H, body: { estimated_test_hours: hours } });
+    window.showMessage && window.showMessage('预计测试用时已更新', 'success');
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '更新预计用时失败', 'error');
+    await loadMyWorkbench();
+  }
+}
+
 export async function setFinalTestStatus(reqId, key, checked, checkboxEl) {
   if (key === 'test_completed' && !checked) {
     const ok = confirm('确认取消该需求的【测试完成】状态吗？');
@@ -869,6 +934,8 @@ window.OmniQAMineTab = {
   removeWorkbenchBug,
   setReqStatus,
   setFinalTestStatus,
+  startReqTask,
+  setReqEstimatedHours,
   addCase,
   deleteCase,
   promptCaseBug,

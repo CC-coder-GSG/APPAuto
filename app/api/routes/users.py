@@ -1,13 +1,16 @@
 ﻿from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
-from app.models import UserRole
+from app.models import UserRole, Version
 from app.services.permission_service import ALL_TAB_KEYS, ensure_admin
 from app.services.user_service import UserService
+from app.services.zentao_system_client import get_system_zentao_client
 
 router = APIRouter()
 
@@ -41,6 +44,16 @@ class PasswordResetPayload(BaseModel):
 
 class TabPermissionsPayload(BaseModel):
     allowed_tabs: list[str] = Field(default_factory=list, description=f"支持的 tab: {', '.join(ALL_TAB_KEYS)}")
+
+
+class ZentaoAccountPayload(BaseModel):
+    zentao_account: Optional[str] = None
+
+
+class ZentaoAccountMatchPayload(BaseModel):
+    # 大版本 id，用于从其禅道执行的任务创建页拉可指派用户列表
+    major_version_id: int
+    overwrite: bool = False
 
 
 @router.get("/users")
@@ -95,3 +108,28 @@ def reset_user_password(user_id: int, payload: PasswordResetPayload, current_use
 def update_user_tab_permissions(user_id: int, payload: TabPermissionsPayload, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     ensure_admin(current_user)
     return UserService.update_tab_permissions(db, user_id, payload.allowed_tabs, actor_id=current_user.id)
+
+
+@router.put("/users/{user_id}/zentao-account")
+def set_user_zentao_account(user_id: int, payload: ZentaoAccountPayload, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    ensure_admin(current_user)
+    return UserService.set_zentao_account(db, user_id, payload.zentao_account, actor_id=current_user.id)
+
+
+@router.post("/users/zentao-account/auto-match")
+def auto_match_zentao_accounts(payload: ZentaoAccountMatchPayload, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    """从指定大版本的禅道执行拉可指派用户，按姓名把禅道账号回填到本地用户。"""
+    ensure_admin(current_user)
+    major = db.query(Version).filter(Version.id == payload.major_version_id).first()
+    if not major or not major.zentao_execution_id:
+        raise HTTPException(status_code=400, detail="该大版本未绑定禅道执行")
+    client = get_system_zentao_client(db)
+    if not client:
+        raise HTTPException(status_code=400, detail="找不到可用的禅道账号绑定")
+    try:
+        account_to_name = client.list_assignable_users(int(major.zentao_execution_id))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"拉取禅道用户列表失败：{exc}")
+    return UserService.auto_match_zentao_accounts(
+        db, account_to_name, overwrite=payload.overwrite, actor_id=current_user.id
+    )

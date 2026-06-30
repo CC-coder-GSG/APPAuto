@@ -270,6 +270,7 @@
       <summary style="cursor:pointer; font-weight:700; color:#0f172a; list-style:none;">任务创建台<span id="assignReqCount" class="badge" style="margin-left:8px; font-weight:600; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe;">共 0 个需求</span></summary>
       <div style="margin-top:10px;">
       <div class="row"><label>大版本</label><select id="assignMajorSelect" onchange="loadAssignBoard()"></select><button onclick="loadAssignBoard()">加载</button><button class="secondary" onclick="syncAssignRequirementsFromZentao()">同步禅道需求</button><button onclick="publishAssign()">一键发布（更新分配）</button><button id="finalTestToggleBtn" class="secondary" onclick="toggleFinalTest()">最终测试</button></div>
+      <div class="row" style="margin-top:6px;"><label>禅道任务起止</label><input type="date" id="assignTaskStartDate" title="测试任务开始日期"><span style="color:#64748b;">至</span><input type="date" id="assignTaskDeadline" title="测试任务截止日期"><span class="muted" style="font-size:12px;">发布时在禅道按执行创建测试任务，预计工时=工作日×8h（跳周末/节假日）</span></div>
         <table><thead><tr><th>需求</th><th>负责人</th></tr></thead><tbody id="assignTable"></tbody></table>
       </div>
     </details>
@@ -364,6 +365,22 @@
     <div id="taskBoardColumns" style="margin-top:12px; display:grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap:12px;"></div>
 
     <div id="taskBoardAssigneeSummary" style="margin-top:16px;"></div>
+
+    <details id="taskBoardZentaoPanel" class="card" style="margin-top:16px; box-shadow:none; border:1px solid #e2e8f0; background:#fff;" ontoggle="this.open && window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.loadZentao()">
+      <summary style="cursor:pointer; font-weight:700; color:#0f172a; list-style:none;">🐲 禅道任务<span class="muted" style="font-weight:400; font-size:12px; margin-left:8px;">从禅道获取相关人员的测试任务（后端缓存）</span></summary>
+      <div class="row" style="margin-top:10px; gap:8px; flex-wrap:wrap; align-items:center;">
+        <select id="taskBoardZentaoScope" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.loadZentao()">
+          <option value="mine">只看我的</option>
+          <option value="all">全部成员</option>
+        </select>
+        <select id="taskBoardZentaoExec" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.loadZentao()">
+          <option value="">全部执行</option>
+        </select>
+        <button class="secondary" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.refreshZentao()" title="从禅道重新拉取并刷新缓存">⟳ 同步禅道</button>
+        <span id="taskBoardZentaoHint" class="muted" style="font-size:12px;"></span>
+      </div>
+      <div id="taskBoardZentaoList" style="margin-top:12px;"></div>
+    </details>
   </section>
 
   <div id="taskBoardModal" class="hidden" data-modal-display="flex" style="position:fixed; inset:0; background:rgba(15,23,42,.35); z-index:10000; display:none; align-items:center; justify-content:center;">
@@ -2625,6 +2642,14 @@ async function setFinalTestStatus(reqId, key, checked, checkboxEl){
   return window.OmniQAMineTab.setFinalTestStatus(reqId, key, checked, checkboxEl);
 }
 
+async function startReqTask(reqId){
+  return window.OmniQAMineTab.startReqTask(reqId);
+}
+
+async function setReqEstimatedHours(reqId, value){
+  return window.OmniQAMineTab.setReqEstimatedHours(reqId, value);
+}
+
 async function confirmMineTestExecutionModal(){
   return window.OmniQAMineTab.confirmMineTestExecutionModal();
 }
@@ -3070,6 +3095,10 @@ async function removeUser(userId, username){
 
 async function renameUserDisplayName(userId, currentDisplayName, username){
   return window.OmniQADataTab.renameUserDisplayName(userId, currentDisplayName, username);
+}
+
+async function editUserZentaoAccount(userId, currentAccount, username){
+  return window.OmniQADataTab.editUserZentaoAccount(userId, currentAccount, username);
 }
 
 async function removeVersion(id){

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -39,6 +39,19 @@ class Requirement(Base):
     zentao_story_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     zentao_plan_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     zentao_plan_title_cache: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # 禅道任务联动（2026-06-29 需求）
+    # 预计测试用时（小时），开始任务时默认取此值；默认 4。
+    estimated_test_hours: Mapped[float] = mapped_column(Float, default=4.0, nullable=False)
+    # 本需求对应的禅道「子任务」id；非空即表示"已建过任务/已分配过"。
+    zentao_task_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    # 子任务所属父任务 id，便于看板分组/追溯。
+    zentao_parent_task_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # 本地记录的开始/完成时刻（上海本地 naive），用于工时回算与展示。
+    task_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    task_finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # 禅道子任务状态缓存（wait/doing/done…），供测试台标签直接展示，免每次查禅道。
+    zentao_task_status_cache: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False)

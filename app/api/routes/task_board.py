@@ -221,6 +221,55 @@ def carry_over(
         raise _to_http(exc)
 
 
+@router.get("/zentao-tasks")
+def list_zentao_tasks(
+    scope: str = Query(default="all"),       # all | mine
+    execution_id: Optional[int] = Query(default=None),
+    refresh: bool = Query(default=False),     # true 时先按需刷新该执行的镜像
+    major_version_id: Optional[int] = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """任务看板：读取禅道任务镜像（后端缓存）。
+
+    scope=mine 只看当前用户；execution_id 限定某执行；refresh=true 且给定
+    major_version_id 时先刷新该执行的镜像再读。
+    """
+    _ensure_read(current_user)
+    from app.models import Version
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+    svc = ZentaoTaskMirrorService(db)
+    refreshed = None
+    if refresh and major_version_id:
+        refreshed = svc.sync_one_major(major_version_id)
+    # 前端按大版本筛选 → 解析成执行 id
+    if execution_id is None and major_version_id:
+        major = db.query(Version).filter(Version.id == major_version_id).first()
+        if major and major.zentao_execution_id:
+            execution_id = int(major.zentao_execution_id)
+    tasks = svc.list_tasks(
+        scope=scope,
+        current_user_id=current_user.id,
+        execution_id=execution_id,
+    )
+    return {"tasks": tasks, "scope": scope, "refreshed": refreshed}
+
+
+@router.post("/zentao-tasks/sync")
+def sync_zentao_tasks(
+    major_version_id: Optional[int] = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """手动刷新禅道任务镜像（全量或单个大版本）。"""
+    _ensure_read(current_user)
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+    svc = ZentaoTaskMirrorService(db)
+    if major_version_id:
+        return svc.sync_one_major(major_version_id)
+    return svc.sync_all()
+
+
 def _to_http(exc: AppError):
     from fastapi import HTTPException
     return HTTPException(status_code=exc.status_code, detail=exc.message)

@@ -339,12 +339,44 @@ export async function publishAssign() {
     requirement_id: r.id,
     owner_id: Number(document.getElementById('o_' + r.id)?.value || 0) || null,
   }));
-  await api('/requirements/assign-and-publish', {
+  const taskStart = document.getElementById('assignTaskStartDate')?.value || null;
+  const taskDeadline = document.getElementById('assignTaskDeadline')?.value || null;
+  const res = await api('/requirements/assign-and-publish', {
     method: 'POST',
     headers: window.H,
-    body: ({ major_version_id: majorId, assignments }),
+    body: ({
+      major_version_id: majorId,
+      assignments,
+      task_start_date: taskStart,
+      task_deadline: taskDeadline,
+    }),
   });
-  window.showMessage && window.showMessage('分配发布成功');
+  let zentao = null;
+  try { zentao = (await res.json())?.zentao; } catch (_) { /* ignore */ }
+  showPublishResult(zentao);
+}
+
+// 把禅道建任务结果汇总成一条提示（成功/部分失败/未能指派）
+function showPublishResult(zentao) {
+  if (!zentao) {
+    window.showMessage && window.showMessage('分配发布成功', 'success');
+    return;
+  }
+  const created = (zentao.created_tasks || []).length;
+  const reassigned = (zentao.reassigned_tasks || []).length;
+  const unassigned = zentao.unassigned || [];
+  const errors = zentao.errors || [];
+  const parts = ['分配发布成功'];
+  if (created) parts.push(`禅道新建子任务 ${created} 个`);
+  if (reassigned) parts.push(`改派 ${reassigned} 个`);
+  if (unassigned.length) {
+    const names = unassigned.map((u) => u.owner_name).filter(Boolean).join('、');
+    parts.push(`未能指派（缺禅道账号）：${names}`);
+  }
+  const level = (errors.length || unassigned.length) ? 'error' : 'success';
+  let msg = parts.join('；');
+  if (errors.length) msg += `；禅道异常 ${errors.length} 条：${errors.slice(0, 2).join('；')}`;
+  window.showMessage && window.showMessage(msg, level);
 }
 
 export async function loadLinkCandidates() {

@@ -26,6 +26,7 @@ from app.models.enums import (
 )
 from app.models.execution import TestExecution
 from app.models.feature_tree import FeatureTreeMark, FeatureTreeNode
+from app.models.holiday import Holiday
 from app.models.feedback import FeedbackAttachment, FeedbackBugLink, FeedbackRecord
 from app.models.field_test import FieldTestBugLink, FieldTestPurposeType, FieldTestRecord, FieldTestResultStatus
 from app.models.final_test_record import FinalTestRecord
@@ -54,6 +55,7 @@ from app.models.user_ai_provider_config import UserAIProviderConfig
 from app.models.user_jenkins_binding import UserJenkinsBinding
 from app.models.user_zentao_binding import UserZentaoBinding
 from app.models.version import Version
+from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.models.zentao_testcase_mirror import ZentaoTestCaseMirror
 
 __all__ = [
@@ -82,6 +84,7 @@ __all__ = [
     "FieldTestRecord",
     "FieldTestResultStatus",
     "FinalTestRecord",
+    "Holiday",
     "Assessment",
     "AssessmentAnswer",
     "AssessmentQuestion",
@@ -121,5 +124,6 @@ __all__ = [
     "UserZentaoBinding",
     "Version",
     "VersionType",
+    "ZentaoTaskMirror",
     "ZentaoTestCaseMirror",
 ]
