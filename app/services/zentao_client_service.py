@@ -537,7 +537,53 @@ class ZentaoClient:
             body["estimate"] = estimate
         if desc is not None:
             body["desc"] = desc
-        return self.post(f"executions/{execution_id}/tasks", body)
+        result = self.post(f"executions/{execution_id}/tasks", body)
+        if isinstance(result, dict) and result.get("id"):
+            return result
+        # 禅道写接口有时建成功却返回空体 / {"message":"success"}（不带 id）。
+        # 回查执行任务列表按名称(+指派人/需求)找回刚建的任务，避免本地写回不到 id。
+        recovered = self._recover_created_task(
+            execution_id, name=name, assigned_to=assigned_to, story=story
+        )
+        return recovered or result
+
+    def _recover_created_task(
+        self,
+        execution_id: int,
+        *,
+        name: str,
+        assigned_to: str | None = None,
+        story: int | None = None,
+    ) -> dict | None:
+        """create 未返回 id 时，从任务列表里按名称找回刚建的任务（取最新一条）。"""
+        try:
+            rows = self.list_execution_tasks(execution_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("_recover_created_task list failed exec=%s: %s", execution_id, exc)
+            return None
+
+        def _acc(v: Any) -> str:
+            if isinstance(v, dict):
+                return str(v.get("account") or "").strip().lower()
+            return str(v or "").strip().lower()
+
+        target = (name or "").strip()
+        cands = [
+            t for t in rows
+            if t.get("id") and str(t.get("name") or "").strip() == target
+        ]
+        if not cands:
+            return None
+        # 尽量用指派人 / 关联需求进一步收窄，再取 id 最大（最新建）的一条。
+        if assigned_to:
+            acc_l = str(assigned_to).strip().lower()
+            narrowed = [t for t in cands if _acc(t.get("assignedTo")) == acc_l]
+            cands = narrowed or cands
+        if story:
+            narrowed = [t for t in cands if str(t.get("story") or "") == str(story)]
+            cands = narrowed or cands
+        cands.sort(key=lambda t: int(t.get("id") or 0))
+        return cands[-1]
 
     def update_task(self, task_id: int, data: dict) -> dict | None:
         """PUT /v1/tasks/{id} —— 改派(assignedTo)/设父子(parent)/改 estimate 等。"""
