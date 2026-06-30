@@ -394,23 +394,27 @@ function buildS5OtherRecordsHtml(records) {
 }
 
 function buildS5DetailRowHtml(b, colSpan) {
-  const statusBadges = [
-    b.zentao_live_status
-      ? `<span class="badge" style="background:#f8fafc; color:#475569;">禅道状态 ${escapeHtml(getS5ZentaoStatusLabel(b))}</span>`
-      : '',
-    b.zentao_assigned_to_name
-      ? `<span class="badge" style="background:#faf5ff; color:#7c3aed;">当前指派 ${escapeHtml(getS5AssignedDisplayName(b.zentao_assigned_to_name))}</span>`
-      : '',
-    b.zentao_closed_by_name
-      ? `<span class="badge" style="background:#ecfdf5; color:#047857;">关闭人 ${escapeHtml(b.zentao_closed_by_name)}</span>`
-      : '',
-    b.zentao_close_date
-      ? `<span class="badge" style="background:#f1f5f9; color:#475569;">关闭时间 ${escapeHtml(b.zentao_close_date)}</span>`
-      : '',
-    b.last_zentao_synced_at
-      ? `<span class="badge" style="background:#eff6ff; color:#2563eb;">同步 ${escapeHtml(b.last_zentao_synced_at)}</span>`
-      : '',
-  ].filter(Boolean).join('');
+  const isZentaoDeleted = !!b.zentao_deleted;
+  // 禅道已删除：只展示红色「已删除」标记，隐藏状态/指派/关闭人等会误导的信息。
+  const statusBadges = isZentaoDeleted
+    ? `<span class="badge" style="background:#dc2626; color:#fff; font-weight:bold;">🗑️ 禅道已删除</span>`
+    : [
+      b.zentao_live_status
+        ? `<span class="badge" style="background:#f8fafc; color:#475569;">禅道状态 ${escapeHtml(getS5ZentaoStatusLabel(b))}</span>`
+        : '',
+      b.zentao_assigned_to_name
+        ? `<span class="badge" style="background:#faf5ff; color:#7c3aed;">当前指派 ${escapeHtml(getS5AssignedDisplayName(b.zentao_assigned_to_name))}</span>`
+        : '',
+      b.zentao_closed_by_name
+        ? `<span class="badge" style="background:#ecfdf5; color:#047857;">关闭人 ${escapeHtml(b.zentao_closed_by_name)}</span>`
+        : '',
+      b.zentao_close_date
+        ? `<span class="badge" style="background:#f1f5f9; color:#475569;">关闭时间 ${escapeHtml(b.zentao_close_date)}</span>`
+        : '',
+      b.last_zentao_synced_at
+        ? `<span class="badge" style="background:#eff6ff; color:#2563eb;">同步 ${escapeHtml(b.last_zentao_synced_at)}</span>`
+        : '',
+    ].filter(Boolean).join('');
   const previewAction = b.zentao_bug_id
     ? `<a href="javascript:void(0)" onclick="openS5PreviewById(${b.id})" style="font-size:12px; text-decoration:none; color:#0f766e;">打开禅道预览</a>`
     : '<span style="font-size:12px; color:#94a3b8;">本地 Bug 无禅道预览</span>';

@@ -222,11 +222,13 @@ class OverallTestService:
         base_pending_count = sum(1 for bug in stat_bugs if _bug_effective_status(bug) == "resolved")
         base_ready_rate = 100 if base_total == 0 else round(base_closed_count * 100 / base_total)
 
-        # Apply server-side filters (status + keyword) before building the payload
+        # Apply server-side filters (status + keyword) before building the payload。
+        # 筛选时排除禅道已删除的 Bug：它们没有有效状态、也不应混入搜索结果；
+        # 无筛选的默认视图仍会展示（前端用红色「已删除」标记）。
         if status_filter:
-            bugs = [b for b in bugs if _bug_effective_status(b) in status_filter]
+            bugs = [b for b in bugs if not bool(b.zentao_deleted) and _bug_effective_status(b) in status_filter]
         if norm_keyword:
-            bugs = [b for b in bugs if _bug_matches_keyword(b, norm_keyword)]
+            bugs = [b for b in bugs if not bool(b.zentao_deleted) and _bug_matches_keyword(b, norm_keyword)]
 
         bug_pool = []
         for bug in bugs:
