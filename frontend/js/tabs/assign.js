@@ -1,6 +1,7 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
 import { renderPreviewBtn } from '../utils.js';
+import { showLoading, hideLoading } from '../components/common.js';
 
 function getUsers() {
   return window.users || state.users || [];
@@ -341,19 +342,24 @@ export async function publishAssign() {
   }));
   const taskStart = document.getElementById('assignTaskStartDate')?.value || null;
   const taskDeadline = document.getElementById('assignTaskDeadline')?.value || null;
-  const res = await api('/requirements/assign-and-publish', {
-    method: 'POST',
-    headers: window.H,
-    body: ({
-      major_version_id: majorId,
-      assignments,
-      task_start_date: taskStart,
-      task_deadline: taskDeadline,
-    }),
-  });
-  let zentao = null;
-  try { zentao = (await res.json())?.zentao; } catch (_) { /* ignore */ }
-  showPublishResult(zentao);
+  showLoading('正在分配并在禅道创建任务，请稍候…');
+  try {
+    const res = await api('/requirements/assign-and-publish', {
+      method: 'POST',
+      headers: window.H,
+      body: ({
+        major_version_id: majorId,
+        assignments,
+        task_start_date: taskStart,
+        task_deadline: taskDeadline,
+      }),
+    });
+    let zentao = null;
+    try { zentao = (await res.json())?.zentao; } catch (_) { /* ignore */ }
+    showPublishResult(zentao);
+  } finally {
+    hideLoading();
+  }
 }
 
 // 把禅道建任务结果汇总成一条提示（成功/部分失败/未能指派）
