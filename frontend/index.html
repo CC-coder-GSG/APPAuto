@@ -505,8 +505,11 @@
 
       <div class="prefix-input" style="flex:1; min-width: 200px; background: #fff;">
         <span>🔍</span>
-        <input id="mineSearchInput" oninput="renderMineCards()" placeholder="搜索需求编号或名称..." style="width:100%; border:none; outline:none; background:transparent;">
+        <input id="mineSearchInput" oninput="renderMineCards()" placeholder="搜索需求编号/名称或 Bug 标题..." style="width:100%; border:none; outline:none; background:transparent;">
       </div>
+      <label style="display:inline-flex; align-items:center; gap:4px; white-space:nowrap; color:#334155; font-size:13px; cursor:pointer;" title="只显示含有指派给我的 Bug 的需求卡片">
+        <input id="mineAssignedToMe" type="checkbox" onchange="renderMineCards()"> 指派给我的
+      </label>
       <button onclick="loadMyWorkbench()">刷新工作台</button>
       <button id="featureTreeTestBtn" class="ftree-entry-btn ftree-entry-btn--test hidden" onclick="window.OmniQAFeatureTreeTab?.openFromWorkbench()" title="进入全量测试功能树状图">🌳 全量测试树状图</button>
       </div>

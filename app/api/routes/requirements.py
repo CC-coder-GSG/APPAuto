@@ -380,33 +380,42 @@ def my_workbench(
         else []
     )
 
+    # 「指派给我的」判定：优先用禅道账号(已绑定)，否则回退真实姓名匹配。
+    my_account = (current_user.zentao_account or "").strip().lower()
+    my_name = (current_user.shown_name or "").strip().lower()
+
+    def _assigned_to_me(b: BugTracking) -> bool:
+        acc = (b.zentao_assigned_to_account or "").strip().lower()
+        if my_account and acc:
+            return acc == my_account
+        nm = (b.zentao_assigned_to_name or "").strip().lower()
+        if my_name and nm:
+            return nm == my_name
+        return False
+
+    def _bug_dict(b: BugTracking) -> dict:
+        return {
+            "id": b.id,
+            "bug_id": b.bug_id,
+            "zentao_bug_url": b.zentao_bug_url,
+            "zentao_bug_title": b.zentao_bug_title,
+            # 缓存的禅道状态/指派信息：前端可即时显示（先显示，hydrator 再慢慢更新）
+            "zentao_live_status": b.zentao_live_status,
+            "zentao_assigned_to_name": b.zentao_assigned_to_name,
+            "zentao_assigned_to_account": b.zentao_assigned_to_account,
+            "assigned_to_me": _assigned_to_me(b),
+            "found_minor_version_no": minors.get(b.found_minor_version_id, "未知") if b.found_minor_version_id else "未知",
+            "fixed_minor_version_no": minors.get(b.fixed_minor_version_id, "未知") if b.fixed_minor_version_id else None,
+            "dispatched_to_name": b.dispatched_to.shown_name if b.dispatched_to else None,
+        }
+
     case_bug_map: dict[str, list[dict]] = {}
     for b in case_bug_rows:
-        case_bug_map.setdefault(b.source_ref or "", []).append(
-            {
-                "id": b.id,
-                "bug_id": b.bug_id,
-                "zentao_bug_url": b.zentao_bug_url,
-                "zentao_bug_title": b.zentao_bug_title,
-                "found_minor_version_no": minors.get(b.found_minor_version_id, "未知") if b.found_minor_version_id else "未知",
-                "fixed_minor_version_no": minors.get(b.fixed_minor_version_id, "未知") if b.fixed_minor_version_id else None,
-                "dispatched_to_name": b.dispatched_to.shown_name if b.dispatched_to else None,
-            }
-        )
+        case_bug_map.setdefault(b.source_ref or "", []).append(_bug_dict(b))
 
     free_bug_map: dict[int, list[dict]] = {}
     for b in free_bug_rows:
-        free_bug_map.setdefault(b.requirement_id or -1, []).append(
-            {
-                "id": b.id,
-                "bug_id": b.bug_id,
-                "zentao_bug_url": b.zentao_bug_url,
-                "zentao_bug_title": b.zentao_bug_title,
-                "found_minor_version_no": minors.get(b.found_minor_version_id, "未知") if b.found_minor_version_id else "未知",
-                "fixed_minor_version_no": minors.get(b.fixed_minor_version_id, "未知") if b.fixed_minor_version_id else None,
-                "dispatched_to_name": b.dispatched_to.shown_name if b.dispatched_to else None,
-            }
-        )
+        free_bug_map.setdefault(b.requirement_id or -1, []).append(_bug_dict(b))
 
     return [
         {

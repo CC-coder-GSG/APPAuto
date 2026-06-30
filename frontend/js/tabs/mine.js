@@ -1,7 +1,7 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
 import { closeModal, openModal } from '../components/modal.js';
-import { renderBugLink, renderCaseLink, renderPreviewBtn } from '../utils.js';
+import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn } from '../utils.js';
 
 const RESULT_OPTIONS = [
   { value: 'passed', label: '通过' },
@@ -94,6 +94,25 @@ async function preflightWorkbenchData(softwareId) {
   return minePreflightPromise;
 }
 
+// DB 缓存的禅道状态/指派人，用于预填 zt-bug-slot（先显示，hydrator 再覆盖更新）。
+// 视觉与 zentao-hydrator 的徽章保持一致。
+const ZT_BUG_STATUS = {
+  active: { zh: '激活', bg: '#fee2e2', color: '#b91c1c' },
+  resolved: { zh: '已解决', bg: '#dcfce7', color: '#166534' },
+  closed: { zh: '已关闭', bg: '#f1f5f9', color: '#475569' },
+};
+function renderCachedBugSlot(bug) {
+  const status = (bug.zentao_live_status || '').toLowerCase();
+  const meta = ZT_BUG_STATUS[status];
+  const statusBadge = meta
+    ? `<span style="background:${meta.bg};color:${meta.color};padding:1px 5px;border-radius:4px;font-size:10px;font-weight:600;">${meta.zh}</span>`
+    : '';
+  const assignee = bug.zentao_assigned_to_name
+    ? `<span style="color:#0ea5e9;font-size:10px;margin-left:3px;">→${escapeHtml(bug.zentao_assigned_to_name)}</span>`
+    : '';
+  return `${statusBadge}${assignee}`;
+}
+
 function renderBugChip(req, bug) {
   const immutable = req.test_completed || bug.auto_linked;
   const dBadge = bug.dispatched_to_name
@@ -103,7 +122,11 @@ function renderBugChip(req, bug) {
     ? `<span style="color:#16a34a; font-size:11px; margin-left:4px;">(✅解决于: 🏷️${bug.fixed_minor_version_no})</span>`
     : `<span style="color:#94a3b8; font-size:11px; margin-left:4px;">(发现于: 🏷️${bug.found_minor_version_no || '未知'})</span>`;
   const ztBugId = (bug.bug_id || '').replace(/\D/g, '');
-  const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:4px;"></span>` : '';
+  // 用 DB 缓存的状态/指派人预填，先显示出来；hydrator 拉到最新后再覆盖。
+  const cachedSlot = renderCachedBugSlot(bug);
+  const ztSlot = ztBugId
+    ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}"${cachedSlot ? ' data-zt-prefilled="1"' : ''} style="margin-left:4px;">${cachedSlot}</span>`
+    : '';
   const autoBadge = bug.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
   const previewBugBtn = renderPreviewBtn('bug', ztBugId);
   // 修复结果/闭环确认入口：点击弹窗完成「修复通过 + 确认闭环 + 保存记录」，不占用标签空间
@@ -503,9 +526,13 @@ export async function loadMyWorkbench() {
         <table style="background:#fff; border-radius:6px; overflow:hidden;">
           <thead><tr><th>Bug 编号 / 归属需求</th><th>引出的新Bug</th><th>专项处理操作</th></tr></thead>
           <tbody>
-            ${ddata.map((b) => `
+            ${ddata.map((b) => {
+              const ztBugId = (b.bug_id || '').replace(/\D/g, '');
+              const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:4px;"></span>` : '';
+              const previewBugBtn = renderPreviewBtn('bug', ztBugId);
+              return `
               <tr style="${b.test_done ? 'background:#f8fafc; color:#94a3b8; text-decoration:line-through;' : ''}">
-                <td>${renderBugLink(b)} <span style="font-size:12px;color:#64748b;">(${b.req_title})</span></td>
+                <td>${renderBugLink(b)} ${ztSlot} ${previewBugBtn} <span style="font-size:12px;color:#64748b;">(${b.req_title})</span></td>
                 <td>
                   <input type="hidden" id="dnb_hidden_${b.id}" value="${b.newly_found_bug_id || ''}">
                   <div style="margin-bottom:6px;">
@@ -515,7 +542,6 @@ export async function loadMyWorkbench() {
                       </span>
                     `).join('') || '<span class="muted" style="font-size:12px;">暂无引出Bug</span>'}
                   </div>
-                  <button class="secondary" style="padding:2px 8px; font-size:12px;" ${b.test_done ? 'disabled' : ''} onclick="addDerivedBug(${b.id})">➕ 添加引出Bug</button>
                 </td>
                 <td style="text-decoration:none;">
                   <input type="hidden" id="dzt_${b.id}" value="${b.zentao_bug_id || ''}">
@@ -535,7 +561,8 @@ export async function loadMyWorkbench() {
                   </div>
                 </td>
               </tr>
-            `).join('')}
+            `;
+            }).join('')}
           </tbody>
         </table>
       </div>`;
@@ -560,35 +587,58 @@ export async function loadMyWorkbench() {
 
 const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
 
-// 「开始」按钮（放在用例/测试勾选框之前）。已完成测试则不显示；已开始则显示「进行中」禁用态。
+// 「开始」按钮（放在用例/测试勾选框之前）。仅在关联了禅道任务时显示，并按任务状态切换：
+//   wait（已关联未开始）→ 可点「开始」
+//   doing（已开始 / 重新激活后）→「任务已开始」禁用
+//   done（测试完成）→「任务已完成」禁用
 function renderTaskStartControl(req) {
-  if (req.test_completed) return '';
-  const started = !!req.task_started_at;
-  if (started && req.zentao_task_status === 'doing') {
-    return `<button class="secondary" disabled style="padding:2px 10px; font-size:12px; opacity:.7;">⏱ 进行中</button>`;
+  if (!req.zentao_task_id) return '';
+  if (req.zentao_task_status === 'done' || req.test_completed) {
+    return `<button class="secondary" disabled style="padding:2px 10px; font-size:12px; opacity:.7;">✅ 任务已完成</button>`;
+  }
+  if (req.zentao_task_status === 'doing' || req.task_started_at) {
+    return `<button class="secondary" disabled style="padding:2px 10px; font-size:12px; opacity:.7;">⏱ 任务已开始</button>`;
   }
   return `<button style="padding:2px 10px; font-size:12px; background:#16a34a;" onclick="startReqTask(${req.id})" title="开始测试，禅道子任务同步开始">▶ 开始</button>`;
 }
 
-// 子任务标签 + 预览 + 预计用时输入
+// 子任务标签 + 预览 + 预计用时输入。预计用时仅在关联了禅道任务时显示。
 function renderTaskMeta(req) {
-  const est = (req.estimated_test_hours != null ? req.estimated_test_hours : 4);
-  const estInput = `<label class="badge" style="background:#f8fafc; color:#475569; border:1px solid #e2e8f0; display:inline-flex; align-items:center; gap:4px;">预计用时
-      <input type="number" min="0.5" step="0.5" value="${est}" style="width:54px; padding:1px 4px; border:1px solid #cbd5e1; border-radius:4px;" onchange="setReqEstimatedHours(${req.id}, this.value)" onclick="event.stopPropagation()">h</label>`;
-  let taskTag = '';
   if (req.zentao_task_id) {
+    const est = (req.estimated_test_hours != null ? req.estimated_test_hours : 4);
+    const estInput = `<label class="badge" style="background:#f8fafc; color:#475569; border:1px solid #e2e8f0; display:inline-flex; align-items:center; gap:4px;">预计用时
+      <input type="number" min="0.5" step="0.5" value="${est}" style="width:54px; padding:1px 4px; border:1px solid #cbd5e1; border-radius:4px;" onchange="setReqEstimatedHours(${req.id}, this.value)" onclick="event.stopPropagation()">h</label>`;
     const zh = TASK_STATUS_ZH[req.zentao_task_status] || req.zentao_task_status || '';
     const done = req.zentao_task_status === 'done';
-    taskTag = `<span class="badge" style="background:${done ? '#dcfce7' : '#eff6ff'}; color:${done ? '#166534' : '#1d4ed8'}; border:1px solid ${done ? '#bbf7d0' : '#bfdbfe'};">禅道子任务 #${req.zentao_task_id}${zh ? '·' + zh : ''}</span>${renderPreviewBtn('task', req.zentao_task_id)}`;
-  } else {
-    taskTag = `<span class="badge" style="background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;">未关联禅道任务</span>`;
+    const taskTag = `<span class="badge" style="background:${done ? '#dcfce7' : '#eff6ff'}; color:${done ? '#166534' : '#1d4ed8'}; border:1px solid ${done ? '#bbf7d0' : '#bfdbfe'};">禅道子任务 #${req.zentao_task_id}${zh ? '·' + zh : ''}</span>${renderPreviewBtn('task', req.zentao_task_id)}`;
+    return `${estInput}${taskTag}`;
   }
-  return `${estInput}${taskTag}`;
+  return `<span class="badge" style="background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;">未关联禅道任务</span>`;
+}
+
+// 收集一个需求卡片下的全部 bug（用例关联 bug + 自由 bug）。
+function collectReqBugs(req) {
+  const caseBugs = (req.test_cases || []).flatMap((c) => c.bugs || []);
+  return [...caseBugs, ...(req.free_bugs || [])];
 }
 
 export function renderMineCards() {
   const searchKw = (document.getElementById('mineSearchInput')?.value || '').trim().toLowerCase();
-  const filteredData = state.currentMineData.filter((req) => !searchKw || (req.zentao_req_id && req.zentao_req_id.toLowerCase().includes(searchKw)) || (req.title && req.title.toLowerCase().includes(searchKw)));
+  const onlyAssignedToMe = !!document.getElementById('mineAssignedToMe')?.checked;
+  const filteredData = state.currentMineData.filter((req) => {
+    // 搜索：匹配需求编号/名称，或卡片内任一 bug 的编号/标题（卡片级过滤）
+    if (searchKw) {
+      const bugs = collectReqBugs(req);
+      const hit = (req.zentao_req_id && req.zentao_req_id.toLowerCase().includes(searchKw))
+        || (req.title && req.title.toLowerCase().includes(searchKw))
+        || bugs.some((b) => (b.bug_id && b.bug_id.toLowerCase().includes(searchKw))
+          || (b.zentao_bug_title && b.zentao_bug_title.toLowerCase().includes(searchKw)));
+      if (!hit) return false;
+    }
+    // 「指派给我的」：只保留含有 ≥1 个指派给当前用户 bug 的卡片
+    if (onlyAssignedToMe && !collectReqBugs(req).some((b) => b.assigned_to_me)) return false;
+    return true;
+  });
   const mode = getMode();
   const foldStateMap = getFoldStateMap();
 

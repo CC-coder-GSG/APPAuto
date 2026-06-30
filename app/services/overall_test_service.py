@@ -213,7 +213,9 @@ class OverallTestService:
         stat_bugs = [bug for bug in bugs if not bool(bug.zentao_deleted)]
         base_total = len(stat_bugs)
         base_closed_count = sum(1 for bug in stat_bugs if bug.closed)
-        base_pending_count = base_total - base_closed_count
+        # 「剩余待验证」= 禅道状态已修复/已解决(resolved)但尚未关闭的 Bug 数，
+        # 即开发已修复、等待测试验证的 Bug（不再是简单的「非关闭数」）。
+        base_pending_count = sum(1 for bug in stat_bugs if _bug_effective_status(bug) == "resolved")
         base_ready_rate = 100 if base_total == 0 else round(base_closed_count * 100 / base_total)
 
         # Apply server-side filters (status + keyword) before building the payload
@@ -276,7 +278,8 @@ class OverallTestService:
         stat_pool = [e for e in bug_pool if not e.get("zentao_deleted")]
         filtered_total = len(stat_pool)
         filtered_closed_count = sum(1 for e in stat_pool if e["closed"])
-        filtered_pending_count = filtered_total - filtered_closed_count
+        # 与 base 口径一致：待验证 = 已修复/已解决(resolved)状态的 Bug 数。
+        filtered_pending_count = sum(1 for e in stat_pool if e.get("effective_status") == "resolved")
         filtered_ready_rate = 100 if filtered_total == 0 else round(filtered_closed_count * 100 / filtered_total)
 
         return {

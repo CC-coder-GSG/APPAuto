@@ -175,7 +175,8 @@ export async function loadOverallTest(options = {}) {
   const stats = data.stats || {};
   const total = Number(stats.total ?? state.overallTestRows.length);
   const closed = Number(stats.closed ?? state.overallTestRows.filter((b) => b.closed).length);
-  const pending = Number(stats.pending ?? Math.max(0, total - closed));
+  // 待验证 = 已修复/已解决(resolved) 状态的 Bug 数（与后端口径一致）
+  const pending = Number(stats.pending ?? state.overallTestRows.filter((b) => (b.effective_status || b.zentao_live_status) === 'resolved').length);
   const rate = Number(stats.ready_rate ?? (total === 0 ? 100 : Math.round((closed / total) * 100)));
 
   document.getElementById('overallTestPanorama')?.classList.remove('hidden');

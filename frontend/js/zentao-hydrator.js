@@ -358,9 +358,11 @@ async function hydrateContainer(containerEl) {
   if (!bugSlots.length && !storySlots.length) return;
 
   // — Step 1: show loading dots immediately —
+  // 已用 DB 缓存预填(data-zt-prefilled)的 slot 不刷加载点，保留「先显示」的内容，
+  // 等 fetch 完成再覆盖为最新数据（先显示出来、再慢慢更新）。
   const LOADING_HTML = '<span class="zt-loading-dots">···</span>';
-  bugSlots.forEach((el) => { el.innerHTML = LOADING_HTML; el.dataset.ztPending = '1'; });
-  storySlots.forEach((el) => { el.innerHTML = LOADING_HTML; el.dataset.ztPending = '1'; });
+  bugSlots.forEach((el) => { if (!el.dataset.ztPrefilled) el.innerHTML = LOADING_HTML; el.dataset.ztPending = '1'; });
+  storySlots.forEach((el) => { if (!el.dataset.ztPrefilled) el.innerHTML = LOADING_HTML; el.dataset.ztPending = '1'; });
 
   // Collect unique uncached IDs
   const uncachedBugIds = [...new Set(
