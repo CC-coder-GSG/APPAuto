@@ -119,9 +119,12 @@ def _bug_effective_status(bug: BugTracking) -> str:
 def _bug_matches_keyword(bug: BugTracking, keyword: str) -> bool:
     if not keyword:
         return True
+    # 既支持编号搜索（b#290 / 290 / 29009），也支持按 Bug 标题/指派人做文本模糊搜索。
     haystacks = [
         str(bug.bug_id or "").lower(),
         str(bug.zentao_bug_id or "").lower(),
+        str(bug.zentao_bug_title or "").lower(),
+        str(bug.zentao_assigned_to_name or "").lower(),
     ]
     return any(keyword in h for h in haystacks if h)
 
@@ -144,7 +147,8 @@ class OverallTestService:
         Optional filters:
         - `statuses`: comma-separated list of {'active', 'closed',
           'resolved', 'local'}. Applied after local fetch.
-        - `keyword`: fuzzy match against `bug_id` and `zentao_bug_id`
+        - `keyword`: fuzzy match against `bug_id`, `zentao_bug_id`,
+          `zentao_bug_title` and `zentao_assigned_to_name`
           (b# prefix and whitespace are stripped before compare).
 
         Stats (total / closed / pending / ready_rate) are computed from
