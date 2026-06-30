@@ -8,8 +8,9 @@ from app.services.zentao_task_sync_service import ZentaoTaskSyncService
 
 
 class FakeClient:
-    def __init__(self, assignable=None):
+    def __init__(self, assignable=None, existing_tasks=None):
         self._assignable = assignable or {}
+        self._existing_tasks = existing_tasks or []
         self.created = []
         self.linked = []
         self.reassigned = []
@@ -17,6 +18,9 @@ class FakeClient:
 
     def list_assignable_users(self, execution_id):
         return self._assignable
+
+    def list_execution_tasks(self, execution_id, limit=500):
+        return self._existing_tasks
 
     def create_execution_task(self, execution_id, **kwargs):
         self._next_id += 1
@@ -86,6 +90,36 @@ def test_create_parent_and_children_for_new_assignments(db_session, monkeypatch,
     # bob 通过姓名匹配回填了账号
     db_session.refresh(setup["bob"])
     assert setup["bob"].zentao_account == "bob"
+
+
+def test_adopts_existing_task_instead_of_recreating(db_session, monkeypatch, setup):
+    # r1(story 6706) 在禅道已有一条 test 子任务 8888 → 应被认领，不重复新建。
+    existing = [{"id": 8888, "type": "test", "story": 6706, "parent": 9000,
+                 "status": "doing", "assignedTo": {"account": "alice"}}]
+    client = FakeClient(assignable={"alice": "爱丽丝", "bob": "鲍勃"}, existing_tasks=existing)
+    _patch_client(monkeypatch, client)
+    svc = ZentaoTaskSyncService(db_session)
+    res = svc.create_tasks_for_assignment(
+        setup["major"].id,
+        [
+            {"requirement_id": setup["r1"].id, "owner_id": setup["alice"].id},
+            {"requirement_id": setup["r2"].id, "owner_id": setup["bob"].id},
+        ],
+        est_started="2026-06-29",
+        deadline="2026-07-03",
+        actor=setup["actor"],
+    )
+    assert res["ok"] is True, res["errors"]
+    db_session.refresh(setup["r1"]); db_session.refresh(setup["r2"])
+    # r1 认领已存在任务 8888（不重复建）
+    assert setup["r1"].zentao_task_id == 8888
+    assert setup["r1"].zentao_parent_task_id == 9000
+    assert setup["r1"].zentao_task_status_cache == "doing"
+    # r2 没有已存在任务 → 正常新建（父 + 1 子）
+    assert setup["r2"].zentao_task_id is not None and setup["r2"].zentao_task_id != 8888
+    # 只为 r2 建了 1 父 + 1 子，r1 未新建
+    child_creates = [c for c in client.created if c.get("story") == 6706]
+    assert child_creates == []  # r1 的 story 没有新建子任务
 
 
 def test_child_estimate_uses_requirement_hours(db_session, monkeypatch, setup):

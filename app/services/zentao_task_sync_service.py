@@ -55,6 +55,21 @@ def _zentao_dt_to_local(raw) -> Optional[datetime]:
     return parse_external_datetime_to_local_naive(raw) if raw else None
 
 
+def _coerce_int(v) -> Optional[int]:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _task_account(t: dict) -> Optional[str]:
+    """禅道任务 assignedTo → account（兼容对象/字符串）。"""
+    a = t.get("assignedTo")
+    if isinstance(a, dict):
+        return a.get("account")
+    return str(a) if a else None
+
+
 class ZentaoTaskSyncService:
     def __init__(self, db: Session):
         self.db = db
@@ -173,13 +188,54 @@ class ZentaoTaskSyncService:
                 logger.warning("reassign task %s -> %s failed: %s", req.zentao_task_id, acc, exc)
                 out["errors"].append(f"改派子任务 #{req.zentao_task_id}（{req.title}）失败：{exc}")
 
-        # ── 新需求：建一个父任务 + 逐条子任务 ──
+        # ── 新需求：幂等处理（认领已存在任务 + 仅对真正缺失的新建）──
+        # 先按 story 索引执行下已有的 test 子任务。若某需求的任务此前已建过（常见于
+        # 子任务很多、单次请求超时导致禅道已建但本地没写回），本次直接认领写回，
+        # 绝不重复新建。这样「重新发布一次」即可自愈历史未关联的需求。
+        existing_by_story = self._index_existing_test_tasks(client, exec_id)
+
+        adopt_items: list[tuple[Requirement, User, dict]] = []
+        create_new_items: list[tuple[Requirement, User]] = []
+        for req, owner in new_items:
+            t = existing_by_story.get(req.zentao_story_id) if req.zentao_story_id else None
+            if t:
+                adopt_items.append((req, owner, t))
+            else:
+                create_new_items.append((req, owner))
+
+        # 认领：写回本地 + 负责人不一致则改派。逐条提交，进度不丢。
+        for req, owner, t in adopt_items:
+            tid = _coerce_int(t.get("id"))
+            if not tid:
+                continue
+            req.zentao_task_id = tid
+            pid = _coerce_int(t.get("parent"))
+            if pid:
+                req.zentao_parent_task_id = pid
+            req.zentao_task_status_cache = str(t.get("status") or "wait")
+            acc = self._resolve_account(owner, assignable)
+            cur_acc = _task_account(t)
+            if acc and cur_acc and acc.strip().lower() != cur_acc.strip().lower():
+                try:
+                    client.reassign_task(tid, acc)
+                    out["reassigned_tasks"].append(tid)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("reassign adopted task %s -> %s failed: %s", tid, acc, exc)
+                    out["errors"].append(f"改派子任务 #{tid}（{req.title}）失败：{exc}")
+            out["created_tasks"].append(tid)
+            try:
+                self.db.commit()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("commit adopt req %s failed: %s", req.id, exc)
+                self.db.rollback()
+
+        # ── 真正缺失的：建父任务 + 逐条子任务，每条建完即提交 ──
         parent_id: Optional[int] = None
-        if new_items:
+        if create_new_items:
             parent_name = f"{major.version_no} 测试任务"
             parent_desc = (
                 f"由测试管理系统于 {local_now().strftime('%Y-%m-%d %H:%M')} 分配，"
-                f"共 {len(new_items)} 个研发需求子任务。"
+                f"共 {len(create_new_items)} 个研发需求子任务。"
             )
             actor_acc = self._resolve_account(actor, assignable) if actor else None
             try:
@@ -200,7 +256,7 @@ class ZentaoTaskSyncService:
 
             if parent_id:
                 out["parent_task_id"] = parent_id
-                for req, owner in new_items:
+                for req, owner in create_new_items:
                     acc = self._resolve_account(owner, assignable)
                     if not acc:
                         out["unassigned"].append({"requirement_id": req.id, "owner_name": owner.shown_name})
@@ -233,6 +289,12 @@ class ZentaoTaskSyncService:
                         req.zentao_parent_task_id = int(parent_id)
                         req.zentao_task_status_cache = "wait"
                         out["created_tasks"].append(child_id)
+                        # 逐条提交：即使后续超时，已建的也不丢、下次按 story 认领不会重复建。
+                        try:
+                            self.db.commit()
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("commit child req %s failed: %s", req.id, exc)
+                            self.db.rollback()
                     except Exception as exc:
                         logger.warning("create child task for req %s failed: %s", req.id, exc)
                         out["errors"].append(f"为需求「{req.title}」创建子任务失败：{exc}")
@@ -240,6 +302,27 @@ class ZentaoTaskSyncService:
         self.db.commit()
         out["ok"] = not out["errors"]
         return out
+
+    def _index_existing_test_tasks(self, client, exec_id: int) -> dict[int, dict]:
+        """按 story 索引执行下已有的 test 子任务，取同 story 中 id 最大（最新）的一条。"""
+        try:
+            rows = client.list_execution_tasks(exec_id) or []
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("index existing tasks exec %s failed: %s", exec_id, exc)
+            return {}
+        idx: dict[int, dict] = {}
+        for t in rows:
+            if not isinstance(t, dict) or str(t.get("type") or "") != "test":
+                continue
+            sid = _coerce_int(t.get("story"))
+            tid = _coerce_int(t.get("id"))
+            if not sid or not tid:
+                continue
+            # 只认子任务（有 parent），父任务 story 通常为 0、不会进来
+            prev = idx.get(sid)
+            if prev is None or tid > _coerce_int(prev.get("id")):
+                idx[sid] = t
+        return idx
 
     # ------------------------------------------------------------------
     # 能力 C：开始 / 完成 / 重新激活
