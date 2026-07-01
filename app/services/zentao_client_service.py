@@ -632,6 +632,13 @@ class ZentaoClient:
         """
         return self.post(f"tasks/{task_id}/restart", {"consumed": consumed, "left": left})
 
+    def close_task(self, task_id: int, *, comment: str | None = None) -> dict | None:
+        """POST /v1/tasks/{id}/close —— 关闭任务（status→closed）。"""
+        body: dict[str, Any] = {}
+        if comment:
+            body["comment"] = comment
+        return self.post(f"tasks/{task_id}/close", body)
+
     def list_assignable_users(self, execution_id: int) -> dict[str, str]:
         """该执行可指派用户 {account: realname}。
 

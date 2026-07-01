@@ -55,6 +55,55 @@ def retest_workbench_v2(
     )
 
 
+class TaskOperatePayload(BaseModel):
+    action: str  # start | finish | close | reactivate | set_time
+    hours: Optional[float] = None
+    consumed: Optional[float] = None
+    comment: Optional[str] = None
+
+
+@router.get("/tasks")
+def my_task_workbench(
+    refresh: bool = False,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """任务工作台：当前账号名下的禅道任务（含是否关联本平台需求的标注）。
+
+    refresh=true 时先全量刷新任务镜像（较慢）；否则读缓存（后台任务会周期刷新）。
+    """
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+
+    svc = ZentaoTaskMirrorService(db)
+    refreshed = None
+    if refresh:
+        try:
+            refreshed = svc.sync_all()
+        except Exception as exc:  # noqa: BLE001 — 刷新失败不影响读缓存
+            refreshed = {"ok": False, "error": str(exc)}
+    return {"tasks": svc.list_mine_with_links(current_user), "refreshed": refreshed}
+
+
+@router.post("/tasks/{task_id}/operate")
+def operate_my_task(
+    task_id: int,
+    payload: TaskOperatePayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """对未关联需求的禅道任务执行操作（开始/完成/关闭/重新激活/设置工时）。"""
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+
+    return ZentaoTaskMirrorService(db).operate_task(
+        task_id=task_id,
+        action=payload.action,
+        current_user=current_user,
+        hours=payload.hours,
+        consumed=payload.consumed,
+        comment=payload.comment,
+    )
+
+
 @router.post("/preflight-refresh")
 def preflight_refresh(
     payload: WorkbenchPreflightPayload,

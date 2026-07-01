@@ -474,6 +474,7 @@
           <button id="workbenchDemandBtn" type="button" onclick="switchWorkbenchSubtab('demand')">需求工作台<span id="workbenchDemandBadge" class="nav-badge hidden"></span></button>
           <button id="workbenchRetestBtn" type="button" onclick="switchWorkbenchSubtab('retest')">复测工作台<span id="workbenchRetestBadge" class="nav-badge hidden"></span></button>
           <button id="workbenchOverallTestBtn" type="button" onclick="switchWorkbenchSubtab('overall-test')">测试工作台<span id="workbenchOverallTestBadge" class="nav-badge hidden"></span></button>
+          <button id="workbenchTaskBtn" type="button" onclick="switchWorkbenchSubtab('task')">任务工作台<span id="workbenchTaskBadge" class="nav-badge hidden"></span></button>
         </div>
       </div>
 
@@ -524,6 +525,17 @@
           </div>
           <div class="workbench-panel" data-workbench-panel="overall-test">
             <div id="workbenchOverallTestMount" class="workbench-panel-inner"></div>
+          </div>
+          <div class="workbench-panel" data-workbench-panel="task">
+            <div class="workbench-panel-inner">
+              <h2>任务工作台</h2>
+              <div class="row" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px; align-items: center; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                <span class="muted" style="font-size:13px;">显示当前账号名下的禅道任务：关联需求的任务可跳转到需求工作台；独立任务可直接开始/完成/关闭。</span>
+                <button onclick="refreshTaskWorkbench()">刷新（从禅道拉取）</button>
+              </div>
+              <div id="taskWorkbenchSummary" style="margin-bottom: 16px; font-weight: bold; color: #1d4ed8; background: #eff6ff; padding: 10px 16px; border-radius: 6px; display: none; border-left: 4px solid #3b82f6;"></div>
+              <div id="taskWorkbenchCards"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -1978,17 +1990,19 @@ function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
 const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal','learning'];
 const DEFAULT_ALLOWED_TABS=['mine','task-board','feedback','retest','overall-test','field-test','testcase-center','report','jenkins','learning'];
-const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test'];
-const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test' };
+const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test','task'];
+const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test', task:'mine' };
 const WORKBENCH_SUBTAB_LOADERS={
   demand: ()=>loadMyWorkbench(),
   retest: ()=>loadRetest(),
   'overall-test': ()=>loadOverallTest(),
+  task: ()=>loadTaskWorkbench(),
 };
 const WORKBENCH_SUBTAB_ERROR_TEXT={
   demand:'加载需求工作台失败',
   retest:'加载复测工作台失败',
   'overall-test':'加载测试工作台失败',
+  task:'加载任务工作台失败',
 };
 const WORKBENCH_SUBTAB_STORAGE_KEY='omniqa_workbench_subtab_v1';
 let currentWorkbenchSubtab='demand';
@@ -2021,7 +2035,7 @@ function readStoredWorkbenchSubtab(){
   return WORKBENCH_SUBTAB_ORDER.includes(saved)?saved:null;
 }
 function getResolvedWorkbenchSubtab(name){
-  if(name==='retest' || name==='overall-test') return name;
+  if(name==='retest' || name==='overall-test' || name==='task') return name;
   const saved=readStoredWorkbenchSubtab();
   if(saved && canAccessWorkbenchSubtab(saved)) return saved;
   return getDefaultWorkbenchSubtab();
@@ -2033,6 +2047,7 @@ function rememberWorkbenchSubtab(name){
 function getWorkbenchSectionForSubtab(name){
   if(name==='retest') return document.getElementById('tab-retest');
   if(name==='overall-test') return document.getElementById('tab-overall-test');
+  if(name==='task') return document.querySelector('[data-workbench-panel="task"]');
   return document.querySelector('[data-workbench-panel="demand"]');
 }
 function getWorkbenchVisibleSubtab(){ return currentWorkbenchSubtab; }
@@ -2090,6 +2105,7 @@ function applyWorkbenchSubtabVisibility(){
     demand:'workbenchDemandBtn',
     retest:'workbenchRetestBtn',
     'overall-test':'workbenchOverallTestBtn',
+    task:'workbenchTaskBtn',
   };
   WORKBENCH_SUBTAB_ORDER.forEach((name)=>{
     const btn=document.getElementById(buttonMap[name]);
@@ -2127,6 +2143,7 @@ async function switchWorkbenchSubtab(name, options={}){
     demand:'workbenchDemandBtn',
     retest:'workbenchRetestBtn',
     'overall-test':'workbenchOverallTestBtn',
+    task:'workbenchTaskBtn',
   };
   WORKBENCH_SUBTAB_ORDER.forEach((key)=>{
     const btn=document.getElementById(buttonMap[key]);
@@ -2620,6 +2637,22 @@ function toggleMineMode() {
 
 async function loadMyWorkbench() {
   return window.OmniQAMineTab.loadMyWorkbench();
+}
+
+async function loadTaskWorkbench() {
+  return window.OmniQATaskWorkbenchTab?.loadTaskWorkbench();
+}
+async function refreshTaskWorkbench() {
+  return window.OmniQATaskWorkbenchTab?.refreshTaskWorkbench();
+}
+async function jumpToLinkedRequirement(reqId, majorVersionId) {
+  return window.OmniQATaskWorkbenchTab?.jumpToLinkedRequirement(reqId, majorVersionId);
+}
+async function taskWorkbenchOperate(taskId, action) {
+  return window.OmniQATaskWorkbenchTab?.taskWorkbenchOperate(taskId, action);
+}
+async function taskWorkbenchSetTime(taskId) {
+  return window.OmniQATaskWorkbenchTab?.taskWorkbenchSetTime(taskId);
 }
 
 function renderMineCards() {
