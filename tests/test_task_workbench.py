@@ -229,6 +229,27 @@ def test_operate_start_preserves_assignee_via_reassign(db_session, monkeypatch):
     assert any(c[0] == "reassign" and c[2] == "alice" for c in client.calls)
 
 
+def test_pause_task_falls_back_to_put_when_action_unauthorized(monkeypatch):
+    # 禅道 v1 未开放 /tasks/{id}/pause（401）→ pause_task 回退用 PUT 改 status
+    from app.services.zentao_client_service import ZentaoClient, ZentaoAPIError
+
+    client = ZentaoClient(base_url="http://z", token="t")
+    calls = {}
+
+    def fake_post(path, body=None):
+        raise ZentaoAPIError(401, '{"error":"Unauthorized"}')
+
+    def fake_put(path, body=None):
+        calls["put"] = (path, body)
+        return {"id": 17246, "status": "pause"}
+
+    monkeypatch.setattr(client, "post", fake_post)
+    monkeypatch.setattr(client, "put", fake_put)
+    res = client.pause_task(17246)
+    assert calls["put"] == ("tasks/17246", {"status": "pause"})
+    assert res.get("status") == "pause"
+
+
 def test_operate_pause_noop_surfaces_error(db_session, monkeypatch):
     # 禅道返回 200 但状态没真正切换（仍 doing）→ 应报「未生效」而非假成功
     alice = _user(db_session, "alice_noop", account="alice")
