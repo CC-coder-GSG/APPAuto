@@ -71,9 +71,7 @@ export async function loadDispatchedAll() {
 }
 
 export function toggleDispatchedClose(id, checked) {
-  // 勾选闭环时禁用「引出Bug」隐藏输入（沿用旧逻辑），同时为禅道 Bug 展开闭环说明输入框
-  const hidden = document.getElementById('dnb_hidden_' + id);
-  if (hidden) hidden.disabled = checked;
+  // 勾选闭环时为禅道 Bug 展开闭环说明输入框
   const wrap = document.getElementById('dcomment_wrap_' + id);
   const isZentao = !!(document.getElementById('dzt_' + id)?.value || '').trim();
   if (wrap) wrap.style.display = (checked && isZentao) ? '' : 'none';
@@ -81,7 +79,6 @@ export function toggleDispatchedClose(id, checked) {
 
 export async function saveDispatchedBug(id) {
   const done = document.getElementById('ddone_' + id).checked;
-  const n = document.getElementById('dnb_hidden_' + id).value || null;
   const res = document.getElementById('dres_' + id).value;
   const zentaoBugId = (document.getElementById('dzt_' + id)?.value || '').trim();
   const wasClosed = !!(document.getElementById('dwasclosed_' + id)?.value || '');
@@ -120,37 +117,103 @@ export async function saveDispatchedBug(id) {
 
   await api(`/overall-test/bugs/${id}/result`, {
     method: 'PUT', headers: window.H,
-    body: ({ minor_version_id: minorId, test_done: done, newly_found_bug_id: n, resolution: res }),
+    body: ({ minor_version_id: minorId, test_done: done, newly_found_bug_id: null, resolution: res }),
   });
   window.showMessage && window.showMessage('特派专项验证已保存并同步至总盘');
   await window.OmniQAMineTab.loadMyWorkbench();
 }
 
-export async function addDerivedBug(id) {
-  const n = prompt('请输入引出的新Bug数字编号：');
-  if (!n) return;
-  const newBug = withPrefix('b#', n);
-  const hiddenEl = document.getElementById('dnb_hidden_' + id);
-  let arr = hiddenEl.value ? hiddenEl.value.split(',') : [];
-  if (arr.includes(newBug)) {
-    window.showMessage && window.showMessage('该 Bug 编号已经添加过了！', 'error');
+// ——「指派给我的Bug」面板行操作（编辑/删除/指派/重新激活）——
+// 完全照搬测试工作台的操作能力；指派/重新激活复用 overall-test 的弹窗，
+// 编辑/删除在本面板内直接完成并刷新需求工作台。
+function findDispatchedBug(id) {
+  return (state.currentDispatchData || []).find((b) => b.id === id) || null;
+}
+
+export async function dispatchEditBug(id) {
+  const bug = findDispatchedBug(id);
+  if (!bug) return;
+  const zentaoBugId = bug.zentao_bug_id || '';
+  if (zentaoBugId) {
+    const current = bug.zentao_bug_title ? String(bug.zentao_bug_title).replace(/&amp;/g, '&') : '';
+    const title = prompt('请输入 Bug 标题：', current);
+    if (title === null) return;
+    if (!title.trim()) {
+      window.showMessage && window.showMessage('标题不能为空', 'error');
+      return;
+    }
+    try {
+      await api(`/zentao/bugs/${Number(zentaoBugId)}`, { method: 'PUT', headers: window.H, body: { title: title.trim() } });
+      window.showMessage && window.showMessage('禅道 Bug 标题已更新', 'success');
+      await window.OmniQAMineTab.loadMyWorkbench();
+    } catch (err) {
+      window.showMessage && window.showMessage(err.message || '标题更新失败', 'error');
+    }
+  } else {
+    const num = prompt('请输入正确的 Bug 数字部分：', String(bug.bug_id || '').replace('b#', ''));
+    if (!num) return;
+    try {
+      await api('/bugs/' + id + '?new_bug_id=' + encodeURIComponent(withPrefix('b#', num)), { method: 'PUT' });
+      window.showMessage && window.showMessage('Bug 编号已纠正', 'success');
+      await window.OmniQAMineTab.loadMyWorkbench();
+    } catch (err) {
+      window.showMessage && window.showMessage(err.message || '更新失败', 'error');
+    }
+  }
+}
+
+export async function dispatchRemoveBug(id) {
+  const bug = findDispatchedBug(id);
+  if (!bug) return;
+  const zentaoBugId = bug.zentao_bug_id || '';
+  if (zentaoBugId) {
+    const confirmed = window.confirm(
+      `⚠️ 删除禅道 Bug\n\n` +
+      `将对禅道执行删除操作（软删除，deleted=true）。\n` +
+      `当前实例删除后暂无稳定可用的 REST 恢复接口，请谨慎操作！\n\n` +
+      `本地记录将标记为“已删除”并从大盘隐藏，不会彻底清除（保留审计记录）。\n\n` +
+      `确认删除禅道 Bug #${zentaoBugId} 吗？`
+    );
+    if (!confirmed) return;
+    try {
+      await api(`/zentao/bugs/${Number(zentaoBugId)}`, { method: 'DELETE' });
+      window.showMessage && window.showMessage('禅道 Bug 已删除并从大盘移除', 'success');
+      await window.OmniQAMineTab.loadMyWorkbench();
+    } catch (err) {
+      window.showMessage && window.showMessage(err.message || '删除失败', 'error');
+    }
+  } else {
+    if (!confirm('确定要在该大版本下移除这个 Bug 吗？')) return;
+    try {
+      await api('/bugs/' + id, { method: 'DELETE' });
+      window.showMessage && window.showMessage('Bug 已彻底移除', 'success');
+      await window.OmniQAMineTab.loadMyWorkbench();
+    } catch (err) {
+      window.showMessage && window.showMessage(err.message || '删除失败', 'error');
+    }
+  }
+}
+
+export function dispatchAssignBug(id) {
+  const bug = findDispatchedBug(id);
+  if (!bug?.zentao_bug_id) return;
+  const isClosed = String(bug.zentao_live_status || '').toLowerCase() === 'closed'
+    || !!bug.zentao_close_date || !!bug.zentao_closed_by_name
+    || String(bug.zentao_assigned_to_name || '').toLowerCase() === 'closed';
+  if (isClosed) {
+    window.showMessage && window.showMessage('已关闭的禅道 Bug 不能再指派，请先重新激活', 'error');
     return;
   }
-  arr.push(newBug);
-  hiddenEl.value = arr.join(',');
-  await saveDispatchedBug(id);
+  window.OmniQAOverallTestTab?.openS5AssignModal?.(id, bug.zentao_bug_id);
 }
 
-export async function removeDerivedBug(id, bugToRemove) {
-  if (!confirm(`确定要移除引出的 Bug [${bugToRemove}] 吗？`)) return;
-  const hiddenEl = document.getElementById('dnb_hidden_' + id);
-  let arr = hiddenEl.value ? hiddenEl.value.split(',') : [];
-  arr = arr.filter((x) => x !== bugToRemove);
-  hiddenEl.value = arr.join(',');
-  await saveDispatchedBug(id);
+export function dispatchReactivateBug(id) {
+  const bug = findDispatchedBug(id);
+  if (!bug?.zentao_bug_id) return;
+  window.OmniQAOverallTestTab?.openS5ReactivateModal?.(id, bug.zentao_bug_id);
 }
 
-window.OmniQADispatchTab = { searchDispatchBug, confirmDispatchBug, loadDispatchedAll, saveDispatchedBug, addDerivedBug, removeDerivedBug, toggleDispatchedClose };
+window.OmniQADispatchTab = { searchDispatchBug, confirmDispatchBug, loadDispatchedAll, saveDispatchedBug, toggleDispatchedClose, dispatchEditBug, dispatchRemoveBug, dispatchAssignBug, dispatchReactivateBug };
 
 function bindDispatchSSE() {
   if (dispatchSseBound) return;

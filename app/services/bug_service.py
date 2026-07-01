@@ -123,28 +123,67 @@ class BugService:
         return {"message": "特派成功"}, user, bug
 
     def dispatched_to_me(self, major_version_id: int, current_user: User) -> list[dict]:
+        # 返回与「测试工作台」大盘一致的完整行结构，以便需求工作台的「指派给我的Bug」
+        # 面板可完全照搬测试工作台的行布局（编号/标题/操作/验证操作）。
+        from app.services.overall_test_service import _bug_effective_status
+
         bugs = (
             self.db.query(BugTracking)
-            .options(joinedload(BugTracking.requirement))
+            .options(
+                joinedload(BugTracking.requirement),
+                joinedload(BugTracking.dispatched_to),
+                joinedload(BugTracking.stage5_records).joinedload(BugStage5Record.user),
+                joinedload(BugTracking.stage5_records).joinedload(BugStage5Record.minor_version),
+            )
             .filter(BugTracking.major_version_id == major_version_id, BugTracking.dispatched_to_id == current_user.id)
             .all()
         )
-        records = self.db.query(BugStage5Record).filter(BugStage5Record.user_id == current_user.id).all()
-        record_map = {r.bug_tracking_id: r for r in records}
         rows = []
         for bug in bugs:
-            record = record_map.get(bug.id)
+            other_records = []
+            my_record = None
+            for record in bug.stage5_records:
+                if record.user_id == current_user.id:
+                    my_record = record
+                else:
+                    other_records.append(
+                        {
+                            "username": record.user.shown_name if record.user else "-",
+                            "minor_version_no": record.minor_version.version_no if record.minor_version else "未知",
+                            "test_done": record.test_done,
+                            "resolution": record.resolution,
+                            "source": record.source or "manual",
+                        }
+                    )
             rows.append(
                 {
                     "id": bug.id,
                     "bug_id": bug.bug_id,
                     "zentao_bug_id": bug.zentao_bug_id,
+                    "zentao_bug_url": bug.zentao_bug_url,
+                    "zentao_bug_title": bug.zentao_bug_title,
+                    "zentao_live_status": bug.zentao_live_status or "",
+                    "zentao_closed_by_name": bug.zentao_closed_by_name or "",
+                    "zentao_close_comment": bug.zentao_close_comment or "",
+                    "zentao_close_date": bug.zentao_close_date.strftime("%Y-%m-%d %H:%M") if bug.zentao_close_date else "",
+                    "zentao_assigned_to_name": bug.zentao_assigned_to_name or "",
+                    "zentao_deleted": bool(bug.zentao_deleted),
+                    "last_zentao_synced_at": bug.last_zentao_synced_at.strftime("%Y-%m-%d %H:%M") if bug.last_zentao_synced_at else "",
                     "closed": bool(bug.closed),
                     "source_type": bug.source_type.value,
+                    "source_ref": bug.source_ref,
+                    "requirement_id": bug.requirement_id,
                     "req_title": bug.requirement.title if bug.requirement else "无关联需求 / 自由Bug",
-                    "test_done": record.test_done if record else False,
-                    "resolution": record.resolution if record else "fixed",
-                    "newly_found_bug_id": record.newly_found_bug_id if record else "",
+                    "my_test_done": my_record.test_done if my_record else False,
+                    "my_resolution": my_record.resolution if my_record else "fixed",
+                    "my_comment": my_record.comment if my_record else "",
+                    "other_records": other_records,
+                    "dispatched_to_name": bug.dispatched_to.shown_name if bug.dispatched_to else None,
+                    "is_retest_failed": getattr(bug, "is_retest_failed", False),
+                    "effective_status": _bug_effective_status(bug),
+                    # 兼容旧字段（历史前端读取）
+                    "test_done": my_record.test_done if my_record else False,
+                    "resolution": my_record.resolution if my_record else "fixed",
                 }
             )
         return rows

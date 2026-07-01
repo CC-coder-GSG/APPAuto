@@ -1,7 +1,7 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
 import { closeModal, openModal } from '../components/modal.js';
-import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn } from '../utils.js';
+import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, sourceTypeZh } from '../utils.js';
 
 const RESULT_OPTIONS = [
   { value: 'passed', label: '通过' },
@@ -495,6 +495,147 @@ function refreshMineMinorSelectByMode() {
   }
 }
 
+// ——「指派给我的Bug」面板：完全照搬测试工作台（overall-test）的行布局 ——
+// 判定禅道 Bug 是否已实质关闭 / 可重新激活，与 overall-test.js 保持一致。
+function isDispatchBugEffectivelyClosed(bug) {
+  if (!bug?.zentao_bug_id) return false;
+  const zentaoStatus = String(bug.zentao_live_status || '').toLowerCase();
+  return (
+    zentaoStatus === 'closed'
+    || !!bug.zentao_close_date
+    || !!bug.zentao_closed_by_name
+    || String(bug.zentao_assigned_to_name || '').toLowerCase() === 'closed'
+  );
+}
+
+function isDispatchBugReactivatable(bug) {
+  if (!bug?.zentao_bug_id) return false;
+  const zentaoStatus = String(bug.zentao_live_status || '').toLowerCase();
+  return isDispatchBugEffectivelyClosed(bug) || zentaoStatus === 'resolved';
+}
+
+function getDispatchAssignedDisplayName(value) {
+  const text = String(value || '').trim();
+  if (!text) return '-';
+  return text.toLowerCase() === 'closed' ? '已关闭' : text;
+}
+
+// 单行渲染：镜像 overall-test.js 的 buildS5RowHtml，列结构为
+// 编号(来源) | 标题 | 操作(编辑/删除/指派/重新激活) | 验证操作(结果+我的闭环确认+说明+保存)。
+function renderDispatchedBugRow(b) {
+  const isMyClosed = b.my_test_done;
+  const isZentaoDeleted = !!b.zentao_deleted;
+  const rowStyle = isZentaoDeleted
+    ? 'background:#fef2f2; box-shadow: inset 4px 0 0 #dc2626;'
+    : (isMyClosed ? 'background: #f8fafc; color: #94a3b8;' : '');
+  const isZentaoBug = !!b.zentao_bug_id;
+  const isEffectivelyClosed = isDispatchBugEffectivelyClosed(b);
+  const canReactivate = isDispatchBugReactivatable(b);
+  const shouldStrikeClosed = !!(isMyClosed || isEffectivelyClosed);
+  const strikeDecoration = shouldStrikeClosed
+    ? 'text-decoration:line-through; text-decoration-thickness:1px; text-decoration-color:#94a3b8;'
+    : '';
+
+  const failBadge = b.is_retest_failed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; margin-left:4px;">🚨复测打回</span>' : '';
+
+  const bugIdText = escapeHtml(b.bug_id || '-');
+  const ztBugId = (b.zentao_bug_id) ? String(b.zentao_bug_id) : (b.bug_id || '').replace(/\D/g, '');
+  const bugHref = b.zentao_bug_url
+    ? `<a class="qa-ext-link" href="${b.zentao_bug_url}" target="_blank" rel="noopener noreferrer">${bugIdText}</a>`
+    : ztBugId
+      ? `<span class="qa-bug-id-nohref" data-zt-bug-id="${ztBugId}">${bugIdText}</span>`
+      : `<span>${bugIdText}</span>`;
+  const bugTitle = escapeHtml(b.zentao_bug_title || b.bug_title || '');
+  const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" data-zt-no-title="1" style="margin-left:4px;"></span>` : '';
+  const previewBugBtn = renderPreviewBtn('bug', ztBugId);
+  const deletedBadge = isZentaoDeleted
+    ? `<span class="badge" style="background:#dc2626; color:#fff; font-weight:bold;">🗑️ 禅道已删除</span>`
+    : '';
+  const reqMeta = `<span style="font-size:12px;color:#64748b;">(${escapeHtml(b.req_title || '')})</span>`;
+  const syncMeta = b.last_zentao_synced_at ? `<span class="badge" style="background:#f8fafc; color:#64748b;">同步 ${escapeHtml(b.last_zentao_synced_at)}</span>` : '';
+  const assignedMeta = (!isZentaoDeleted && b.zentao_assigned_to_name) ? `<span class="badge" style="background:#faf5ff; color:#7c3aed;">当前指派 ${escapeHtml(getDispatchAssignedDisplayName(b.zentao_assigned_to_name))}</span>` : '';
+  const closedByMeta = (!isZentaoDeleted && b.zentao_closed_by_name) ? `<span class="badge" style="background:#ecfdf5; color:#047857;">禅道关闭 ${escapeHtml(b.zentao_closed_by_name)}</span>` : '';
+  const closeDateMeta = (!isZentaoDeleted && b.zentao_close_date) ? `<span class="badge" style="background:#f1f5f9; color:#475569;">${escapeHtml(b.zentao_close_date)}</span>` : '';
+  const otherClosedMeta = (b.other_records && b.other_records.length > 0)
+    ? `<span class="badge" style="background:#eff6ff; color:#1d4ed8;">他人闭环 ${b.other_records.length}</span>`
+    : '';
+
+  const linkStyle = 'font-size:12px; text-decoration:none; white-space:nowrap;';
+  const editLink = `<a href="javascript:void(0)" onclick="dispatchEditBug(${b.id})" style="${linkStyle} color:#3b82f6;">编辑</a>`;
+  const deleteLink = `<a href="javascript:void(0)" onclick="dispatchRemoveBug(${b.id})" style="${linkStyle} color:#ef4444;">删除</a>`;
+  const sep = `<span style="color:#e2e8f0; margin:0 2px;">|</span>`;
+  let actionsHtml;
+  if (isZentaoBug) {
+    const assignLink = `<a href="javascript:void(0)" onclick="dispatchAssignBug(${b.id})" style="${linkStyle} color:#8b5cf6;">指派</a>`;
+    const reactivateVis = canReactivate ? 'visible' : 'hidden';
+    const reactivateLink = `<a href="javascript:void(0)" onclick="dispatchReactivateBug(${b.id})" style="${linkStyle} color:#059669; font-weight:bold; visibility:${reactivateVis};">重新激活</a>`;
+    actionsHtml = `
+      <div style="display:flex; flex-direction:column; gap:3px;">
+        <div style="display:flex; align-items:center; gap:2px;">${editLink}${sep}${deleteLink}</div>
+        <div style="display:flex; align-items:center; gap:2px;">${assignLink}${sep}${reactivateLink}</div>
+      </div>`;
+  } else {
+    actionsHtml = `
+      <div style="display:flex; flex-direction:column; gap:3px;">
+        <div style="display:flex; align-items:center; gap:2px;">${editLink}${sep}${deleteLink}</div>
+        <div style="height:18px;"></div>
+      </div>`;
+  }
+
+  const closeOnChange = `onchange="toggleDispatchedClose(${b.id}, this.checked)"`;
+  const closeLabel = `<label style="color:#0f172a; font-weight:bold; display:flex; align-items:center; gap:4px; margin:0; ${strikeDecoration}"><input id='ddone_${b.id}' type='checkbox' ${isMyClosed ? 'checked' : ''} ${closeOnChange}> 我的闭环确认</label>`;
+  const closeCommentRow = isZentaoBug
+    ? `<div id='dcomment_wrap_${b.id}' style="display:none; margin-top:4px; width:100%;">
+        <textarea id='dcomment_${b.id}' placeholder='闭环说明（将同步写入禅道备注）' style='width:100%; font-size:12px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; resize:vertical; min-height:40px;'>${escapeHtml(b.my_comment || '')}</textarea>
+       </div>`
+    : '';
+
+  return `<tr class="mine-dispatch-row-card" data-bug-id="${b.id}" style="${rowStyle}">
+    <td style="vertical-align:middle; padding:6px 10px;">
+      <div${isZentaoDeleted ? ' style="color:#dc2626; font-weight:bold;"' : ''}>${bugHref}${ztSlot} ${previewBugBtn} <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span>${failBadge}</div>
+      <div style="margin-top:6px;">${reqMeta}</div>
+      ${(deletedBadge || otherClosedMeta) ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">${deletedBadge}${otherClosedMeta}</div>` : ''}
+    </td>
+    <td style="vertical-align:middle; padding:6px 10px;">
+      ${bugTitle ? `<div style="max-height:60px; overflow-y:auto; font-size:13px; color:#475569; line-height:1.65; word-break:break-word; ${strikeDecoration}">${bugTitle}</div>` : '<span style="color:#94a3b8;">-</span>'}
+      ${(syncMeta || assignedMeta || closedByMeta || closeDateMeta) ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">${syncMeta}${assignedMeta}${closedByMeta}${closeDateMeta}</div>` : ''}
+    </td>
+    <td style="vertical-align:middle; padding:6px 8px; width:120px;">${actionsHtml}</td>
+    <td style="text-decoration:none; vertical-align:middle; padding:6px 10px;">
+      <input type="hidden" id="dzt_${b.id}" value="${b.zentao_bug_id || ''}">
+      <input type="hidden" id="dwasclosed_${b.id}" value="${b.closed ? '1' : ''}">
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <select id='dres_${b.id}' style="padding:2px; font-size:13px; border:1px solid #cbd5e1; border-radius:4px; color:#475569; ${strikeDecoration}" ${isMyClosed ? 'disabled' : ''}>
+          <option value="fixed" ${b.my_resolution === 'fixed' ? 'selected' : ''}>✅修复通过</option>
+          <option value="false_alarm" ${b.my_resolution === 'false_alarm' ? 'selected' : ''}>⚠️误报</option>
+          <option value="rejected" ${b.my_resolution === 'rejected' ? 'selected' : ''}>拒绝修复</option>
+        </select>
+        ${closeLabel}
+        ${closeCommentRow}
+        <button class="${isMyClosed ? 'secondary' : ''}" style="${strikeDecoration}" onclick="saveDispatchedBug(${b.id})">保存记录</button>
+      </div>
+    </td>
+  </tr>`;
+}
+
+// 可折叠面板（默认折叠），内部表格与测试工作台大盘行布局一致。
+function renderDispatchPanel(ddata) {
+  const rows = ddata.map((b) => renderDispatchedBugRow(b)).join('');
+  return `<details class="card" data-dispatch-panel="1" style="border:2px solid #3b82f6; background:#eff6ff; margin-bottom:24px;">
+    <summary style="outline:none; cursor:pointer; color:#1d4ed8; font-size:16px; font-weight:bold; display:flex; align-items:center; gap:8px; list-style:none;">
+      <span>🪂 指派给我的Bug</span>
+      <span class="badge" style="background:#dbeafe; color:#1d4ed8; border:1px solid #bfdbfe;">${ddata.length}</span>
+      <span style="font-size:12px; color:#64748b; font-weight:normal;">(点击展开/收起)</span>
+    </summary>
+    <div style="margin-top:12px;">
+      <table style="background:#fff; border-radius:6px; overflow:hidden;">
+        <thead><tr><th style="width:260px">Bug 编号 (来源)</th><th>Bug 标题</th><th style="width:120px">操作</th><th style="width:420px">验证操作</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </details>`;
+}
+
 export async function loadMyWorkbench() {
   initTestExecutionModal();
   refreshMineMinorSelectByMode();
@@ -518,54 +659,12 @@ export async function loadMyWorkbench() {
   }
 
   state.currentDispatchHtml = '';
+  state.currentDispatchData = [];
   if (mode === 'version' && majorId) {
     const ddata = await (await api('/bugs/dispatched-to-me?major_version_id=' + majorId)).json();
+    state.currentDispatchData = ddata;
     if (ddata.length > 0) {
-      state.currentDispatchHtml = `<div class="card" style="border:2px solid #3b82f6; background:#eff6ff; margin-bottom:24px;">
-        <h3 style="color:#1d4ed8; margin-top:0; border-bottom:1px dashed #93c5fd; padding-bottom:8px;">🪂 指派给我的Bug</h3>
-        <table style="background:#fff; border-radius:6px; overflow:hidden;">
-          <thead><tr><th>Bug 编号 / 归属需求</th><th>引出的新Bug</th><th>专项处理操作</th></tr></thead>
-          <tbody>
-            ${ddata.map((b) => {
-              const ztBugId = (b.bug_id || '').replace(/\D/g, '');
-              const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:4px;"></span>` : '';
-              const previewBugBtn = renderPreviewBtn('bug', ztBugId);
-              return `
-              <tr style="${b.test_done ? 'background:#f8fafc; color:#94a3b8; text-decoration:line-through;' : ''}">
-                <td>${renderBugLink(b)} ${ztSlot} ${previewBugBtn} <span style="font-size:12px;color:#64748b;">(${b.req_title})</span></td>
-                <td>
-                  <input type="hidden" id="dnb_hidden_${b.id}" value="${b.newly_found_bug_id || ''}">
-                  <div style="margin-bottom:6px;">
-                    ${(b.newly_found_bug_id ? b.newly_found_bug_id.split(',') : []).map((dbug) => `
-                      <span class="badge" style="background:#fef2f2; color:#b91c1c; border:1px solid #fca5a5; margin-right:4px; margin-bottom:4px; display:inline-block;">
-                        ${dbug} <a href="javascript:void(0)" onclick="${b.test_done ? 'return false;' : `removeDerivedBug(${b.id}, '${dbug}')`}" style="color:#7f1d1d; text-decoration:none; margin-left:4px; font-weight:bold;">×</a>
-                      </span>
-                    `).join('') || '<span class="muted" style="font-size:12px;">暂无引出Bug</span>'}
-                  </div>
-                </td>
-                <td style="text-decoration:none;">
-                  <input type="hidden" id="dzt_${b.id}" value="${b.zentao_bug_id || ''}">
-                  <input type="hidden" id="dwasclosed_${b.id}" value="${b.closed ? '1' : ''}">
-                  <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                    <select id='dres_${b.id}' style="padding:2px; font-size:13px;" ${b.test_done ? 'disabled' : ''}>
-                      <option value="fixed" ${b.resolution === 'fixed' ? 'selected' : ''}>🚀修复通过</option>
-                      <option value="false_alarm" ${b.resolution === 'false_alarm' ? 'selected' : ''}>⚠️误报</option>
-                      <option value="rejected" ${b.resolution === 'rejected' ? 'selected' : ''}>⛔拒绝修复</option>
-                    </select>
-                    <label style="color:#0f172a; display:flex; align-items:center; gap:4px; margin:0;"><input id='ddone_${b.id}' type='checkbox' ${b.test_done ? 'checked' : ''} onchange="toggleDispatchedClose(${b.id}, this.checked)"> 确认闭环</label>
-                    <button class="${b.test_done ? 'secondary' : ''}" onclick="saveDispatchedBug(${b.id})">保存记录</button>
-                  </div>
-                  <div id="dcomment_wrap_${b.id}" style="margin-top:6px; display:none;">
-                    <textarea id="dcomment_${b.id}" rows="2" placeholder="闭环说明（将同步写入禅道备注）" style="width:100%; font-size:12px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px;"></textarea>
-                    ${b.zentao_bug_id ? '<div class="muted" style="font-size:11px; margin-top:2px;">勾选「确认闭环」保存时会同步关闭禅道 Bug（需禅道中已是“已解决”）。</div>' : ''}
-                  </div>
-                </td>
-              </tr>
-            `;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>`;
+      state.currentDispatchHtml = renderDispatchPanel(ddata);
     }
   }
 

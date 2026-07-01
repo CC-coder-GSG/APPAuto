@@ -13,6 +13,7 @@ export const state = {
   currentMineData: [],
   currentFeedbackTodoHtml: '',
   currentDispatchHtml: '',
+  currentDispatchData: [],
   currentRetestData: [],
   overallTestRows: [],
   overallTestAllVersionsMode: false,

@@ -3136,12 +3136,20 @@ function toggleDispatchedClose(id, checked) {
   return window.OmniQADispatchTab.toggleDispatchedClose(id, checked);
 }
 
-async function addDerivedBug(id) {
-  return window.OmniQADispatchTab.addDerivedBug(id);
+async function dispatchEditBug(id) {
+  return window.OmniQADispatchTab.dispatchEditBug(id);
 }
 
-async function removeDerivedBug(id, bugToRemove) {
-  return window.OmniQADispatchTab.removeDerivedBug(id, bugToRemove);
+async function dispatchRemoveBug(id) {
+  return window.OmniQADispatchTab.dispatchRemoveBug(id);
+}
+
+function dispatchAssignBug(id) {
+  return window.OmniQADispatchTab.dispatchAssignBug(id);
+}
+
+function dispatchReactivateBug(id) {
+  return window.OmniQADispatchTab.dispatchReactivateBug(id);
 }
 
 async function searchDispatchBug() {
