@@ -229,8 +229,8 @@ def test_operate_start_preserves_assignee_via_reassign(db_session, monkeypatch):
     assert any(c[0] == "reassign" and c[2] == "alice" for c in client.calls)
 
 
-def test_pause_task_falls_back_to_put_when_action_unauthorized(monkeypatch):
-    # 禅道 v1 未开放 /tasks/{id}/pause（401）→ pause_task 回退用 PUT 改 status
+def test_pause_task_falls_back_to_page_action_when_rest_unauthorized(monkeypatch):
+    # 禅道 v1 未开放 /tasks/{id}/pause（401）→ pause_task 回退走传统页面动作 task-pause
     from app.services.zentao_client_service import ZentaoClient, ZentaoAPIError
 
     client = ZentaoClient(base_url="http://z", token="t")
@@ -239,15 +239,15 @@ def test_pause_task_falls_back_to_put_when_action_unauthorized(monkeypatch):
     def fake_post(path, body=None):
         raise ZentaoAPIError(401, '{"error":"Unauthorized"}')
 
-    def fake_put(path, body=None):
-        calls["put"] = (path, body)
-        return {"id": 17246, "status": "pause"}
+    def fake_post_page(path, data=None):
+        calls["page"] = (path, data)
+        return {"status": "success"}
 
     monkeypatch.setattr(client, "post", fake_post)
-    monkeypatch.setattr(client, "put", fake_put)
+    monkeypatch.setattr(client, "post_page", fake_post_page)
     res = client.pause_task(17246)
-    assert calls["put"] == ("tasks/17246", {"status": "pause"})
-    assert res.get("status") == "pause"
+    assert calls["page"][0] == "task-pause-17246.json"
+    assert res.get("status") == "success"
 
 
 def test_operate_pause_noop_surfaces_error(db_session, monkeypatch):

@@ -234,6 +234,35 @@ class ZentaoClient:
             logger.warning("ZentaoClient.get_page error path=%s: %s", path, e)
             return None
 
+    def post_page(self, path: str, data: dict | None = None) -> dict | None:
+        """POST 到禅道传统页面动作（非 v1 REST），如 task-pause-{id}.json。
+
+        用于 v1 REST 未开放的状态动作（pause 等）。本部署的传统 .json 页面接受
+        Token 头鉴权（list_assignable_users 即走 get_page + Token）。用表单编码提交，
+        与 Zentao 传统动作读取 $_POST 一致。返回解析后的 JSON（失败/非 JSON 返回原文包裹）。
+        """
+        url = f"{self.base_url}/{path.lstrip('/')}"
+        headers = {
+            "Token": self.token,
+            "Accept": "application/json, text/html;q=0.8, */*;q=0.5",
+        }
+        try:
+            resp = httpx.post(url, data=(data or {}), headers=headers, timeout=_DEFAULT_TIMEOUT, follow_redirects=True)
+            if resp.status_code not in (200, 201):
+                raise ZentaoAPIError(resp.status_code, resp.text[:300])
+            text = (resp.text or "").strip()
+            if not text:
+                return {"message": "success"}
+            try:
+                return _loads_lenient(text)
+            except Exception:
+                return {"raw": text[:300]}
+        except ZentaoAPIError:
+            raise
+        except Exception as e:
+            logger.warning("ZentaoClient.post_page error path=%s: %s", path, e)
+            raise ZentaoAPIError(0, str(e))
+
     def get_page_text(self, path: str, params: dict | None = None) -> str | None:
         """
         Fetch raw HTML/text from a Zentao page endpoint using Token auth.
@@ -624,9 +653,11 @@ class ZentaoClient:
         try:
             return self.post(f"tasks/{task_id}/pause", body)
         except ZentaoAPIError as exc:
+            # 该禅道版本 v1 REST 未开放 /tasks/{id}/pause（未匹配路由回 401），且 PUT 编辑
+            # 会忽略 status 字段（实测 no-op）→ 改走传统页面动作 task-pause 执行状态切换。
             if exc.status_code in (401, 404, 405):
-                logger.warning("pause action endpoint unavailable (%s), fallback to PUT status for task %s", exc, task_id)
-                return self.put(f"tasks/{task_id}", {"status": "pause"})
+                logger.warning("pause action endpoint unavailable (%s), fallback to legacy page action for task %s", exc, task_id)
+                return self.post_page(f"task-pause-{task_id}.json", {"comment": comment or ""})
             raise
 
     def finish_task(
