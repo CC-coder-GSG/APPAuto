@@ -1,16 +1,42 @@
 from __future__ import annotations
 
+import logging
+import time
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import FinalTestRecord, Requirement, RequirementRetestRecord, User, Version
 from app.services.workbench_link_service import WorkbenchLinkService
 
+logger = logging.getLogger(__name__)
+
+# 进程内节流：同一大版本的禅道任务状态同步最多每 N 秒一次，避免 SSE 频繁
+# 刷新工作台时反复打禅道接口。
+_TASK_STATUS_SYNC_TTL_SECONDS = 20
+_task_status_sync_at: dict[int, float] = {}
+
 
 class WorkbenchService:
     def __init__(self, db: Session):
         self.db = db
         self.link_service = WorkbenchLinkService(db)
+
+    def _maybe_sync_task_status(self, major_version_id: int | None) -> None:
+        """按大版本节流地从禅道回写子任务状态/指派人（最佳努力，失败不影响加载）。"""
+        if not major_version_id:
+            return
+        now = time.monotonic()
+        last = _task_status_sync_at.get(major_version_id, 0.0)
+        if now - last < _TASK_STATUS_SYNC_TTL_SECONDS:
+            return
+        _task_status_sync_at[major_version_id] = now
+        try:
+            from app.services.zentao_task_sync_service import ZentaoTaskSyncService
+
+            ZentaoTaskSyncService(self.db).sync_tasks_status_for_major(major_version_id)
+        except Exception as exc:  # noqa: BLE001 — 禅道侧异常绝不阻断工作台加载
+            logger.warning("workbench task status sync major %s failed: %s", major_version_id, exc)
 
     def get_my_workbench(
         self,
@@ -20,6 +46,11 @@ class WorkbenchService:
         mode: str = "version",
         software_id: int | None = None,
     ) -> list[dict]:
+        # 进入版本工作台时，先按大版本回写禅道子任务的最新状态/指派人（节流+最佳努力），
+        # 避免「已在禅道完成的任务本地仍显示未开始」以及指派人判定过期。
+        if mode == "version" and major_version_id:
+            self._maybe_sync_task_status(major_version_id)
+
         # 最终测试模式：所选大版本已开启 final_test 时，无视分配，返回该版本全部
         # 需求，且勾选状态改用当前用户独立的 FinalTestRecord。
         final_test_mode = False
@@ -79,6 +110,16 @@ class WorkbenchService:
             include_retest=False,
         )
 
+        # 当前用户的禅道账号（用于判定子任务是否指派给本人）。
+        my_account = (current_user.zentao_account or "").strip().lower()
+
+        def _task_assigned_to_me(r: Requirement) -> bool:
+            if not r.zentao_task_id:
+                return False
+            assignee = (r.zentao_task_assigned_to or "").strip().lower()
+            # 未知指派人时保守视为“非本人”，避免误放开始/完成禅道任务的权限。
+            return bool(my_account) and assignee == my_account
+
         return [
             {
                 "id": r.id,
@@ -96,6 +137,10 @@ class WorkbenchService:
                 "zentao_task_status": r.zentao_task_status_cache,
                 "task_started_at": r.task_started_at.isoformat() if r.task_started_at else None,
                 "estimated_test_hours": r.estimated_test_hours,
+                # 子任务指派人账号 + 是否指派给当前用户（前端据此决定是否显示
+                # 开始/预计用时、以及勾选完成时是否联动禅道完成任务）。
+                "zentao_task_assigned_to": r.zentao_task_assigned_to,
+                "task_assigned_to_me": _task_assigned_to_me(r),
                 "test_notes": r.test_notes,
                 "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
                 "test_notes_updated_by_name": r.test_notes_updated_by.shown_name if r.test_notes_updated_by else None,

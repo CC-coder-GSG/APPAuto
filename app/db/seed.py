@@ -181,6 +181,9 @@ def ensure_requirement_schema_compat(db: Session) -> None:
     if "zentao_task_status_cache" not in req_cols:
         db.execute(text("ALTER TABLE requirements ADD COLUMN zentao_task_status_cache VARCHAR(20)"))
         db.commit()
+    if "zentao_task_assigned_to" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN zentao_task_assigned_to VARCHAR(120)"))
+        db.commit()
     if "test_completed_at" not in req_cols:
         db.execute(text("ALTER TABLE requirements ADD COLUMN test_completed_at DATETIME"))
         # Backfill existing test_completed=True rows with their updated_at as a

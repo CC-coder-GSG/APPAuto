@@ -154,6 +154,78 @@ def test_workbench_mine_exposes_zentao_task_linkage(db_session):
     assert by_id[unlinked.id]["zentao_task_id"] is None
 
 
+def test_workbench_mine_task_assignee_flag(db_session):
+    """指派人判定：task_assigned_to_me 依据禅道账号匹配子任务指派人。"""
+    major = _major(db_session, "V9008")
+    owner = _user(db_session, "ft_owner8")
+    owner.zentao_account = "owner8acc"
+    r = _req(db_session, major.id, "r#9501", owner_id=owner.id)
+    r.zentao_task_id = 800
+    r.zentao_task_assigned_to = "owner8acc"
+    db_session.commit()
+
+    rows = WorkbenchService(db_session).get_my_workbench(
+        current_user=owner, major_version_id=major.id, mode="version"
+    )
+    row = {x["id"]: x for x in rows}[r.id]
+    assert row["task_assigned_to_me"] is True
+    assert row["zentao_task_assigned_to"] == "owner8acc"
+
+    # 指派给别人 → False（前端据此隐藏开始/预计用时）
+    r.zentao_task_assigned_to = "someoneelse"
+    db_session.commit()
+    rows = WorkbenchService(db_session).get_my_workbench(
+        current_user=owner, major_version_id=major.id, mode="version"
+    )
+    assert {x["id"]: x for x in rows}[r.id]["task_assigned_to_me"] is False
+
+
+def test_final_test_finish_only_for_task_assignee(db_session, monkeypatch):
+    """最终测试勾选完成：仅子任务指派人本人才联动禅道 finish，其他人只留本地记录。"""
+    major = _major(db_session, "V9009")
+    admin = _user(db_session, "ft_admin9", role=UserRole.ADMIN)
+    assignee = _user(db_session, "ft_assignee9")
+    assignee.zentao_account = "acc9"
+    other = _user(db_session, "ft_other9")
+    other.zentao_account = "other9"
+    r = _req(db_session, major.id, "r#9601", owner_id=assignee.id)
+    r.zentao_task_id = 900
+    r.zentao_task_assigned_to = "acc9"
+    db_session.commit()
+    FinalTestService(db_session).toggle(major.id, True, admin)
+
+    calls = []
+    monkeypatch.setattr(
+        "app.services.zentao_task_sync_service.ZentaoTaskSyncService.finish_requirement_task",
+        lambda self, requirement: (calls.append(requirement.id), {"ok": True, "errors": []})[1],
+    )
+    # 非指派人勾选完成 → 只本地，不联动禅道
+    FinalTestService(db_session).upsert_record(r.id, other, test_completed=True)
+    assert calls == []
+    # 指派人勾选完成 → 联动禅道 finish
+    FinalTestService(db_session).upsert_record(r.id, assignee, test_completed=True)
+    assert calls == [r.id]
+
+
+def test_start_task_blocked_for_non_assignee(db_session):
+    """开始任务：即便是负责人，若不是子任务指派人也被拒绝（仅指派人可开始）。"""
+    import pytest
+    from fastapi import HTTPException
+    from app.services.requirement_service import RequirementService
+
+    major = _major(db_session, "V9010")
+    owner_not_assignee = _user(db_session, "ft_ot10")
+    owner_not_assignee.zentao_account = "ot10"
+    r = _req(db_session, major.id, "r#9701", owner_id=owner_not_assignee.id)
+    r.zentao_task_id = 1000
+    r.zentao_task_assigned_to = "acc10"  # 指派给别人
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as ei:
+        RequirementService(db_session).start_requirement_task(r.id, owner_not_assignee)
+    assert ei.value.status_code == 403
+
+
 def test_progress_for_major_aggregates(db_session):
     major = _major(db_session, "V9006")
     admin = _user(db_session, "ft_admin6", role=UserRole.ADMIN)

@@ -547,6 +547,30 @@ async def assign_and_publish(payload: AssignPublishPayload, current_user=Depends
     return {"message": result.get("message", "Assignments updated"), "zentao": zentao_result}
 
 
+@router.post("/requirements/create-zentao-tasks")
+def create_zentao_tasks(payload: AssignPublishPayload, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    """仅在禅道创建/改派测试任务，不改动本地负责人、不发送企微通知。
+
+    用于「分配并发布（企微）」之后单独补建任务：创建有时会部分失败，若靠重新点击
+    发布来重试会重复推送企微通知，故独立成一个按钮。幂等：已建过的按 story 认领，
+    禅道侧已取消/关闭的会重建。
+    """
+    ensure_tab_access(current_user, "assign")
+    task_service = ZentaoTaskSyncService(db)
+    try:
+        zentao_result = task_service.create_tasks_for_assignment(
+            payload.major_version_id,
+            [{"requirement_id": item.requirement_id, "owner_id": item.owner_id} for item in payload.assignments],
+            est_started=payload.task_start_date,
+            deadline=payload.task_deadline,
+            actor=current_user,
+        )
+    except Exception as exc:  # 兜底，禅道异常不抛 500
+        logger.warning("create_zentao_tasks failed: %s", exc)
+        zentao_result = {"ok": False, "errors": [str(exc)]}
+    return {"message": "禅道任务创建已执行", "zentao": zentao_result}
+
+
 @router.patch("/requirements/{requirement_id}/status")
 def patch_requirement_status(
     requirement_id: int,

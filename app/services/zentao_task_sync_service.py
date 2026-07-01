@@ -70,6 +70,19 @@ def _task_account(t: dict) -> Optional[str]:
     return str(a) if a else None
 
 
+# 禅道侧「已失效」的任务状态：被取消 / 关闭的任务不应再被认领或改派，
+# 需求应视为「未建任务」重新创建一条新的子任务。
+_DEAD_TASK_STATUSES = {"cancel", "closed"}
+
+
+def _task_status(t: dict) -> str:
+    return str((t or {}).get("status") or "").strip().lower()
+
+
+def _is_dead_task(t: Optional[dict]) -> bool:
+    return _task_status(t) in _DEAD_TASK_STATUSES
+
+
 class ZentaoTaskSyncService:
     def __init__(self, db: Session):
         self.db = db
@@ -162,18 +175,38 @@ class ZentaoTaskSyncService:
             u.id: u for u in self.db.query(User).filter(User.id.in_(owner_ids)).all()
         } if owner_ids else {}
 
-        new_items: list[tuple[Requirement, User]] = []      # 待建子任务
-        reassign_items: list[tuple[Requirement, User]] = []  # 待改派
+        # 先拉取执行下现有任务索引（by_id 判活 / by_story 认领），据此分类：
+        #   - 本地已关联且禅道侧任务仍存活（非取消/关闭/删除）→ 改派
+        #   - 否则清除本地陈旧关联，走「认领同 story 存活任务 / 新建」流程
+        # 这样「分配后在禅道取消/关闭了任务，再重新分配」也能正确新建一条新任务。
+        by_id, existing_by_story = self._index_existing_test_tasks(client, exec_id)
+
+        reassign_items: list[tuple[Requirement, User]] = []  # 待改派（现有存活任务）
+        pending_items: list[tuple[Requirement, User]] = []   # 需认领或新建
 
         for a in assignments:
             req = req_map.get(a.get("requirement_id"))
             owner = user_map.get(a.get("owner_id"))
             if not req or not owner:
                 continue
-            if req.zentao_task_id:
+            live = by_id.get(int(req.zentao_task_id)) if req.zentao_task_id else None
+            if req.zentao_task_id and _is_dead_task(live):
+                # 禅道侧已被取消/关闭：作废本地关联，按缺失重新建任务。
+                # （仅在明确查到 dead 状态时才重建；查不到可能是分页/临时不可见，
+                #  仍走改派以避免误重建。）
+                logger.info(
+                    "req %s 本地关联子任务 #%s 在禅道已%s，将重新建任务",
+                    req.id, req.zentao_task_id, _task_status(live),
+                )
+                req.zentao_task_id = None
+                req.zentao_parent_task_id = None
+                req.zentao_task_status_cache = None
+                req.zentao_task_assigned_to = None
+                pending_items.append((req, owner))
+            elif req.zentao_task_id:
                 reassign_items.append((req, owner))
             else:
-                new_items.append((req, owner))
+                pending_items.append((req, owner))
 
         # ── 改派已有子任务 ──
         for req, owner in reassign_items:
@@ -183,20 +216,19 @@ class ZentaoTaskSyncService:
                 continue
             try:
                 client.reassign_task(int(req.zentao_task_id), acc)
+                req.zentao_task_assigned_to = acc
                 out["reassigned_tasks"].append(req.zentao_task_id)
             except Exception as exc:
                 logger.warning("reassign task %s -> %s failed: %s", req.zentao_task_id, acc, exc)
                 out["errors"].append(f"改派子任务 #{req.zentao_task_id}（{req.title}）失败：{exc}")
 
-        # ── 新需求：幂等处理（认领已存在任务 + 仅对真正缺失的新建）──
-        # 先按 story 索引执行下已有的 test 子任务。若某需求的任务此前已建过（常见于
-        # 子任务很多、单次请求超时导致禅道已建但本地没写回），本次直接认领写回，
-        # 绝不重复新建。这样「重新发布一次」即可自愈历史未关联的需求。
-        existing_by_story = self._index_existing_test_tasks(client, exec_id)
-
+        # ── 认领同 story 的存活任务 + 仅对真正缺失的新建 ──
+        # 若某需求的任务此前已建过（常见于子任务很多、单次请求超时导致禅道已建但本地
+        # 没写回），本次直接认领写回，绝不重复新建。已取消/关闭的死任务不在 by_story 中，
+        # 不会被认领。
         adopt_items: list[tuple[Requirement, User, dict]] = []
         create_new_items: list[tuple[Requirement, User]] = []
-        for req, owner in new_items:
+        for req, owner in pending_items:
             t = existing_by_story.get(req.zentao_story_id) if req.zentao_story_id else None
             if t:
                 adopt_items.append((req, owner, t))
@@ -215,9 +247,11 @@ class ZentaoTaskSyncService:
             req.zentao_task_status_cache = str(t.get("status") or "wait")
             acc = self._resolve_account(owner, assignable)
             cur_acc = _task_account(t)
+            req.zentao_task_assigned_to = cur_acc  # 先按禅道现值缓存，改派成功后再覆盖
             if acc and cur_acc and acc.strip().lower() != cur_acc.strip().lower():
                 try:
                     client.reassign_task(tid, acc)
+                    req.zentao_task_assigned_to = acc
                     out["reassigned_tasks"].append(tid)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("reassign adopted task %s -> %s failed: %s", tid, acc, exc)
@@ -288,6 +322,7 @@ class ZentaoTaskSyncService:
                         req.zentao_task_id = int(child_id)
                         req.zentao_parent_task_id = int(parent_id)
                         req.zentao_task_status_cache = "wait"
+                        req.zentao_task_assigned_to = acc
                         out["created_tasks"].append(child_id)
                         # 逐条提交：即使后续超时，已建的也不丢、下次按 story 认领不会重复建。
                         try:
@@ -303,26 +338,83 @@ class ZentaoTaskSyncService:
         out["ok"] = not out["errors"]
         return out
 
-    def _index_existing_test_tasks(self, client, exec_id: int) -> dict[int, dict]:
-        """按 story 索引执行下已有的 test 子任务，取同 story 中 id 最大（最新）的一条。"""
+    def _index_existing_test_tasks(self, client, exec_id: int) -> tuple[dict[int, dict], dict[int, dict]]:
+        """索引执行下已有的 test 任务，返回 (by_id, by_story)。
+
+        - by_id：按任务 id 索引全部 test 任务（含已取消/关闭），用于按 id 判活。
+        - by_story：按 story 索引「存活」(非取消/关闭)的 test 子任务，取同 story 中
+          id 最大（最新）的一条，供认领。已取消/关闭的任务不进 by_story，避免把
+          禅道上已被取消/关闭的死任务重新认领回来（会导致重新分配时不新建）。
+        """
         try:
             rows = client.list_execution_tasks(exec_id) or []
         except Exception as exc:  # noqa: BLE001
             logger.warning("index existing tasks exec %s failed: %s", exec_id, exc)
-            return {}
-        idx: dict[int, dict] = {}
+            return {}, {}
+        by_id: dict[int, dict] = {}
+        by_story: dict[int, dict] = {}
         for t in rows:
             if not isinstance(t, dict) or str(t.get("type") or "") != "test":
                 continue
-            sid = _coerce_int(t.get("story"))
             tid = _coerce_int(t.get("id"))
+            if tid:
+                by_id[tid] = t
+            sid = _coerce_int(t.get("story"))
             if not sid or not tid:
                 continue
+            if _is_dead_task(t):
+                continue
             # 只认子任务（有 parent），父任务 story 通常为 0、不会进来
-            prev = idx.get(sid)
+            prev = by_story.get(sid)
             if prev is None or tid > _coerce_int(prev.get("id")):
-                idx[sid] = t
-        return idx
+                by_story[sid] = t
+        return by_id, by_story
+
+    def sync_tasks_status_for_major(self, major_version_id: int) -> dict:
+        """最佳努力：拉取该大版本禅道执行下的任务，回写本地状态缓存 + 指派人账号。
+
+        只更新按 zentao_task_id 命中的需求（禅道为权威）；找不到的（可能被彻底
+        删除）不动，避免网络/分页抖动误清关联。任何异常都吞掉，不抛给调用方。
+        """
+        out: dict = {"updated": 0, "errors": []}
+        major = self.db.query(Version).filter(Version.id == major_version_id).first()
+        if not major or not major.zentao_execution_id:
+            return out
+        client = get_system_zentao_client(self.db)
+        if not client:
+            return out
+        by_id, _ = self._index_existing_test_tasks(client, int(major.zentao_execution_id))
+        if not by_id:
+            return out
+        reqs = (
+            self.db.query(Requirement)
+            .filter(
+                Requirement.major_version_id == major_version_id,
+                Requirement.zentao_task_id.isnot(None),
+            )
+            .all()
+        )
+        changed = False
+        for req in reqs:
+            t = by_id.get(int(req.zentao_task_id))
+            if not t:
+                continue
+            status = _task_status(t) or None
+            acc = _task_account(t)
+            if status and req.zentao_task_status_cache != status:
+                req.zentao_task_status_cache = status
+                changed = True
+                out["updated"] += 1
+            if acc is not None and req.zentao_task_assigned_to != acc:
+                req.zentao_task_assigned_to = acc
+                changed = True
+        if changed:
+            try:
+                self.db.commit()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("commit task status sync major %s failed: %s", major_version_id, exc)
+                self.db.rollback()
+        return out
 
     # ------------------------------------------------------------------
     # 能力 C：开始 / 完成 / 重新激活

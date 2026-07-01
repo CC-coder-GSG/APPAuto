@@ -417,7 +417,7 @@ class RequirementService:
             "conflict_count": conflict_count,
         }
 
-    def _mark_test_completed_transition(self, requirement: Requirement, test_completed: bool) -> None:
+    def _mark_test_completed_transition(self, requirement: Requirement, test_completed: bool, acting_user: User | None = None) -> None:
         """
         Set test_completed plus its timestamp anchor.
 
@@ -430,18 +430,19 @@ class RequirementService:
         requirement.test_completed = bool(test_completed)
         if test_completed and not was_completed:
             requirement.test_completed_at = local_now()
-            self._sync_zentao_task_on_test_completed(requirement, finished=True)
+            self._sync_zentao_task_on_test_completed(requirement, finished=True, acting_user=acting_user)
         elif not test_completed and was_completed:
             requirement.test_completed_at = None
-            self._sync_zentao_task_on_test_completed(requirement, finished=False)
+            self._sync_zentao_task_on_test_completed(requirement, finished=False, acting_user=acting_user)
 
-    def _sync_zentao_task_on_test_completed(self, requirement: Requirement, *, finished: bool) -> None:
+    def _sync_zentao_task_on_test_completed(self, requirement: Requirement, *, finished: bool, acting_user: User | None = None) -> None:
         """测试完成勾选/取消 → 禅道子任务 完成 / 重新激活。
 
-        仅在该需求绑定了禅道子任务时才动作；任何异常都吞掉，不影响本地状态流转
-        （禅道为辅，本地为主）。
+        仅在该需求绑定了禅道子任务、且操作者是子任务指派人时才联动禅道；否则只保留
+        本地记录（对应「非指派人勾选完成只做本地记录」）。任何异常都吞掉，不影响本地
+        状态流转（禅道为辅，本地为主）。
         """
-        if not requirement.zentao_task_id:
+        if not self._may_drive_zentao_task(requirement, acting_user):
             return
         try:
             from app.services.zentao_task_sync_service import ZentaoTaskSyncService
@@ -524,9 +525,48 @@ class RequirementService:
             raise HTTPException(status_code=403, detail="只有负责人可以操作该需求的任务")
         return req
 
+    @staticmethod
+    def _is_task_assignee(requirement: Requirement, user: User) -> bool:
+        """当前用户的禅道账号是否等于该子任务的指派人账号。"""
+        assignee = (requirement.zentao_task_assigned_to or "").strip().lower()
+        acc = (getattr(user, "zentao_account", None) or "").strip().lower()
+        return bool(assignee) and bool(acc) and assignee == acc
+
+    def _may_drive_zentao_task(self, requirement: Requirement, acting_user: User | None) -> bool:
+        """是否允许由本次操作联动禅道子任务（开始/完成/重新激活）。
+
+        规则：需求已绑定禅道子任务，且（未记录指派人[历史兼容] 或 操作者就是指派人）。
+        acting_user 为 None 时视为不做指派人限制（内部/自动化调用，保持向后兼容）。
+        """
+        if not requirement.zentao_task_id:
+            return False
+        assignee = (requirement.zentao_task_assigned_to or "").strip()
+        if not assignee:
+            return True  # 历史数据未同步指派人：保持旧行为
+        if acting_user is None:
+            return True
+        return self._is_task_assignee(requirement, acting_user)
+
+    def _get_task_actionable_requirement(self, requirement_id: int, current_user: User) -> Requirement:
+        """开始 / 设置预计用时的权限：管理员，或（已建任务时）子任务指派人本人，
+        或（未建任务时/未记录指派人时）需求负责人。非指派人操作已建任务一律拒绝，
+        对应「任务指派人和当前账号相同时才允许点击开始、设置时间」。"""
+        req = self.db.query(Requirement).filter(Requirement.id == requirement_id).first()
+        if not req:
+            raise HTTPException(status_code=404, detail="需求不存在")
+        if current_user.role == UserRole.ADMIN:
+            return req
+        if req.zentao_task_id and (req.zentao_task_assigned_to or "").strip():
+            if self._is_task_assignee(req, current_user):
+                return req
+            raise HTTPException(status_code=403, detail="该禅道任务未指派给你，无法操作")
+        if req.owner_id == current_user.id:
+            return req
+        raise HTTPException(status_code=403, detail="只有负责人或任务指派人可以操作该任务")
+
     def update_estimated_test_hours(self, requirement_id: int, hours: float, current_user: User) -> dict:
-        """更新需求的预计测试用时（小时）。"""
-        req = self._get_owned_requirement(requirement_id, current_user)
+        """更新需求的预计测试用时（小时）。仅任务指派人本人（或负责人/管理员）可改。"""
+        req = self._get_task_actionable_requirement(requirement_id, current_user)
         try:
             h = float(hours)
         except (TypeError, ValueError):
@@ -538,8 +578,8 @@ class RequirementService:
         return {"message": "预计测试用时已更新", "estimated_test_hours": req.estimated_test_hours}
 
     def start_requirement_task(self, requirement_id: int, current_user: User, hours: float | None = None) -> dict:
-        """点击「开始」：记录开始时刻并让禅道子任务开始。"""
-        req = self._get_owned_requirement(requirement_id, current_user)
+        """点击「开始」：记录开始时刻并让禅道子任务开始。仅任务指派人本人可开始。"""
+        req = self._get_task_actionable_requirement(requirement_id, current_user)
         from app.services.zentao_task_sync_service import ZentaoTaskSyncService
         result = ZentaoTaskSyncService(self.db).start_requirement_task(req, hours=hours)
         self.db.refresh(req)
@@ -798,7 +838,7 @@ class RequirementService:
         if case_completed is not None:
             requirement.case_completed = case_completed
         if test_completed is not None:
-            self._mark_test_completed_transition(requirement, test_completed)
+            self._mark_test_completed_transition(requirement, test_completed, acting_user=current_user)
 
         self.recalculate_requirement_status(requirement, actor_id=current_user.id)
         self.db.commit()
@@ -841,7 +881,8 @@ class RequirementService:
         requirement = self.db.query(Requirement).filter(Requirement.id == requirement_id).first()
         if not requirement:
             raise HTTPException(status_code=404, detail="Requirement not found")
-        self._mark_test_completed_transition(requirement, test_completed)
+        acting_user = self.db.query(User).filter(User.id == actor_id).first() if actor_id else None
+        self._mark_test_completed_transition(requirement, test_completed, acting_user=acting_user)
         self.recalculate_requirement_status(requirement, actor_id=actor_id)
         self.db.commit()
         audit(
@@ -971,7 +1012,8 @@ class RequirementService:
         execution.notes = notes
         execution.executed_by_id = actor_id
         execution.executed_at = local_now()
-        self._mark_test_completed_transition(requirement, test_completed)
+        acting_user = self.db.query(User).filter(User.id == actor_id).first() if actor_id else None
+        self._mark_test_completed_transition(requirement, test_completed, acting_user=acting_user)
         self.recalculate_requirement_status(requirement, actor_id=actor_id)
         self.db.commit()
         self.db.refresh(execution)

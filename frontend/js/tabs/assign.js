@@ -362,17 +362,51 @@ export async function publishAssign() {
   }
 }
 
+// 仅在禅道创建/改派任务，不发企微、不改本地负责人。用于「发布」后创建失败时单独重试。
+export async function createZentaoTasks() {
+  const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
+  if (!majorId) {
+    window.showMessage && window.showMessage('“全部版本”仅用于查看；请先选择一个具体大版本', 'error');
+    return;
+  }
+  const assignments = state.assignReqs.map((r) => ({
+    requirement_id: r.id,
+    owner_id: Number(document.getElementById('o_' + r.id)?.value || 0) || null,
+  }));
+  const taskStart = document.getElementById('assignTaskStartDate')?.value || null;
+  const taskDeadline = document.getElementById('assignTaskDeadline')?.value || null;
+  showLoading('正在禅道创建/改派测试任务，请稍候…');
+  try {
+    const res = await api('/requirements/create-zentao-tasks', {
+      method: 'POST',
+      headers: window.H,
+      body: ({
+        major_version_id: majorId,
+        assignments,
+        task_start_date: taskStart,
+        task_deadline: taskDeadline,
+      }),
+    });
+    let zentao = null;
+    try { zentao = (await res.json())?.zentao; } catch (_) { /* ignore */ }
+    showPublishResult(zentao, { taskOnly: true });
+  } finally {
+    hideLoading();
+  }
+}
+
 // 把禅道建任务结果汇总成一条提示（成功/部分失败/未能指派）
-function showPublishResult(zentao) {
+function showPublishResult(zentao, opts = {}) {
+  const lead = opts.taskOnly ? '禅道任务创建完成' : '分配发布成功';
   if (!zentao) {
-    window.showMessage && window.showMessage('分配发布成功', 'success');
+    window.showMessage && window.showMessage(lead, 'success');
     return;
   }
   const created = (zentao.created_tasks || []).length;
   const reassigned = (zentao.reassigned_tasks || []).length;
   const unassigned = zentao.unassigned || [];
   const errors = zentao.errors || [];
-  const parts = ['分配发布成功'];
+  const parts = [lead];
   if (created) parts.push(`禅道新建子任务 ${created} 个`);
   if (reassigned) parts.push(`改派 ${reassigned} 个`);
   if (unassigned.length) {
@@ -500,6 +534,7 @@ window.OmniQAAssignTab = {
   loadAssignProgress,
   toggleAssignProgressPendingOnly,
   publishAssign,
+  createZentaoTasks,
   syncAssignRequirementsFromZentao,
   loadLinkCandidates,
   toggleLinkSelectAll,

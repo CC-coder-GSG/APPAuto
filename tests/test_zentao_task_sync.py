@@ -153,6 +153,67 @@ def test_reassign_existing_task_no_new_parent(db_session, monkeypatch, setup):
     assert res["reassigned_tasks"] == [555]
 
 
+def test_recreate_when_existing_task_cancelled(db_session, monkeypatch, setup):
+    # r1 已关联任务 555，但禅道侧该任务已被取消(cancel) → 作废本地关联并新建，不改派死任务
+    setup["r1"].zentao_task_id = 555
+    setup["r1"].zentao_task_assigned_to = "alice"
+    db_session.commit()
+    existing = [{"id": 555, "type": "test", "story": 6706, "parent": 9000,
+                 "status": "cancel", "assignedTo": {"account": "alice"}}]
+    client = FakeClient(assignable={"alice": "爱丽丝", "bob": "鲍勃"}, existing_tasks=existing)
+    _patch_client(monkeypatch, client)
+    svc = ZentaoTaskSyncService(db_session)
+    res = svc.create_tasks_for_assignment(
+        setup["major"].id,
+        [{"requirement_id": setup["r1"].id, "owner_id": setup["bob"].id}],
+        est_started="2026-06-29", deadline="2026-07-03", actor=setup["actor"],
+    )
+    assert res["ok"] is True, res["errors"]
+    # 没有改派/认领已取消的死任务
+    assert client.reassigned == []
+    assert res["parent_task_id"] is not None
+    db_session.refresh(setup["r1"])
+    # 关联被换成新建的任务，指派人回写为新负责人 bob
+    assert setup["r1"].zentao_task_id not in (None, 555)
+    assert setup["r1"].zentao_task_assigned_to == "bob"
+
+
+def test_recreate_when_existing_task_closed(db_session, monkeypatch, setup):
+    # 关闭(closed)同样视为失效，重新分配应新建
+    setup["r1"].zentao_task_id = 556
+    db_session.commit()
+    existing = [{"id": 556, "type": "test", "story": 6706, "parent": 9000,
+                 "status": "closed", "assignedTo": {"account": "alice"}}]
+    client = FakeClient(assignable={"alice": "爱丽丝"}, existing_tasks=existing)
+    _patch_client(monkeypatch, client)
+    svc = ZentaoTaskSyncService(db_session)
+    res = svc.create_tasks_for_assignment(
+        setup["major"].id,
+        [{"requirement_id": setup["r1"].id, "owner_id": setup["alice"].id}],
+        est_started="2026-06-29", deadline="2026-07-03", actor=setup["actor"],
+    )
+    assert client.reassigned == []
+    assert res["parent_task_id"] is not None
+    db_session.refresh(setup["r1"])
+    assert setup["r1"].zentao_task_id not in (None, 556)
+
+
+def test_sync_tasks_status_for_major_updates_cache_and_assignee(db_session, monkeypatch, setup):
+    setup["r1"].zentao_task_id = 700
+    setup["r1"].zentao_task_status_cache = "wait"
+    setup["r1"].zentao_task_assigned_to = "alice"
+    db_session.commit()
+    existing = [{"id": 700, "type": "test", "story": 6706, "parent": 9000,
+                 "status": "done", "assignedTo": {"account": "carol"}}]
+    client = FakeClient(existing_tasks=existing)
+    _patch_client(monkeypatch, client)
+    out = ZentaoTaskSyncService(db_session).sync_tasks_status_for_major(setup["major"].id)
+    db_session.refresh(setup["r1"])
+    assert setup["r1"].zentao_task_status_cache == "done"
+    assert setup["r1"].zentao_task_assigned_to == "carol"
+    assert out["updated"] == 1
+
+
 def test_unassigned_when_no_account_match(db_session, monkeypatch, setup):
     # 可指派列表里没有 bob 的姓名/账号 → 列入 unassigned
     client = FakeClient(assignable={"alice": "爱丽丝"})

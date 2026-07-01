@@ -52,6 +52,8 @@ class Requirement(Base):
     task_finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # 禅道子任务状态缓存（wait/doing/done…），供测试台标签直接展示，免每次查禅道。
     zentao_task_status_cache: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # 禅道子任务当前指派人账号缓存；用于「仅指派人本人可开始/完成禅道任务」的权限判定。
+    zentao_task_assigned_to: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False)

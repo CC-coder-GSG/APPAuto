@@ -24,6 +24,15 @@ class FinalTestService:
             raise HTTPException(status_code=400, detail="major_version_id 必须指向大版本")
         return version
 
+    @staticmethod
+    def _is_task_assignee(requirement: Requirement, user: User) -> bool:
+        """当前用户的禅道账号是否等于该子任务指派人账号（无任务/无指派人则 False）。"""
+        if not requirement.zentao_task_id:
+            return False
+        assignee = (requirement.zentao_task_assigned_to or "").strip().lower()
+        acc = (getattr(user, "zentao_account", None) or "").strip().lower()
+        return bool(assignee) and bool(acc) and assignee == acc
+
     def is_enabled(self, major_version_id: int | None) -> bool:
         if not major_version_id:
             return False
@@ -98,16 +107,40 @@ class FinalTestService:
 
         if case_completed is not None:
             record.case_completed = bool(case_completed)
+        test_completed_changed = False
+        finish_zentao = False
         if test_completed is not None:
             was_done = bool(record.test_completed)
             record.test_completed = bool(test_completed)
             if test_completed and not was_done:
                 record.test_completed_at = local_now()
-            elif not test_completed:
+                test_completed_changed = True
+                finish_zentao = True
+            elif not test_completed and was_done:
                 record.test_completed_at = None
+                test_completed_changed = True
+                finish_zentao = False
 
         self.db.commit()
         self.db.refresh(record)
+
+        # 仅当子任务指派人是当前用户本人时，勾选/取消完成才联动禅道任务；否则只留本地记录。
+        if test_completed_changed and self._is_task_assignee(requirement, current_user):
+            try:
+                from app.services.zentao_task_sync_service import ZentaoTaskSyncService
+
+                svc = ZentaoTaskSyncService(self.db)
+                if finish_zentao:
+                    svc.finish_requirement_task(requirement)
+                else:
+                    svc.reactivate_requirement_task(requirement)
+            except Exception as exc:  # noqa: BLE001 — 禅道侧失败不阻断本地状态
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "final_test zentao task sync req=%s finished=%s failed: %s",
+                    requirement_id, finish_zentao, exc,
+                )
         audit(
             self.db,
             action="final_test.patch_status",

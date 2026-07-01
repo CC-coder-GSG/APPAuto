@@ -692,6 +692,8 @@ const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', done: '已完成
 //   done（测试完成）→「任务已完成」禁用
 function renderTaskStartControl(req) {
   if (!req.zentao_task_id) return '';
+  // 任务未指派给当前账号：不显示「开始」按钮（仅指派人本人可开始）。
+  if (!req.task_assigned_to_me) return '';
   if (req.zentao_task_status === 'done' || req.test_completed) {
     return `<button class="secondary" disabled style="padding:2px 10px; font-size:12px; opacity:.7;">✅ 任务已完成</button>`;
   }
@@ -701,15 +703,23 @@ function renderTaskStartControl(req) {
   return `<button style="padding:2px 10px; font-size:12px; background:#16a34a;" onclick="startReqTask(${req.id})" title="开始测试，禅道子任务同步开始">▶ 开始</button>`;
 }
 
-// 子任务标签 + 预览 + 预计用时输入。预计用时仅在关联了禅道任务时显示。
+// 子任务标签 + 预览 + 预计用时输入。预计用时仅在「任务指派给本人」时可编辑；
+// 非指派人只读展示子任务状态与指派人，避免误操作他人任务。
 function renderTaskMeta(req) {
   if (req.zentao_task_id) {
-    const est = (req.estimated_test_hours != null ? req.estimated_test_hours : 4);
-    const estInput = `<label class="badge" style="background:#f8fafc; color:#475569; border:1px solid #e2e8f0; display:inline-flex; align-items:center; gap:4px;">预计用时
-      <input type="number" min="0.5" step="0.5" value="${est}" style="width:54px; padding:1px 4px; border:1px solid #cbd5e1; border-radius:4px;" onchange="setReqEstimatedHours(${req.id}, this.value)" onclick="event.stopPropagation()">h</label>`;
     const zh = TASK_STATUS_ZH[req.zentao_task_status] || req.zentao_task_status || '';
     const done = req.zentao_task_status === 'done';
     const taskTag = `<span class="badge" style="background:${done ? '#dcfce7' : '#eff6ff'}; color:${done ? '#166534' : '#1d4ed8'}; border:1px solid ${done ? '#bbf7d0' : '#bfdbfe'};">禅道子任务 #${req.zentao_task_id}${zh ? '·' + zh : ''}</span>${renderPreviewBtn('task', req.zentao_task_id)}`;
+    if (!req.task_assigned_to_me) {
+      // 非指派人：隐藏预计用时输入，改为只读的指派人标签。
+      const assignee = req.zentao_task_assigned_to
+        ? `<span class="badge" style="background:#faf5ff; color:#7c3aed; border:1px solid #e9d5ff;">指派给 ${escapeHtml(req.zentao_task_assigned_to)}</span>`
+        : '';
+      return `${taskTag}${assignee}`;
+    }
+    const est = (req.estimated_test_hours != null ? req.estimated_test_hours : 4);
+    const estInput = `<label class="badge" style="background:#f8fafc; color:#475569; border:1px solid #e2e8f0; display:inline-flex; align-items:center; gap:4px;">预计用时
+      <input type="number" min="0.5" step="0.5" value="${est}" style="width:54px; padding:1px 4px; border:1px solid #cbd5e1; border-radius:4px;" onchange="setReqEstimatedHours(${req.id}, this.value)" onclick="event.stopPropagation()">h</label>`;
     return `${estInput}${taskTag}`;
   }
   return `<span class="badge" style="background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;">未关联禅道任务</span>`;
