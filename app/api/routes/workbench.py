@@ -70,7 +70,7 @@ def my_task_workbench(
 ):
     """任务工作台：当前账号名下的禅道任务（含是否关联本平台需求的标注）。
 
-    refresh=true 时先全量刷新任务镜像（较慢）；否则读缓存（后台任务会周期刷新）。
+    refresh=true 时仅刷新当前用户名下任务所在的执行（快）；否则读缓存（后台任务周期全量刷新）。
     """
     from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
 
@@ -78,7 +78,7 @@ def my_task_workbench(
     refreshed = None
     if refresh:
         try:
-            refreshed = svc.sync_all()
+            refreshed = svc.sync_mine(current_user)
         except Exception as exc:  # noqa: BLE001 — 刷新失败不影响读缓存
             refreshed = {"ok": False, "error": str(exc)}
     return {"tasks": svc.list_mine_with_links(current_user), "refreshed": refreshed}

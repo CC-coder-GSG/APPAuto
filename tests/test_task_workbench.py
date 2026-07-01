@@ -25,10 +25,11 @@ def _major(db, no="V-TW-1"):
     return v
 
 
-def _req(db, major_id, req_no, *, task_id=None, story_id=None):
+def _req(db, major_id, req_no, *, task_id=None, story_id=None, owner_id=None):
     r = Requirement(
         zentao_req_id=req_no, title="需求-" + req_no, major_version_id=major_id,
         status=RequirementStatus.PENDING, zentao_task_id=task_id, zentao_story_id=story_id,
+        owner_id=owner_id,
     )
     db.add(r)
     db.commit()
@@ -99,6 +100,32 @@ def test_list_mine_with_links_detects_linkage(db_session):
     assert by_id[700]["linked_requirement"]["id"] == r1.id  # 按 story 兜底关联
     assert by_id[900]["linked_requirement"] is None
     assert all(t["assigned_to_me"] for t in rows)  # 账号 alice 与指派人匹配
+
+
+def test_derived_task_of_others_requirement_is_operable(db_session):
+    # 需求归属他人(bob)，但衍生任务指派给 alice → alice 可在任务工作台直接操作禅道，不跳转
+    alice = _user(db_session, "alice_d6", account="alice")
+    bob = _user(db_session, "bob_d6", account="bob")
+    major = _major(db_session, "V-TW-6")
+    r = _req(db_session, major.id, "r#7601", task_id=560, owner_id=bob.id)
+    _mirror(db_session, 560, alice.id, account="alice", status="wait")
+    t = ZentaoTaskMirrorService(db_session).list_mine_with_links(alice)[0]
+    assert t["linked_requirement"]["id"] == r.id
+    assert t["requirement_mine"] is False
+    assert t["can_operate"] is True
+    assert t["show_jump"] is False
+
+
+def test_own_requirement_task_shows_jump_not_operate(db_session):
+    # 需求归属本人 → 只提供跳转，不在任务工作台直接操作禅道
+    alice = _user(db_session, "alice_d7", account="alice")
+    major = _major(db_session, "V-TW-7")
+    _req(db_session, major.id, "r#7701", task_id=570, owner_id=alice.id)
+    _mirror(db_session, 570, alice.id, account="alice")
+    t = ZentaoTaskMirrorService(db_session).list_mine_with_links(alice)[0]
+    assert t["requirement_mine"] is True
+    assert t["show_jump"] is True
+    assert t["can_operate"] is False
 
 
 def test_list_mine_excludes_parents_and_others(db_session):

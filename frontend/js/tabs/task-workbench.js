@@ -29,16 +29,17 @@ function metaBadge(label, value) {
 
 function renderTaskActions(t) {
   const link = t.linked_requirement;
-  if (link) {
-    // 关联需求：只给跳转按钮，不提供禅道操作。
+  // 关联需求且该需求归属本人 → 跳转到需求工作台管理，不在此直接操作禅道。
+  if (t.show_jump && link) {
     return `<button class="secondary" style="padding:2px 10px; font-size:12px; color:#1d4ed8; border-color:#bfdbfe;"
       onclick="event.stopPropagation(); jumpToLinkedRequirement(${link.id}, ${link.major_version_id || 0})"
       title="跳转到需求工作台中该需求的位置">↪ 跳转到关联需求</button>`;
   }
-  // 未关联需求：禅道操作按钮。仅指派给本人的任务可操作。
-  if (!t.assigned_to_me) {
+  // 不可操作：任务未指派给本人（且不是可跳转的自有需求）。
+  if (!t.can_operate) {
     return `<span class="muted" style="font-size:12px;">该任务未指派给你，无法操作</span>`;
   }
+  // 可操作：独立任务，或需求归属他人的衍生任务（本人是任务指派人）。
   const id = t.task_id;
   const status = t.status;
   const isDone = status === 'done';
@@ -75,9 +76,13 @@ function renderTaskActions(t) {
 function renderTaskCard(t) {
   const link = t.linked_requirement;
   const previewBtn = renderPreviewBtn('task', t.task_id);
-  const linkedBadge = link
-    ? `<span class="badge" style="background:#faf5ff; color:#7c3aed; border:1px solid #e9d5ff;">关联需求 ${escapeHtml(link.zentao_req_id || '')}</span>`
-    : `<span class="badge" style="background:#fff7ed; color:#c2410c; border:1px solid #fed7aa;">独立任务（无关联需求）</span>`;
+  let linkedBadge;
+  if (link) {
+    const ownerHint = t.requirement_mine ? '' : `（负责人：${escapeHtml(link.owner_name || '他人')}）`;
+    linkedBadge = `<span class="badge" style="background:#faf5ff; color:#7c3aed; border:1px solid #e9d5ff;">关联需求 ${escapeHtml(link.zentao_req_id || '')}${ownerHint}</span>`;
+  } else {
+    linkedBadge = `<span class="badge" style="background:#fff7ed; color:#c2410c; border:1px solid #fed7aa;">独立任务（无关联需求）</span>`;
+  }
   const metas = [
     metaBadge('执行', t.execution_name),
     metaBadge('优先级', t.pri),

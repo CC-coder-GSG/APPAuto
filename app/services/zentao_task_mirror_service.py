@@ -100,6 +100,41 @@ class ZentaoTaskMirrorService:
         self.db.commit()
         return {"ok": not errors, "synced": synced, "executions": len(majors), "errors": errors}
 
+    def sync_mine(self, current_user: User) -> dict[str, Any]:
+        """只刷新「当前用户已有任务」所在的执行（通常 1~3 个），远快于 sync_all。
+
+        任务工作台手动刷新用；跨执行的全量覆盖交给后台 sync_all 周期任务。
+        """
+        client = get_system_zentao_client(self.db)
+        if not client:
+            return {"ok": False, "error": "找不到可用的禅道账号绑定", "synced": 0}
+        exec_ids = [
+            row[0]
+            for row in self.db.query(ZentaoTaskMirror.execution_id)
+            .filter(ZentaoTaskMirror.assignee_user_id == current_user.id, ZentaoTaskMirror.execution_id.isnot(None))
+            .distinct()
+            .all()
+        ]
+        if not exec_ids:
+            # 镜像里还没有本人的任务（后台尚未同步）→ 回退一次全量，保证首次可见。
+            return self.sync_all()
+        majors = (
+            self.db.query(Version)
+            .filter(Version.zentao_execution_id.in_(exec_ids))
+            .all()
+        )
+        by_account, by_name = self._build_user_maps()
+        synced = 0
+        errors: list[str] = []
+        for major in majors:
+            try:
+                synced += self._sync_execution(client, major, by_account, by_name)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("sync_mine exec %s failed: %s", major.zentao_execution_id, exc)
+                errors.append(str(exc))
+        self.db.commit()
+        return {"ok": not errors, "synced": synced, "executions": len(majors), "errors": errors}
+
     def sync_one_major(self, major_version_id: int) -> dict[str, Any]:
         client = get_system_zentao_client(self.db)
         if not client:
@@ -192,6 +227,8 @@ class ZentaoTaskMirrorService:
         requirements.zentao_story_id == task.story。命中则带上需求 id / 编号 /
         大版本，供前端「跳转到需求工作台对应位置」。
         """
+        from sqlalchemy.orm import joinedload
+
         from app.models import Requirement
 
         tasks = self.list_tasks(scope="mine", current_user_id=current_user.id)
@@ -203,29 +240,45 @@ class ZentaoTaskMirrorService:
         by_task_id: dict[int, Requirement] = {}
         by_story: dict[int, Requirement] = {}
         if task_ids:
-            for req in self.db.query(Requirement).filter(Requirement.zentao_task_id.in_(task_ids)).all():
+            for req in (
+                self.db.query(Requirement).options(joinedload(Requirement.owner))
+                .filter(Requirement.zentao_task_id.in_(task_ids)).all()
+            ):
                 by_task_id[int(req.zentao_task_id)] = req
         if story_ids:
-            for req in self.db.query(Requirement).filter(Requirement.zentao_story_id.in_(story_ids)).all():
+            for req in (
+                self.db.query(Requirement).options(joinedload(Requirement.owner))
+                .filter(Requirement.zentao_story_id.in_(story_ids)).all()
+            ):
                 if req.zentao_story_id is not None:
                     by_story.setdefault(int(req.zentao_story_id), req)
 
         my_account = (current_user.zentao_account or "").strip().lower()
         for t in tasks:
             req = by_task_id.get(t["task_id"]) or (by_story.get(t["story"]) if t.get("story") else None)
+            # 是否可对禅道操作：镜像已映射到本人，或禅道账号匹配（与 operate_task 权限一致，
+            # 兼容未设 zentao_account、靠真实姓名兜底映射的用户）。
+            acc = (t.get("assigned_to") or "").strip().lower()
+            assigned_to_me = (t.get("assignee_user_id") == current_user.id) or (bool(my_account) and acc == my_account)
+            requirement_mine = bool(req) and req.owner_id == current_user.id
             if req:
                 t["linked_requirement"] = {
                     "id": req.id,
                     "zentao_req_id": req.zentao_req_id,
                     "title": req.title,
                     "major_version_id": req.major_version_id,
+                    "owner_id": req.owner_id,
+                    "owner_name": req.owner.shown_name if req.owner else None,
                 }
             else:
                 t["linked_requirement"] = None
-            # 是否可对禅道操作：镜像已映射到本人，或禅道账号匹配（与 operate_task 权限一致，
-            # 兼容未设 zentao_account、靠真实姓名兜底映射的用户）。
-            acc = (t.get("assigned_to") or "").strip().lower()
-            t["assigned_to_me"] = (t.get("assignee_user_id") == current_user.id) or (bool(my_account) and acc == my_account)
+            t["assigned_to_me"] = assigned_to_me
+            t["requirement_mine"] = requirement_mine
+            # 关联需求且该需求归属当前账号 → 跳转到需求工作台管理（不在此直接操作禅道）。
+            t["show_jump"] = bool(req) and requirement_mine
+            # 可在此直接操作禅道：任务指派给本人，且不是「本人负责的需求」（独立任务，
+            # 或需求归属他人的衍生任务——此时需求工作台里看不到，必须能在任务工作台操作）。
+            t["can_operate"] = assigned_to_me and not requirement_mine
         return tasks
 
     # ------------------------------------------------------------------
