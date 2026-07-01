@@ -692,13 +692,19 @@ const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', done: '已完成
 //   done（测试完成）→「任务已完成」禁用
 function renderTaskStartControl(req) {
   if (!req.zentao_task_id) return '';
-  // 任务未指派给当前账号：不显示「开始」按钮（仅指派人本人可开始）。
+  // 任务未指派给当前账号：不显示操作按钮（仅指派人本人可操作）。
   if (!req.task_assigned_to_me) return '';
-  if (req.zentao_task_status === 'done' || req.test_completed) {
+  const status = String(req.zentao_task_status || '').toLowerCase();
+  if (status === 'done' || req.test_completed) {
     return `<button class="secondary" disabled style="padding:2px 10px; font-size:12px; opacity:.7;">✅ 任务已完成</button>`;
   }
-  if (req.zentao_task_status === 'doing' || req.task_started_at) {
-    return `<button class="secondary" disabled style="padding:2px 10px; font-size:12px; opacity:.7;">⏱ 任务已开始</button>`;
+  if (status === 'doing') {
+    // 进行中：可暂停（禅道同步暂停）。
+    return `<button style="padding:2px 10px; font-size:12px; background:#d97706;" onclick="pauseReqTask(${req.id})" title="暂停任务，禅道子任务同步暂停">⏸ 暂停</button>`;
+  }
+  if (status === 'pause') {
+    // 已暂停：用「开始」继续（后端识别暂停态走 restart 继续）。
+    return `<button style="padding:2px 10px; font-size:12px; background:#16a34a;" onclick="startReqTask(${req.id})" title="继续任务，禅道子任务同步继续">▶ 继续</button>`;
   }
   return `<button style="padding:2px 10px; font-size:12px; background:#16a34a;" onclick="startReqTask(${req.id})" title="开始测试，禅道子任务同步开始">▶ 开始</button>`;
 }
@@ -965,6 +971,25 @@ export async function startReqTask(reqId) {
   }
 }
 
+// 禅道任务联动：点击「暂停」→ 让禅道子任务暂停（之后可用「开始」继续）
+export async function pauseReqTask(reqId) {
+  try {
+    const res = await api(`/requirements/${reqId}/task/pause`, { method: 'POST', headers: window.H, body: {} });
+    let data = null;
+    try { data = await res.json(); } catch (_) { /* ignore */ }
+    const errs = (data && data.errors) || [];
+    if (errs.length) {
+      window.showMessage && window.showMessage(`任务已暂停（禅道侧部分失败：${errs[0]}）`, 'error');
+    } else {
+      window.showMessage && window.showMessage('任务已暂停', 'success');
+    }
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '暂停任务失败', 'error');
+  } finally {
+    await loadMyWorkbench();
+  }
+}
+
 // 修改某需求的预计测试用时（小时）
 export async function setReqEstimatedHours(reqId, value) {
   const hours = Number(value);
@@ -1094,6 +1119,7 @@ window.OmniQAMineTab = {
   setReqStatus,
   setFinalTestStatus,
   startReqTask,
+  pauseReqTask,
   setReqEstimatedHours,
   addCase,
   deleteCase,

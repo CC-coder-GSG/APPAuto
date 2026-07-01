@@ -597,14 +597,27 @@ class ZentaoClient:
         """改派任务负责人。"""
         return self.put(f"tasks/{task_id}", {"assignedTo": assigned_to})
 
-    def start_task(self, task_id: int, *, real_started: str | None = None, left: float | None = None) -> dict | None:
-        """POST /v1/tasks/{id}/start —— 开始任务（status→doing）。"""
+    def start_task(self, task_id: int, *, real_started: str | None = None, left: float | None = None, assigned_to: str | None = None) -> dict | None:
+        """POST /v1/tasks/{id}/start —— 开始任务（status→doing）。
+
+        ⚠️ 用系统账号（非指派人本人）调用 start 时，禅道可能把 assignedTo 清空/改掉，
+        故显式回传 assignedTo=当前指派人，保持指派不变。
+        """
         body: dict[str, Any] = {}
         if real_started:
             body["realStarted"] = real_started
         if left is not None:
             body["left"] = left
+        if assigned_to:
+            body["assignedTo"] = assigned_to
         return self.post(f"tasks/{task_id}/start", body)
+
+    def pause_task(self, task_id: int, *, comment: str | None = None) -> dict | None:
+        """POST /v1/tasks/{id}/pause —— 暂停任务（status→pause）。之后可再 start 继续。"""
+        body: dict[str, Any] = {}
+        if comment:
+            body["comment"] = comment
+        return self.post(f"tasks/{task_id}/pause", body)
 
     def finish_task(
         self,
@@ -625,12 +638,16 @@ class ZentaoClient:
             body["assignedTo"] = assigned_to
         return self.post(f"tasks/{task_id}/finish", body)
 
-    def restart_task(self, task_id: int, *, consumed: float, left: float) -> dict | None:
-        """POST /v1/tasks/{id}/restart —— 重新激活已完成任务（status→doing）。
+    def restart_task(self, task_id: int, *, consumed: float, left: float, assigned_to: str | None = None) -> dict | None:
+        """POST /v1/tasks/{id}/restart —— 继续暂停/重新激活已完成任务（status→doing）。
 
         ⚠️ `consumed` 与 `left`(>0) 必填，否则禅道 400。无 /activate 端点。
+        显式回传 assignedTo 保持指派不变（系统账号操作时禅道可能改掉指派人）。
         """
-        return self.post(f"tasks/{task_id}/restart", {"consumed": consumed, "left": left})
+        body: dict[str, Any] = {"consumed": consumed, "left": left}
+        if assigned_to:
+            body["assignedTo"] = assigned_to
+        return self.post(f"tasks/{task_id}/restart", body)
 
     def close_task(self, task_id: int, *, comment: str | None = None) -> dict | None:
         """POST /v1/tasks/{id}/close —— 关闭任务（status→closed）。"""

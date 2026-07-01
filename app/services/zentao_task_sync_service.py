@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Requirement, User, Version
 from app.services.holiday_service import get_holiday_map
-from app.services.zentao_system_client import get_system_zentao_client
+from app.services.zentao_system_client import get_system_zentao_client, get_user_zentao_client
 from app.utils import work_hours
 from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
 
@@ -420,24 +420,54 @@ class ZentaoTaskSyncService:
     # 能力 C：开始 / 完成 / 重新激活
     # ------------------------------------------------------------------
 
-    def _client_or_error(self, out: dict):
-        client = get_system_zentao_client(self.db)
+    def _client_or_error(self, out: dict, acting_user: Optional[User] = None):
+        """优先用「操作人本人」的禅道客户端（正确记录操作人、保持指派不变）；
+        无本人绑定时回退系统账号。"""
+        client = get_user_zentao_client(acting_user.id, self.db) if acting_user is not None else None
+        if client is None:
+            client = get_system_zentao_client(self.db)
         if not client:
             out["errors"].append("找不到可用的禅道账号绑定")
         return client
 
-    def start_requirement_task(self, requirement: Requirement, *, hours: Optional[float] = None) -> dict:
-        """点击「开始」：禅道子任务 start，记录本地开始时刻。"""
+    def _restore_assignee_if_changed(self, client, requirement: Requirement) -> None:
+        """兜底：若禅道把指派人清空/改掉（系统账号 start/continue 的已知副作用），
+        改派回记录的指派人，避免出现「开始后变未指派」。"""
+        want = (requirement.zentao_task_assigned_to or "").strip()
+        if not want or not requirement.zentao_task_id:
+            return
+        try:
+            task = client.get_task(int(requirement.zentao_task_id)) or {}
+            cur = _task_account(task)
+            if (cur or "").strip().lower() != want.lower():
+                client.reassign_task(int(requirement.zentao_task_id), want)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("restore assignee req task %s -> %s failed: %s", requirement.zentao_task_id, want, exc)
+
+    def start_requirement_task(self, requirement: Requirement, *, hours: Optional[float] = None, acting_user: Optional[User] = None) -> dict:
+        """点击「开始」：禅道子任务 start（暂停中的则 restart 继续），记录本地开始时刻。"""
         out: dict = {"ok": False, "errors": []}
         now = local_now()
         requirement.task_started_at = now
         left = hours if hours is not None else (requirement.estimated_test_hours or 4.0)
         if requirement.zentao_task_id:
-            client = self._client_or_error(out)
+            client = self._client_or_error(out, acting_user)
             if client:
+                assignee = requirement.zentao_task_assigned_to or None
+                paused = str(requirement.zentao_task_status_cache or "").strip().lower() == "pause"
                 try:
-                    client.start_task(int(requirement.zentao_task_id), real_started=_fmt_dt(now), left=left)
+                    if paused:
+                        # 继续暂停的任务
+                        consumed = 0.0
+                        try:
+                            consumed = float((client.get_task(int(requirement.zentao_task_id)) or {}).get("consumed") or 0.0)
+                        except Exception:
+                            consumed = 0.0
+                        client.restart_task(int(requirement.zentao_task_id), consumed=consumed, left=left, assigned_to=assignee)
+                    else:
+                        client.start_task(int(requirement.zentao_task_id), real_started=_fmt_dt(now), left=left, assigned_to=assignee)
                     requirement.zentao_task_status_cache = "doing"
+                    self._restore_assignee_if_changed(client, requirement)
                 except Exception as exc:
                     logger.warning("start task %s failed: %s", requirement.zentao_task_id, exc)
                     out["errors"].append(f"禅道开始任务失败：{exc}")
@@ -445,7 +475,24 @@ class ZentaoTaskSyncService:
         out["ok"] = not out["errors"]
         return out
 
-    def finish_requirement_task(self, requirement: Requirement) -> dict:
+    def pause_requirement_task(self, requirement: Requirement, *, acting_user: Optional[User] = None, comment: Optional[str] = None) -> dict:
+        """点击「暂停」：禅道子任务 pause（status→pause），之后可再「开始」继续。"""
+        out: dict = {"ok": False, "errors": []}
+        if requirement.zentao_task_id:
+            client = self._client_or_error(out, acting_user)
+            if client:
+                try:
+                    client.pause_task(int(requirement.zentao_task_id), comment=comment)
+                    requirement.zentao_task_status_cache = "pause"
+                    self._restore_assignee_if_changed(client, requirement)
+                except Exception as exc:
+                    logger.warning("pause task %s failed: %s", requirement.zentao_task_id, exc)
+                    out["errors"].append(f"禅道暂停任务失败：{exc}")
+        self.db.commit()
+        out["ok"] = not out["errors"]
+        return out
+
+    def finish_requirement_task(self, requirement: Requirement, *, acting_user: Optional[User] = None) -> dict:
         """勾「测试完成」：算工时 → 禅道 finish，记录本地完成时刻。"""
         out: dict = {"ok": False, "errors": [], "consumed": 0.0}
         now = local_now()
@@ -463,7 +510,7 @@ class ZentaoTaskSyncService:
             consumed = round(requirement.estimated_test_hours or 1.0, 2)
         out["consumed"] = consumed
         if requirement.zentao_task_id:
-            client = self._client_or_error(out)
+            client = self._client_or_error(out, acting_user)
             if client:
                 try:
                     client.finish_task(
@@ -479,13 +526,13 @@ class ZentaoTaskSyncService:
         out["ok"] = not out["errors"]
         return out
 
-    def reactivate_requirement_task(self, requirement: Requirement) -> dict:
+    def reactivate_requirement_task(self, requirement: Requirement, *, acting_user: Optional[User] = None) -> dict:
         """取消「测试完成」：禅道 restart（重新激活）。"""
         out: dict = {"ok": False, "errors": []}
         requirement.task_finished_at = None
         left = requirement.estimated_test_hours or 4.0
         if requirement.zentao_task_id:
-            client = self._client_or_error(out)
+            client = self._client_or_error(out, acting_user)
             if client:
                 consumed = 0.0
                 try:
@@ -495,8 +542,9 @@ class ZentaoTaskSyncService:
                     consumed = 0.0
                 # restart 要求 consumed 必填、left>0
                 try:
-                    client.restart_task(int(requirement.zentao_task_id), consumed=consumed, left=left)
+                    client.restart_task(int(requirement.zentao_task_id), consumed=consumed, left=left, assigned_to=(requirement.zentao_task_assigned_to or None))
                     requirement.zentao_task_status_cache = "doing"
+                    self._restore_assignee_if_changed(client, requirement)
                 except Exception as exc:
                     logger.warning("restart task %s failed: %s", requirement.zentao_task_id, exc)
                     out["errors"].append(f"禅道重新激活任务失败：{exc}")

@@ -609,6 +609,16 @@ def start_requirement_task(
     return service.start_requirement_task(requirement_id, current_user, hours=payload.hours)
 
 
+@router.post("/requirements/{requirement_id}/task/pause")
+def pause_requirement_task(
+    requirement_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = RequirementService(db)
+    return service.pause_requirement_task(requirement_id, current_user)
+
+
 @router.put("/requirements/{requirement_id}/test-notes")
 def update_requirement_test_notes(
     requirement_id: int,

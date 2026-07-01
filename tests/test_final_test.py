@@ -197,7 +197,7 @@ def test_final_test_finish_only_for_task_assignee(db_session, monkeypatch):
     calls = []
     monkeypatch.setattr(
         "app.services.zentao_task_sync_service.ZentaoTaskSyncService.finish_requirement_task",
-        lambda self, requirement: (calls.append(requirement.id), {"ok": True, "errors": []})[1],
+        lambda self, requirement, **kw: (calls.append(requirement.id), {"ok": True, "errors": []})[1],
     )
     # 非指派人勾选完成 → 只本地，不联动禅道
     FinalTestService(db_session).upsert_record(r.id, other, test_completed=True)

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.models import User, Version, VersionType
 from app.models.zentao_task_mirror import ZentaoTaskMirror
-from app.services.zentao_system_client import get_system_zentao_client
+from app.services.zentao_system_client import get_system_zentao_client, get_user_zentao_client
 from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
 
 logger = logging.getLogger(__name__)
@@ -285,7 +285,7 @@ class ZentaoTaskMirrorService:
     # 独立（未关联需求）任务的禅道操作：开始 / 完成 / 关闭 / 设置工时
     # ------------------------------------------------------------------
 
-    _OP_ACTIONS = {"start", "finish", "close", "reactivate", "set_time"}
+    _OP_ACTIONS = {"start", "pause", "finish", "close", "reactivate", "set_time"}
 
     def operate_task(
         self,
@@ -312,21 +312,31 @@ class ZentaoTaskMirrorService:
         if not is_mine:
             raise HTTPException(status_code=403, detail="该任务未指派给你，无法操作")
 
-        client = get_system_zentao_client(self.db)
+        # 优先用「操作人本人」的禅道客户端：让禅道把操作人记为其本人、并保持指派不变；
+        # 无本人绑定时回退系统账号（此时靠回传 assignedTo + 事后校正保持指派人）。
+        acting_client = get_user_zentao_client(current_user.id, self.db)
+        client = acting_client or get_system_zentao_client(self.db)
         if not client:
             raise HTTPException(status_code=502, detail="找不到可用的禅道账号绑定")
 
+        original_account = row.assigned_to  # 操作前的指派人账号，用于事后校正
         errors: list[str] = []
         try:
             if action == "start":
                 left = hours if (hours and hours > 0) else (row.left or row.estimate or 1.0)
-                client.start_task(task_id, real_started=_fmt_now(), left=left)
+                if (row.status or "").strip().lower() == "pause":
+                    # 暂停中的任务用 restart「继续」，保持指派人
+                    client.restart_task(task_id, consumed=(row.consumed or 0.0), left=left, assigned_to=original_account)
+                else:
+                    client.start_task(task_id, real_started=_fmt_now(), left=left, assigned_to=original_account)
+            elif action == "pause":
+                client.pause_task(task_id, comment=comment)
             elif action == "finish":
                 cur = consumed if (consumed and consumed > 0) else (row.left or row.estimate or 1.0)
                 client.finish_task(task_id, current_consumed=cur, finished_date=_fmt_now())
             elif action == "reactivate":
                 left = hours if (hours and hours > 0) else (row.estimate or 1.0)
-                client.restart_task(task_id, consumed=(row.consumed or 0.0), left=left)
+                client.restart_task(task_id, consumed=(row.consumed or 0.0), left=left, assigned_to=original_account)
             elif action == "close":
                 client.close_task(task_id, comment=comment)
             elif action == "set_time":
@@ -340,18 +350,29 @@ class ZentaoTaskMirrorService:
             errors.append(str(exc))
 
         # 操作后从禅道回读最新任务态，刷新镜像行。
-        self._refresh_one_task(client, row)
+        fresh = self._refresh_one_task(client, row)
+        # 兜底校正：若禅道把指派人清空/改掉（系统账号操作 start/pause/continue 的已知副作用），
+        # 且操作原本不该改指派人，则改派回原指派人。按「禅道真实值」判断（refresh 出于稳健
+        # 不会用空值覆盖镜像，故这里直接看回读到的任务）。
+        if not errors and original_account and action in {"start", "pause", "reactivate", "set_time"}:
+            cur_acc, _ = _account_of((fresh or {}).get("assignedTo"))
+            if (cur_acc or "").strip().lower() != original_account.strip().lower():
+                try:
+                    client.reassign_task(task_id, original_account)
+                    self._refresh_one_task(client, row)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("restore assignee task %s -> %s failed: %s", task_id, original_account, exc)
         self.db.commit()
         return {"ok": not errors, "errors": errors, "task": self._serialize(row)}
 
-    def _refresh_one_task(self, client, row: ZentaoTaskMirror) -> None:
+    def _refresh_one_task(self, client, row: ZentaoTaskMirror) -> Optional[dict]:
         try:
             t = client.get_task(row.task_id) or {}
         except Exception as exc:  # noqa: BLE001
             logger.warning("refresh one task %s failed: %s", row.task_id, exc)
-            return
+            return None
         if not isinstance(t, dict) or not t:
-            return
+            return None
         account, realname = _account_of(t.get("assignedTo"))
         by_account, by_name = self._build_user_maps()
         if t.get("status") is not None:
@@ -373,6 +394,7 @@ class ZentaoTaskMirrorService:
         if t.get("deadline") is not None:
             row.deadline = _parse_date(t.get("deadline"))
         row.synced_at = local_now()
+        return t
 
     @staticmethod
     def _serialize(r: ZentaoTaskMirror) -> dict:

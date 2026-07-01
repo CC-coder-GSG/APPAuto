@@ -448,9 +448,9 @@ class RequirementService:
             from app.services.zentao_task_sync_service import ZentaoTaskSyncService
             svc = ZentaoTaskSyncService(self.db)
             if finished:
-                svc.finish_requirement_task(requirement)
+                svc.finish_requirement_task(requirement, acting_user=acting_user)
             else:
-                svc.reactivate_requirement_task(requirement)
+                svc.reactivate_requirement_task(requirement, acting_user=acting_user)
         except Exception as exc:  # noqa: BLE001 — 禅道侧失败不阻断本地
             import logging
             logging.getLogger(__name__).warning(
@@ -581,11 +581,24 @@ class RequirementService:
         """点击「开始」：记录开始时刻并让禅道子任务开始。仅任务指派人本人可开始。"""
         req = self._get_task_actionable_requirement(requirement_id, current_user)
         from app.services.zentao_task_sync_service import ZentaoTaskSyncService
-        result = ZentaoTaskSyncService(self.db).start_requirement_task(req, hours=hours)
+        result = ZentaoTaskSyncService(self.db).start_requirement_task(req, hours=hours, acting_user=current_user)
         self.db.refresh(req)
         return {
             "message": "任务已开始" if result.get("ok") else "任务已开始（禅道侧部分失败）",
             "task_started_at": req.task_started_at.isoformat() if req.task_started_at else None,
+            "zentao_task_id": req.zentao_task_id,
+            "zentao_task_status": req.zentao_task_status_cache,
+            "errors": result.get("errors", []),
+        }
+
+    def pause_requirement_task(self, requirement_id: int, current_user: User) -> dict:
+        """点击「暂停」：暂停禅道子任务。仅任务指派人本人可操作。之后可再「开始」继续。"""
+        req = self._get_task_actionable_requirement(requirement_id, current_user)
+        from app.services.zentao_task_sync_service import ZentaoTaskSyncService
+        result = ZentaoTaskSyncService(self.db).pause_requirement_task(req, acting_user=current_user)
+        self.db.refresh(req)
+        return {
+            "message": "任务已暂停" if result.get("ok") else "任务已暂停（禅道侧部分失败）",
             "zentao_task_id": req.zentao_task_id,
             "zentao_task_status": req.zentao_task_status_cache,
             "errors": result.get("errors", []),

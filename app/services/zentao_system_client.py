@@ -43,6 +43,15 @@ def _try_user(user_id: int, db: Session) -> Optional[ZentaoClient]:
     return ZentaoClient(base_url=binding.base_url, token=token)
 
 
+def get_user_zentao_client(user_id: int, db: Session) -> Optional[ZentaoClient]:
+    """构造「指定用户本人」的禅道客户端（用其绑定 token）。用于用户主动发起的写操作，
+    让禅道把操作人记为其本人、并保持任务指派不变。无绑定/无有效 token 时返回 None，
+    调用方应回退到 get_system_zentao_client 并显式回写指派人以免被清空。"""
+    if not user_id:
+        return None
+    return _try_user(user_id, db)
+
+
 def get_system_zentao_client(db: Session) -> Optional[ZentaoClient]:
     # 1) Try the preferred usernames first
     for username in PREFERRED_USERNAMES:
@@ -74,4 +83,4 @@ def get_system_zentao_client(db: Session) -> Optional[ZentaoClient]:
     return None
 
 
-__all__ = ["get_system_zentao_client"]
+__all__ = ["get_system_zentao_client", "get_user_zentao_client"]

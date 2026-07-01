@@ -15,7 +15,7 @@ class FakeClient:
         self.calls = []
         self._task = {"id": 777, "consumed": 2.0, "status": "doing"}
 
-    def start_task(self, task_id, *, real_started=None, left=None):
+    def start_task(self, task_id, *, real_started=None, left=None, assigned_to=None):
         self.calls.append(("start", task_id, real_started, left))
         return {"id": task_id, "status": "doing"}
 
@@ -23,9 +23,17 @@ class FakeClient:
         self.calls.append(("finish", task_id, current_consumed, finished_date))
         return {"id": task_id, "status": "done"}
 
-    def restart_task(self, task_id, *, consumed, left):
+    def restart_task(self, task_id, *, consumed, left, assigned_to=None):
         self.calls.append(("restart", task_id, consumed, left))
         return {"id": task_id, "status": "doing"}
+
+    def pause_task(self, task_id, *, comment=None):
+        self.calls.append(("pause", task_id))
+        return {"id": task_id, "status": "pause"}
+
+    def reassign_task(self, task_id, assigned_to):
+        self.calls.append(("reassign", task_id, assigned_to))
+        return {"id": task_id}
 
     def get_task(self, task_id):
         return self._task

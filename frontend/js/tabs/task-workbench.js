@@ -47,17 +47,20 @@ function renderTaskActions(t) {
   const isDoing = status === 'doing';
   const btn = (label, action, bg, extra = '') =>
     `<button style="padding:2px 10px; font-size:12px; ${bg ? `background:${bg};` : ''} ${extra}" onclick="event.stopPropagation(); taskWorkbenchOperate(${id}, '${action}')">${label}</button>`;
+  const isPaused = status === 'pause';
   const parts = [];
   if (isClosed) {
     parts.push(`<span class="muted" style="font-size:12px;">任务已关闭</span>`);
     parts.push(btn('♻ 重新激活', 'reactivate', '#0ea5e9'));
     return `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>`;
   }
-  // 开始（仅未开始时）
-  if (status === 'wait' || (!isDoing && !isDone)) {
+  // 开始（未开始或已暂停时；已暂停时「开始」即继续）；进行中显示「暂停」。
+  if (isDoing) {
+    parts.push(btn('⏸ 暂停', 'pause', '#d97706'));
+  } else if (isPaused) {
+    parts.push(btn('▶ 继续', 'start', '#16a34a'));
+  } else if (!isDone) {
     parts.push(btn('▶ 开始', 'start', '#16a34a'));
-  } else if (isDoing) {
-    parts.push(`<button class="secondary" disabled style="padding:2px 10px; font-size:12px; opacity:.7;">⏱ 进行中</button>`);
   }
   // 设置工时
   parts.push(`<button class="secondary" style="padding:2px 10px; font-size:12px;" onclick="event.stopPropagation(); taskWorkbenchSetTime(${id})">🕒 设置工时</button>`);

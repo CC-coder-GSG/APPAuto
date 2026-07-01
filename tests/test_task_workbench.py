@@ -71,6 +71,16 @@ class FakeClient:
         self._tasks.setdefault(task_id, {}).update({"status": "doing"})
         return {"id": task_id}
 
+    def pause_task(self, task_id, **kw):
+        self.calls.append(("pause", task_id, kw))
+        self._tasks.setdefault(task_id, {}).update({"status": "pause"})
+        return {"id": task_id}
+
+    def reassign_task(self, task_id, account):
+        self.calls.append(("reassign", task_id, account))
+        self._tasks.setdefault(task_id, {}).update({"assignedTo": account})
+        return {"id": task_id}
+
     def close_task(self, task_id, **kw):
         self.calls.append(("close", task_id, kw))
         self._tasks.setdefault(task_id, {}).update({"status": "closed"})
@@ -173,6 +183,50 @@ def test_operate_task_start_and_close(db_session, monkeypatch):
     assert res2["ok"] is True
     row = db_session.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == 301).first()
     assert row.status == "closed"
+
+
+def test_operate_task_pause_then_resume(db_session, monkeypatch):
+    alice = _user(db_session, "alice_p", account="alice")
+    _major(db_session, "V-TW-P")
+    _mirror(db_session, 501, alice.id, account="alice", status="doing")
+    client = FakeClient()
+    client.set_task(501, {"status": "doing", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    svc = ZentaoTaskMirrorService(db_session)
+
+    r1 = svc.operate_task(task_id=501, action="pause", current_user=alice)
+    assert r1["ok"] is True
+    row = db_session.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == 501).first()
+    assert row.status == "pause"
+
+    # 暂停后用「开始」继续 → 走 restart，回到 doing
+    r2 = svc.operate_task(task_id=501, action="start", current_user=alice)
+    assert r2["ok"] is True
+    assert any(c[0] == "restart" for c in client.calls)
+    row = db_session.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == 501).first()
+    assert row.status == "doing"
+
+
+def test_operate_start_preserves_assignee_via_reassign(db_session, monkeypatch):
+    # 模拟禅道 start 后把指派人清空 → 兜底应改派回原指派人
+    alice = _user(db_session, "alice_keep", account="alice")
+    _major(db_session, "V-TW-K")
+    _mirror(db_session, 601, alice.id, account="alice", status="wait")
+
+    class ClearingClient(FakeClient):
+        def start_task(self, task_id, **kw):
+            self.calls.append(("start", task_id, kw))
+            # 禅道副作用：开始后指派人被清空
+            self._tasks[task_id] = {"status": "doing", "assignedTo": ""}
+            return {"id": task_id}
+
+    client = ClearingClient()
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    svc = ZentaoTaskMirrorService(db_session)
+    res = svc.operate_task(task_id=601, action="start", current_user=alice)
+    assert res["ok"] is True
+    # 兜底改派回 alice
+    assert any(c[0] == "reassign" and c[2] == "alice" for c in client.calls)
 
 
 def test_operate_task_set_time_validates(db_session, monkeypatch):

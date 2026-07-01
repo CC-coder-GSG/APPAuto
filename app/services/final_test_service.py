@@ -131,9 +131,9 @@ class FinalTestService:
 
                 svc = ZentaoTaskSyncService(self.db)
                 if finish_zentao:
-                    svc.finish_requirement_task(requirement)
+                    svc.finish_requirement_task(requirement, acting_user=current_user)
                 else:
-                    svc.reactivate_requirement_task(requirement)
+                    svc.reactivate_requirement_task(requirement, acting_user=current_user)
             except Exception as exc:  # noqa: BLE001 — 禅道侧失败不阻断本地状态
                 import logging
 
