@@ -229,25 +229,28 @@ def test_operate_start_preserves_assignee_via_reassign(db_session, monkeypatch):
     assert any(c[0] == "reassign" and c[2] == "alice" for c in client.calls)
 
 
-def test_pause_task_falls_back_to_page_action_when_rest_unauthorized(monkeypatch):
-    # 禅道 v1 未开放 /tasks/{id}/pause（401）→ pause_task 回退走传统页面动作 task-pause
-    from app.services.zentao_client_service import ZentaoClient, ZentaoAPIError
+def test_operate_falls_back_to_system_when_self_token_unauthorized(db_session, monkeypatch):
+    # 本人 token 被当作 guest（pause 返回 401）→ 回退系统管理员账号完成暂停
+    from app.services.zentao_client_service import ZentaoAPIError
 
-    client = ZentaoClient(base_url="http://z", token="t")
-    calls = {}
+    alice = _user(db_session, "alice_fb", account="alice")
+    _major(db_session, "V-TW-FB")
+    _mirror(db_session, 801, alice.id, account="alice", status="doing")
 
-    def fake_post(path, body=None):
-        raise ZentaoAPIError(401, '{"error":"Unauthorized"}')
+    class GuestClient(FakeClient):
+        def pause_task(self, task_id, **kw):
+            raise ZentaoAPIError(401, '{"error":"Unauthorized"}')
 
-    def fake_post_page(path, data=None):
-        calls["page"] = (path, data)
-        return {"status": "success"}
+    good = FakeClient()
+    good.set_task(801, {"status": "doing", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_user_zentao_client", lambda uid, db: GuestClient())
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: good)
 
-    monkeypatch.setattr(client, "post", fake_post)
-    monkeypatch.setattr(client, "post_page", fake_post_page)
-    res = client.pause_task(17246)
-    assert calls["page"][0] == "task-pause-17246.json"
-    assert res.get("status") == "success"
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=801, action="pause", current_user=alice)
+    assert res["ok"] is True
+    assert any(c[0] == "pause" for c in good.calls)
+    row = db_session.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == 801).first()
+    assert row.status == "pause"
 
 
 def test_operate_pause_noop_surfaces_error(db_session, monkeypatch):

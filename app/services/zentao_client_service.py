@@ -642,23 +642,15 @@ class ZentaoClient:
         return self.post(f"tasks/{task_id}/start", body)
 
     def pause_task(self, task_id: int, *, comment: str | None = None) -> dict | None:
-        """暂停任务（status→pause），之后可再 start 继续。
+        """POST /v1/tasks/{id}/pause —— 暂停任务（status→pause），之后可再 start 继续。
 
-        部分禅道版本的 v1 REST 未开放 `/tasks/{id}/pause` 动作（未匹配路由会返回
-        401 Unauthorized），此时回退用 `PUT /tasks/{id}` 直接改 status。
+        官方 v1 接口即此路径（见 zentao.net/book/api/968）。若返回 401，多半是所用
+        token 被当作 guest（账号 token 失效/无写权限）——由调用方回退系统管理员账号重试。
         """
         body: dict[str, Any] = {}
         if comment:
             body["comment"] = comment
-        try:
-            return self.post(f"tasks/{task_id}/pause", body)
-        except ZentaoAPIError as exc:
-            # 该禅道版本 v1 REST 未开放 /tasks/{id}/pause（未匹配路由回 401），且 PUT 编辑
-            # 会忽略 status 字段（实测 no-op）→ 改走传统页面动作 task-pause 执行状态切换。
-            if exc.status_code in (401, 404, 405):
-                logger.warning("pause action endpoint unavailable (%s), fallback to legacy page action for task %s", exc, task_id)
-                return self.post_page(f"task-pause-{task_id}.json", {"comment": comment or ""})
-            raise
+        return self.post(f"tasks/{task_id}/pause", body)
 
     def finish_task(
         self,

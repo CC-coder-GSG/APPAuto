@@ -312,60 +312,78 @@ class ZentaoTaskMirrorService:
         if not is_mine:
             raise HTTPException(status_code=403, detail="该任务未指派给你，无法操作")
 
-        # 优先用「操作人本人」的禅道客户端：让禅道把操作人记为其本人、并保持指派不变；
-        # 无本人绑定时回退系统账号（此时靠回传 assignedTo + 事后校正保持指派人）。
+        # 候选客户端：优先「操作人本人」（禅道正确记录操作人、保持指派），失败/未生效再回退
+        # 系统管理员账号（chenwenbo）。这样即便本人 token 被当作 guest（返回 401），也能由管理员
+        # 账号完成操作；配合事后校正把指派人改回本人。
+        original_account = row.assigned_to  # 操作前的指派人账号，用于事后校正
         acting_client = get_user_zentao_client(current_user.id, self.db)
-        client = acting_client or get_system_zentao_client(self.db)
-        if not client:
+        system_client = get_system_zentao_client(self.db)
+        candidates: list[tuple[str, object]] = []
+        if acting_client is not None:
+            candidates.append(("self", acting_client))
+        if system_client is not None and system_client is not acting_client:
+            candidates.append(("system", system_client))
+        if not candidates:
             raise HTTPException(status_code=502, detail="找不到可用的禅道账号绑定")
 
-        original_account = row.assigned_to  # 操作前的指派人账号，用于事后校正
-        errors: list[str] = []
-        action_resp = None
-        try:
+        if action == "set_time" and (hours is None or hours <= 0 or hours > 999):
+            raise HTTPException(status_code=400, detail="工时需在 0~999 小时之间")
+
+        _expected = {"start": "doing", "pause": "pause", "reactivate": "doing", "finish": "done", "close": "closed"}.get(action)
+
+        def _dispatch(cli):
             if action == "start":
                 left = hours if (hours and hours > 0) else (row.left or row.estimate or 1.0)
                 if (row.status or "").strip().lower() == "pause":
-                    # 暂停中的任务用 restart「继续」，保持指派人
-                    action_resp = client.restart_task(task_id, consumed=(row.consumed or 0.0), left=left, assigned_to=original_account)
-                else:
-                    action_resp = client.start_task(task_id, real_started=_fmt_now(), left=left, assigned_to=original_account)
-            elif action == "pause":
-                action_resp = client.pause_task(task_id, comment=comment)
-            elif action == "finish":
+                    return cli.restart_task(task_id, consumed=(row.consumed or 0.0), left=left, assigned_to=original_account)
+                return cli.start_task(task_id, real_started=_fmt_now(), left=left, assigned_to=original_account)
+            if action == "pause":
+                return cli.pause_task(task_id, comment=comment)
+            if action == "finish":
                 cur = consumed if (consumed and consumed > 0) else (row.left or row.estimate or 1.0)
-                action_resp = client.finish_task(task_id, current_consumed=cur, finished_date=_fmt_now())
-            elif action == "reactivate":
+                return cli.finish_task(task_id, current_consumed=cur, finished_date=_fmt_now())
+            if action == "reactivate":
                 left = hours if (hours and hours > 0) else (row.estimate or 1.0)
-                action_resp = client.restart_task(task_id, consumed=(row.consumed or 0.0), left=left, assigned_to=original_account)
-            elif action == "close":
-                action_resp = client.close_task(task_id, comment=comment)
-            elif action == "set_time":
-                if hours is None or hours <= 0 or hours > 999:
-                    raise HTTPException(status_code=400, detail="工时需在 0~999 小时之间")
-                action_resp = client.update_task(task_id, {"estimate": hours, "left": hours})
-            logger.info("operate task %s action=%s own_client=%s resp=%r", task_id, action, acting_client is not None, action_resp)
-        except HTTPException:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("operate task %s action=%s failed: %s", task_id, action, exc)
-            errors.append(str(exc))
+                return cli.restart_task(task_id, consumed=(row.consumed or 0.0), left=left, assigned_to=original_account)
+            if action == "close":
+                return cli.close_task(task_id, comment=comment)
+            if action == "set_time":
+                return cli.update_task(task_id, {"estimate": hours, "left": hours})
+            return None
 
-        # 操作后从禅道回读最新任务态，刷新镜像行。
-        fresh = self._refresh_one_task(client, row)
-        # 校验是否真的生效：禅道对某些操作可能返回 200 但并未真正切换状态。若状态未达预期，
-        # 明确报错并带上禅道原始返回，便于定位（区分接口不支持 / 状态不允许 / 权限等）。
-        _expected = {"start": "doing", "pause": "pause", "reactivate": "doing", "finish": "done", "close": "closed"}.get(action)
-        if not errors and _expected and (row.status or "").strip().lower() != _expected:
-            logger.warning("operate task %s action=%s no-op: status=%s expected=%s resp=%r", task_id, action, row.status, _expected, action_resp)
-            errors.append(
-                f"禅道未生效：任务当前状态为「{row.status or '未知'}」（期望「{_expected}」）。"
-                f"禅道返回：{str(action_resp)[:200]}"
-            )
-        # 兜底校正：若禅道把指派人清空/改掉（系统账号操作 start/pause/continue 的已知副作用），
-        # 且操作原本不该改指派人，则改派回原指派人。按「禅道真实值」判断（refresh 出于稳健
-        # 不会用空值覆盖镜像，故这里直接看回读到的任务）。
-        if not errors and original_account and action in {"start", "pause", "reactivate", "set_time"}:
+        errors: list[str] = []
+        used_client = None
+        last_resp = None
+        last_err = None
+        for label, cli in candidates:
+            try:
+                last_resp = _dispatch(cli)
+            except HTTPException:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                logger.warning("operate task %s action=%s via %s failed: %s", task_id, action, label, exc)
+                continue
+            self._refresh_one_task(cli, row)
+            logger.info("operate task %s action=%s via %s resp=%r status=%s", task_id, action, label, last_resp, row.status)
+            if not _expected or (row.status or "").strip().lower() == _expected:
+                used_client = cli
+                break  # 生效（或无需校验状态）
+            # 200 但状态未切换 → 试下一个候选账号
+            last_err = None
+        if used_client is None:
+            if last_err is not None:
+                errors.append(str(last_err))
+            else:
+                errors.append(
+                    f"禅道未生效：任务当前状态为「{row.status or '未知'}」（期望「{_expected}」）。"
+                    f"禅道返回：{str(last_resp)[:200]}"
+                )
+
+        # 兜底校正：操作生效后若禅道把指派人清空/改掉（系统账号代操作的已知副作用），改派回本人。
+        client = used_client or candidates[0][1]
+        if used_client is not None and original_account and action in {"start", "pause", "reactivate", "set_time"}:
+            fresh = self._refresh_one_task(client, row)
             cur_acc, _ = _account_of((fresh or {}).get("assignedTo"))
             if (cur_acc or "").strip().lower() != original_account.strip().lower():
                 try:
