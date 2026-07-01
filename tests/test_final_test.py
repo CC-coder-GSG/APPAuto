@@ -128,6 +128,32 @@ def test_report_executed_requirements_includes_final_test(db_session):
     assert result["overview"]["executed_requirements"] == 2
 
 
+def test_workbench_mine_exposes_zentao_task_linkage(db_session):
+    """回归：/workbench/mine 必须返回禅道子任务关联字段，否则已建任务的需求
+    会在需求工作台错误显示为「未关联禅道任务」。"""
+    major = _major(db_session, "V9007")
+    owner = _user(db_session, "ft_owner7")
+    linked = _req(db_session, major.id, "r#9401", owner_id=owner.id)
+    unlinked = _req(db_session, major.id, "r#9402", owner_id=owner.id)
+    linked.zentao_task_id = 17196
+    linked.zentao_parent_task_id = 17195
+    linked.zentao_task_status_cache = "wait"
+    linked.estimated_test_hours = 4.0
+    db_session.commit()
+
+    rows = WorkbenchService(db_session).get_my_workbench(
+        current_user=owner, major_version_id=major.id, mode="version"
+    )
+    by_id = {row["id"]: row for row in rows}
+    # 关联了禅道任务的需求应带出 task id / 状态 / 预计用时
+    assert by_id[linked.id]["zentao_task_id"] == 17196
+    assert by_id[linked.id]["zentao_task_status"] == "wait"
+    assert by_id[linked.id]["estimated_test_hours"] == 4.0
+    assert "task_started_at" in by_id[linked.id]
+    # 未关联的需求返回 None，前端据此显示「未关联禅道任务」
+    assert by_id[unlinked.id]["zentao_task_id"] is None
+
+
 def test_progress_for_major_aggregates(db_session):
     major = _major(db_session, "V9006")
     admin = _user(db_session, "ft_admin6", role=UserRole.ADMIN)

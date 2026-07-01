@@ -90,6 +90,12 @@ class WorkbenchService:
                 "major_version_id": r.major_version_id,
                 "major_version_name": r.major_version.version_no if r.major_version else "",
                 "zentao_story_id": r.zentao_story_id,
+                # 禅道子任务关联信息：前端据此显示「禅道子任务 #」标签 / 「开始」按钮，
+                # 缺失会导致已建任务的需求错误显示为「未关联禅道任务」。
+                "zentao_task_id": r.zentao_task_id,
+                "zentao_task_status": r.zentao_task_status_cache,
+                "task_started_at": r.task_started_at.isoformat() if r.task_started_at else None,
+                "estimated_test_hours": r.estimated_test_hours,
                 "test_notes": r.test_notes,
                 "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
                 "test_notes_updated_by_name": r.test_notes_updated_by.shown_name if r.test_notes_updated_by else None,
