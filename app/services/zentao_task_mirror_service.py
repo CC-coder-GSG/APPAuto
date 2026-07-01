@@ -351,6 +351,14 @@ class ZentaoTaskMirrorService:
 
         # 操作后从禅道回读最新任务态，刷新镜像行。
         fresh = self._refresh_one_task(client, row)
+        # 校验是否真的生效：禅道对某些操作可能返回 200 但并未真正切换状态（例如由非指派人的
+        # 系统账号代操作、或当前状态不允许该操作）。若状态未达预期，明确报错而不是假成功。
+        _expected = {"start": "doing", "pause": "pause", "reactivate": "doing", "finish": "done", "close": "closed"}.get(action)
+        if not errors and _expected and (row.status or "").strip().lower() != _expected:
+            errors.append(
+                f"禅道未生效：任务当前状态为「{row.status or '未知'}」（期望「{_expected}」）。"
+                f"请确认该任务由本人（{original_account or '指派人'}）在平台绑定禅道账号后操作。"
+            )
         # 兜底校正：若禅道把指派人清空/改掉（系统账号操作 start/pause/continue 的已知副作用），
         # 且操作原本不该改指派人，则改派回原指派人。按「禅道真实值」判断（refresh 出于稳健
         # 不会用空值覆盖镜像，故这里直接看回读到的任务）。

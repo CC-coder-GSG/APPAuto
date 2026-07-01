@@ -229,6 +229,25 @@ def test_operate_start_preserves_assignee_via_reassign(db_session, monkeypatch):
     assert any(c[0] == "reassign" and c[2] == "alice" for c in client.calls)
 
 
+def test_operate_pause_noop_surfaces_error(db_session, monkeypatch):
+    # 禅道返回 200 但状态没真正切换（仍 doing）→ 应报「未生效」而非假成功
+    alice = _user(db_session, "alice_noop", account="alice")
+    _major(db_session, "V-TW-N")
+    _mirror(db_session, 701, alice.id, account="alice", status="doing")
+
+    class NoopPauseClient(FakeClient):
+        def pause_task(self, task_id, **kw):
+            self.calls.append(("pause", task_id, kw))
+            self._tasks[task_id] = {"status": "doing", "assignedTo": {"account": "alice"}}
+            return {"message": "success"}
+
+    client = NoopPauseClient()
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=701, action="pause", current_user=alice)
+    assert res["ok"] is False
+    assert any("未生效" in e for e in res["errors"])
+
+
 def test_operate_task_set_time_validates(db_session, monkeypatch):
     alice = _user(db_session, "alice_tw5", account="alice")
     major = _major(db_session, "V-TW-5")

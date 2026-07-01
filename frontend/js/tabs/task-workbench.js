@@ -9,6 +9,8 @@ import { showLoading, hideLoading } from '../components/common.js';
 // 跳转、彩色边框流光特效）。
 
 let taskWorkbenchData = [];
+// 记住已展开的任务卡片，刷新/操作后重新渲染时保持展开，避免每次都被收起。
+const openTaskIds = new Set();
 
 const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
 
@@ -97,7 +99,7 @@ function renderTaskCard(t) {
   ].filter(Boolean).join('');
 
   return `
-    <details class="mine-req-card" data-task-id="${t.task_id}" style="background:#ffffff; transition: all 0.3s;">
+    <details class="mine-req-card" data-task-id="${t.task_id}" ${openTaskIds.has(t.task_id) ? 'open' : ''} ontoggle="taskWorkbenchRememberFold(${t.task_id}, this.open)" style="background:#ffffff; transition: all 0.3s;">
       <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom:1px solid #e2e8f0; padding-bottom:12px; display:flex; justify-content:space-between; align-items:center; gap:8px; list-style:none;">
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
           <span style="color:#1d4ed8;">禅道任务 #${t.task_id}</span>
@@ -227,10 +229,17 @@ export async function taskWorkbenchSetTime(taskId) {
   await loadTaskWorkbench();
 }
 
+export function taskWorkbenchRememberFold(taskId, open) {
+  if (open) openTaskIds.add(taskId);
+  else openTaskIds.delete(taskId);
+  window.scheduleWorkbenchViewportResize?.();
+}
+
 window.OmniQATaskWorkbenchTab = {
   loadTaskWorkbench,
   refreshTaskWorkbench,
   jumpToLinkedRequirement,
   taskWorkbenchOperate,
   taskWorkbenchSetTime,
+  taskWorkbenchRememberFold,
 };

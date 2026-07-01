@@ -2654,6 +2654,9 @@ async function taskWorkbenchOperate(taskId, action) {
 async function taskWorkbenchSetTime(taskId) {
   return window.OmniQATaskWorkbenchTab?.taskWorkbenchSetTime(taskId);
 }
+function taskWorkbenchRememberFold(taskId, open) {
+  return window.OmniQATaskWorkbenchTab?.taskWorkbenchRememberFold(taskId, open);
+}
 
 function renderMineCards() {
   return window.OmniQAMineTab.renderMineCards();
