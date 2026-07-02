@@ -650,6 +650,20 @@ tr.sse-glow-enter td:first-child {
   --sse-c4: #f59e0b;
 }
 
+/* ── 14b. 工作台视口：给弹起条目与流光边留呼吸空间 ──────
+   .workbench-viewport 必须保持 overflow:hidden（子页横向轮播靠它裁剪），
+   但条目 hover 弹起（translateX/Y、scale）和 SSE 流光边（::before 外扩 2px）
+   会越出条目边缘，恰好落在视口边界上被裁掉。
+   处理：视口负外边距向四周外扩，面板等量内缩——内容视觉位置不变，
+   越界的流光与投影落在扩出的空间里，不再被切。
+   （外扩量 ≤ section.card 的最小内边距 16px/14px，不会挤出父容器。） */
+.workbench-viewport {
+  margin: -10px -12px !important;
+}
+.workbench-panel {
+  padding: 10px 12px !important;
+}
+
 /* ============================================================
    R2 修复轮（2026-06-12 用户反馈）：
    - 消灭刺眼纯白：raised 改暖白、输入控件改"凹陷"暖色
