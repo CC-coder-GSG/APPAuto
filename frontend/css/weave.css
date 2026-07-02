@@ -679,25 +679,27 @@ tr.sse-glow-enter td:first-child {
 @keyframes sseAngFlow { to { --sse-ang: 360deg; } }
 .sse-glow { animation: sseAngFlow 4.8s linear infinite; }
 
+/* 每种色调在 50% 处放一段亮色高光：随角度旋转形成一颗肉眼可辨的
+   "光点"绕边缘游走，避免同色系渐变旋转过于含蓄被误认为静态。 */
 .sse-glow-blue::before {
   background: conic-gradient(from var(--sse-ang),
-      #6366f1, #8b5cf6, #3b82f6, #06b6d4, #6366f1) !important;
+      #6366f1, #8b5cf6 28%, #c7d2fe 50%, #3b82f6 62%, #06b6d4 82%, #6366f1) !important;
 }
 .sse-glow-teal::before {
   background: conic-gradient(from var(--sse-ang),
-      #0891b2, #10b981, #06b6d4, #22d3ee, #0891b2) !important;
+      #0891b2, #10b981 28%, #a5f3fc 50%, #06b6d4 62%, #22d3ee 82%, #0891b2) !important;
 }
 .sse-glow-green::before {
   background: conic-gradient(from var(--sse-ang),
-      #10b981, #22c55e, #84cc16, #16a34a, #10b981) !important;
+      #10b981, #22c55e 28%, #d9f99d 50%, #84cc16 62%, #16a34a 82%, #10b981) !important;
 }
 .sse-glow-purple::before {
   background: conic-gradient(from var(--sse-ang),
-      #7c3aed, #8b5cf6, #d946a0, #6d28d9, #7c3aed) !important;
+      #7c3aed, #8b5cf6 28%, #f5d0fe 50%, #d946a0 62%, #6d28d9 82%, #7c3aed) !important;
 }
 .sse-glow-amber::before {
   background: conic-gradient(from var(--sse-ang),
-      #f59e0b, #f97316, #fbbf24, #d97706, #f59e0b) !important;
+      #f59e0b, #f97316 28%, #fef08a 50%, #fbbf24 62%, #d97706 82%, #f59e0b) !important;
 }
 
 /* 行式条目/对象卡的 hover 左沿 beam 与流光环共用 ::before，且 beam 规则

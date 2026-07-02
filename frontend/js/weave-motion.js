@@ -206,12 +206,48 @@
     return null;
   }
 
+  /* ── 5. SSE 流光角度回退（不支持 @property 的浏览器） ──
+     weave.css 用 @property 注册 --sse-ang，由 CSS 动画插值角度实现色彩沿
+     边缘流动。老内核（Chrome<85、Firefox<128、双核浏览器兼容模式等）不支持
+     注册型属性：角度不插值、动画对未注册变量只做离散翻转（0↔360 视觉等价），
+     流光退化成静态。这里检测到不支持时改用 rAF 驱动：
+     - 注入 animation:none 停掉元素上的离散动画（它会盖住继承值）；
+     - 在 :root 上逐帧写 --sse-ang（未注册的自定义属性天然继承到 ::before）。
+     支持 @property 的浏览器直接返回，不产生任何开销。 */
+  function sseAngleFallback() {
+    if (reduceMotion) return;
+    try {
+      if (window.CSS && CSS.registerProperty) {
+        // 直接注册 --sse-ang 本身：CSS @property 已生效会抛 InvalidModificationError
+        // （说明支持，返回）；未生效则 JS 注册补位，CSS 动画同样能插值（返回）。
+        CSS.registerProperty({ name: "--sse-ang", syntax: "<angle>", inherits: true, initialValue: "0deg" });
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === "InvalidModificationError") return; // 已注册 = @property 生效
+      // 其余异常说明注册型属性不可用 → 走 rAF 回退
+    }
+    const style = document.createElement("style");
+    style.textContent = ".sse-glow { animation: none !important; }";
+    document.head.appendChild(style);
+    const PERIOD = 4800;
+    function tick(now) {
+      if (document.querySelector(".sse-glow")) {
+        const deg = ((now % PERIOD) / PERIOD * 360).toFixed(1) + "deg";
+        document.documentElement.style.setProperty("--sse-ang", deg);
+      }
+      window.requestAnimationFrame(tick);
+    }
+    window.requestAnimationFrame(tick);
+  }
+
   function init() {
     document.documentElement.classList.add("weave");
     wrapShowTab();
     injectChapterNumbers();
     observeMetrics();
     ensureIndicator();
+    sseAngleFallback();
     // 应用启动时 app.js 可能已经展示了默认 tab
     const name = currentVisibleTab();
     if (name) onTabShown(name);
