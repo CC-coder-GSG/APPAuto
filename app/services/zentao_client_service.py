@@ -644,8 +644,10 @@ class ZentaoClient:
     def pause_task(self, task_id: int, *, comment: str | None = None) -> dict | None:
         """POST /v1/tasks/{id}/pause —— 暂停任务（status→pause），之后可再 start 继续。
 
-        官方 v1 接口即此路径（见 zentao.net/book/api/968）。若返回 401，多半是所用
-        token 被当作 guest（账号 token 失效/无写权限）——由调用方回退系统管理员账号重试。
+        ⚠️ 本部署（ipd4.3）该 REST 端点未实现：返回 200 + 任务原样，状态不变；
+        传统页面动作带 Token 头又会被「您无权访问该迭代」拦截。实际生效路径是
+        zentao_web_session.pause_task_via_web（网页 cookie 会话），此方法仅作为
+        其他禅道版本的兜底保留，调用方必须回读校验状态。
         """
         body: dict[str, Any] = {}
         if comment:

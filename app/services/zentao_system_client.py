@@ -83,4 +83,56 @@ def get_system_zentao_client(db: Session) -> Optional[ZentaoClient]:
     return None
 
 
-__all__ = ["get_system_zentao_client", "get_user_zentao_client"]
+def _try_web_login(user_id: int, db: Session) -> Optional["ZentaoWebLogin"]:
+    from app.services.zentao_auth_service import decrypt_password
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    binding = (
+        db.query(UserZentaoBinding)
+        .filter(UserZentaoBinding.user_id == user_id)
+        .first()
+    )
+    if not binding or not binding.base_url or not binding.zentao_account:
+        return None
+    plain = decrypt_password(binding.zentao_password_ciphertext or "")
+    if not plain:
+        return None
+    return ZentaoWebLogin(base_url=binding.base_url, account=binding.zentao_account, password=plain)
+
+
+def get_user_zentao_web_login(user_id: int, db: Session) -> Optional["ZentaoWebLogin"]:
+    """指定用户的禅道网页登录凭据（cookie 会话用）。用于 REST/Token 都走不通的
+    页面动作（如 ipd4.3 的任务暂停）。无绑定/解密失败返回 None。"""
+    if not user_id:
+        return None
+    return _try_web_login(user_id, db)
+
+
+def get_system_zentao_web_login(db: Session) -> Optional["ZentaoWebLogin"]:
+    """系统账号的禅道网页登录凭据，选取顺序与 get_system_zentao_client 一致。"""
+    for username in PREFERRED_USERNAMES:
+        user = db.query(User).filter(User.username == username).first()
+        if user:
+            login = _try_web_login(user.id, db)
+            if login:
+                return login
+    admin_ids = [
+        uid for (uid,) in db.query(User.id).filter(User.role == UserRole.ADMIN).all()
+    ]
+    for uid in admin_ids:
+        login = _try_web_login(uid, db)
+        if login:
+            return login
+    for (uid,) in db.query(UserZentaoBinding.user_id).all():
+        login = _try_web_login(uid, db)
+        if login:
+            return login
+    return None
+
+
+__all__ = [
+    "get_system_zentao_client",
+    "get_user_zentao_client",
+    "get_user_zentao_web_login",
+    "get_system_zentao_web_login",
+]

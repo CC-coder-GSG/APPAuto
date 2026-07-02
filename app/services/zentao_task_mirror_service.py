@@ -13,7 +13,13 @@ from sqlalchemy.orm import Session
 
 from app.models import User, Version, VersionType
 from app.models.zentao_task_mirror import ZentaoTaskMirror
-from app.services.zentao_system_client import get_system_zentao_client, get_user_zentao_client
+from app.services.zentao_system_client import (
+    get_system_zentao_client,
+    get_system_zentao_web_login,
+    get_user_zentao_client,
+    get_user_zentao_web_login,
+)
+from app.services.zentao_web_session import ZentaoWebSessionError, pause_task_via_web
 from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
 
 logger = logging.getLogger(__name__)
@@ -331,13 +337,26 @@ class ZentaoTaskMirrorService:
 
         _expected = {"start": "doing", "pause": "pause", "reactivate": "doing", "finish": "done", "close": "closed"}.get(action)
 
-        def _dispatch(cli):
+        # 暂停在本禅道（ipd4.3）REST 未实现、Token 页面动作被迭代 ACL 拦截，
+        # 必须走网页 cookie 会话（见 zentao_web_session）。按候选账号取网页登录凭据。
+        web_logins = {}
+        if action == "pause":
+            web_logins["self"] = get_user_zentao_web_login(current_user.id, self.db)
+            web_logins["system"] = get_system_zentao_web_login(self.db)
+
+        def _dispatch(label, cli):
             if action == "start":
                 left = hours if (hours and hours > 0) else (row.left or row.estimate or 1.0)
                 if (row.status or "").strip().lower() == "pause":
                     return cli.restart_task(task_id, consumed=(row.consumed or 0.0), left=left, assigned_to=original_account)
                 return cli.start_task(task_id, real_started=_fmt_now(), left=left, assigned_to=original_account)
             if action == "pause":
+                web = web_logins.get(label)
+                if web is not None:
+                    try:
+                        return pause_task_via_web(web, task_id, comment=comment)
+                    except ZentaoWebSessionError as exc:
+                        logger.warning("pause via web session (%s) task %s failed: %s", label, task_id, exc)
                 return cli.pause_task(task_id, comment=comment)
             if action == "finish":
                 cur = consumed if (consumed and consumed > 0) else (row.left or row.estimate or 1.0)
@@ -357,7 +376,7 @@ class ZentaoTaskMirrorService:
         last_err = None
         for label, cli in candidates:
             try:
-                last_resp = _dispatch(cli)
+                last_resp = _dispatch(label, cli)
             except HTTPException:
                 raise
             except Exception as exc:  # noqa: BLE001

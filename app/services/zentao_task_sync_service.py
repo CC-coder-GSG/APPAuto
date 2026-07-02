@@ -24,7 +24,13 @@ from sqlalchemy.orm import Session
 
 from app.models import Requirement, User, Version
 from app.services.holiday_service import get_holiday_map
-from app.services.zentao_system_client import get_system_zentao_client, get_user_zentao_client
+from app.services.zentao_system_client import (
+    get_system_zentao_client,
+    get_system_zentao_web_login,
+    get_user_zentao_client,
+    get_user_zentao_web_login,
+)
+from app.services.zentao_web_session import ZentaoWebSessionError, pause_task_via_web
 from app.utils import work_hours
 from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
 
@@ -476,18 +482,51 @@ class ZentaoTaskSyncService:
         return out
 
     def pause_requirement_task(self, requirement: Requirement, *, acting_user: Optional[User] = None, comment: Optional[str] = None) -> dict:
-        """点击「暂停」：禅道子任务 pause（status→pause），之后可再「开始」继续。"""
+        """点击「暂停」：禅道子任务 pause（status→pause），之后可再「开始」继续。
+
+        本禅道（ipd4.3）REST pause 未实现、Token 页面动作被迭代 ACL 拦截，
+        优先走网页 cookie 会话（zentao_web_session），并回读校验状态真的切到 pause。
+        """
         out: dict = {"ok": False, "errors": []}
         if requirement.zentao_task_id:
+            task_id = int(requirement.zentao_task_id)
             client = self._client_or_error(out, acting_user)
             if client:
+                web_logins = []
+                if acting_user is not None:
+                    web_logins.append(get_user_zentao_web_login(acting_user.id, self.db))
+                web_logins.append(get_system_zentao_web_login(self.db))
+                paused = False
+                last_err: Optional[Exception] = None
+                for web in web_logins:
+                    if web is None:
+                        continue
+                    try:
+                        pause_task_via_web(web, task_id, comment=comment)
+                        paused = True
+                        break
+                    except ZentaoWebSessionError as exc:
+                        last_err = exc
+                        logger.warning("pause via web session task %s (%s) failed: %s", task_id, web.account, exc)
+                if not paused:
+                    # 无网页凭据或网页会话失败 → 尝试 REST（其他禅道版本可用）
+                    try:
+                        client.pause_task(task_id, comment=comment)
+                    except Exception as exc:
+                        last_err = exc
+                        logger.warning("pause task %s via REST failed: %s", task_id, exc)
+                # 回读校验：禅道 200 不代表生效（历史上曾静默失败）
+                status = None
                 try:
-                    client.pause_task(int(requirement.zentao_task_id), comment=comment)
+                    status = str((client.get_task(task_id) or {}).get("status") or "").strip().lower()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("verify pause task %s failed: %s", task_id, exc)
+                if status == "pause":
                     requirement.zentao_task_status_cache = "pause"
                     self._restore_assignee_if_changed(client, requirement)
-                except Exception as exc:
-                    logger.warning("pause task %s failed: %s", requirement.zentao_task_id, exc)
-                    out["errors"].append(f"禅道暂停任务失败：{exc}")
+                else:
+                    detail = f"：{last_err}" if last_err else f"（任务当前状态为「{status or '未知'}」）"
+                    out["errors"].append(f"禅道暂停任务未生效{detail}")
         self.db.commit()
         out["ok"] = not out["errors"]
         return out
