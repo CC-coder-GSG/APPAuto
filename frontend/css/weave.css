@@ -664,6 +664,57 @@ tr.sse-glow-enter td:first-child {
   padding: 10px 12px !important;
 }
 
+/* ── 14c. SSE 流光边缘动态化：色彩沿边缘缓缓流动 ────────
+   原实现是静态 linear-gradient 描边环（style.css .sse-glow-*::before）。
+   改为 conic 渐变 + 角度缓速自转（复用 R2 的 @property 角度插值模式）。
+   角度变量放在宿主元素上做动画且声明为可继承，::before 的渐变随之旋转——
+   不触碰 style.css 中 enter/hold/exit 三阶段对 ::before 的 animation 赋值，
+   两套动画互不覆盖。渐变首尾同色保证循环无接缝；不支持 @property 的
+   浏览器角度不插值，渐变静止在 0deg，安全降级为原来的静态描边。 */
+@property --sse-ang {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: true;
+}
+@keyframes sseAngFlow { to { --sse-ang: 360deg; } }
+.sse-glow { animation: sseAngFlow 4.8s linear infinite; }
+
+.sse-glow-blue::before {
+  background: conic-gradient(from var(--sse-ang),
+      #6366f1, #8b5cf6, #3b82f6, #06b6d4, #6366f1) !important;
+}
+.sse-glow-teal::before {
+  background: conic-gradient(from var(--sse-ang),
+      #0891b2, #10b981, #06b6d4, #22d3ee, #0891b2) !important;
+}
+.sse-glow-green::before {
+  background: conic-gradient(from var(--sse-ang),
+      #10b981, #22c55e, #84cc16, #16a34a, #10b981) !important;
+}
+.sse-glow-purple::before {
+  background: conic-gradient(from var(--sse-ang),
+      #7c3aed, #8b5cf6, #d946a0, #6d28d9, #7c3aed) !important;
+}
+.sse-glow-amber::before {
+  background: conic-gradient(from var(--sse-ang),
+      #f59e0b, #f97316, #fbbf24, #d97706, #f59e0b) !important;
+}
+
+/* 行式条目/对象卡的 hover 左沿 beam 与流光环共用 ::before，且 beam 规则
+   （ID 选择器）特异性更高，会把流光环压成左侧细条。流光激活期间把
+   环形几何抢回来（beam 是 hover 瞬态装饰，让位无感知）。 */
+[data-task-card].sse-glow::before,
+.build-record-card.sse-glow::before,
+#tab-mine details.mine-req-card.sse-glow::before,
+#tab-retest details.retest-req-card.sse-glow::before,
+.activity-feed-item.sse-glow::before {
+  inset: -2px !important;
+  width: auto !important;
+  border-radius: inherit !important;
+  transform: none !important;
+  transition: none !important;
+}
+
 /* ============================================================
    R2 修复轮（2026-06-12 用户反馈）：
    - 消灭刺眼纯白：raised 改暖白、输入控件改"凹陷"暖色
@@ -1009,6 +1060,8 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
   #tab-learning .lc-q:focus-within,
   #tab-learning details.lc-rank:hover { animation: none !important; }
   #tab-learning .lc-progress-bar { animation: none !important; }
+  /* SSE 流光边缘：停用色彩流动，退回静态描边 */
+  .sse-glow { animation: none !important; }
 }
 
 /* ── 12. 功能树状图谱 Feature Tree ─────────────────────── */
