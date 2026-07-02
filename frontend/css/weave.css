@@ -738,6 +738,47 @@ tr.sse-glow-hold {
   transition: none !important;
 }
 
+/* ── 14d. 悬停流光环：条目弹起时色彩沿边缘缓缓流动 ──────
+   用户日常看到的「彩色边缘」是 hover 效果（SSE 流光环仅在有未读事件时
+   出现，平时看不到）。把 hover 升级为绕四周流动的描边环：放在空闲的
+   ::after 上（::before 已被 hover 左沿 beam 占用），conic 极光渐变 +
+   --w-ang 角度自转（@property 已注册，动画作用在伪元素自身）。
+   悬停时原左沿 beam 退场，由流光环接任 hover 指示。 */
+#tab-mine details.mine-req-card::after,
+#tab-retest details.retest-req-card::after,
+.activity-feed-item::after,
+[data-task-card]::after,
+.build-record-card::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: var(--w-aurora-conic);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: destination-out;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity var(--w-base) ease-out;
+  pointer-events: none;
+}
+#tab-mine details.mine-req-card:hover::after,
+#tab-retest details.retest-req-card:hover::after,
+.activity-feed-item:hover::after,
+[data-task-card]:hover::after,
+.build-record-card:hover::after {
+  opacity: 1;
+  animation: weaveAngSpin 4.8s linear infinite;
+}
+/* 流光环接任 hover 指示后，左沿 beam 不再出现（避免双重装饰） */
+#tab-mine details.mine-req-card:hover::before,
+#tab-retest details.retest-req-card:hover::before,
+.activity-feed-item:hover::before,
+[data-task-card]:hover::before,
+.build-record-card:hover::before {
+  opacity: 0;
+}
+
 /* ============================================================
    R2 修复轮（2026-06-12 用户反馈）：
    - 消灭刺眼纯白：raised 改暖白、输入控件改"凹陷"暖色
@@ -1086,6 +1127,12 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
   /* SSE 流光边缘：停用色彩流动，退回静态描边 */
   .sse-glow { animation: none !important; }
   tr.sse-glow-hold { animation: none !important; }
+  /* 悬停流光环：保留描边但不旋转 */
+  #tab-mine details.mine-req-card:hover::after,
+  #tab-retest details.retest-req-card:hover::after,
+  .activity-feed-item:hover::after,
+  [data-task-card]:hover::after,
+  .build-record-card:hover::after { animation: none !important; }
 }
 
 /* ── 12. 功能树状图谱 Feature Tree ─────────────────────── */
