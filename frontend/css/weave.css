@@ -702,6 +702,27 @@ tr.sse-glow-enter td:first-child {
       #f59e0b, #f97316 28%, #fef08a 50%, #fbbf24 62%, #d97706 82%, #f59e0b) !important;
 }
 
+/* 表格行条目（测试工作台/反馈等 SSE 高亮是 <tr>）：无法用 ::before 描边环，
+   原实现只有单色内描边呼吸。补一条横向缓缓流过的极光渐变：tr 背景跨单元格
+   连续绘制，td 的 hold 底色是半透明能透出流动。background-size 300% 配合
+   位移 -150%（= 恰好一个图宽）保证循环无接缝，渐变首尾同色。 */
+tr.sse-glow-hold {
+  /* 用长属性而非 background 简写：!important 的简写会连 background-position
+     一起锁死，动画（优先级低于 !important）就动不了了。position 不声明，
+     完全交给 sseRowSweep 动画驱动。 */
+  background-image: linear-gradient(100deg,
+      rgba(99, 102, 241, 0.14), rgba(139, 92, 246, 0.20) 25%,
+      rgba(217, 70, 160, 0.16) 50%, rgba(59, 130, 246, 0.18) 75%,
+      rgba(99, 102, 241, 0.14)) !important;
+  background-size: 300% 100% !important;
+  background-repeat: repeat !important;
+  animation: sseRowSweep 4.8s linear infinite;
+}
+@keyframes sseRowSweep {
+  from { background-position: 0% 0; }
+  to   { background-position: -150% 0; }
+}
+
 /* 行式条目/对象卡的 hover 左沿 beam 与流光环共用 ::before，且 beam 规则
    （ID 选择器）特异性更高，会把流光环压成左侧细条。流光激活期间把
    环形几何抢回来（beam 是 hover 瞬态装饰，让位无感知）。 */
@@ -1064,6 +1085,7 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
   #tab-learning .lc-progress-bar { animation: none !important; }
   /* SSE 流光边缘：停用色彩流动，退回静态描边 */
   .sse-glow { animation: none !important; }
+  tr.sse-glow-hold { animation: none !important; }
 }
 
 /* ── 12. 功能树状图谱 Feature Tree ─────────────────────── */
