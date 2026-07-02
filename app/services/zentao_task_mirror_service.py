@@ -337,8 +337,8 @@ class ZentaoTaskMirrorService:
 
         _expected = {"start": "doing", "pause": "pause", "reactivate": "doing", "finish": "done", "close": "closed"}.get(action)
 
-        # 暂停在本禅道（ipd4.3）REST 未实现、Token 页面动作被迭代 ACL 拦截，
-        # 必须走网页 cookie 会话（见 zentao_web_session）。按候选账号取网页登录凭据。
+        # 暂停：REST 优先（ipd4.3 空 body 会被静默忽略，pause_task 已固定带 comment 字段）；
+        # REST 未生效（如 token 被当 guest 时 200 无效果）再回退网页 cookie 会话。
         web_logins = {}
         if action == "pause":
             web_logins["self"] = get_user_zentao_web_login(current_user.id, self.db)
@@ -351,13 +351,19 @@ class ZentaoTaskMirrorService:
                     return cli.restart_task(task_id, consumed=(row.consumed or 0.0), left=left, assigned_to=original_account)
                 return cli.start_task(task_id, real_started=_fmt_now(), left=left, assigned_to=original_account)
             if action == "pause":
+                resp = None
+                try:
+                    resp = cli.pause_task(task_id, comment=comment)
+                    if str((cli.get_task(task_id) or {}).get("status") or "").strip().lower() == "pause":
+                        return resp
+                except Exception as exc:  # noqa: BLE001 — REST 失败/未生效都尝试网页会话
+                    logger.warning("pause via REST (%s) task %s failed: %s", label, task_id, exc)
                 web = web_logins.get(label)
                 if web is not None:
-                    try:
-                        return pause_task_via_web(web, task_id, comment=comment)
-                    except ZentaoWebSessionError as exc:
-                        logger.warning("pause via web session (%s) task %s failed: %s", label, task_id, exc)
-                return cli.pause_task(task_id, comment=comment)
+                    return pause_task_via_web(web, task_id, comment=comment)
+                if resp is not None:
+                    return resp  # 无网页凭据：交给外层校验判定未生效
+                raise ZentaoWebSessionError("REST 暂停失败且无网页登录凭据")
             if action == "finish":
                 cur = consumed if (consumed and consumed > 0) else (row.left or row.estimate or 1.0)
                 return cli.finish_task(task_id, current_consumed=cur, finished_date=_fmt_now())

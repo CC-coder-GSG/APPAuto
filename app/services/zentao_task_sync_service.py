@@ -484,48 +484,49 @@ class ZentaoTaskSyncService:
     def pause_requirement_task(self, requirement: Requirement, *, acting_user: Optional[User] = None, comment: Optional[str] = None) -> dict:
         """点击「暂停」：禅道子任务 pause（status→pause），之后可再「开始」继续。
 
-        本禅道（ipd4.3）REST pause 未实现、Token 页面动作被迭代 ACL 拦截，
-        优先走网页 cookie 会话（zentao_web_session），并回读校验状态真的切到 pause。
+        REST 优先（ipd4.3 空 body 会被静默忽略，pause_task 已固定带 comment 字段）；
+        REST 未生效（如 token 被当 guest）再回退网页 cookie 会话（zentao_web_session）。
+        始终回读校验状态真的切到 pause。
         """
         out: dict = {"ok": False, "errors": []}
         if requirement.zentao_task_id:
             task_id = int(requirement.zentao_task_id)
             client = self._client_or_error(out, acting_user)
             if client:
-                web_logins = []
-                if acting_user is not None:
-                    web_logins.append(get_user_zentao_web_login(acting_user.id, self.db))
-                web_logins.append(get_system_zentao_web_login(self.db))
-                paused = False
                 last_err: Optional[Exception] = None
-                for web in web_logins:
-                    if web is None:
-                        continue
+
+                def _paused() -> bool:
                     try:
-                        pause_task_via_web(web, task_id, comment=comment)
-                        paused = True
-                        break
-                    except ZentaoWebSessionError as exc:
-                        last_err = exc
-                        logger.warning("pause via web session task %s (%s) failed: %s", task_id, web.account, exc)
-                if not paused:
-                    # 无网页凭据或网页会话失败 → 尝试 REST（其他禅道版本可用）
-                    try:
-                        client.pause_task(task_id, comment=comment)
-                    except Exception as exc:
-                        last_err = exc
-                        logger.warning("pause task %s via REST failed: %s", task_id, exc)
-                # 回读校验：禅道 200 不代表生效（历史上曾静默失败）
-                status = None
+                        return str((client.get_task(task_id) or {}).get("status") or "").strip().lower() == "pause"
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("verify pause task %s failed: %s", task_id, exc)
+                        return False
+
                 try:
-                    status = str((client.get_task(task_id) or {}).get("status") or "").strip().lower()
+                    client.pause_task(task_id, comment=comment)
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning("verify pause task %s failed: %s", task_id, exc)
-                if status == "pause":
+                    last_err = exc
+                    logger.warning("pause task %s via REST failed: %s", task_id, exc)
+                if not _paused():
+                    web_logins = []
+                    if acting_user is not None:
+                        web_logins.append(get_user_zentao_web_login(acting_user.id, self.db))
+                    web_logins.append(get_system_zentao_web_login(self.db))
+                    for web in web_logins:
+                        if web is None:
+                            continue
+                        try:
+                            pause_task_via_web(web, task_id, comment=comment)
+                            break
+                        except ZentaoWebSessionError as exc:
+                            last_err = exc
+                            logger.warning("pause via web session task %s (%s) failed: %s", task_id, web.account, exc)
+                # 回读校验：禅道 200 不代表生效（历史上曾静默失败）
+                if _paused():
                     requirement.zentao_task_status_cache = "pause"
                     self._restore_assignee_if_changed(client, requirement)
                 else:
-                    detail = f"：{last_err}" if last_err else f"（任务当前状态为「{status or '未知'}」）"
+                    detail = f"：{last_err}" if last_err else "（禅道返回成功但状态未切换）"
                     out["errors"].append(f"禅道暂停任务未生效{detail}")
         self.db.commit()
         out["ok"] = not out["errors"]

@@ -1,12 +1,15 @@
 """
 Zentao 网页会话客户端（cookie 登录，非 API Token）。
 
-为什么需要它：本部署（禅道 ipd4.3）的任务「暂停」两条常规路径都不可用——
-  1. REST `POST /v1/tasks/{id}/pause` 未实现：返回 200 + 任务原样，状态不变；
-  2. 传统页面动作带 Token 头会被 ACL 拦截：`{"result":"fail","alert":"您无权访问该迭代！"}`
-     （API Token 会话未加载用户的迭代访问权限，同一账号网页登录则正常）。
+为什么需要它：本部署（禅道 ipd4.3）的任务动作 REST POST 有两类静默失败——
+  1. **空 body 被静默忽略**：返回 200 + 任务原样、状态不变（pause_task/close_task
+     已固定带 comment 字段规避，REST 是首选路径）；
+  2. **token 被当 guest** 时同样 200 无效果；而传统页面动作带 Token 头会被 ACL
+     拦截：`{"result":"fail","alert":"您无权访问该迭代！"}`（API Token 会话未加载
+     用户的迭代访问权限，同一账号网页登录则正常）。
 
-唯一生效的方式是模拟真实网页登录（zentaosid cookie 会话）后提交暂停表单。
+因此保留本模块作为 REST 未生效时的兜底：模拟真实网页登录（zentaosid cookie
+会话）后提交暂停表单。
 实测协议（2026-07-02 对 ipd4.3 抓包验证）：
   - 登录必须带浏览器 User-Agent，否则禅道静默拒绝、重渲染登录页；
   - rand 必须来自 `GET user-refreshRandom.html`（写入会话），密码为 md5(md5(明文)+rand)；

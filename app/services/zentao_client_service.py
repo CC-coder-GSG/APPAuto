@@ -644,15 +644,12 @@ class ZentaoClient:
     def pause_task(self, task_id: int, *, comment: str | None = None) -> dict | None:
         """POST /v1/tasks/{id}/pause —— 暂停任务（status→pause），之后可再 start 继续。
 
-        ⚠️ 本部署（ipd4.3）该 REST 端点未实现：返回 200 + 任务原样，状态不变；
-        传统页面动作带 Token 头又会被「您无权访问该迭代」拦截。实际生效路径是
-        zentao_web_session.pause_task_via_web（网页 cookie 会话），此方法仅作为
-        其他禅道版本的兜底保留，调用方必须回读校验状态。
+        ⚠️ 本部署（ipd4.3）任务动作的 REST POST **空 body 会被静默忽略**（返回
+        200 + 任务原样，状态不变），必须至少带 comment 字段（空串即可）。此外
+        token 被当 guest 时同样 200 无效果——调用方必须回读校验状态，未生效时
+        回退 zentao_web_session.pause_task_via_web（网页 cookie 会话）。
         """
-        body: dict[str, Any] = {}
-        if comment:
-            body["comment"] = comment
-        return self.post(f"tasks/{task_id}/pause", body)
+        return self.post(f"tasks/{task_id}/pause", {"comment": comment or ""})
 
     def finish_task(
         self,
@@ -685,11 +682,13 @@ class ZentaoClient:
         return self.post(f"tasks/{task_id}/restart", body)
 
     def close_task(self, task_id: int, *, comment: str | None = None) -> dict | None:
-        """POST /v1/tasks/{id}/close —— 关闭任务（status→closed）。"""
-        body: dict[str, Any] = {}
-        if comment:
-            body["comment"] = comment
-        return self.post(f"tasks/{task_id}/close", body)
+        """POST /v1/tasks/{id}/close —— 关闭任务（status→closed）。
+
+        ⚠️ 本部署（ipd4.3）空 body 会被静默忽略（200 + 任务原样、状态不变），
+        必须至少带 comment 字段（空串即可）。平台前端点「关闭」不传 comment，
+        曾因此全部静默失败。
+        """
+        return self.post(f"tasks/{task_id}/close", {"comment": comment or ""})
 
     def list_assignable_users(self, execution_id: int) -> dict[str, str]:
         """该执行可指派用户 {account: realname}。

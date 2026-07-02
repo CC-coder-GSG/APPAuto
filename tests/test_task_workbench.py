@@ -272,8 +272,8 @@ def test_operate_pause_noop_surfaces_error(db_session, monkeypatch):
     assert any("未生效" in e for e in res["errors"])
 
 
-def test_operate_pause_prefers_web_session(db_session, monkeypatch):
-    # 有网页登录凭据时暂停走 cookie 会话（ipd4.3 REST pause 不生效），不再调 REST pause
+def test_operate_pause_rest_first_skips_web(db_session, monkeypatch):
+    # REST pause 生效（pause_task 已固定带 comment 字段）→ 不再动用网页会话
     from app.services.zentao_web_session import ZentaoWebLogin
 
     alice = _user(db_session, "alice_web", account="alice")
@@ -286,7 +286,6 @@ def test_operate_pause_prefers_web_session(db_session, monkeypatch):
 
     def fake_web_pause(login, task_id, *, comment=None):
         web_calls.append((login.account, task_id, comment))
-        client.set_task(task_id, {"status": "pause", "assignedTo": {"account": "alice"}})
         return {"result": "success"}
 
     monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
@@ -299,25 +298,34 @@ def test_operate_pause_prefers_web_session(db_session, monkeypatch):
 
     res = ZentaoTaskMirrorService(db_session).operate_task(task_id=901, action="pause", current_user=alice)
     assert res["ok"] is True
-    assert web_calls == [("admin", 901, None)]
-    assert not any(c[0] == "pause" for c in client.calls)  # REST pause 未被调用
+    assert any(c[0] == "pause" for c in client.calls)  # 走了 REST
+    assert web_calls == []  # 网页会话未被动用
     row = db_session.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == 901).first()
     assert row.status == "pause"
 
 
-def test_operate_pause_web_failure_falls_back_to_rest(db_session, monkeypatch):
-    # 网页会话失败（登录被拒等）→ 回退 REST pause
-    from app.services.zentao_web_session import ZentaoWebLogin, ZentaoWebSessionError
+def test_operate_pause_falls_back_to_web_when_rest_noop(db_session, monkeypatch):
+    # REST 200 但未生效（如 token 被当 guest）→ 回退网页 cookie 会话完成暂停
+    from app.services.zentao_web_session import ZentaoWebLogin
 
     alice = _user(db_session, "alice_webfb", account="alice")
     _major(db_session, "V-TW-WF")
     _mirror(db_session, 902, alice.id, account="alice", status="doing")
 
-    client = FakeClient()
-    client.set_task(902, {"status": "doing", "assignedTo": {"account": "alice"}})
+    class NoopPauseClient(FakeClient):
+        def pause_task(self, task_id, **kw):
+            self.calls.append(("pause", task_id, kw))
+            self._tasks[task_id] = {"status": "doing", "assignedTo": {"account": "alice"}}
+            return {"message": "success"}
 
-    def failing_web_pause(login, task_id, *, comment=None):
-        raise ZentaoWebSessionError("登录被拒")
+    client = NoopPauseClient()
+    client.set_task(902, {"status": "doing", "assignedTo": {"account": "alice"}})
+    web_calls = []
+
+    def fake_web_pause(login, task_id, *, comment=None):
+        web_calls.append((login.account, task_id))
+        client.set_task(task_id, {"status": "pause", "assignedTo": {"account": "alice"}})
+        return {"result": "success"}
 
     monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
     monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: None)
@@ -325,11 +333,34 @@ def test_operate_pause_web_failure_falls_back_to_rest(db_session, monkeypatch):
         tms, "get_system_zentao_web_login",
         lambda db: ZentaoWebLogin(base_url="http://z", account="admin", password="p"),
     )
-    monkeypatch.setattr(tms, "pause_task_via_web", failing_web_pause)
+    monkeypatch.setattr(tms, "pause_task_via_web", fake_web_pause)
 
     res = ZentaoTaskMirrorService(db_session).operate_task(task_id=902, action="pause", current_user=alice)
     assert res["ok"] is True
-    assert any(c[0] == "pause" for c in client.calls)  # 回退到了 REST
+    assert web_calls == [("admin", 902)]
+    row = db_session.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == 902).first()
+    assert row.status == "pause"
+
+
+def test_pause_and_close_always_send_nonempty_body(monkeypatch):
+    # ipd4.3 空 body 的任务动作会被静默忽略 → pause/close 必须始终带 comment 字段
+    import httpx as _httpx
+    from app.services.zentao_client_service import ZentaoClient
+
+    sent = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        sent.append((url, json))
+        return _httpx.Response(200, json={"id": 1, "status": "x"}, request=_httpx.Request("POST", url))
+
+    monkeypatch.setattr(_httpx, "post", fake_post)
+    cli = ZentaoClient(base_url="http://z/zentao", token="t")
+    cli.pause_task(1)
+    cli.close_task(1)
+    cli.pause_task(1, comment="备注")
+    assert sent[0][1] == {"comment": ""}
+    assert sent[1][1] == {"comment": ""}
+    assert sent[2][1] == {"comment": "备注"}
 
 
 def test_operate_task_set_time_validates(db_session, monkeypatch):
