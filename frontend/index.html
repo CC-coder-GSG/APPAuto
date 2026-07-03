@@ -4,12 +4,12 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20260703-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20260703-2">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20260703-2"></script>
+  <script type="module" src="/static/js/app.js?v=20260703-3"></script>
   <script src="/static/js/weave-motion.js?v=20260703-1" defer></script>
   <style>
     /* Header layout */
@@ -431,11 +431,17 @@
         </div>
         <div>
           <label style="display:block; margin-bottom:4px;">父任务</label>
-          <select id="taskBoardZtParent" style="width:100%;"><option value="">无（顶层任务）</option></select>
+          <div style="position:relative;">
+            <input type="text" id="taskBoardZtParentInput" autocomplete="off" style="width:100%;" placeholder="输入任务名/编号搜索；留空=顶层任务">
+            <div id="taskBoardZtParentList" class="zt-combo-list hidden"></div>
+          </div>
         </div>
         <div>
           <label style="display:block; margin-bottom:4px;">指派给</label>
-          <select id="taskBoardZtAssignee" style="width:100%;"><option value="">不指派</option></select>
+          <div style="position:relative;">
+            <input type="text" id="taskBoardZtAssigneeInput" autocomplete="off" style="width:100%;" placeholder="输入姓名/账号搜索；留空=不指派">
+            <div id="taskBoardZtAssigneeList" class="zt-combo-list hidden"></div>
+          </div>
         </div>
         <div style="grid-column:1/-1;">
           <label style="display:block; margin-bottom:4px; font-weight:600;">任务名称<span style="color:#dc2626;">*</span></label>
@@ -464,7 +470,10 @@
         </div>
         <div style="grid-column:1/-1;">
           <label style="display:block; margin-bottom:4px;">相关研发需求</label>
-          <select id="taskBoardZtStory" style="width:100%;"><option value="">无</option></select>
+          <div style="position:relative;">
+            <input type="text" id="taskBoardZtStoryInput" autocomplete="off" style="width:100%;" placeholder="输入需求标题/编号搜索；留空=无">
+            <div id="taskBoardZtStoryList" class="zt-combo-list hidden"></div>
+          </div>
         </div>
         <div style="grid-column:1/-1;">
           <label style="display:block; margin-bottom:4px;">任务描述</label>

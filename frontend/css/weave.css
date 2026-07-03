@@ -640,6 +640,33 @@ thead tr:hover th { background: transparent !important; box-shadow: none !import
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ── 13b. 模糊搜索组合框（任务看板·新建禅道任务）──────── */
+.zt-combo-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--w-raised, #fff);
+  border: 1px solid var(--w-hairline-strong, #cbd5e1);
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(28, 25, 23, 0.14);
+  padding: 4px;
+}
+.zt-combo-item {
+  padding: 7px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.zt-combo-item:hover,
+.zt-combo-item.active {
+  background: rgba(139, 92, 246, 0.10);
+}
+
 /* ── 14. SSE 极光统一（沿用现有 glow 机制，仅调色） ────── */
 .sse-glow-wrap::before,
 tr.sse-glow-enter td:first-child {

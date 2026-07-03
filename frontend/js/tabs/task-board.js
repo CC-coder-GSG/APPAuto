@@ -287,6 +287,83 @@ function resetForm() {
 
 // ─── 新建禅道任务（模式切换 + 表单）─────────────────────────────────────
 
+// 模糊搜索组合框：输入过滤 + 点击/回车选择。下拉列表很长（人员/需求/父任务），
+// 原生 select 一个个翻不现实。value 只在明确选择时落定；失焦时唯一匹配自动选中，
+// 匹配不到则清空文本，保证提交值与所见一致。
+const ztCombos = {};
+
+function ztComboInit(key, inputId, listId) {
+  if (ztCombos[key]) return ztCombos[key];
+  const input = document.getElementById(inputId);
+  const list = document.getElementById(listId);
+  if (!input || !list) return null;
+  const combo = { input, list, items: [], value: '' };
+  ztCombos[key] = combo;
+
+  const matchOf = (q) => combo.items.filter((it) => (it.label + ' ' + it.value).toLowerCase().includes(q));
+  const render = () => {
+    const q = input.value.trim().toLowerCase();
+    const matched = q ? matchOf(q) : combo.items;
+    const rows = matched.slice(0, 100);
+    list.innerHTML = rows.length
+      ? rows.map((it) => `<div class="zt-combo-item" data-value="${escapeHtml(String(it.value))}">${escapeHtml(it.label)}</div>`).join('') +
+        (matched.length > 100 ? `<div class="muted" style="padding:6px 10px; font-size:12px;">还有 ${matched.length - 100} 条，继续输入缩小范围…</div>` : '')
+      : '<div class="muted" style="padding:6px 10px; font-size:12px;">无匹配项</div>';
+  };
+  const pick = (value) => {
+    const found = combo.items.find((it) => String(it.value) === String(value));
+    combo.value = found ? String(found.value) : '';
+    input.value = found ? found.label : '';
+    list.classList.add('hidden');
+  };
+
+  input.addEventListener('input', () => { combo.value = ''; render(); list.classList.remove('hidden'); });
+  input.addEventListener('focus', () => { render(); list.classList.remove('hidden'); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { list.classList.add('hidden'); return; }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const first = list.querySelector('[data-value]');
+      if (first && !list.classList.contains('hidden')) pick(first.getAttribute('data-value'));
+    }
+  });
+  input.addEventListener('blur', () => setTimeout(() => {
+    list.classList.add('hidden');
+    if (combo.value) return;             // 已经点选过
+    const q = input.value.trim().toLowerCase();
+    if (!q) { combo.value = ''; return; } // 留空 = 不选
+    const matched = matchOf(q);
+    if (matched.length === 1) pick(matched[0].value);
+    else { input.value = ''; combo.value = ''; } // 含糊不清就清空，避免提交错人/错需求
+  }, 150));
+  // mousedown 先于 blur 触发，保证点击项能生效
+  list.addEventListener('mousedown', (e) => {
+    const item = e.target.closest('[data-value]');
+    if (!item) return;
+    e.preventDefault();
+    pick(item.getAttribute('data-value'));
+  });
+  return combo;
+}
+
+function ztComboSetItems(key, items) {
+  const c = ztCombos[key];
+  if (!c) return;
+  c.items = Array.isArray(items) ? items : [];
+  c.value = '';
+  c.input.value = '';
+}
+
+function ztComboValue(key) {
+  return ztCombos[key] ? ztCombos[key].value : '';
+}
+
+function ztInitCombos() {
+  ztComboInit('parent', 'taskBoardZtParentInput', 'taskBoardZtParentList');
+  ztComboInit('assignee', 'taskBoardZtAssigneeInput', 'taskBoardZtAssigneeList');
+  ztComboInit('story', 'taskBoardZtStoryInput', 'taskBoardZtStoryList');
+}
+
 function resetZtForm() {
   const ids = ['taskBoardZtName', 'taskBoardZtEstStarted', 'taskBoardZtDeadline', 'taskBoardZtEstimate', 'taskBoardZtDesc'];
   ids.forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
@@ -294,10 +371,8 @@ function resetZtForm() {
   if (type) type.value = 'test';
   const pri = document.getElementById('taskBoardZtPri');
   if (pri) pri.value = '3';
-  ['taskBoardZtParent', 'taskBoardZtAssignee', 'taskBoardZtStory'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.innerHTML = `<option value="">${id === 'taskBoardZtParent' ? '无（顶层任务）' : id === 'taskBoardZtAssignee' ? '不指派' : '无'}</option>`;
-  });
+  ztInitCombos();
+  ['parent', 'assignee', 'story'].forEach((key) => ztComboSetItems(key, ztCombos[key] ? ztCombos[key].items : []));
   const hint = document.getElementById('taskBoardZtHint');
   if (hint) hint.textContent = '';
   state.ztOptionsMajor = null;
@@ -340,13 +415,9 @@ function populateZtExecSelect() {
 export async function loadZtFormOptions() {
   const majorId = document.getElementById('taskBoardZtExec')?.value;
   const hint = document.getElementById('taskBoardZtHint');
-  const parentSel = document.getElementById('taskBoardZtParent');
-  const assigneeSel = document.getElementById('taskBoardZtAssignee');
-  const storySel = document.getElementById('taskBoardZtStory');
+  ztInitCombos();
   if (!majorId) {
-    if (parentSel) parentSel.innerHTML = '<option value="">无（顶层任务）</option>';
-    if (assigneeSel) assigneeSel.innerHTML = '<option value="">不指派</option>';
-    if (storySel) storySel.innerHTML = '<option value="">无</option>';
+    ['parent', 'assignee', 'story'].forEach((key) => ztComboSetItems(key, []));
     state.ztOptionsMajor = null;
     return;
   }
@@ -354,18 +425,18 @@ export async function loadZtFormOptions() {
   try {
     const data = await (await api(`/task-board/zentao-task-form-options?major_version_id=${majorId}`)).json();
     state.ztOptionsMajor = majorId;
-    if (assigneeSel) {
-      assigneeSel.innerHTML = '<option value="">不指派</option>' +
-        (data.assignable || []).map((u) => `<option value="${escapeHtml(u.account)}">${escapeHtml(u.realname || u.account)}</option>`).join('');
-    }
-    if (parentSel) {
-      parentSel.innerHTML = '<option value="">无（顶层任务）</option>' +
-        (data.parents || []).map((p) => `<option value="${p.id}">#${p.id} ${escapeHtml(p.name || '')}${p.is_parent ? '（父任务）' : ''}</option>`).join('');
-    }
-    if (storySel) {
-      storySel.innerHTML = '<option value="">无</option>' +
-        (data.stories || []).map((s) => `<option value="${s.id}">#${s.id} ${escapeHtml(s.title || '')}</option>`).join('');
-    }
+    ztComboSetItems('assignee', (data.assignable || []).map((u) => ({
+      value: u.account,
+      label: `${u.realname || u.account}（${u.account}）`,
+    })));
+    ztComboSetItems('parent', (data.parents || []).map((p) => ({
+      value: p.id,
+      label: `#${p.id} ${p.name || ''}${p.is_parent ? '（父任务）' : ''}`,
+    })));
+    ztComboSetItems('story', (data.stories || []).map((s) => ({
+      value: s.id,
+      label: `#${s.id} ${s.title || ''}`,
+    })));
     if (hint) hint.textContent = (data.errors && data.errors.length) ? `⚠ ${data.errors.join('；')}` : '';
   } catch (err) {
     if (hint) hint.textContent = err.message || '加载表单选项失败';
@@ -395,9 +466,9 @@ async function submitZentao() {
     major_version_id: Number(majorId),
     name,
     task_type: document.getElementById('taskBoardZtType')?.value || 'test',
-    assigned_to: document.getElementById('taskBoardZtAssignee')?.value || null,
-    parent_task_id: Number(document.getElementById('taskBoardZtParent')?.value) || null,
-    story: Number(document.getElementById('taskBoardZtStory')?.value) || null,
+    assigned_to: ztComboValue('assignee') || null,
+    parent_task_id: Number(ztComboValue('parent')) || null,
+    story: Number(ztComboValue('story')) || null,
     est_started: estStarted,
     deadline,
     estimate: estimateRaw ? Number(estimateRaw) : null,
