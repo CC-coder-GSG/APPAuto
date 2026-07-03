@@ -63,6 +63,20 @@ class TaskCarryOverPayload(BaseModel):
     to_date: date
 
 
+class ZentaoTaskCreatePayload(BaseModel):
+    major_version_id: int
+    name: str = Field(min_length=1, max_length=255)
+    task_type: str = "test"
+    assigned_to: Optional[str] = None
+    parent_task_id: Optional[int] = None
+    story: Optional[int] = None
+    est_started: Optional[str] = None   # YYYY-MM-DD
+    deadline: Optional[str] = None      # YYYY-MM-DD
+    estimate: Optional[float] = None
+    pri: int = 3
+    desc: Optional[str] = None
+
+
 def _ensure_read(current_user: User) -> None:
     ensure_tab_access(current_user, "task-board", "无权限访问任务看板")
 
@@ -253,6 +267,46 @@ def list_zentao_tasks(
         execution_id=execution_id,
     )
     return {"tasks": tasks, "scope": scope, "refreshed": refreshed}
+
+
+@router.get("/zentao-task-form-options")
+def zentao_task_form_options(
+    major_version_id: int = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """新建禅道任务的表单选项（可指派人 / 父任务候选 / 关联研发需求）。"""
+    _ensure_read(current_user)
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+    return ZentaoTaskMirrorService(db).form_options(major_version_id)
+
+
+@router.post("/zentao-tasks/create")
+def create_zentao_task(
+    payload: ZentaoTaskCreatePayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """任务看板：直接在禅道执行下创建任务（复刻禅道创建页核心字段）。"""
+    _ensure_read(current_user)
+    if not can_manage_board(current_user):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="当前账号无任务派发权限")
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+    return ZentaoTaskMirrorService(db).create_board_task(
+        current_user=current_user,
+        major_version_id=payload.major_version_id,
+        name=payload.name,
+        task_type=payload.task_type,
+        assigned_to=payload.assigned_to,
+        parent_task_id=payload.parent_task_id,
+        story=payload.story,
+        est_started=payload.est_started,
+        deadline=payload.deadline,
+        estimate=payload.estimate,
+        pri=payload.pri,
+        desc=payload.desc,
+    )
 
 
 @router.post("/zentao-tasks/sync")

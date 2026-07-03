@@ -288,6 +288,155 @@ class ZentaoTaskMirrorService:
         return tasks
 
     # ------------------------------------------------------------------
+    # 任务看板：新建禅道任务（复刻禅道创建页的核心字段）
+    # ------------------------------------------------------------------
+
+    _CREATE_TASK_TYPES = {"design", "devel", "test", "study", "discuss", "review", "affair", "misc"}
+
+    def form_options(self, major_version_id: int) -> dict:
+        """新建禅道任务的表单选项：可指派人 / 父任务候选 / 关联研发需求。
+
+        可指派人、需求走禅道实时接口（单项失败不阻塞，收进 errors）；
+        父任务候选读本地镜像（顶层且未取消/关闭的任务）。
+        """
+        from fastapi import HTTPException
+
+        major = self.db.query(Version).filter(Version.id == major_version_id).first()
+        if not major or not major.zentao_execution_id:
+            raise HTTPException(status_code=400, detail="该大版本未绑定禅道执行")
+        exec_id = int(major.zentao_execution_id)
+        out: dict = {"execution_id": exec_id, "assignable": [], "parents": [], "stories": [], "errors": []}
+
+        client = get_system_zentao_client(self.db)
+        if client is None:
+            out["errors"].append("找不到可用的禅道账号绑定，人员/需求列表不可用")
+        else:
+            try:
+                out["assignable"] = [
+                    {"account": acc, "realname": name}
+                    for acc, name in (client.list_assignable_users(exec_id) or {}).items()
+                ]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("form_options assignable exec %s failed: %s", exec_id, exc)
+                out["errors"].append(f"拉取可指派人失败：{exc}")
+            try:
+                out["stories"] = [
+                    {"id": _coerce_int(s.get("id")), "title": str(s.get("title") or "")}
+                    for s in (client.list_execution_stories(exec_id) or [])
+                    if _coerce_int(s.get("id"))
+                ]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("form_options stories exec %s failed: %s", exec_id, exc)
+                out["errors"].append(f"拉取研发需求失败：{exc}")
+
+        rows = (
+            self.db.query(ZentaoTaskMirror)
+            .filter(
+                ZentaoTaskMirror.execution_id == exec_id,
+                ZentaoTaskMirror.parent == 0,
+            )
+            .order_by(ZentaoTaskMirror.is_parent.desc(), ZentaoTaskMirror.task_id.desc())
+            .all()
+        )
+        out["parents"] = [
+            {"id": r.task_id, "name": r.name, "is_parent": bool(r.is_parent), "status": r.status}
+            for r in rows
+            if str(r.status or "").strip().lower() not in {"cancel", "closed"}
+        ]
+        return out
+
+    def create_board_task(
+        self,
+        *,
+        current_user: User,
+        major_version_id: int,
+        name: str,
+        task_type: str = "test",
+        assigned_to: Optional[str] = None,
+        parent_task_id: Optional[int] = None,
+        story: Optional[int] = None,
+        est_started: Optional[str] = None,
+        deadline: Optional[str] = None,
+        estimate: Optional[float] = None,
+        pri: int = 3,
+        desc: Optional[str] = None,
+    ) -> dict:
+        """从任务看板创建禅道任务并刷新镜像。
+
+        创建人优先用本人禅道绑定（禅道正确记录 openedBy），无绑定回退系统账号。
+        parent 在 create 时被禅道忽略，创建成功后再 PUT 挂父（失败降级为警告）。
+        """
+        from fastapi import HTTPException
+
+        name = (name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="任务名称不能为空")
+        if task_type not in self._CREATE_TASK_TYPES:
+            raise HTTPException(status_code=400, detail=f"不支持的任务类型：{task_type}")
+        if pri not in (1, 2, 3, 4):
+            raise HTTPException(status_code=400, detail="优先级需为 1~4")
+        if estimate is not None and (estimate <= 0 or estimate > 999):
+            raise HTTPException(status_code=400, detail="预计工时需在 0~999 小时之间")
+        major = self.db.query(Version).filter(Version.id == major_version_id).first()
+        if not major or not major.zentao_execution_id:
+            raise HTTPException(status_code=400, detail="该大版本未绑定禅道执行")
+        exec_id = int(major.zentao_execution_id)
+
+        acting_client = get_user_zentao_client(current_user.id, self.db)
+        system_client = get_system_zentao_client(self.db)
+        candidates = []
+        if acting_client is not None:
+            candidates.append(acting_client)
+        if system_client is not None and system_client is not acting_client:
+            candidates.append(system_client)
+        if not candidates:
+            raise HTTPException(status_code=502, detail="找不到可用的禅道账号绑定")
+
+        created = None
+        used_client = None
+        errors: list[str] = []
+        for cli in candidates:
+            try:
+                created = cli.create_execution_task(
+                    exec_id,
+                    name=name,
+                    assigned_to=(assigned_to or None),
+                    task_type=task_type,
+                    story=story or None,
+                    est_started=est_started or None,
+                    deadline=deadline or None,
+                    estimate=estimate,
+                    pri=pri,
+                    desc=desc,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("create board task in exec %s failed: %s", exec_id, exc)
+                errors.append(str(exc))
+                continue
+            if isinstance(created, dict) and _coerce_int(created.get("id")):
+                used_client = cli
+                break
+            errors.append(f"禅道返回异常：{str(created)[:200]}")
+        task_id = _coerce_int((created or {}).get("id")) if isinstance(created, dict) else None
+        if not task_id or used_client is None:
+            raise HTTPException(status_code=502, detail="创建禅道任务失败：" + ("；".join(errors) or "未返回任务 id"))
+
+        warnings: list[str] = []
+        if parent_task_id:
+            try:
+                used_client.link_task_parent(task_id, int(parent_task_id))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("link new task %s -> parent %s failed: %s", task_id, parent_task_id, exc)
+                warnings.append(f"挂到父任务 #{parent_task_id} 失败：{exc}")
+
+        # 刷新该执行的镜像，让看板/面板立刻可见（失败不影响创建结果）
+        refreshed = self.sync_one_major(major_version_id)
+        if not refreshed.get("ok"):
+            warnings.append(f"镜像刷新失败（{refreshed.get('error')}），任务已创建、稍后会由后台同步补上")
+
+        return {"ok": True, "task_id": task_id, "warnings": warnings}
+
+    # ------------------------------------------------------------------
     # 独立（未关联需求）任务的禅道操作：开始 / 完成 / 关闭 / 设置工时
     # ------------------------------------------------------------------
 
@@ -312,11 +461,19 @@ class ZentaoTaskMirrorService:
         if not row:
             raise HTTPException(status_code=404, detail="任务不存在或未同步")
         # 权限：任务须指派给当前账号本人（禅道账号匹配，或镜像已映射到本人）。
+        # 例外：管理员可以关闭「已完成」的任务（2026-07-03 需求）。
         my_account = (current_user.zentao_account or "").strip().lower()
         acc = (row.assigned_to or "").strip().lower()
         is_mine = (row.assignee_user_id == current_user.id) or (bool(my_account) and acc == my_account)
         if not is_mine:
-            raise HTTPException(status_code=403, detail="该任务未指派给你，无法操作")
+            role_val = getattr(current_user.role, "value", None) or str(current_user.role or "")
+            admin_close = (
+                action == "close"
+                and role_val == "admin"
+                and str(row.status or "").strip().lower() == "done"
+            )
+            if not admin_close:
+                raise HTTPException(status_code=403, detail="该任务未指派给你，无法操作")
 
         # 候选客户端：优先「操作人本人」（禅道正确记录操作人、保持指派），失败/未生效再回退
         # 系统管理员账号（chenwenbo）。这样即便本人 token 被当作 guest（返回 401），也能由管理员

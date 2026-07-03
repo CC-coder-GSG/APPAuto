@@ -28,6 +28,8 @@ const state = {
   sseBound: false,
   zentao: [],          // 禅道任务镜像（scope=all，一份数据供看板列与底部面板共用）
   zentaoLoaded: false,
+  createMode: 'platform', // 新建任务模式：platform | zentao
+  ztOptionsMajor: null,   // 已加载表单选项的大版本 id（避免重复拉取）
 };
 
 function todayISO() {
@@ -280,6 +282,141 @@ function resetForm() {
   document.getElementById('taskBoardModalExtra').classList.add('hidden');
   document.getElementById('taskBoardModalArchiveBtn').classList.add('hidden');
   document.getElementById('taskBoardModalCarryBtn').classList.add('hidden');
+  resetZtForm();
+}
+
+// ─── 新建禅道任务（模式切换 + 表单）─────────────────────────────────────
+
+function resetZtForm() {
+  const ids = ['taskBoardZtName', 'taskBoardZtEstStarted', 'taskBoardZtDeadline', 'taskBoardZtEstimate', 'taskBoardZtDesc'];
+  ids.forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const type = document.getElementById('taskBoardZtType');
+  if (type) type.value = 'test';
+  const pri = document.getElementById('taskBoardZtPri');
+  if (pri) pri.value = '3';
+  ['taskBoardZtParent', 'taskBoardZtAssignee', 'taskBoardZtStory'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = `<option value="">${id === 'taskBoardZtParent' ? '无（顶层任务）' : id === 'taskBoardZtAssignee' ? '不指派' : '无'}</option>`;
+  });
+  const hint = document.getElementById('taskBoardZtHint');
+  if (hint) hint.textContent = '';
+  state.ztOptionsMajor = null;
+}
+
+function setCreateMode(mode) {
+  state.createMode = mode;
+  const sel = document.getElementById('taskBoardCreateMode');
+  if (sel) sel.value = mode;
+  document.getElementById('taskBoardFormZentao')?.classList.toggle('hidden', mode !== 'zentao');
+  document.getElementById('taskBoardFormPlatform')?.classList.toggle('hidden', mode === 'zentao');
+}
+
+export function toggleCreateMode() {
+  const mode = document.getElementById('taskBoardCreateMode')?.value || 'platform';
+  setCreateMode(mode);
+  if (mode === 'zentao') {
+    populateZtExecSelect();
+    const majorId = document.getElementById('taskBoardZtExec')?.value;
+    if (majorId && String(state.ztOptionsMajor) !== String(majorId)) loadZtFormOptions();
+  }
+}
+
+// 所属执行 = 当前软件下绑定了禅道执行的大版本（与禅道项目同步）
+function populateZtExecSelect() {
+  const sel = document.getElementById('taskBoardZtExec');
+  if (!sel) return;
+  const majors = (window.versions || (window.state && window.state.versions) || [])
+    .filter((v) => v.version_type === 'major' && v.zentao_execution_id);
+  const current = sel.value;
+  sel.innerHTML = '<option value="">请选择执行</option>' +
+    majors.map((v) => `<option value="${v.id}">${escapeHtml(v.version_no)}</option>`).join('');
+  sel.value = current || '';
+  if (!sel.value && majors.length === 1) {
+    sel.value = String(majors[0].id); // 只有一个执行时直接选中
+    loadZtFormOptions();
+  }
+}
+
+export async function loadZtFormOptions() {
+  const majorId = document.getElementById('taskBoardZtExec')?.value;
+  const hint = document.getElementById('taskBoardZtHint');
+  const parentSel = document.getElementById('taskBoardZtParent');
+  const assigneeSel = document.getElementById('taskBoardZtAssignee');
+  const storySel = document.getElementById('taskBoardZtStory');
+  if (!majorId) {
+    if (parentSel) parentSel.innerHTML = '<option value="">无（顶层任务）</option>';
+    if (assigneeSel) assigneeSel.innerHTML = '<option value="">不指派</option>';
+    if (storySel) storySel.innerHTML = '<option value="">无</option>';
+    state.ztOptionsMajor = null;
+    return;
+  }
+  if (hint) hint.textContent = '正在加载执行的人员/父任务/需求…';
+  try {
+    const data = await (await api(`/task-board/zentao-task-form-options?major_version_id=${majorId}`)).json();
+    state.ztOptionsMajor = majorId;
+    if (assigneeSel) {
+      assigneeSel.innerHTML = '<option value="">不指派</option>' +
+        (data.assignable || []).map((u) => `<option value="${escapeHtml(u.account)}">${escapeHtml(u.realname || u.account)}</option>`).join('');
+    }
+    if (parentSel) {
+      parentSel.innerHTML = '<option value="">无（顶层任务）</option>' +
+        (data.parents || []).map((p) => `<option value="${p.id}">#${p.id} ${escapeHtml(p.name || '')}${p.is_parent ? '（父任务）' : ''}</option>`).join('');
+    }
+    if (storySel) {
+      storySel.innerHTML = '<option value="">无</option>' +
+        (data.stories || []).map((s) => `<option value="${s.id}">#${s.id} ${escapeHtml(s.title || '')}</option>`).join('');
+    }
+    if (hint) hint.textContent = (data.errors && data.errors.length) ? `⚠ ${data.errors.join('；')}` : '';
+  } catch (err) {
+    if (hint) hint.textContent = err.message || '加载表单选项失败';
+    state.ztOptionsMajor = null;
+  }
+}
+
+async function submitZentao() {
+  const majorId = document.getElementById('taskBoardZtExec')?.value;
+  const name = document.getElementById('taskBoardZtName')?.value.trim();
+  if (!majorId) {
+    window.showMessage && window.showMessage('请选择所属执行', 'error');
+    return;
+  }
+  if (!name) {
+    window.showMessage && window.showMessage('任务名称不能为空', 'error');
+    return;
+  }
+  const estStarted = document.getElementById('taskBoardZtEstStarted')?.value || null;
+  const deadline = document.getElementById('taskBoardZtDeadline')?.value || null;
+  if (estStarted && deadline && estStarted > deadline) {
+    window.showMessage && window.showMessage('预计开始不能晚于截止日期', 'error');
+    return;
+  }
+  const estimateRaw = document.getElementById('taskBoardZtEstimate')?.value;
+  const payload = {
+    major_version_id: Number(majorId),
+    name,
+    task_type: document.getElementById('taskBoardZtType')?.value || 'test',
+    assigned_to: document.getElementById('taskBoardZtAssignee')?.value || null,
+    parent_task_id: Number(document.getElementById('taskBoardZtParent')?.value) || null,
+    story: Number(document.getElementById('taskBoardZtStory')?.value) || null,
+    est_started: estStarted,
+    deadline,
+    estimate: estimateRaw ? Number(estimateRaw) : null,
+    pri: Number(document.getElementById('taskBoardZtPri')?.value) || 3,
+    desc: document.getElementById('taskBoardZtDesc')?.value.trim() || null,
+  };
+  showLoading('正在创建禅道任务，请稍候…');
+  try {
+    const res = await (await api('/task-board/zentao-tasks/create', { method: 'POST', body: payload })).json();
+    let msg = `禅道任务 #${res.task_id} 已创建`;
+    if (res.warnings && res.warnings.length) msg += `（${res.warnings.join('；')}）`;
+    window.showMessage && window.showMessage(msg, (res.warnings && res.warnings.length) ? 'info' : 'success');
+    closeModal();
+    await load();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '创建禅道任务失败', 'error');
+  } finally {
+    hideLoading();
+  }
 }
 
 export async function openCreate() {
@@ -290,6 +427,8 @@ export async function openCreate() {
   if (!state.candidates.length) await fetchCandidates();
   state.editingTaskId = null;
   resetForm();
+  setCreateMode('platform');
+  document.getElementById('taskBoardModeSwitch')?.classList.remove('hidden');
   document.getElementById('taskBoardModalTitle').innerText = '新建任务';
   openModal();
 }
@@ -299,6 +438,9 @@ export async function openEdit(taskId) {
   try {
     const detail = await (await api(`/task-board/tasks/${taskId}`)).json();
     state.editingTaskId = taskId;
+    // 编辑的是平台任务：隐藏创建模式切换，固定平台表单
+    setCreateMode('platform');
+    document.getElementById('taskBoardModeSwitch')?.classList.add('hidden');
     document.getElementById('taskBoardModalTitle').innerText = `任务详情 #${detail.id}`;
     document.getElementById('taskBoardFormTitle').value = detail.title || '';
     document.getElementById('taskBoardFormDescription').value = detail.description || '';
@@ -359,6 +501,11 @@ function readForm() {
 }
 
 export async function submit() {
+  // 新建 + 禅道模式 → 走禅道创建
+  if (!state.editingTaskId && state.createMode === 'zentao') {
+    await submitZentao();
+    return;
+  }
   const payload = readForm();
   if (!payload.title) {
     window.showMessage && window.showMessage('任务标题不能为空', 'error');
@@ -533,21 +680,26 @@ function zentaoForBoard() {
 }
 
 // 禅道任务操作按钮（看板卡片与底部面板共用）：像任务工作台那样开始/暂停/完成/关闭。
-// 仅任务指派人本人可操作（与后端 /workbench/tasks/{id}/operate 权限一致）。
+// 开始/暂停/完成仅指派人本人；关闭已完成任务额外放开给管理员
+// （与后端 /workbench/tasks/{id}/operate 权限一致）。
 function ztActionsHtml(t) {
-  if (!ztIsMine(t)) return '';
+  const mine = ztIsMine(t);
+  const isAdmin = !!(window.currentUser && window.currentUser.role === 'admin');
+  if (!mine && !(isAdmin && t.status === 'done')) return '';
   const id = t.task_id;
   const btn = (label, action, style) =>
     `<button style="padding:2px 8px; font-size:11px; ${style}" onclick="event.stopPropagation(); window.OmniQATaskBoardTab.ztOperate(${id}, '${action}')">${label}</button>`;
   const parts = [];
-  if (t.status === 'wait') parts.push(btn('▶ 开始', 'start', 'background:#16a34a;'));
-  if (t.status === 'doing') {
-    parts.push(btn('⏸ 暂停', 'pause', 'background:#d97706;'));
-    parts.push(btn('✅ 完成', 'finish', 'background:#0d9488;'));
-  }
-  if (t.status === 'pause') {
-    parts.push(btn('▶ 继续', 'start', 'background:#16a34a;'));
-    parts.push(btn('✅ 完成', 'finish', 'background:#0d9488;'));
+  if (mine) {
+    if (t.status === 'wait') parts.push(btn('▶ 开始', 'start', 'background:#16a34a;'));
+    if (t.status === 'doing') {
+      parts.push(btn('⏸ 暂停', 'pause', 'background:#d97706;'));
+      parts.push(btn('✅ 完成', 'finish', 'background:#0d9488;'));
+    }
+    if (t.status === 'pause') {
+      parts.push(btn('▶ 继续', 'start', 'background:#16a34a;'));
+      parts.push(btn('✅ 完成', 'finish', 'background:#0d9488;'));
+    }
   }
   if (t.status === 'done') parts.push(btn('⛔ 关闭', 'close', 'background:#fff; color:#b91c1c; border:1px solid #fca5a5;'));
   return parts.length ? `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>` : '';
@@ -765,6 +917,8 @@ window.OmniQATaskBoardTab = {
   refreshZentao,
   renderZentaoPanel,
   ztOperate,
+  toggleCreateMode,
+  loadZtFormOptions,
 };
 
 bindSSE();

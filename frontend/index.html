@@ -9,7 +9,7 @@
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20260703-1"></script>
+  <script type="module" src="/static/js/app.js?v=20260703-2"></script>
   <script src="/static/js/weave-motion.js?v=20260703-1" defer></script>
   <style>
     /* Header layout */
@@ -401,7 +401,80 @@
         <h3 id="taskBoardModalTitle" style="margin:0; color:#0f172a;">新建任务</h3>
         <button class="secondary" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.closeModal()">关闭</button>
       </div>
-      <div style="margin-top:14px; display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+      <div id="taskBoardModeSwitch" class="row" style="margin-top:12px; gap:8px; align-items:center;">
+        <label style="font-weight:600;">创建到</label>
+        <select id="taskBoardCreateMode" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.toggleCreateMode()">
+          <option value="platform">平台任务（仅本系统）</option>
+          <option value="zentao">🐲 禅道任务（同步到禅道）</option>
+        </select>
+        <span class="muted" style="font-size:12px;">禅道任务创建后由指派人在看板/任务工作台开始、暂停、完成</span>
+      </div>
+      <div id="taskBoardFormZentao" class="hidden" style="margin-top:14px; display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div>
+          <label style="display:block; margin-bottom:4px; font-weight:600;">所属执行<span style="color:#dc2626;">*</span></label>
+          <select id="taskBoardZtExec" style="width:100%;" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.loadZtFormOptions()">
+            <option value="">请选择执行</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block; margin-bottom:4px;">任务类型</label>
+          <select id="taskBoardZtType" style="width:100%;">
+            <option value="test" selected>测试</option>
+            <option value="devel">开发</option>
+            <option value="design">设计</option>
+            <option value="study">研究</option>
+            <option value="discuss">讨论</option>
+            <option value="review">评审</option>
+            <option value="affair">事务</option>
+            <option value="misc">其他</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block; margin-bottom:4px;">父任务</label>
+          <select id="taskBoardZtParent" style="width:100%;"><option value="">无（顶层任务）</option></select>
+        </div>
+        <div>
+          <label style="display:block; margin-bottom:4px;">指派给</label>
+          <select id="taskBoardZtAssignee" style="width:100%;"><option value="">不指派</option></select>
+        </div>
+        <div style="grid-column:1/-1;">
+          <label style="display:block; margin-bottom:4px; font-weight:600;">任务名称<span style="color:#dc2626;">*</span></label>
+          <input id="taskBoardZtName" maxlength="255" style="width:100%;" placeholder="禅道任务名称（必填）">
+        </div>
+        <div>
+          <label style="display:block; margin-bottom:4px;">日程规划 · 预计开始</label>
+          <input type="date" id="taskBoardZtEstStarted" style="width:100%;">
+        </div>
+        <div>
+          <label style="display:block; margin-bottom:4px;">日程规划 · 截止日期</label>
+          <input type="date" id="taskBoardZtDeadline" style="width:100%;">
+        </div>
+        <div>
+          <label style="display:block; margin-bottom:4px;">优先级</label>
+          <select id="taskBoardZtPri" style="width:100%;">
+            <option value="1">1（最高）</option>
+            <option value="2">2（较高）</option>
+            <option value="3" selected>3（普通）</option>
+            <option value="4">4（较低）</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block; margin-bottom:4px;">预计（小时）</label>
+          <input type="number" id="taskBoardZtEstimate" min="0.5" max="999" step="0.5" style="width:100%;" placeholder="如 4">
+        </div>
+        <div style="grid-column:1/-1;">
+          <label style="display:block; margin-bottom:4px;">相关研发需求</label>
+          <select id="taskBoardZtStory" style="width:100%;"><option value="">无</option></select>
+        </div>
+        <div style="grid-column:1/-1;">
+          <label style="display:block; margin-bottom:4px;">任务描述</label>
+          <textarea id="taskBoardZtDesc" rows="4" style="width:100%;" placeholder="任务详细描述"></textarea>
+        </div>
+        <div style="grid-column:1/-1;">
+          <span id="taskBoardZtHint" class="muted" style="font-size:12px;"></span>
+        </div>
+      </div>
+      <div id="taskBoardFormPlatform" style="margin-top:14px; display:grid; grid-template-columns:1fr 1fr; gap:12px;">
         <div style="grid-column:1/-1;">
           <label style="display:block; margin-bottom:4px; font-weight:600;">标题<span style="color:#dc2626;">*</span></label>
           <input id="taskBoardFormTitle" maxlength="200" style="width:100%;" placeholder="任务标题（必填）">
