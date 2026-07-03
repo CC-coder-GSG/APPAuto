@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { showLoading, hideLoading } from '../components/common.js';
 
 const STATUS_META = {
   todo:         { label: '待处理', color: '#475569', bg: '#f1f5f9', border: '#cbd5e1' },
@@ -25,6 +26,8 @@ const state = {
   canManage: false,
   loaded: false,
   sseBound: false,
+  zentao: [],          // 禅道任务镜像（scope=all，一份数据供看板列与底部面板共用）
+  zentaoLoaded: false,
 };
 
 function todayISO() {
@@ -108,10 +111,14 @@ export async function load() {
   window.SelectMemory && window.SelectMemory.applyMany(['taskBoardAssigneeFilter', 'taskBoardStatusFilter']);
   const qs = buildQuery();
   try {
-    const data = await (await api('/task-board/tasks' + (qs ? `?${qs}` : ''))).json();
+    const boardPromise = api('/task-board/tasks' + (qs ? `?${qs}` : '')).then((r) => r.json());
+    // 禅道镜像拉不到不影响平台任务看板
+    await fetchZentaoTasks().catch((err) => console.warn('[task-board] zentao tasks fetch failed', err));
+    const data = await boardPromise;
     state.data = data;
     state.canManage = !!data.can_manage;
     render(data);
+    renderZentaoPanel();
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '加载任务看板失败', 'error');
   }
@@ -121,15 +128,21 @@ function render(data) {
   const createBtn = document.getElementById('taskBoardCreateBtn');
   if (createBtn) createBtn.classList.toggle('hidden', !state.canManage);
 
-  renderSummary(data);
-  renderColumns(data);
+  const zt = zentaoForBoard();
+  renderSummary(data, zt);
+  renderColumns(data, zt);
   renderAssigneeSummary(data);
 }
 
-function renderSummary(data) {
+function renderSummary(data, ztItems = []) {
   const wrap = document.getElementById('taskBoardSummary');
   if (!wrap) return;
   const s = data.summary || {};
+  const ztCount = { total: ztItems.length, todo: 0, in_progress: 0, blocked: 0, done: 0, deferred: 0 };
+  ztItems.forEach((t) => {
+    const k = ZT_BOARD_MAP[t.status];
+    if (k && k in ztCount) ztCount[k] += 1;
+  });
   const cards = [
     { key: 'total', label: '今日任务', value: s.total || 0, bg: '#f1f5f9', color: '#1e293b' },
     { key: 'todo', label: '待处理', value: s.todo || 0, bg: STATUS_META.todo.bg, color: STATUS_META.todo.color },
@@ -138,36 +151,50 @@ function renderSummary(data) {
     { key: 'done', label: '已完成', value: s.done || 0, bg: STATUS_META.done.bg, color: STATUS_META.done.color },
     { key: 'deferred', label: '延期', value: s.deferred || 0, bg: STATUS_META.deferred.bg, color: STATUS_META.deferred.color },
   ];
-  wrap.innerHTML = cards.map((c) => `
+  wrap.innerHTML = cards.map((c) => {
+    const zt = ztCount[c.key] || 0;
+    return `
     <div style="min-width:120px; padding:10px 14px; background:${c.bg}; color:${c.color}; border-radius:8px; border:1px solid rgba(0,0,0,.06);">
       <div style="font-size:11px; letter-spacing:0.04em;">${c.label}</div>
-      <div style="font-size:22px; font-weight:700;">${c.value}</div>
+      <div style="font-size:22px; font-weight:700;">${c.value + zt}</div>
+      ${zt > 0 ? `<div style="font-size:10px; opacity:.75;">含禅道 ${zt}</div>` : ''}
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
-function renderColumns(data) {
+function renderColumns(data, ztItems = []) {
   const root = document.getElementById('taskBoardColumns');
   if (!root) return;
   const columns = data.columns || {};
+  const ztByStatus = {};
+  ztItems.forEach((t) => {
+    const k = ZT_BOARD_MAP[t.status];
+    if (k) (ztByStatus[k] = ztByStatus[k] || []).push(t);
+  });
   root.innerHTML = STATUS_ORDER.map((statusKey) => {
     const meta = STATUS_META[statusKey];
     const items = columns[statusKey] || [];
+    const zt = ztByStatus[statusKey] || [];
+    const count = items.length + zt.length;
     return `
       <div style="background:${meta.bg}; border:1px solid ${meta.border}; border-radius:10px; padding:10px; min-height:180px; display:flex; flex-direction:column;">
         <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:8px;">
           <div style="font-weight:700; color:${meta.color};">${meta.label}</div>
-          <div style="font-size:12px; color:${meta.color}; background:#fff; border-radius:999px; padding:2px 8px; border:1px solid ${meta.border};">${items.length}</div>
+          <div style="font-size:12px; color:${meta.color}; background:#fff; border-radius:999px; padding:2px 8px; border:1px solid ${meta.border};">${count}</div>
         </div>
         <div style="display:flex; flex-direction:column; gap:8px;">
-          ${items.length === 0 ? '<div class="muted" style="text-align:center; padding:16px 0; font-size:12px;">暂无任务</div>' : items.map(renderCard).join('')}
+          ${count === 0 ? '<div class="muted" style="text-align:center; padding:16px 0; font-size:12px;">暂无任务</div>'
+            : items.map(renderCard).join('') + zt.map(renderZentaoBoardCard).join('')}
         </div>
       </div>
     `;
   }).join('');
 
   root.querySelectorAll('[data-task-card]').forEach((el) => {
-    el.addEventListener('click', () => openEdit(Number(el.getAttribute('data-task-card'))));
+    const idAttr = el.getAttribute('data-task-card') || '';
+    if (idAttr.startsWith('zt-')) return; // 禅道任务卡：无平台详情弹窗
+    el.addEventListener('click', () => openEdit(Number(idAttr)));
   });
 }
 
@@ -456,6 +483,121 @@ const ZT_STATUS_META = {
   closed: { label: '已关闭', bg: '#f1f5f9', color: '#94a3b8' },
 };
 
+// 禅道状态 → 看板分栏（暂停归入"阻塞"栏；已取消/已关闭不进看板，只在下方面板可见）
+const ZT_BOARD_MAP = { wait: 'todo', doing: 'in_progress', pause: 'blocked', done: 'done' };
+
+function myUserId() {
+  return Number((window.currentUser && window.currentUser.id) || 0);
+}
+
+function ztIsMine(t) {
+  const me = myUserId();
+  return me > 0 && Number(t.assignee_user_id || 0) === me;
+}
+
+async function fetchZentaoTasks(opts = {}) {
+  const params = new URLSearchParams({ scope: 'all' });
+  if (opts.refresh && opts.majorId) {
+    params.set('refresh', 'true');
+    params.set('major_version_id', String(opts.majorId));
+  }
+  const data = await (await api('/task-board/zentao-tasks?' + params.toString())).json();
+  state.zentao = Array.isArray(data.tasks) ? data.tasks : [];
+  state.zentaoLoaded = true;
+  return data;
+}
+
+// 看板归类：按看板日期（任务日期跨度覆盖当日）+ 看板顶部筛选（指派人/状态/只看我的）
+function zentaoForBoard() {
+  const date = state.date || todayISO();
+  const assignee = document.getElementById('taskBoardAssigneeFilter')?.value;
+  const statusFilter = document.getElementById('taskBoardStatusFilter')?.value;
+  const mineOnly = document.getElementById('taskBoardMineOnly')?.checked;
+  return state.zentao.filter((t) => {
+    const mapped = ZT_BOARD_MAP[t.status];
+    if (!mapped) return false;
+    if (statusFilter && mapped !== statusFilter) return false;
+    if (assignee && Number(assignee) !== Number(t.assignee_user_id || 0)) return false;
+    if (mineOnly && !ztIsMine(t)) return false;
+    const start = t.est_started || t.deadline;
+    const end = t.deadline || t.est_started;
+    const finishedDay = t.finished_date ? String(t.finished_date).slice(0, 10) : null;
+    if (start) {
+      if (start <= date && date <= end) return true;
+      // 完成日在跨度外（如逾期完成）：完成当天也算
+      return t.status === 'done' && finishedDay === date;
+    }
+    if (finishedDay) return finishedDay === date;
+    return date === todayISO(); // 完全没有日期信息的任务：只出现在今天的看板
+  });
+}
+
+// 禅道任务操作按钮（看板卡片与底部面板共用）：像任务工作台那样开始/暂停/完成/关闭。
+// 仅任务指派人本人可操作（与后端 /workbench/tasks/{id}/operate 权限一致）。
+function ztActionsHtml(t) {
+  if (!ztIsMine(t)) return '';
+  const id = t.task_id;
+  const btn = (label, action, style) =>
+    `<button style="padding:2px 8px; font-size:11px; ${style}" onclick="event.stopPropagation(); window.OmniQATaskBoardTab.ztOperate(${id}, '${action}')">${label}</button>`;
+  const parts = [];
+  if (t.status === 'wait') parts.push(btn('▶ 开始', 'start', 'background:#16a34a;'));
+  if (t.status === 'doing') {
+    parts.push(btn('⏸ 暂停', 'pause', 'background:#d97706;'));
+    parts.push(btn('✅ 完成', 'finish', 'background:#0d9488;'));
+  }
+  if (t.status === 'pause') {
+    parts.push(btn('▶ 继续', 'start', 'background:#16a34a;'));
+    parts.push(btn('✅ 完成', 'finish', 'background:#0d9488;'));
+  }
+  if (t.status === 'done') parts.push(btn('⛔ 关闭', 'close', 'background:#fff; color:#b91c1c; border:1px solid #fca5a5;'));
+  return parts.length ? `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>` : '';
+}
+
+export async function ztOperate(taskId, action) {
+  const confirmText = { finish: '确认将该任务标记为完成？', close: '确认关闭该任务？' }[action];
+  if (confirmText && !window.confirm(confirmText)) return;
+  showLoading('正在同步禅道，请稍候…');
+  try {
+    const res = await (await api(`/workbench/tasks/${taskId}/operate`, {
+      method: 'POST', body: { action },
+    })).json();
+    if (res.ok) window.showMessage && window.showMessage('操作已同步禅道', 'success');
+    else window.showMessage && window.showMessage('禅道操作有异常：' + (res.errors || []).join('；'), 'error');
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '操作失败', 'error');
+  } finally {
+    hideLoading();
+  }
+  try { await fetchZentaoTasks(); } catch { /* 保留旧数据渲染 */ }
+  if (state.data) render(state.data);
+  renderZentaoPanel();
+}
+
+// 看板列中的禅道任务卡
+function renderZentaoBoardCard(t) {
+  const meta = ZT_STATUS_META[t.status] || { label: t.status || '', bg: '#f1f5f9', color: '#475569' };
+  const person = escapeHtml(t.assigned_to_realname || t.assigned_to || '未指派');
+  const span = (t.est_started || t.deadline) ? `${t.est_started || '—'} → ${t.deadline || '—'}` : '';
+  const preview = window.OmniQAUtils && window.OmniQAUtils.renderPreviewBtn
+    ? window.OmniQAUtils.renderPreviewBtn('task', t.task_id)
+    : '';
+  const actions = ztActionsHtml(t);
+  return `
+    <div data-task-card="zt-${t.task_id}" style="background:#fff; border:1px solid rgba(15,23,42,.08); border-left:3px solid ${meta.color}; border-radius:8px; padding:10px; box-shadow:0 1px 2px rgba(15,23,42,.04);">
+      <div class="row" style="justify-content:space-between; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
+        <span class="badge" style="background:#f0fdfa; color:#0f766e; border:1px solid #99f6e4; font-size:11px;">🐲 禅道 #${t.task_id}</span>
+        <span class="badge" style="background:${meta.bg}; color:${meta.color}; font-size:11px;">${meta.label}</span>
+      </div>
+      <div style="font-weight:600; color:#0f172a; line-height:1.4;">${escapeHtml(t.name || '')} ${preview}</div>
+      <div class="muted" style="font-size:11px; margin-top:6px; display:flex; justify-content:space-between; gap:6px; flex-wrap:wrap;">
+        <span>👤 ${person}</span>
+        ${span ? `<span>🗓️ ${escapeHtml(span)}</span>` : ''}
+      </div>
+      ${actions ? `<div style="margin-top:8px;">${actions}</div>` : ''}
+    </div>
+  `;
+}
+
 function populateZentaoExecSelect() {
   const sel = document.getElementById('taskBoardZentaoExec');
   if (!sel) return;
@@ -467,36 +609,85 @@ function populateZentaoExecSelect() {
   sel.value = current || '';
 }
 
+function populateZentaoAssigneeSelect() {
+  const sel = document.getElementById('taskBoardZentaoAssignee');
+  if (!sel) return;
+  const current = sel.value;
+  const seen = new Map();
+  state.zentao.forEach((t) => {
+    const key = (t.assigned_to || '').trim();
+    if (!key || seen.has(key)) return;
+    seen.set(key, t.assigned_to_realname || t.assigned_to);
+  });
+  sel.innerHTML = '<option value="">全部人员</option>' +
+    [...seen.entries()]
+      .sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'zh'))
+      .map(([acc, name]) => `<option value="${escapeHtml(acc)}">${escapeHtml(name)}</option>`)
+      .join('');
+  sel.value = current || '';
+  if (sel.value !== (current || '')) sel.value = ''; // 选中人已不在列表：回落到全部
+}
+
 export async function loadZentao() {
   const panel = document.getElementById('taskBoardZentaoPanel');
-  if (!panel || !panel.open) return;  // 折叠时不拉
+  if (!panel || !panel.open) return;  // 折叠时不渲染
   populateZentaoExecSelect();
+  const hint = document.getElementById('taskBoardZentaoHint');
+  if (!state.zentaoLoaded) {
+    try {
+      await fetchZentaoTasks();
+    } catch (err) {
+      if (hint) hint.textContent = err.message || '加载禅道任务失败';
+      return;
+    }
+  }
+  populateZentaoAssigneeSelect();
+  window.SelectMemory && window.SelectMemory.applyMany(
+    ['taskBoardZentaoScope', 'taskBoardZentaoExec', 'taskBoardZentaoStatus', 'taskBoardZentaoAssignee']);
+  renderZentaoPanel();
+}
+
+// 底部面板：纯客户端筛选（范围/执行/状态/人员都作用在同一份镜像数据上）
+export function renderZentaoPanel() {
+  const panel = document.getElementById('taskBoardZentaoPanel');
+  if (!panel || !panel.open) return;
+  const hint = document.getElementById('taskBoardZentaoHint');
   const scope = document.getElementById('taskBoardZentaoScope')?.value || 'mine';
   const majorId = document.getElementById('taskBoardZentaoExec')?.value || '';
-  const hint = document.getElementById('taskBoardZentaoHint');
-  const params = new URLSearchParams({ scope });
-  if (majorId) params.set('major_version_id', majorId);
-  try {
-    const data = await (await api('/task-board/zentao-tasks?' + params.toString())).json();
-    renderZentaoTasks(data.tasks || []);
-    if (hint) hint.textContent = `共 ${data.tasks ? data.tasks.length : 0} 个任务`;
-  } catch (err) {
-    if (hint) hint.textContent = err.message || '加载禅道任务失败';
+  const status = document.getElementById('taskBoardZentaoStatus')?.value || '';
+  const person = document.getElementById('taskBoardZentaoAssignee')?.value || '';
+  let execId = null;
+  if (majorId) {
+    const majors = window.versions || (window.state && window.state.versions) || [];
+    const v = majors.find((x) => String(x.id) === String(majorId));
+    execId = v && v.zentao_execution_id ? Number(v.zentao_execution_id) : -1; // 无映射 → 空结果
   }
+  const tasks = state.zentao.filter((t) => {
+    if (scope === 'mine' && !ztIsMine(t)) return false;
+    if (execId != null && Number(t.execution_id || 0) !== execId) return false;
+    if (status && t.status !== status) return false;
+    if (person && (t.assigned_to || '').trim() !== person) return false;
+    return true;
+  });
+  renderZentaoTasks(tasks);
+  if (hint) hint.textContent = `共 ${tasks.length} 个任务`;
 }
 
 export async function refreshZentao() {
   const majorId = document.getElementById('taskBoardZentaoExec')?.value || '';
   const hint = document.getElementById('taskBoardZentaoHint');
-  if (hint) hint.textContent = '正在从禅道同步…';
-  const scope = document.getElementById('taskBoardZentaoScope')?.value || 'mine';
-  const params = new URLSearchParams({ scope, refresh: 'true' });
-  if (majorId) params.set('major_version_id', majorId);
+  if (hint) hint.textContent = majorId ? '正在从禅道同步…' : '正在从禅道同步全部执行，可能较慢…';
   try {
-    const data = await (await api('/task-board/zentao-tasks?' + params.toString())).json();
-    renderZentaoTasks(data.tasks || []);
-    const synced = data.refreshed && data.refreshed.synced;
-    if (hint) hint.textContent = `同步完成${synced != null ? `（${synced} 个）` : ''}，共 ${data.tasks ? data.tasks.length : 0} 个任务`;
+    if (majorId) {
+      await fetchZentaoTasks({ refresh: true, majorId });
+    } else {
+      await api('/task-board/zentao-tasks/sync', { method: 'POST', body: {} });
+      await fetchZentaoTasks();
+    }
+    populateZentaoAssigneeSelect();
+    renderZentaoPanel();
+    if (state.data) render(state.data);
+    if (hint) hint.textContent = `同步完成，共 ${state.zentao.length} 个任务（缓存）`;
   } catch (err) {
     if (hint) hint.textContent = err.message || '同步禅道任务失败';
   }
@@ -539,11 +730,15 @@ function renderZentaoTaskRow(t) {
   const preview = window.OmniQAUtils && window.OmniQAUtils.renderPreviewBtn
     ? window.OmniQAUtils.renderPreviewBtn('task', t.task_id)
     : '';
+  const actions = ztActionsHtml(t);
   return `
     <div style="background:#fff; border:1px solid #e2e8f0; border-left:3px solid ${meta.color}; border-radius:8px; padding:8px 10px;">
       <div class="row" style="justify-content:space-between; gap:6px; flex-wrap:wrap;">
         <div style="font-weight:600; color:#0f172a;">${escapeHtml(t.name)} ${preview}</div>
-        <span class="badge" style="background:${meta.bg}; color:${meta.color};">${meta.label}</span>
+        <div class="row" style="gap:6px; flex-wrap:wrap; align-items:center;">
+          ${actions}
+          <span class="badge" style="background:${meta.bg}; color:${meta.color};">${meta.label}</span>
+        </div>
       </div>
       <div class="muted" style="font-size:11px; margin-top:4px; display:flex; gap:10px; flex-wrap:wrap;">
         <span>🏷️ ${escapeHtml(t.execution_name || '')}</span>
@@ -568,6 +763,8 @@ window.OmniQATaskBoardTab = {
   gotoToday,
   loadZentao,
   refreshZentao,
+  renderZentaoPanel,
+  ztOperate,
 };
 
 bindSSE();

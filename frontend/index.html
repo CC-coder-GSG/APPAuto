@@ -9,7 +9,7 @@
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20260630-1"></script>
+  <script type="module" src="/static/js/app.js?v=20260703-1"></script>
   <script src="/static/js/weave-motion.js?v=20260703-1" defer></script>
   <style>
     /* Header layout */
@@ -369,12 +369,24 @@
     <details id="taskBoardZentaoPanel" class="card" style="margin-top:16px; box-shadow:none; border:1px solid #e2e8f0; background:#fff;" ontoggle="this.open && window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.loadZentao()">
       <summary style="cursor:pointer; font-weight:700; color:#0f172a; list-style:none;">🐲 禅道任务<span class="muted" style="font-weight:400; font-size:12px; margin-left:8px;">从禅道获取相关人员的测试任务（后端缓存）</span></summary>
       <div class="row" style="margin-top:10px; gap:8px; flex-wrap:wrap; align-items:center;">
-        <select id="taskBoardZentaoScope" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.loadZentao()">
+        <select id="taskBoardZentaoScope" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.renderZentaoPanel()">
           <option value="mine">只看我的</option>
           <option value="all">全部成员</option>
         </select>
-        <select id="taskBoardZentaoExec" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.loadZentao()">
+        <select id="taskBoardZentaoExec" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.renderZentaoPanel()">
           <option value="">全部执行</option>
+        </select>
+        <select id="taskBoardZentaoStatus" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.renderZentaoPanel()">
+          <option value="">全部状态</option>
+          <option value="wait">未开始</option>
+          <option value="doing">进行中</option>
+          <option value="pause">已暂停</option>
+          <option value="done">已完成</option>
+          <option value="cancel">已取消</option>
+          <option value="closed">已关闭</option>
+        </select>
+        <select id="taskBoardZentaoAssignee" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.renderZentaoPanel()">
+          <option value="">全部人员</option>
         </select>
         <button class="secondary" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.refreshZentao()" title="从禅道重新拉取并刷新缓存">⟳ 同步禅道</button>
         <span id="taskBoardZentaoHint" class="muted" style="font-size:12px;"></span>
