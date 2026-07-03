@@ -743,7 +743,7 @@ tr.sse-glow-hold {
    出现，平时看不到）。把 hover 升级为绕四周流动的描边环：放在空闲的
    ::after 上（::before 已被 hover 左沿 beam 占用），conic 极光渐变 +
    --w-ang 角度自转（@property 已注册，动画作用在伪元素自身）。
-   悬停时原左沿 beam 退场，由流光环接任 hover 指示。
+   左沿彩色竖线 beam 保留，与流光环共同构成 hover 指示（用户点名要的）。
    整段包在 @supports 里：遮罩描边不可用的环境保持原 beam 行为不变。 */
 @supports ((-webkit-mask-composite: destination-out) or (mask-composite: exclude)) {
   #tab-mine details.mine-req-card::after,
@@ -756,6 +756,10 @@ tr.sse-glow-hold {
     inset: -2px;
     border-radius: inherit;
     padding: 2.5px;
+    /* 渐变必须在 ::after 自身重声明：继承 :root 的 --w-aurora-conic 时
+       var(--w-ang) 已在 :root 处固化为 0deg，动画转不动（详见 R2 段注释） */
+    --w-aurora-conic: conic-gradient(from var(--w-ang),
+        #5b8cff, #8b5cf6, #d946a0, #f59e0b, #5b8cff);
     background: var(--w-aurora-conic);
     -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     -webkit-mask-composite: destination-out;
@@ -770,15 +774,8 @@ tr.sse-glow-hold {
   [data-task-card]:hover::after,
   .build-record-card:hover::after {
     opacity: 1;
-    animation: weaveAngSpin 4.8s linear infinite;
-  }
-  /* 流光环接任 hover 指示后，左沿 beam 不再出现（避免双重装饰） */
-  #tab-mine details.mine-req-card:hover::before,
-  #tab-retest details.retest-req-card:hover::before,
-  .activity-feed-item:hover::before,
-  [data-task-card]:hover::before,
-  .build-record-card:hover::before {
-    opacity: 0;
+    /* 3s 与 R2.2 宿主 1px 描边同速同相，两圈不会转出错位 */
+    animation: weaveAngSpin 3s linear infinite;
   }
   /* 行式条目 hover 补一圈柔光，让流光环在浅色背景上更醒目 */
   #tab-mine details.mine-req-card:hover,
@@ -803,6 +800,24 @@ tr.sse-glow-hold {
       #5b8cff, #8b5cf6, #d946a0, #f59e0b, #5b8cff);
 }
 @keyframes weaveAngSpin { to { --w-ang: 360deg; } }
+
+/* 旋转失效的根因修复：自定义属性里的 var() 是在“声明处”求值的——
+   --w-aurora-conic 挂在 :root，var(--w-ang) 永远取 :root 的 0deg，
+   后代继承到的是已固化的静态渐变；元素上 weaveAngSpin 再怎么转自己的
+   --w-ang 都不影响背景（此前所有流光边缘一直是静止的）。
+   在每个跑 weaveAngSpin 的元素上就地重声明，var(--w-ang) 改在元素
+   自身求值，随元素动画逐帧重算，渐变才真正旋转。 */
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+select, textarea, .prefix-input,
+[data-task-card], .build-record-card,
+#terminalGrid .card, #tab-cad-test .card,
+#jenkinsDetailArea > div[style*="border"], #dataUsers > .card,
+#tab-mine details.mine-req-card, #tab-retest details.retest-req-card,
+#tab-learning .lc-topic, #tab-learning .lc-panel, #tab-learning .lc-row,
+#tab-learning .lc-q, #tab-learning details.lc-rank {
+  --w-aurora-conic: conic-gradient(from var(--w-ang),
+      #5b8cff, #8b5cf6, #d946a0, #f59e0b, #5b8cff);
+}
 
 /* ── R2.1 输入控件：凹陷暖色 + 焦点流光边缘 ── */
 input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),

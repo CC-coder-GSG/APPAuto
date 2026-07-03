@@ -221,6 +221,10 @@
         // 直接注册 --sse-ang 本身：CSS @property 已生效会抛 InvalidModificationError
         // （说明支持，返回）；未生效则 JS 注册补位，CSS 动画同样能插值（返回）。
         CSS.registerProperty({ name: "--sse-ang", syntax: "<angle>", inherits: true, initialValue: "0deg" });
+        // 悬停/焦点流光的角度变量同样补注册（Chrome 78-84 只有 JS 注册没有 @property）
+        try {
+          CSS.registerProperty({ name: "--w-ang", syntax: "<angle>", inherits: false, initialValue: "0deg" });
+        } catch (e2) { /* 已注册即达成目的 */ }
         return;
       }
     } catch (e) {
@@ -228,14 +232,21 @@
       // 其余异常说明注册型属性不可用 → 走 rAF 回退
     }
     const style = document.createElement("style");
-    style.textContent = ".sse-glow { animation: none !important; }";
+    // 空 keyframes 覆盖同名 weaveAngSpin：元素上的离散动画不再逐帧写 0/360
+    // 覆盖自身 --w-ang，:root 继承下来的 rAF 角度才能生效（--w-ang 未注册时
+    // 默认可继承，恰好补上 @property inherits:false 缺席后的传递通道）。
+    style.textContent = ".sse-glow { animation: none !important; } @keyframes weaveAngSpin {}";
     document.head.appendChild(style);
     const PERIOD = 4800;
+    const HOVER_PERIOD = 3000; // 与 weave.css 悬停流光环 3s 同速
     function tick(now) {
       if (document.querySelector(".sse-glow")) {
         const deg = ((now % PERIOD) / PERIOD * 360).toFixed(1) + "deg";
         document.documentElement.style.setProperty("--sse-ang", deg);
       }
+      // 悬停不可预知，常驻驱动（只写 :root 一个变量，未悬停时无人引用，开销可忽略）
+      const wdeg = ((now % HOVER_PERIOD) / HOVER_PERIOD * 360).toFixed(1) + "deg";
+      document.documentElement.style.setProperty("--w-ang", wdeg);
       window.requestAnimationFrame(tick);
     }
     window.requestAnimationFrame(tick);
