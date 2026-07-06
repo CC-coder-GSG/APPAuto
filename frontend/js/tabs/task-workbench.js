@@ -11,8 +11,28 @@ import { showLoading, hideLoading } from '../components/common.js';
 let taskWorkbenchData = [];
 // 记住已展开的任务卡片，刷新/操作后重新渲染时保持展开，避免每次都被收起。
 const openTaskIds = new Set();
+// 状态筛选（all / wait / doing / pause / done / closed，closed 含 cancel）。
+let statusFilter = 'all';
+// 批量关闭：勾选的任务 id。
+const selectedTaskIds = new Set();
 
 const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
+
+function taskMatchesFilter(t) {
+  if (statusFilter === 'all') return true;
+  const s = String(t.status || '');
+  if (statusFilter === 'closed') return s === 'closed' || s === 'cancel';
+  return s === statusFilter;
+}
+
+// 可参与批量关闭：本人可操作且尚未关闭/取消；
+// 关联需求的任务在「已完成」状态下也允许关闭（后端按指派人放行）。
+function isBatchClosable(t) {
+  const s = String(t.status || '');
+  if (s === 'closed' || s === 'cancel') return false;
+  if (t.can_operate) return true;
+  return !!t.show_jump && s === 'done' && !!t.assigned_to_me;
+}
 
 function statusBadge(status) {
   const zh = TASK_STATUS_ZH[status] || status || '未知';
@@ -32,10 +52,16 @@ function metaBadge(label, value) {
 function renderTaskActions(t) {
   const link = t.linked_requirement;
   // 关联需求且该需求归属本人 → 跳转到需求工作台管理，不在此直接操作禅道。
+  // 例外：任务已完成时，除跳转外也允许直接关闭（避免只为关闭再绕一圈）。
   if (t.show_jump && link) {
-    return `<button class="secondary" style="padding:2px 10px; font-size:12px; color:#1d4ed8; border-color:#bfdbfe;"
+    const parts = [`<button class="secondary" style="padding:2px 10px; font-size:12px; color:#1d4ed8; border-color:#bfdbfe;"
       onclick="event.stopPropagation(); jumpToLinkedRequirement(${link.id}, ${link.major_version_id || 0})"
-      title="跳转到需求工作台中该需求的位置">↪ 跳转到关联需求</button>`;
+      title="跳转到需求工作台中该需求的位置">↪ 跳转到关联需求</button>`];
+    if (t.status === 'done' && t.assigned_to_me) {
+      parts.push(`<button style="padding:2px 10px; font-size:12px; color:#b91c1c; border-color:#fca5a5;"
+        onclick="event.stopPropagation(); taskWorkbenchOperate(${t.task_id}, 'close')">⛔ 关闭</button>`);
+    }
+    return `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>`;
   }
   // 不可操作：任务未指派给本人（且不是可跳转的自有需求）。
   if (!t.can_operate) {
@@ -98,10 +124,17 @@ function renderTaskCard(t) {
     metaBadge('指派', t.assigned_to_realname || t.assigned_to),
   ].filter(Boolean).join('');
 
+  const checkbox = isBatchClosable(t)
+    ? `<input type="checkbox" data-task-check="${t.task_id}" ${selectedTaskIds.has(t.task_id) ? 'checked' : ''}
+        onclick="event.stopPropagation();" onchange="taskWorkbenchToggleSelect(${t.task_id}, this.checked)"
+        title="勾选后可在上方「批量关闭」" style="width:16px; height:16px; cursor:pointer; accent-color:#dc2626; flex-shrink:0;">`
+    : '';
+
   return `
     <details class="mine-req-card" data-task-id="${t.task_id}" ${openTaskIds.has(t.task_id) ? 'open' : ''} ontoggle="taskWorkbenchRememberFold(${t.task_id}, this.open)" style="background:#ffffff; transition: all 0.3s;">
       <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom:1px solid #e2e8f0; padding-bottom:12px; display:flex; justify-content:space-between; align-items:center; gap:8px; list-style:none;">
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          ${checkbox}
           <span style="color:#1d4ed8;">禅道任务 #${t.task_id}</span>
           <span>${escapeHtml(t.name || '')}</span>
           ${previewBtn}
@@ -132,19 +165,44 @@ export async function loadTaskWorkbench(opts = {}) {
     if (opts.refresh) hideLoading();
   }
 
+  // 清理已不可批量关闭的勾选（任务被关闭/移出名下后自动取消勾选）。
+  const closableIds = new Set(taskWorkbenchData.filter(isBatchClosable).map((t) => t.task_id));
+  for (const id of [...selectedTaskIds]) {
+    if (!closableIds.has(id)) selectedTaskIds.delete(id);
+  }
+
+  renderTaskWorkbench();
+}
+
+// 按当前状态筛选渲染任务卡片（不重新请求后端）。
+function renderTaskWorkbench() {
+  const container = document.getElementById('taskWorkbenchCards');
+  if (!container) return;
+
+  const filterSel = document.getElementById('taskWorkbenchStatusFilter');
+  if (filterSel && filterSel.value !== statusFilter) filterSel.value = statusFilter;
+
+  const visible = taskWorkbenchData.filter(taskMatchesFilter);
   const summaryEl = document.getElementById('taskWorkbenchSummary');
   const total = taskWorkbenchData.length;
   const linked = taskWorkbenchData.filter((t) => t.linked_requirement).length;
   if (summaryEl) {
+    const filterHint = statusFilter !== 'all'
+      ? `，当前筛选「${{ wait: '未开始', doing: '进行中', pause: '已暂停', done: '已完成', closed: '已关闭' }[statusFilter] || statusFilter}」显示 <b style="color:#1d4ed8;">${visible.length}</b> 个`
+      : '';
     summaryEl.innerHTML = total
-      ? `📋 你名下共有 <b style="color:#1d4ed8;">${total}</b> 个任务（关联需求 ${linked} 个，独立任务 ${total - linked} 个）`
+      ? `📋 你名下共有 <b style="color:#1d4ed8;">${total}</b> 个任务（关联需求 ${linked} 个，独立任务 ${total - linked} 个）${filterHint}`
       : '🎉 当前账号名下暂无任务';
     summaryEl.style.display = 'block';
   }
 
-  container.innerHTML = taskWorkbenchData.length
-    ? taskWorkbenchData.map((t) => renderTaskCard(t)).join('')
-    : '<div class="muted" style="padding:24px; text-align:center;">当前账号名下暂无禅道任务（可点击「刷新」从禅道拉取最新）。</div>';
+  container.innerHTML = visible.length
+    ? visible.map((t) => renderTaskCard(t)).join('')
+    : (total
+        ? '<div class="muted" style="padding:24px; text-align:center;">当前筛选条件下没有任务，可切换状态筛选查看其他任务。</div>'
+        : '<div class="muted" style="padding:24px; text-align:center;">当前账号名下暂无禅道任务（可点击「刷新」从禅道拉取最新）。</div>');
+
+  updateBatchBar(visible);
 
   // 彩色边框流光特效（与需求工作台一致）
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
@@ -153,6 +211,89 @@ export async function loadTaskWorkbench(opts = {}) {
     });
   }
   window.scheduleWorkbenchViewportResize?.();
+}
+
+function updateBatchBar(visibleTasks) {
+  const closable = (visibleTasks || taskWorkbenchData.filter(taskMatchesFilter)).filter(isBatchClosable);
+  const btn = document.getElementById('taskWorkbenchBatchCloseBtn');
+  if (btn) {
+    btn.textContent = `⛔ 批量关闭选中 (${selectedTaskIds.size})`;
+    btn.disabled = selectedTaskIds.size === 0;
+    btn.style.opacity = selectedTaskIds.size === 0 ? '.55' : '';
+  }
+  const wrap = document.getElementById('taskWorkbenchSelectAllWrap');
+  // main.css 对含 checkbox 的 label 有 display:inline-flex !important，
+  // 普通内联 display:none 压不过，必须带 important。
+  if (wrap) {
+    if (closable.length) wrap.style.removeProperty('display');
+    else wrap.style.setProperty('display', 'none', 'important');
+  }
+  const selAll = document.getElementById('taskWorkbenchSelectAll');
+  if (selAll) selAll.checked = closable.length > 0 && closable.every((t) => selectedTaskIds.has(t.task_id));
+}
+
+export function taskWorkbenchFilterChanged(value) {
+  statusFilter = value || 'all';
+  renderTaskWorkbench();
+}
+
+export function taskWorkbenchToggleSelect(taskId, checked) {
+  if (checked) selectedTaskIds.add(taskId);
+  else selectedTaskIds.delete(taskId);
+  updateBatchBar();
+}
+
+// 全选/取消全选：只作用于当前筛选可见、且可关闭的任务。
+export function taskWorkbenchToggleSelectAll(checked) {
+  taskWorkbenchData.filter(taskMatchesFilter).filter(isBatchClosable).forEach((t) => {
+    if (checked) selectedTaskIds.add(t.task_id);
+    else selectedTaskIds.delete(t.task_id);
+  });
+  document.querySelectorAll('#taskWorkbenchCards input[data-task-check]').forEach((cb) => {
+    cb.checked = selectedTaskIds.has(Number(cb.getAttribute('data-task-check')));
+  });
+  updateBatchBar();
+}
+
+// 逐个调用禅道关闭接口，失败的任务单独汇报，不影响其余任务。
+export async function taskWorkbenchBatchClose() {
+  const ids = taskWorkbenchData.filter((t) => selectedTaskIds.has(t.task_id) && isBatchClosable(t)).map((t) => t.task_id);
+  if (!ids.length) {
+    window.showMessage && window.showMessage('请先勾选要关闭的任务', 'info');
+    return;
+  }
+  if (!window.confirm(`确认关闭选中的 ${ids.length} 个任务？关闭后如需继续可「重新激活」。`)) return;
+  showLoading(`正在关闭任务（0/${ids.length}）…`);
+  let okCount = 0;
+  const failed = [];
+  try {
+    for (let i = 0; i < ids.length; i++) {
+      // show/hide 成对调用：仅更新遮罩文案，不改变遮罩计数。
+      showLoading(`正在关闭任务 #${ids[i]}（${i + 1}/${ids.length}）…`);
+      hideLoading();
+      try {
+        const res = await (await api(`/workbench/tasks/${ids[i]}/operate`, {
+          method: 'POST', headers: window.H, body: ({ action: 'close' }),
+        })).json();
+        if (res.ok) {
+          okCount += 1;
+          selectedTaskIds.delete(ids[i]);
+        } else {
+          failed.push(`#${ids[i]}：${(res.errors || []).join('；') || '未知错误'}`);
+        }
+      } catch (err) {
+        failed.push(`#${ids[i]}：${err.message || '请求失败'}`);
+      }
+    }
+  } finally {
+    hideLoading();
+  }
+  if (failed.length) {
+    window.showMessage && window.showMessage(`已关闭 ${okCount} 个，${failed.length} 个失败：${failed.join('；')}`, 'error');
+  } else {
+    window.showMessage && window.showMessage(`已关闭 ${okCount} 个任务，已同步禅道`, 'success');
+  }
+  await loadTaskWorkbench();
 }
 
 export async function refreshTaskWorkbench() {
@@ -242,4 +383,8 @@ window.OmniQATaskWorkbenchTab = {
   taskWorkbenchOperate,
   taskWorkbenchSetTime,
   taskWorkbenchRememberFold,
+  taskWorkbenchFilterChanged,
+  taskWorkbenchToggleSelect,
+  taskWorkbenchToggleSelectAll,
+  taskWorkbenchBatchClose,
 };

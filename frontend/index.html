@@ -625,6 +625,20 @@
               <h2>任务工作台</h2>
               <div class="row" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px; align-items: center; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
                 <span class="muted" style="font-size:13px;">显示当前账号名下的禅道任务：关联需求的任务可跳转到需求工作台；独立任务可直接开始/完成/关闭。</span>
+                <label style="display:flex; align-items:center; gap:6px; font-size:13px;">状态筛选
+                  <select id="taskWorkbenchStatusFilter" onchange="taskWorkbenchFilterChanged(this.value)" style="padding:4px 8px;">
+                    <option value="all">全部状态</option>
+                    <option value="wait">未开始</option>
+                    <option value="doing">进行中</option>
+                    <option value="pause">已暂停</option>
+                    <option value="done">已完成</option>
+                    <option value="closed">已关闭</option>
+                  </select>
+                </label>
+                <label id="taskWorkbenchSelectAllWrap" style="display:none !important; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+                  <input type="checkbox" id="taskWorkbenchSelectAll" onchange="taskWorkbenchToggleSelectAll(this.checked)" style="width:15px; height:15px; cursor:pointer; accent-color:#dc2626;">全选可关闭任务
+                </label>
+                <button id="taskWorkbenchBatchCloseBtn" disabled style="color:#b91c1c; border:1px solid #fca5a5; background:#fff; opacity:.55;" onclick="taskWorkbenchBatchClose()">⛔ 批量关闭选中 (0)</button>
                 <button onclick="refreshTaskWorkbench()">刷新（从禅道拉取）</button>
               </div>
               <div id="taskWorkbenchSummary" style="margin-bottom: 16px; font-weight: bold; color: #1d4ed8; background: #eff6ff; padding: 10px 16px; border-radius: 6px; display: none; border-left: 4px solid #3b82f6;"></div>
@@ -2750,6 +2764,18 @@ async function taskWorkbenchSetTime(taskId) {
 }
 function taskWorkbenchRememberFold(taskId, open) {
   return window.OmniQATaskWorkbenchTab?.taskWorkbenchRememberFold(taskId, open);
+}
+function taskWorkbenchFilterChanged(value) {
+  return window.OmniQATaskWorkbenchTab?.taskWorkbenchFilterChanged(value);
+}
+function taskWorkbenchToggleSelect(taskId, checked) {
+  return window.OmniQATaskWorkbenchTab?.taskWorkbenchToggleSelect(taskId, checked);
+}
+function taskWorkbenchToggleSelectAll(checked) {
+  return window.OmniQATaskWorkbenchTab?.taskWorkbenchToggleSelectAll(checked);
+}
+async function taskWorkbenchBatchClose() {
+  return window.OmniQATaskWorkbenchTab?.taskWorkbenchBatchClose();
 }
 
 function renderMineCards() {
