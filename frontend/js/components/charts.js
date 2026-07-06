@@ -32,6 +32,38 @@ export function resizeAllCharts() {
   Object.values(state.charts).forEach((chart) => chart && chart.resize());
 }
 
+// Bug 分布饼图的双视图数据缓存：major=按大版本，source=按来源；zh 为来源类型中文化函数
+let bugDistState = { source: [], major: [], zh: (v) => v };
+
+function bindBugDistModeSelect() {
+  const sel = document.getElementById('bugDistModeSelect');
+  if (!sel || sel.dataset.bound) return;
+  sel.dataset.bound = '1';
+  sel.addEventListener('change', () => renderBugDistChart());
+}
+
+export function renderBugDistChart() {
+  const sel = document.getElementById('bugDistModeSelect');
+  const isSource = !!sel && sel.value === 'source';
+  const rows = isSource ? bugDistState.source : bugDistState.major;
+  const pieData = isSource
+    ? rows.map((i) => ({ name: bugDistState.zh(i.source_type), value: i.count }))
+    : rows.map((i) => ({ name: i.major_version_no || '未关联大版本', value: i.count }));
+  initChart('sourcePieChart', 'sourcePieChart')?.setOption({
+    title: { text: isSource ? 'Bug来源分布' : '大版本Bug分布', left: 'center' },
+    tooltip: { trigger: 'item', formatter: '{b}: {c}个 ({d}%)' },
+    legend: { top: 'bottom', type: 'scroll' },
+    // minShowLabelAngle：大版本很多时小切片不出标签（避免糊成一团），靠 tooltip/图例查看
+    series: [{ type: 'pie', radius: '50%', center: ['50%', '55%'], showEmptyCircle: false, minShowLabelAngle: 10, data: pieData }],
+    graphic: pieData.length ? [] : [{
+      type: 'text',
+      left: 'center',
+      top: 'middle',
+      style: { text: '当前筛选条件下暂无 Bug 数据', fill: '#94a3b8', fontSize: 13 },
+    }],
+  }, { replaceMerge: ['graphic', 'series'] });
+}
+
 export function renderReportCharts(data, advancedData, helpers = {}) {
   const { sourceTypeZh = (v) => v, isAllUsersMode = false, fieldTestData = null } = helpers;
 
@@ -72,12 +104,14 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
     ],
   });
 
-  initChart('sourcePieChart', 'sourcePieChart')?.setOption({
-    title: { text: 'Bug来源分布', left: 'center' },
-    tooltip: { trigger: 'item' },
-    legend: { top: 'bottom' },
-    series: [{ type: 'pie', radius: '50%', center: ['50%', '55%'], data: (data.bug_source_dist || []).map((i) => ({ name: sourceTypeZh(i.source_type), value: i.count })) }],
-  });
+  // Bug 分布饼图支持双视图（大版本/来源），数据缓存在模块级，切换下拉即时重渲染
+  bugDistState = {
+    source: data.bug_source_dist || [],
+    major: data.bug_major_dist || [],
+    zh: sourceTypeZh,
+  };
+  bindBugDistModeSelect();
+  renderBugDistChart();
 
   if (!isAllUsersMode) {
     const radar = initChart('radarChart', 'radarChart');

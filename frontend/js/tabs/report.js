@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { renderGovernanceCharts, renderReportCharts, renderVersionBugChart } from '../components/charts.js?v=20260518-1';
+import { renderGovernanceCharts, renderReportCharts, renderVersionBugChart } from '../components/charts.js?v=20260706-2';
 import { renderBugLink, sourceTypeZh } from '../utils.js';
 
 let governanceCache = null;

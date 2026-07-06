@@ -655,10 +655,41 @@ class ReportService:
             bug_dist_query = apply_created_bug_actor_filter(bug_dist_query, [target_user_id])
         bug_source_dist = [{"source_type": (k.value if hasattr(k, 'value') else str(k)), "count": v} for k, v in bug_dist_query.group_by(BugTracking.source_type).all()]
 
+        # 大版本 Bug 分布：与来源分布完全同口径（时间/删除/人员/大版本过滤），仅分组维度不同
+        major_dist_query = self.db.query(BugTracking.major_version_id, func.count(BugTracking.id)).filter(
+            _bug_time_col() >= sdt,
+            _bug_time_col() <= edt,
+            _not_deleted_clause(),
+        )
+        major_dist_query = filter_by_major_ids(major_dist_query, BugTracking.major_version_id)
+        if all_users_mode:
+            major_dist_query = apply_created_bug_actor_filter(major_dist_query, team_ids)
+        else:
+            major_dist_query = apply_created_bug_actor_filter(major_dist_query, [target_user_id])
+        major_rows = major_dist_query.group_by(BugTracking.major_version_id).all()
+        found_major_ids = [mid for mid, _ in major_rows if mid]
+        major_name_map = (
+            {v.id: v.version_no for v in self.db.query(Version).filter(Version.id.in_(found_major_ids)).all()}
+            if found_major_ids else {}
+        )
+        bug_major_dist = sorted(
+            (
+                {
+                    "major_version_id": mid,
+                    "major_version_no": (major_name_map.get(mid, "未知大版本") if mid else "未关联大版本"),
+                    "count": cnt,
+                }
+                for mid, cnt in major_rows
+            ),
+            key=lambda r: r["count"],
+            reverse=True,
+        )
+
         result = {
             "overview": overview,
             "trend": trend,
             "bug_source_dist": bug_source_dist,
+            "bug_major_dist": bug_major_dist,
             "target_user_id": None if all_users_mode else target_user_id,
         }
         if all_users_mode:

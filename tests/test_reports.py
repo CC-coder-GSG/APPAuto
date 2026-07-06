@@ -65,8 +65,11 @@ def test_summary_returns_expected_structure(db_session):
     assert "overview" in result
     assert "trend" in result
     assert "bug_source_dist" in result
+    assert "bug_major_dist" in result
     assert result["overview"]["created_cases"] == 1
     assert result["overview"]["created_bugs"] == 1
+    major_map = {x["major_version_no"]: x["count"] for x in result["bug_major_dist"]}
+    assert major_map.get(major.version_no) == 1
 
 
 def test_advanced_and_version_bugs_return_expected_shapes(db_session):
