@@ -659,40 +659,6 @@
       </div>
     </div>
 
-    <div id="weeklyExportModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
-      <div style="width: min(560px, 92vw); max-height: 86vh; overflow:auto; background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px;">
-        <h3 style="margin:0 0 4px 0;">📄 导出本周工作 · 设置</h3>
-        <div id="weeklyExportHint" class="muted" style="font-size:12px; margin-bottom:12px;"></div>
-        <div class="row" style="justify-content:space-between; align-items:center;">
-          <strong style="font-size:13px; color:#334155;">大版本</strong>
-          <label style="font-size:12px; color:#64748b; cursor:pointer;"><input type="checkbox" id="weeklyExportVersionsAll" checked onchange="weeklyExportToggleAll('version', this.checked)"> 全选</label>
-        </div>
-        <div id="weeklyExportVersions" style="display:flex; flex-wrap:wrap; gap:6px 14px; margin:8px 0 14px 0;"></div>
-        <div class="row" style="justify-content:space-between; align-items:center;">
-          <strong style="font-size:13px; color:#334155;">人员</strong>
-          <label style="font-size:12px; color:#64748b; cursor:pointer;"><input type="checkbox" id="weeklyExportPersonsAll" checked onchange="weeklyExportToggleAll('person', this.checked)"> 全选</label>
-        </div>
-        <div id="weeklyExportPersons" style="display:flex; flex-wrap:wrap; gap:6px 14px; margin:8px 0 4px 0;"></div>
-        <div class="row" style="justify-content:flex-end; gap:8px; margin-top:14px;">
-          <button class="secondary" onclick="closeWeeklyExportModal()">取消</button>
-          <button onclick="confirmWeeklyExport()">确认导出</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="taskAssignModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
-      <div style="width: min(440px, 92vw); background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px;">
-        <h3 style="margin:0 0 4px 0;">👤 指派任务 <span id="taskAssignTaskLabel" style="color:#1d4ed8;"></span></h3>
-        <div id="taskAssignHint" class="muted" style="font-size:12px; margin-bottom:10px;"></div>
-        <input id="taskAssignInput" placeholder="输入姓名或账号模糊搜索，点击选择…" autocomplete="off" style="width:100%; box-sizing:border-box;">
-        <div id="taskAssignList" style="max-height:250px; overflow:auto; border:1px solid #e2e8f0; border-radius:8px; margin-top:8px;"></div>
-        <div class="row" style="justify-content:flex-end; gap:8px; margin-top:14px;">
-          <button class="secondary" onclick="closeTaskAssignModal()">取消</button>
-          <button onclick="confirmTaskAssign()">确认指派</button>
-        </div>
-      </div>
-    </div>
-
     <div id="mineTestExecModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
       <div style="width: min(560px, 92vw); background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px 18px 14px 18px;">
         <h3 style="margin: 0 0 12px 0; color:#0f172a;">提交测试结果</h3>
@@ -766,6 +732,43 @@
       </div>
     </div>
   </section>
+
+  <!-- 全局弹窗：必须放在所有 tab section 之外。放进 section 里的话，切到其他
+       页时 section display:none 会把弹窗压住，而 body:has() 滚动锁仍然生效，
+       表现为「点了没反应且页面卡死」（2026-07-08 导出本周工作弹窗事故）。 -->
+  <div id="weeklyExportModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
+    <div style="width: min(560px, 92vw); max-height: 86vh; overflow:auto; background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px;">
+      <h3 style="margin:0 0 4px 0;">📄 导出本周工作 · 设置</h3>
+      <div id="weeklyExportHint" class="muted" style="font-size:12px; margin-bottom:12px;"></div>
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <strong style="font-size:13px; color:#334155;">大版本</strong>
+        <label style="font-size:12px; color:#64748b; cursor:pointer;"><input type="checkbox" id="weeklyExportVersionsAll" checked onchange="weeklyExportToggleAll('version', this.checked)"> 全选</label>
+      </div>
+      <div id="weeklyExportVersions" style="display:flex; flex-wrap:wrap; gap:6px 14px; margin:8px 0 14px 0;"></div>
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <strong style="font-size:13px; color:#334155;">人员</strong>
+        <label style="font-size:12px; color:#64748b; cursor:pointer;"><input type="checkbox" id="weeklyExportPersonsAll" checked onchange="weeklyExportToggleAll('person', this.checked)"> 全选</label>
+      </div>
+      <div id="weeklyExportPersons" style="display:flex; flex-wrap:wrap; gap:6px 14px; margin:8px 0 4px 0;"></div>
+      <div class="row" style="justify-content:flex-end; gap:8px; margin-top:14px;">
+        <button class="secondary" onclick="closeWeeklyExportModal()">取消</button>
+        <button onclick="confirmWeeklyExport()">确认导出</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="taskAssignModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
+    <div style="width: min(440px, 92vw); background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px;">
+      <h3 style="margin:0 0 4px 0;">👤 指派任务 <span id="taskAssignTaskLabel" style="color:#1d4ed8;"></span></h3>
+      <div id="taskAssignHint" class="muted" style="font-size:12px; margin-bottom:10px;"></div>
+      <input id="taskAssignInput" placeholder="输入姓名或账号模糊搜索，点击选择…" autocomplete="off" style="width:100%; box-sizing:border-box;">
+      <div id="taskAssignList" style="max-height:250px; overflow:auto; border:1px solid #e2e8f0; border-radius:8px; margin-top:8px;"></div>
+      <div class="row" style="justify-content:flex-end; gap:8px; margin-top:14px;">
+        <button class="secondary" onclick="closeTaskAssignModal()">取消</button>
+        <button onclick="confirmTaskAssign()">确认指派</button>
+      </div>
+    </div>
+  </div>
 
   <section id="tab-feedback" class="hidden card">
     <h2>反馈记录与处理</h2>
