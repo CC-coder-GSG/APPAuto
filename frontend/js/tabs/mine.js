@@ -1,5 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
+import { showLoading, hideLoading } from '../components/common.js';
 import { closeModal, openModal } from '../components/modal.js';
 import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, sourceTypeZh } from '../utils.js';
 
@@ -95,17 +96,23 @@ async function preflightWorkbenchData(softwareId) {
 }
 
 // 勾选「用例完成 / 测试完成」后的增量刷新：
-//  - 执行在后端（/workbench/preflight-refresh 只拉禅道「最近编辑」的 Bug/用例页，
-//    且有 180s/300s TTL 缓存 + 同步锁兜底，重复触发时直接返回 cached，不产生禅道请求）；
+//  - 执行在后端（/workbench/preflight-refresh 只拉禅道「最近编辑」的 Bug/用例页）。
+//  - 勾「用例完成」时带 testcases_recent：用例走轻量增量同步（绕过 5 分钟 TTL，
+//    刚在禅道新建的用例秒级可见；服务端有 60s 最小间隔 + 同步锁保护）。
 //  - 前端只负责触发：800ms 去抖合并连续勾选 + 20s 冷却，防止勾选风暴打接口。
 // 同步完成后重载工作台一次，让需求的用例/Bug 内容保持最新。
 let incrementalRefreshTimer = null;
 let incrementalRefreshAt = 0;
+let incrementalRefreshWantRecent = false;
 
-function scheduleCompletionIncrementalRefresh() {
+function scheduleCompletionIncrementalRefresh(opts = {}) {
+  // 去抖窗口内只要有一次是「用例完成」，合并后的这次同步就走用例快速路径
+  if (opts.testcasesRecent) incrementalRefreshWantRecent = true;
   if (incrementalRefreshTimer) clearTimeout(incrementalRefreshTimer);
   incrementalRefreshTimer = setTimeout(async () => {
     incrementalRefreshTimer = null;
+    const wantRecent = incrementalRefreshWantRecent;
+    incrementalRefreshWantRecent = false;
     const softwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
     if (!softwareId) return;
     if (Date.now() - incrementalRefreshAt < 20000) return;
@@ -114,7 +121,13 @@ function scheduleCompletionIncrementalRefresh() {
       await api('/workbench/preflight-refresh', {
         method: 'POST',
         headers: window.H,
-        body: { software_id: softwareId, include_bugs: true, include_testcases: true, force: false },
+        body: {
+          software_id: softwareId,
+          include_bugs: true,
+          include_testcases: true,
+          force: false,
+          testcases_recent: wantRecent,
+        },
       });
       await loadMyWorkbench();
     } catch (err) {
@@ -440,6 +453,7 @@ export async function confirmMineTestExecutionModal() {
   const pageMinorSel = document.getElementById('mineMinorSelect');
   if (pageMinorSel) pageMinorSel.value = String(minorId);
 
+  showLoading('正在提交测试完成并同步禅道任务，请稍候…');
   try {
     await submitTestExecution(reqId, {
       minor_version_id: minorId,
@@ -447,12 +461,14 @@ export async function confirmMineTestExecutionModal() {
       test_completed: true,
       notes,
     });
-    window.showMessage && window.showMessage('测试执行记录已提交，并同步标记需求测试完成', 'success');
+    window.showMessage && window.showMessage('测试执行记录已提交，需求已标记测试完成（禅道任务已联动完成）', 'success');
     const modal = document.getElementById('mineTestExecModal');
     if (modal) closeModal(modal);
     scheduleCompletionIncrementalRefresh(); // 测试完成 → 增量同步用例/Bug 保持最新
+    hideLoading();
     await loadMyWorkbench();
   } catch (err) {
+    hideLoading();
     if (modalState.checkboxEl) modalState.checkboxEl.checked = false;
     window.showMessage && window.showMessage(err.message || '提交失败，请稍后重试', 'error');
   } finally {
@@ -479,17 +495,19 @@ export async function handleTestCompletedToggle(reqId, checked, checkboxEl) {
     if (checkboxEl) checkboxEl.checked = true;
     return;
   }
+  showLoading('正在取消测试完成并同步禅道（重新激活任务），请稍候…');
   try {
     await api(`/requirements/${reqId}/status`, {
       method: 'PATCH',
       headers: window.H,
       body: { test_completed: false },
     });
-    window.showMessage && window.showMessage('已取消测试完成状态', 'success');
+    window.showMessage && window.showMessage('已取消测试完成状态（禅道任务已联动重新激活）', 'success');
   } catch (err) {
     if (checkboxEl) checkboxEl.checked = true;
     window.showMessage && window.showMessage(err.message || '状态更新失败', 'error');
   } finally {
+    hideLoading();
     await loadMyWorkbench();
   }
 }
@@ -963,6 +981,10 @@ export async function removeWorkbenchBug(id) {
 }
 
 export async function setReqStatus(reqId, key, checked) {
+  // 测试完成勾选/取消会联动禅道任务（完成/重新激活），给出等待提示。
+  // showLoading/hideLoading 是计数器配对的，用标志位保证「确认框取消」的
+  // 早退路径不会多调一次 hideLoading。
+  let loadingShown = false;
   try {
     if (!checked) {
       const ok = confirm(key === 'case_completed' ? '确认取消【用例完成】状态吗？' : '确认取消【测试完成】状态吗？');
@@ -971,23 +993,30 @@ export async function setReqStatus(reqId, key, checked) {
         return;
       }
     }
+    if (key === 'test_completed') {
+      showLoading(`正在${checked ? '标记测试完成' : '取消测试完成'}并同步禅道，请稍候…`);
+      loadingShown = true;
+    }
     const payload = {};
     payload[key] = checked;
     await api(`/requirements/${reqId}/status`, { method: 'PATCH', headers: window.H, body: payload });
-    window.showMessage && window.showMessage('需求状态已更新', 'success');
-    // 勾选完成 → 触发一次增量同步（去抖 + 冷却 + 后端 TTL，多次勾选不叠加开销）
+    window.showMessage && window.showMessage(loadingShown ? '需求状态已更新，已同步禅道' : '需求状态已更新', 'success');
+    // 勾选完成 → 触发一次增量同步（去抖 + 冷却 + 后端节流，多次勾选不叠加开销）；
+    // 用例完成走用例快速同步路径，新建用例及时可见
     if (checked && (key === 'case_completed' || key === 'test_completed')) {
-      scheduleCompletionIncrementalRefresh();
+      scheduleCompletionIncrementalRefresh({ testcasesRecent: key === 'case_completed' });
     }
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '状态更新失败', 'error');
   } finally {
+    if (loadingShown) hideLoading();
     await loadMyWorkbench();
   }
 }
 
 // 禅道任务联动：点击「开始」→ 记录开始时刻并让禅道子任务开始
 export async function startReqTask(reqId) {
+  showLoading('正在开始任务并同步禅道，请稍候…');
   try {
     const res = await api(`/requirements/${reqId}/task/start`, { method: 'POST', headers: window.H, body: {} });
     let data = null;
@@ -996,17 +1025,19 @@ export async function startReqTask(reqId) {
     if (errs.length) {
       window.showMessage && window.showMessage(`任务已开始（禅道侧部分失败：${errs[0]}）`, 'error');
     } else {
-      window.showMessage && window.showMessage('任务已开始', 'success');
+      window.showMessage && window.showMessage('任务已开始，已同步禅道', 'success');
     }
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '开始任务失败', 'error');
   } finally {
+    hideLoading();
     await loadMyWorkbench();
   }
 }
 
 // 禅道任务联动：点击「暂停」→ 让禅道子任务暂停（之后可用「开始」继续）
 export async function pauseReqTask(reqId) {
+  showLoading('正在暂停任务并同步禅道，请稍候…');
   try {
     const res = await api(`/requirements/${reqId}/task/pause`, { method: 'POST', headers: window.H, body: {} });
     let data = null;
@@ -1015,11 +1046,12 @@ export async function pauseReqTask(reqId) {
     if (errs.length) {
       window.showMessage && window.showMessage(`任务已暂停（禅道侧部分失败：${errs[0]}）`, 'error');
     } else {
-      window.showMessage && window.showMessage('任务已暂停', 'success');
+      window.showMessage && window.showMessage('任务已暂停，已同步禅道', 'success');
     }
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '暂停任务失败', 'error');
   } finally {
+    hideLoading();
     await loadMyWorkbench();
   }
 }
@@ -1054,7 +1086,7 @@ export async function setFinalTestStatus(reqId, key, checked, checkboxEl) {
     await api(`/final-test/requirements/${reqId}/status`, { method: 'PATCH', headers: window.H, body: payload });
     window.showMessage && window.showMessage('最终测试状态已更新', 'success');
     if (checked && (key === 'case_completed' || key === 'test_completed')) {
-      scheduleCompletionIncrementalRefresh();
+      scheduleCompletionIncrementalRefresh({ testcasesRecent: key === 'case_completed' });
     }
   } catch (err) {
     if (checkboxEl) checkboxEl.checked = !checked;

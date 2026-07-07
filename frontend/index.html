@@ -9,7 +9,7 @@
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20260707-1"></script>
+  <script type="module" src="/static/js/app.js?v=20260707-4"></script>
   <script src="/static/js/weave-motion.js?v=20260703-1" defer></script>
   <style>
     /* Header layout */
@@ -655,6 +655,27 @@
               <div id="taskWorkbenchCards"></div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="weeklyExportModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
+      <div style="width: min(560px, 92vw); max-height: 86vh; overflow:auto; background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px;">
+        <h3 style="margin:0 0 4px 0;">📄 导出本周工作 · 设置</h3>
+        <div id="weeklyExportHint" class="muted" style="font-size:12px; margin-bottom:12px;"></div>
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <strong style="font-size:13px; color:#334155;">大版本</strong>
+          <label style="font-size:12px; color:#64748b; cursor:pointer;"><input type="checkbox" id="weeklyExportVersionsAll" checked onchange="weeklyExportToggleAll('version', this.checked)"> 全选</label>
+        </div>
+        <div id="weeklyExportVersions" style="display:flex; flex-wrap:wrap; gap:6px 14px; margin:8px 0 14px 0;"></div>
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <strong style="font-size:13px; color:#334155;">人员</strong>
+          <label style="font-size:12px; color:#64748b; cursor:pointer;"><input type="checkbox" id="weeklyExportPersonsAll" checked onchange="weeklyExportToggleAll('person', this.checked)"> 全选</label>
+        </div>
+        <div id="weeklyExportPersons" style="display:flex; flex-wrap:wrap; gap:6px 14px; margin:8px 0 4px 0;"></div>
+        <div class="row" style="justify-content:flex-end; gap:8px; margin-top:14px;">
+          <button class="secondary" onclick="closeWeeklyExportModal()">取消</button>
+          <button onclick="confirmWeeklyExport()">确认导出</button>
         </div>
       </div>
     </div>
@@ -3235,6 +3256,18 @@ function exportReportPdf() {
 }
 function exportWeeklyTasks() {
   return window.OmniQAReportTab.exportWeeklyTasks();
+}
+function closeWeeklyExportModal() {
+  return window.OmniQAReportTab.closeWeeklyExportModal();
+}
+function confirmWeeklyExport() {
+  return window.OmniQAReportTab.confirmWeeklyExport();
+}
+function weeklyExportToggleAll(kind, checked) {
+  return window.OmniQAReportTab.weeklyExportToggleAll(kind, checked);
+}
+function weeklyExportSyncAll(kind) {
+  return window.OmniQAReportTab.weeklyExportSyncAll(kind);
 }
 
 function exportTreePdf() {

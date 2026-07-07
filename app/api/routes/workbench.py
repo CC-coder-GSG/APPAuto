@@ -21,6 +21,9 @@ class WorkbenchPreflightPayload(BaseModel):
     include_bugs: bool = True
     include_testcases: bool = True
     force: bool = False
+    # 勾「用例完成」触发：用例走轻量增量同步（只拉最近编辑页，绕过 5 分钟 TTL，
+    # 新建用例秒级可见；服务端另有 60s 最小间隔保护）
+    testcases_recent: bool = False
 
 
 @router.get("/mine")
@@ -130,6 +133,7 @@ def preflight_refresh(
         include_bugs=payload.include_bugs,
         include_testcases=payload.include_testcases,
         force=payload.force,
+        testcases_recent=payload.testcases_recent,
     )
 
 
