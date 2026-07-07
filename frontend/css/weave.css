@@ -810,6 +810,19 @@ tr.sse-glow-hold {
   .activity-feed-item:hover {
     box-shadow: 0 4px 18px rgba(139, 92, 246, 0.18) !important;
   }
+  /* 展开态停用 hover 流光环与柔光：weaveAngSpin 动的是自定义属性，无法走
+     合成器，每帧按整个卡片包围盒重绘 conic 渐变。折叠行 ~50px 无感；
+     父任务展开后带子任务列表高达上千像素，逐帧整框重绘直接掉帧卡顿。
+     展开即阅读态，hover 装饰本就多余——折叠行保留全部流光效果。 */
+  #tab-mine details.mine-req-card[open]:hover::after,
+  #tab-retest details.retest-req-card[open]:hover::after {
+    animation: none !important;
+    opacity: 0 !important;
+  }
+  #tab-mine details.mine-req-card[open]:hover,
+  #tab-retest details.retest-req-card[open]:hover {
+    box-shadow: none !important;
+  }
 }
 
 /* ============================================================
