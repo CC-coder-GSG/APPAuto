@@ -311,10 +311,88 @@ export function exportReportPdf() {
   });
 }
 
-// 导出本周工作内容 txt（后端按大版本/人员分组、父子任务合并）
+// ── 导出本周工作内容 txt（先弹设置：勾选大版本/人员，确认后按勾选导出）──
+
+function weeklyModalEls() {
+  return {
+    modal: document.getElementById('weeklyExportModal'),
+    hint: document.getElementById('weeklyExportHint'),
+    versionsWrap: document.getElementById('weeklyExportVersions'),
+    personsWrap: document.getElementById('weeklyExportPersons'),
+    versionsAll: document.getElementById('weeklyExportVersionsAll'),
+    personsAll: document.getElementById('weeklyExportPersonsAll'),
+  };
+}
+
+function renderWeeklyChecklist(wrap, items, kind) {
+  wrap.innerHTML = items.length
+    ? items.map((name) => `
+        <label style="display:flex; align-items:center; gap:5px; font-size:13px; cursor:pointer;">
+          <input type="checkbox" data-weekly-${kind} value="${name.replace(/"/g, '&quot;')}" checked
+            onchange="weeklyExportSyncAll('${kind}')">${name}
+        </label>`).join('')
+    : '<span class="muted" style="font-size:12px;">本周暂无数据</span>';
+}
+
+// 点「导出本周工作」→ 拉取本周全集（版本/人员清单），弹设置窗
 export async function exportWeeklyTasks() {
+  const { modal, hint, versionsWrap, personsWrap, versionsAll, personsAll } = weeklyModalEls();
+  if (!modal) return;
   try {
     const data = await (await api('/reports/weekly-task-export')).json();
+    hint.textContent = `本周：${data.week_start} ~ ${data.week_end}，勾选要导出的大版本与人员（默认全选）`;
+    renderWeeklyChecklist(versionsWrap, data.available_versions || [], 'version');
+    renderWeeklyChecklist(personsWrap, data.available_persons || [], 'person');
+    if (versionsAll) versionsAll.checked = true;
+    if (personsAll) personsAll.checked = true;
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '加载本周任务数据失败', 'error');
+  }
+}
+
+export function closeWeeklyExportModal() {
+  const { modal } = weeklyModalEls();
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.style.display = 'none';
+}
+
+export function weeklyExportToggleAll(kind, checked) {
+  document.querySelectorAll(`#weeklyExportModal input[data-weekly-${kind}]`).forEach((cb) => { cb.checked = checked; });
+}
+
+// 单项勾选变化时同步「全选」框状态
+export function weeklyExportSyncAll(kind) {
+  const boxes = [...document.querySelectorAll(`#weeklyExportModal input[data-weekly-${kind}]`)];
+  const all = document.getElementById(kind === 'version' ? 'weeklyExportVersionsAll' : 'weeklyExportPersonsAll');
+  if (all) all.checked = boxes.length > 0 && boxes.every((cb) => cb.checked);
+}
+
+function weeklyPicked(kind) {
+  const boxes = [...document.querySelectorAll(`#weeklyExportModal input[data-weekly-${kind}]`)];
+  return { picked: boxes.filter((cb) => cb.checked).map((cb) => cb.value), total: boxes.length };
+}
+
+export async function confirmWeeklyExport() {
+  const versions = weeklyPicked('version');
+  const persons = weeklyPicked('person');
+  if (versions.total && !versions.picked.length) {
+    window.showMessage && window.showMessage('请至少勾选一个大版本', 'info');
+    return;
+  }
+  if (persons.total && !persons.picked.length) {
+    window.showMessage && window.showMessage('请至少勾选一个人员', 'info');
+    return;
+  }
+  const params = new URLSearchParams();
+  // 全选时不传参（导出全部），部分勾选才传清单
+  if (versions.picked.length < versions.total) params.set('versions', versions.picked.join(','));
+  if (persons.picked.length < persons.total) params.set('persons', persons.picked.join(','));
+  const qs = params.toString();
+  try {
+    const data = await (await api('/reports/weekly-task-export' + (qs ? `?${qs}` : ''))).json();
     const blob = new Blob([data.text || ''], { type: 'text/plain;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -323,6 +401,7 @@ export async function exportWeeklyTasks() {
     a.click();
     a.remove();
     URL.revokeObjectURL(a.href);
+    closeWeeklyExportModal();
     window.showMessage && window.showMessage('本周工作内容已导出', 'success');
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '导出本周工作失败', 'error');
@@ -409,7 +488,16 @@ function renderZentaoSyncTable(tbodyId, rows, fields, headers) {
   ).join('');
 }
 
-window.OmniQAReportTab = { queryReport, exportReportPdf, exportWeeklyTasks, loadZentaoSyncStats };
+window.OmniQAReportTab = {
+  queryReport,
+  exportReportPdf,
+  exportWeeklyTasks,
+  closeWeeklyExportModal,
+  confirmWeeklyExport,
+  weeklyExportToggleAll,
+  weeklyExportSyncAll,
+  loadZentaoSyncStats,
+};
 window.openGovernanceDetail = openGovernanceDetail;
 window.closeGovernanceDetail = closeGovernanceDetail;
 window.loadZentaoSyncStats = loadZentaoSyncStats;

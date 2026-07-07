@@ -45,6 +45,11 @@ class ZentaoTaskMirror(Base):
     assigned_to_realname: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     assignee_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
 
+    # 完成者（禅道 finishedBy）：任务完成后 assignedTo 常被流转给下一环节的人，
+    # 周报等场景要展示真正做完任务的人，必须单独存
+    finished_by: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    finished_by_realname: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+
     estimate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     consumed: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     left: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

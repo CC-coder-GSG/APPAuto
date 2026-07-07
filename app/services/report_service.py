@@ -832,13 +832,25 @@ class ReportService:
         "done": "已完成", "closed": "已关闭", "cancel": "已取消",
     }
 
-    def weekly_task_report(self, week_offset: int = 0) -> dict:
+    def weekly_task_report(
+        self,
+        week_offset: int = 0,
+        versions: list[str] | None = None,
+        persons: list[str] | None = None,
+    ) -> dict:
         """本周工作内容 txt：本周内有活动的禅道任务，按大版本→人员分组，
-        子任务合并到父任务下缩进显示，标注起止时间与状态。
+        子任务合并到父任务下缩进显示，标注起止时间、状态与完成者。
 
         活动跨度：开始=实际开始(real_started)/计划开始(est_started)，
         结束=完成时间(finished_date)/截止(deadline)/今天；跨度与本周
         （周一~周日）有交集即纳入。已取消的任务不算工作内容，排除。
+
+        人员口径：未开始的任务展示指派人；进行中/已完成/已关闭展示完成者
+        （禅道 finishedBy；进行中尚无完成者时回退指派人）。
+
+        versions / persons：导出设置勾选的大版本名与人员名，None=全部。
+        返回值附带 available_versions / available_persons（未过滤的全集），
+        供导出设置弹窗渲染勾选列表。
         """
         from app.models.zentao_task_mirror import ZentaoTaskMirror
 
@@ -891,14 +903,25 @@ class ReportService:
                 return f"{f(start)}~"
             return "时间未知"
 
-        def task_line(t: ZentaoTaskMirror, start: date | None, end: date | None, indent: str = "") -> str:
-            status = self._TASK_STATUS_ZH.get(str(t.status or "").strip().lower(), t.status or "未知")
-            hours = f" (工时{t.consumed:g}h)" if t.consumed else ""
-            return f"{indent}t#{t.task_id} {t.name or ''} {fmt_dates(start, end)} {status}{hours}"
-
-        # 大版本 → 人员 → [(父任务或独立任务, 子任务列表)]
+        # 人员口径：未开始 → 指派人；进行中/已完成/已关闭 → 完成者
+        # （finishedBy；进行中尚无完成者、或历史数据未同步到完成者时回退指派人）
         def person_of(t: ZentaoTaskMirror) -> str:
-            return t.assigned_to_realname or t.assigned_to or "未指派"
+            status = str(t.status or "").strip().lower()
+            if status == "wait":
+                return t.assigned_to_realname or t.assigned_to or "未指派"
+            return (
+                t.finished_by_realname or t.finished_by
+                or t.assigned_to_realname or t.assigned_to or "未指派"
+            )
+
+        def task_line(t: ZentaoTaskMirror, start: date | None, end: date | None, indent: str = "") -> str:
+            status_l = str(t.status or "").strip().lower()
+            status = self._TASK_STATUS_ZH.get(status_l, t.status or "未知")
+            hours = f" (工时{t.consumed:g}h)" if t.consumed else ""
+            # 每行都标注人：未开始标「指派」，其余标「完成者」
+            who_label = "指派" if status_l == "wait" else "完成者"
+            who = f" [{who_label}:{person_of(t)}]"
+            return f"{indent}t#{t.task_id} {t.name or ''} {fmt_dates(start, end)} {status}{hours}{who}"
 
         grouped: dict[str, dict[str, dict[int, dict]]] = {}
         def bucket(version: str, person: str) -> dict[int, dict]:
@@ -907,13 +930,29 @@ class ReportService:
         def version_of(t: ZentaoTaskMirror) -> str:
             return exec_name.get(int(t.execution_id or 0)) or t.execution_name_cache or f"执行{t.execution_id}"
 
+        # 导出设置的勾选全集（未过滤）；再按勾选过滤本周任务
+        available_versions = sorted({version_of(t) for t, _, _ in in_week.values()})
+        available_persons = sorted({person_of(t) for t, _, _ in in_week.values()})
+        version_pick = set(versions) if versions else None
+        person_pick = set(persons) if persons else None
+        if version_pick is not None or person_pick is not None:
+            in_week = {
+                tid: (t, s, e) for tid, (t, s, e) in in_week.items()
+                if (version_pick is None or version_of(t) in version_pick)
+                and (person_pick is None or person_of(t) in person_pick)
+            }
+
         for t, start, end in in_week.values():
             pid = int(t.parent or 0)
             if pid > 0:
                 parent = by_id.get(pid)  # 父任务缺失（未同步）时子任务独立成行
                 if parent is not None:
-                    ver, person = version_of(parent), person_of(parent)
-                    slot = bucket(ver, person).setdefault(pid, {"task": parent, "span": in_week.get(pid, (None, None, None))[1:], "children": []})
+                    # 父任务归到其人员名下；父任务的人被筛掉时改挂到子任务人名下
+                    #（父任务只是容器行，子任务才是勾选人员的工作内容）
+                    parent_person = person_of(parent)
+                    if person_pick is not None and parent_person not in person_pick:
+                        parent_person = person_of(t)
+                    slot = bucket(version_of(parent), parent_person).setdefault(pid, {"task": parent, "span": in_week.get(pid, (None, None, None))[1:], "children": []})
                     slot["children"].append((t, start, end))
                     continue
             slot = bucket(version_of(t), person_of(t)).setdefault(t.task_id, {"task": t, "span": (start, end), "children": []})
@@ -933,10 +972,9 @@ class ReportService:
                     t = slot["task"]
                     start, end = slot["span"] if slot["span"][0] else (span_of(t) or (None, None))
                     lines.append(task_line(t, start, end, indent="  "))
+                    # 行内已带 [完成者/指派:X]，子任务不再额外标注
                     for child, cs, ce in sorted(slot["children"], key=lambda x: x[0].task_id):
-                        who = person_of(child)
-                        suffix = f" [{who}]" if who != person else ""
-                        lines.append(task_line(child, cs, ce, indent="    └ ") + suffix)
+                        lines.append(task_line(child, cs, ce, indent="    └ "))
                 lines.append("")
             lines.append("")
         if not grouped:
@@ -946,6 +984,8 @@ class ReportService:
             "week_start": monday.isoformat(),
             "week_end": sunday.isoformat(),
             "text": "\n".join(lines).rstrip() + "\n",
+            "available_versions": available_versions,
+            "available_persons": available_persons,
         }
 
     def governance(

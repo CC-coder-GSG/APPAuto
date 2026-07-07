@@ -399,6 +399,18 @@ def ensure_testcase_schema_compat(db: Session) -> None:
         logger.warning("test_cases unique index creation failed; skipped.", exc_info=True)
 
 
+def ensure_zentao_task_mirror_schema_compat(db: Session) -> None:
+    """给历史 zentao_task_mirror 表补完成者列（周报展示真正做完任务的人）。"""
+    rows = db.execute(text("PRAGMA table_info(zentao_task_mirror)")).fetchall()
+    cols = {r[1] for r in rows}
+    if not cols:
+        return  # 表尚未建立（全新库由 create_all 直接建出含该列）
+    for col in ("finished_by", "finished_by_realname"):
+        if col not in cols:
+            db.execute(text(f"ALTER TABLE zentao_task_mirror ADD COLUMN {col} VARCHAR(120)"))
+            db.commit()
+
+
 def ensure_zentao_testcase_mirror_schema_compat(db: Session) -> None:
     rows = db.execute(text("PRAGMA table_info(zentao_testcase_mirror)")).fetchall()
     cols = {r[1] for r in rows}

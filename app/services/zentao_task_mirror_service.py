@@ -191,6 +191,9 @@ class ZentaoTaskMirrorService:
                 if nm:
                     uid = by_name.get(nm)
             row.assignee_user_id = uid
+            fb_acc, fb_name = _account_of(t.get("finishedBy"))
+            row.finished_by = fb_acc
+            row.finished_by_realname = fb_name or (t.get("finishedByRealName") if isinstance(t.get("finishedByRealName"), str) else None) or row.finished_by_realname
             row.estimate = _as_float(t.get("estimate"))
             row.consumed = _as_float(t.get("consumed"))
             row.left = _as_float(t.get("left"))
@@ -705,6 +708,11 @@ class ZentaoTaskMirrorService:
             if uid is None and row.assigned_to_realname:
                 uid = by_name.get(row.assigned_to_realname.strip())
             row.assignee_user_id = uid
+        if t.get("finishedBy") is not None:
+            fb_acc, fb_name = _account_of(t.get("finishedBy"))
+            if fb_acc:
+                row.finished_by = fb_acc
+                row.finished_by_realname = fb_name or row.finished_by_realname
         row.estimate = _as_float(t.get("estimate")) if t.get("estimate") is not None else row.estimate
         row.consumed = _as_float(t.get("consumed")) if t.get("consumed") is not None else row.consumed
         row.left = _as_float(t.get("left")) if t.get("left") is not None else row.left
@@ -733,6 +741,8 @@ class ZentaoTaskMirrorService:
             "assigned_to": r.assigned_to,
             "assigned_to_realname": r.assigned_to_realname,
             "assignee_user_id": r.assignee_user_id,
+            "finished_by": r.finished_by,
+            "finished_by_realname": r.finished_by_realname,
             "estimate": r.estimate,
             "consumed": r.consumed,
             "left": r.left,

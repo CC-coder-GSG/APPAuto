@@ -160,11 +160,13 @@ def test_weekly_task_report_groups_by_version_and_person(db_session):
     monday = today - timedelta(days=today.weekday())
 
     def mk(task_id, name, *, parent=0, is_parent=0, status="done", person="陈文博",
-           start=None, finish=None, consumed=None):
+           start=None, finish=None, consumed=None, finisher=None):
         row = ZentaoTaskMirror(
             task_id=task_id, execution_id=2100, execution_name_cache="V4.0.4.0",
             parent=parent, is_parent=is_parent, name=name, type="test", status=status,
             assigned_to="acct_" + person, assigned_to_realname=person,
+            finished_by=("acct_" + finisher) if finisher else None,
+            finished_by_realname=finisher,
             est_started=start, real_started=datetime.combine(start, datetime.min.time()) if start else None,
             finished_date=datetime.combine(finish, datetime.min.time()) if finish else None,
             consumed=consumed,
@@ -194,6 +196,59 @@ def test_weekly_task_report_groups_by_version_and_person(db_session):
     assert "t#15001" not in text
     # 子任务行缩进在父任务行之后
     assert text.index("t#16776") < text.index("t#16777")
+    # 每行都带人员标注：done/doing 标完成者（无 finishedBy 回退指派人），设置弹窗全集
+    assert "[完成者:陈文博]" in text
+    assert "[完成者:张三]" in text
+    assert result["available_versions"] == ["V4.0.4.0"]
+    assert set(result["available_persons"]) == {"陈文博", "张三"}
+
+
+def test_weekly_task_report_finisher_and_filters(db_session):
+    from app.models.zentao_task_mirror import ZentaoTaskMirror
+    from app.utils.time_utils import local_now
+
+    major = _create_major(db_session, "V4.0.5.0")
+    major.zentao_execution_id = 2200
+    db_session.commit()
+    today = local_now().date()
+    monday = today - timedelta(days=today.weekday())
+
+    def mk(task_id, name, *, status, person, finisher=None, start=None):
+        row = ZentaoTaskMirror(
+            task_id=task_id, execution_id=2200, execution_name_cache="V4.0.5.0",
+            parent=0, is_parent=0, name=name, type="test", status=status,
+            assigned_to="acct_" + person, assigned_to_realname=person,
+            finished_by=("acct_" + finisher) if finisher else None,
+            finished_by_realname=finisher,
+            est_started=start,
+            real_started=datetime.combine(start, datetime.min.time()) if start and status != "wait" else None,
+            finished_date=datetime.combine(start, datetime.min.time()) if status in ("done", "closed") else None,
+        )
+        db_session.add(row)
+
+    # 完成后被流转：assigned_to=李四（下一环节），finishedBy=王五（真正完成者）
+    mk(20001, "已完成任务", status="done", person="李四", finisher="王五", start=monday)
+    # 未开始：显示指派人
+    mk(20002, "未开始任务", status="wait", person="赵六", start=monday + timedelta(days=2))
+    db_session.commit()
+
+    svc = ReportService(db_session)
+    full = svc.weekly_task_report()
+    # done 显示完成者王五（而非流转后的指派人李四）；wait 显示指派人
+    assert "[完成者:王五]" in full["text"]
+    assert "[指派:赵六]" in full["text"]
+    assert "王五" in full["available_persons"] and "赵六" in full["available_persons"]
+
+    # 人员筛选：只勾王五 → 赵六的任务不导出
+    picked = svc.weekly_task_report(persons=["王五"])
+    assert "t#20001" in picked["text"]
+    assert "t#20002" not in picked["text"]
+    # 全集清单不受筛选影响（弹窗数据源）
+    assert "赵六" in picked["available_persons"]
+
+    # 版本筛选：勾一个不存在的版本 → 空
+    none = svc.weekly_task_report(versions=["不存在的版本"])
+    assert "本周暂无任务活动记录" in none["text"]
 
 
 def test_bug_source_distribution_includes_field_test(db_session):

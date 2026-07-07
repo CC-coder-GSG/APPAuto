@@ -16,6 +16,7 @@ from app.db.seed import (
     ensure_testcase_schema_compat,
     ensure_user_schema_compat,
     ensure_version_schema_compat,
+    ensure_zentao_task_mirror_schema_compat,
     ensure_zentao_testcase_mirror_schema_compat,
     ensure_zentao_sync_bot,
 )
@@ -63,6 +64,7 @@ def init_db() -> None:
         ensure_bug_schema_compat(db)
         ensure_testcase_schema_compat(db)
         ensure_zentao_testcase_mirror_schema_compat(db)
+        ensure_zentao_task_mirror_schema_compat(db)
         ensure_sync_lock_schema_compat(db)
         ensure_browser_sync_schema_compat(db)
         ensure_build_record_schema_compat(db)
