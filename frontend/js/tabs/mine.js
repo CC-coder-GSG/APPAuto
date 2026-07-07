@@ -94,6 +94,35 @@ async function preflightWorkbenchData(softwareId) {
   return minePreflightPromise;
 }
 
+// 勾选「用例完成 / 测试完成」后的增量刷新：
+//  - 执行在后端（/workbench/preflight-refresh 只拉禅道「最近编辑」的 Bug/用例页，
+//    且有 180s/300s TTL 缓存 + 同步锁兜底，重复触发时直接返回 cached，不产生禅道请求）；
+//  - 前端只负责触发：800ms 去抖合并连续勾选 + 20s 冷却，防止勾选风暴打接口。
+// 同步完成后重载工作台一次，让需求的用例/Bug 内容保持最新。
+let incrementalRefreshTimer = null;
+let incrementalRefreshAt = 0;
+
+function scheduleCompletionIncrementalRefresh() {
+  if (incrementalRefreshTimer) clearTimeout(incrementalRefreshTimer);
+  incrementalRefreshTimer = setTimeout(async () => {
+    incrementalRefreshTimer = null;
+    const softwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+    if (!softwareId) return;
+    if (Date.now() - incrementalRefreshAt < 20000) return;
+    incrementalRefreshAt = Date.now();
+    try {
+      await api('/workbench/preflight-refresh', {
+        method: 'POST',
+        headers: window.H,
+        body: { software_id: softwareId, include_bugs: true, include_testcases: true, force: false },
+      });
+      await loadMyWorkbench();
+    } catch (err) {
+      console.warn('completion-toggle incremental refresh failed', err);
+    }
+  }, 800);
+}
+
 // DB 缓存的禅道状态/指派人，用于预填 zt-bug-slot（先显示，hydrator 再覆盖更新）。
 // 视觉与 zentao-hydrator 的徽章保持一致。
 const ZT_BUG_STATUS = {
@@ -421,6 +450,7 @@ export async function confirmMineTestExecutionModal() {
     window.showMessage && window.showMessage('测试执行记录已提交，并同步标记需求测试完成', 'success');
     const modal = document.getElementById('mineTestExecModal');
     if (modal) closeModal(modal);
+    scheduleCompletionIncrementalRefresh(); // 测试完成 → 增量同步用例/Bug 保持最新
     await loadMyWorkbench();
   } catch (err) {
     if (modalState.checkboxEl) modalState.checkboxEl.checked = false;
@@ -945,6 +975,10 @@ export async function setReqStatus(reqId, key, checked) {
     payload[key] = checked;
     await api(`/requirements/${reqId}/status`, { method: 'PATCH', headers: window.H, body: payload });
     window.showMessage && window.showMessage('需求状态已更新', 'success');
+    // 勾选完成 → 触发一次增量同步（去抖 + 冷却 + 后端 TTL，多次勾选不叠加开销）
+    if (checked && (key === 'case_completed' || key === 'test_completed')) {
+      scheduleCompletionIncrementalRefresh();
+    }
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '状态更新失败', 'error');
   } finally {
@@ -1019,6 +1053,9 @@ export async function setFinalTestStatus(reqId, key, checked, checkboxEl) {
     payload[key] = checked;
     await api(`/final-test/requirements/${reqId}/status`, { method: 'PATCH', headers: window.H, body: payload });
     window.showMessage && window.showMessage('最终测试状态已更新', 'success');
+    if (checked && (key === 'case_completed' || key === 'test_completed')) {
+      scheduleCompletionIncrementalRefresh();
+    }
   } catch (err) {
     if (checkboxEl) checkboxEl.checked = !checked;
     window.showMessage && window.showMessage(err.message || '状态更新失败', 'error');
