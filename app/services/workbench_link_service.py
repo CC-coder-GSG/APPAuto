@@ -9,6 +9,28 @@ from sqlalchemy.orm import Session, joinedload
 from app.models import BugSourceType, BugTracking, Requirement, Version, VersionType, ZentaoTestCaseMirror
 
 
+def _case_key(value: Any) -> str:
+    """用例关联键归一化：'u#19712' / 'U#19712' / '19712' → '19712'。
+
+    镜像的 zentao_case_id 带 'u#' 前缀，而 bug_tracking.zentao_linked_case_id
+    历史上存过裸数字，两种格式并存——统一剥前缀后按数字部分匹配，否则
+    「禅道 Bug 关联了用例但工作台用例栏不显示」。
+    """
+    key = str(value or "").strip().lower()
+    if key.startswith("u#"):
+        key = key[2:]
+    return key
+
+
+def _case_key_sql_variants(keys: set[str]) -> list[str]:
+    """SQL in_ 过滤用：归一化键的两种落库形态（裸数字 + u# 前缀）都要能命中。"""
+    out: set[str] = set()
+    for k in keys:
+        out.add(k)
+        out.add(f"u#{k}")
+    return list(out)
+
+
 class WorkbenchLinkService:
     def __init__(self, db: Session):
         self.db = db
@@ -82,7 +104,7 @@ class WorkbenchLinkService:
         for row in mirror_rows:
             if row.zentao_story_id:
                 mirror_by_story[int(row.zentao_story_id)].append(row)
-            key = str(row.zentao_case_id or "").strip().lower()
+            key = _case_key(row.zentao_case_id)
             if key:
                 all_mirror_case_keys.add(key)
 
@@ -102,7 +124,7 @@ class WorkbenchLinkService:
                 .all()
             )
             for bug in linked_bug_rows:
-                key = str(bug.zentao_linked_case_id or "").strip().lower()
+                key = _case_key(bug.zentao_linked_case_id)
                 if not key:
                     continue
                 if key in all_mirror_case_keys:
@@ -113,7 +135,7 @@ class WorkbenchLinkService:
             items: list[dict[str, Any]] = []
             existing_case_ids: set[str] = set()
             for local_case in req.test_cases or []:
-                local_key = str(local_case.zentao_case_id or "").strip().lower()
+                local_key = _case_key(local_case.zentao_case_id)
                 existing_case_ids.add(local_key)
                 bugs_payload = list(case_bug_map.get(str(local_case.id), []))
                 seen_bug_ids = {b["id"] for b in bugs_payload}
@@ -136,7 +158,7 @@ class WorkbenchLinkService:
 
             if req.zentao_story_id:
                 for mirror in mirror_by_story.get(int(req.zentao_story_id), []):
-                    case_key = str(mirror.zentao_case_id or "").strip().lower()
+                    case_key = _case_key(mirror.zentao_case_id)
                     if case_key and case_key in existing_case_ids:
                         continue
                     auto_bugs = [
@@ -191,7 +213,7 @@ class WorkbenchLinkService:
                 .all()
             ):
                 story_id_val, case_id_val = row
-                key = str(case_id_val or "").strip().lower()
+                key = _case_key(case_id_val)
                 if story_id_val and key:
                     mirror_keys_by_story[int(story_id_val)].add(key)
         all_mirror_keys: set[str] = set()
@@ -202,7 +224,7 @@ class WorkbenchLinkService:
         if story_ids:
             story_filter_terms.append(BugTracking.zentao_story_id.in_(story_ids))
         if all_mirror_keys:
-            story_filter_terms.append(BugTracking.zentao_linked_case_id.in_(list(all_mirror_keys)))
+            story_filter_terms.append(BugTracking.zentao_linked_case_id.in_(_case_key_sql_variants(all_mirror_keys)))
 
         if story_filter_terms and major_ids:
             story_query = (
@@ -242,7 +264,7 @@ class WorkbenchLinkService:
         auto_linked_story_bug_map: dict[int, list[dict[str, Any]]] = defaultdict(list)
         for bug in story_rows:
             bug_story_id = int(bug.zentao_story_id or 0)
-            bug_case_key = str(bug.zentao_linked_case_id or "").strip().lower()
+            bug_case_key = _case_key(bug.zentao_linked_case_id)
 
             target_reqs: list[Requirement] = []
             if bug_story_id and bug_story_id in req_by_story:
@@ -296,7 +318,7 @@ class WorkbenchLinkService:
                 )
                 .all()
             ):
-                key = str(case_id_val or "").strip().lower()
+                key = _case_key(case_id_val)
                 if story_id_val and key:
                     mirror_keys_by_story[int(story_id_val)].add(key)
                     all_mirror_keys.add(key)
@@ -305,7 +327,7 @@ class WorkbenchLinkService:
         if story_ids:
             story_filter_terms.append(BugTracking.zentao_story_id.in_(story_ids))
         if all_mirror_keys:
-            story_filter_terms.append(BugTracking.zentao_linked_case_id.in_(list(all_mirror_keys)))
+            story_filter_terms.append(BugTracking.zentao_linked_case_id.in_(_case_key_sql_variants(all_mirror_keys)))
 
         if not (story_filter_terms and major_ids):
             return {req.id: [] for req in reqs}
@@ -332,7 +354,7 @@ class WorkbenchLinkService:
         for bug in candidate_rows:
             target_reqs: list[Requirement] = []
             bug_story_id = int(bug.zentao_story_id or 0)
-            bug_case_key = str(bug.zentao_linked_case_id or "").strip().lower()
+            bug_case_key = _case_key(bug.zentao_linked_case_id)
             if bug_story_id and bug_story_id in req_by_story:
                 target_reqs = list(req_by_story[bug_story_id])
             elif bug_case_key:

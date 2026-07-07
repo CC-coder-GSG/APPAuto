@@ -1599,6 +1599,19 @@ class OverallTestService:
             except (TypeError, ValueError):
                 story_ref_id = None
 
+        # 关联用例（禅道「用例转Bug」/相关用例字段）：0/空 = 未关联。
+        # 工作台需求卡的用例栏靠它把 Bug 挂到对应用例下。
+        case_ref_id: int | None = None
+        case_raw = bug.get("case")
+        if isinstance(case_raw, dict):
+            case_raw = case_raw.get("id")
+        try:
+            case_ref_id = int(case_raw) if case_raw else None
+        except (TypeError, ValueError):
+            case_ref_id = None
+        if case_ref_id is not None and case_ref_id <= 0:
+            case_ref_id = None
+
         return {
             "zentao_bug_id": bug_id_str,
             "bug_id": f"b#{bug_id_str}",
@@ -1621,6 +1634,7 @@ class OverallTestService:
             "execution_ref_id": execution_ref_id,
             "project_ref_id": project_ref_id,
             "story_ref_id": story_ref_id,
+            "case_ref_id": case_ref_id,
             "affected_version": str(bug.get("v1") or bug.get("v2") or "").strip() or None,
         }
 
@@ -1787,6 +1801,10 @@ class OverallTestService:
             bug_row.zentao_affected_version = normalized["affected_version"]
         if normalized.get("story_ref_id"):
             bug_row.zentao_story_id = normalized["story_ref_id"]
+        # 关联用例：与用例镜像 zentao_case_id 同格式（u#前缀），工作台用例栏按它挂 Bug。
+        # 只在有值时写入——部分禅道版本的列表接口可能不带 case 字段，避免误清已有关联。
+        if normalized.get("case_ref_id"):
+            bug_row.zentao_linked_case_id = f"u#{normalized['case_ref_id']}"
         bug_row.zentao_sync_status = "synced"
         bug_row.zentao_sync_message = sync_message
         if sync_source:
