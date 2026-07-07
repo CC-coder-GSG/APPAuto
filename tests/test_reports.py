@@ -148,6 +148,54 @@ def test_summary_executed_requirements_increased_after_backfill(db_session):
     assert after["overview"]["executed_requirements"] == 1
 
 
+def test_weekly_task_report_groups_by_version_and_person(db_session):
+    from app.models.zentao_task_mirror import ZentaoTaskMirror
+    from app.utils.time_utils import local_now
+
+    major = _create_major(db_session, "V4.0.4.0")
+    major.zentao_execution_id = 2100
+    db_session.commit()
+
+    today = local_now().date()
+    monday = today - timedelta(days=today.weekday())
+
+    def mk(task_id, name, *, parent=0, is_parent=0, status="done", person="陈文博",
+           start=None, finish=None, consumed=None):
+        row = ZentaoTaskMirror(
+            task_id=task_id, execution_id=2100, execution_name_cache="V4.0.4.0",
+            parent=parent, is_parent=is_parent, name=name, type="test", status=status,
+            assigned_to="acct_" + person, assigned_to_realname=person,
+            est_started=start, real_started=datetime.combine(start, datetime.min.time()) if start else None,
+            finished_date=datetime.combine(finish, datetime.min.time()) if finish else None,
+            consumed=consumed,
+        )
+        db_session.add(row)
+        return row
+
+    mk(16776, "父任务描述", is_parent=1, status="done", start=monday, finish=monday + timedelta(days=2))
+    mk(16777, "子任务A", parent=16776, status="done", start=monday, finish=monday + timedelta(days=1), consumed=4)
+    mk(16800, "独立任务", status="doing", person="张三", start=monday + timedelta(days=1))
+    # 上周就完成的任务：不应出现在本周报告
+    mk(15000, "上周任务", status="done", start=monday - timedelta(days=7), finish=monday - timedelta(days=5))
+    # 已取消的任务：排除
+    mk(15001, "取消任务", status="cancel", start=monday)
+    db_session.commit()
+
+    result = ReportService(db_session).weekly_task_report()
+    text = result["text"]
+    assert result["week_start"] == monday.isoformat()
+    assert "V4.0.4.0：" in text
+    assert "t#16776 父任务描述" in text
+    assert "└ t#16777 子任务A" in text
+    assert "(工时4h)" in text
+    assert "t#16800 独立任务" in text and "进行中" in text
+    assert "张三" in text and "陈文博" in text
+    assert "t#15000" not in text
+    assert "t#15001" not in text
+    # 子任务行缩进在父任务行之后
+    assert text.index("t#16776") < text.index("t#16777")
+
+
 def test_bug_source_distribution_includes_field_test(db_session):
     user = _create_user(db_session, "report_user7")
     major = _create_major(db_session, "V7400")

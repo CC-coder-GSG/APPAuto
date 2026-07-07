@@ -311,6 +311,24 @@ export function exportReportPdf() {
   });
 }
 
+// 导出本周工作内容 txt（后端按大版本/人员分组、父子任务合并）
+export async function exportWeeklyTasks() {
+  try {
+    const data = await (await api('/reports/weekly-task-export')).json();
+    const blob = new Blob([data.text || ''], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `本周工作内容_${data.week_start}_${data.week_end}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+    window.showMessage && window.showMessage('本周工作内容已导出', 'success');
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '导出本周工作失败', 'error');
+  }
+}
+
 function bindReportSSE() {
   if (reportSseBound) return;
   if (!window.OmniQASSE || typeof window.OmniQASSE.subscribe !== 'function') return;
@@ -391,7 +409,7 @@ function renderZentaoSyncTable(tbodyId, rows, fields, headers) {
   ).join('');
 }
 
-window.OmniQAReportTab = { queryReport, exportReportPdf, loadZentaoSyncStats };
+window.OmniQAReportTab = { queryReport, exportReportPdf, exportWeeklyTasks, loadZentaoSyncStats };
 window.openGovernanceDetail = openGovernanceDetail;
 window.closeGovernanceDetail = closeGovernanceDetail;
 window.loadZentaoSyncStats = loadZentaoSyncStats;

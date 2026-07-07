@@ -4,8 +4,8 @@ import { showLoading, hideLoading } from '../components/common.js';
 const STATUS_META = {
   todo:         { label: '待处理', color: '#475569', bg: '#f1f5f9', border: '#cbd5e1' },
   in_progress:  { label: '进行中', color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
-  blocked:      { label: '阻塞',   color: '#b91c1c', bg: '#fef2f2', border: '#fecaca' },
   done:         { label: '已完成', color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0' },
+  closed:       { label: '已关闭', color: '#64748b', bg: '#f8fafc', border: '#e2e8f0' },
   deferred:     { label: '延期',   color: '#a16207', bg: '#fefce8', border: '#fde68a' },
 };
 
@@ -16,7 +16,9 @@ const PRIORITY_META = {
   urgent: { label: '紧急', bg: '#fee2e2', color: '#991b1b' },
 };
 
-const STATUS_ORDER = ['todo', 'in_progress', 'blocked', 'done', 'deferred'];
+// 2026-07-07：阻塞列删除（用不上），新增已关闭列（禅道 closed/cancel 任务归入）。
+// 平台侧遗留的 blocked 任务并入进行中列展示，避免消失。
+const STATUS_ORDER = ['todo', 'in_progress', 'done', 'closed', 'deferred'];
 
 const state = {
   date: null,
@@ -30,6 +32,7 @@ const state = {
   zentaoLoaded: false,
   createMode: 'platform', // 新建任务模式：platform | zentao
   ztOptionsMajor: null,   // 已加载表单选项的大版本 id（避免重复拉取）
+  viewMode: 'day',        // 看板视图：day（按日分列）| month（月历，按任务起止时间铺排）
 };
 
 function todayISO() {
@@ -98,7 +101,9 @@ function buildQuery() {
   const assignee = document.getElementById('taskBoardAssigneeFilter')?.value;
   if (assignee) params.set('assignee_id', String(assignee));
   const status = document.getElementById('taskBoardStatusFilter')?.value;
-  if (status) params.set('status', status);
+  // closed 是禅道任务专属列，平台任务无此状态（后端是 SAEnum，传了会报错）；
+  // 筛选已关闭时平台侧改为「不可能匹配」在 render 里置空。
+  if (status && status !== 'closed') params.set('status', status);
   const mine = document.getElementById('taskBoardMineOnly')?.checked;
   if (mine) params.set('mine', 'true');
   const archived = document.getElementById('taskBoardShowArchived')?.checked;
@@ -130,17 +135,22 @@ function render(data) {
   const createBtn = document.getElementById('taskBoardCreateBtn');
   if (createBtn) createBtn.classList.toggle('hidden', !state.canManage);
 
+  // 筛选「已关闭」时平台任务不可能匹配（平台无 closed 状态），列与汇总置空
+  const statusFilter = document.getElementById('taskBoardStatusFilter')?.value;
+  const effective = statusFilter === 'closed' ? { ...data, columns: {}, summary: {} } : data;
+
   const zt = zentaoForBoard();
-  renderSummary(data, zt);
-  renderColumns(data, zt);
-  renderAssigneeSummary(data);
+  renderSummary(effective, zt);
+  renderColumns(effective, zt);
+  renderAssigneeSummary(effective);
+  renderMonthView();
 }
 
 function renderSummary(data, ztItems = []) {
   const wrap = document.getElementById('taskBoardSummary');
   if (!wrap) return;
   const s = data.summary || {};
-  const ztCount = { total: ztItems.length, todo: 0, in_progress: 0, blocked: 0, done: 0, deferred: 0 };
+  const ztCount = { total: ztItems.length, todo: 0, in_progress: 0, done: 0, closed: 0, deferred: 0 };
   ztItems.forEach((t) => {
     const k = ZT_BOARD_MAP[t.status];
     if (k && k in ztCount) ztCount[k] += 1;
@@ -148,9 +158,10 @@ function renderSummary(data, ztItems = []) {
   const cards = [
     { key: 'total', label: '今日任务', value: s.total || 0, bg: '#f1f5f9', color: '#1e293b' },
     { key: 'todo', label: '待处理', value: s.todo || 0, bg: STATUS_META.todo.bg, color: STATUS_META.todo.color },
-    { key: 'in_progress', label: '进行中', value: s.in_progress || 0, bg: STATUS_META.in_progress.bg, color: STATUS_META.in_progress.color },
-    { key: 'blocked', label: '阻塞', value: s.blocked || 0, bg: STATUS_META.blocked.bg, color: STATUS_META.blocked.color },
+    // 平台侧遗留 blocked 任务并入进行中统计
+    { key: 'in_progress', label: '进行中', value: (s.in_progress || 0) + (s.blocked || 0), bg: STATUS_META.in_progress.bg, color: STATUS_META.in_progress.color },
     { key: 'done', label: '已完成', value: s.done || 0, bg: STATUS_META.done.bg, color: STATUS_META.done.color },
+    { key: 'closed', label: '已关闭', value: 0, bg: STATUS_META.closed.bg, color: STATUS_META.closed.color },
     { key: 'deferred', label: '延期', value: s.deferred || 0, bg: STATUS_META.deferred.bg, color: STATUS_META.deferred.color },
   ];
   wrap.innerHTML = cards.map((c) => {
@@ -176,7 +187,10 @@ function renderColumns(data, ztItems = []) {
   });
   root.innerHTML = STATUS_ORDER.map((statusKey) => {
     const meta = STATUS_META[statusKey];
-    const items = columns[statusKey] || [];
+    // 平台侧遗留 blocked 任务并入进行中列（阻塞列已删除）
+    const items = statusKey === 'in_progress'
+      ? [...(columns.in_progress || []), ...(columns.blocked || [])]
+      : (columns[statusKey] || []);
     const zt = ztByStatus[statusKey] || [];
     const count = items.length + zt.length;
     return `
@@ -648,10 +662,30 @@ export function shiftDate(days) {
   const input = ensureDateInput();
   if (!input) return;
   const d = new Date(input.value || todayISO());
-  d.setDate(d.getDate() + Number(days || 0));
+  // 月视图下 ◀▶ 按月翻页（跳到目标月 1 号，避免 31 号翻到下下月）
+  if (state.viewMode === 'month') {
+    d.setDate(1);
+    d.setMonth(d.getMonth() + Number(days || 0));
+  } else {
+    d.setDate(d.getDate() + Number(days || 0));
+  }
   input.value = d.toISOString().slice(0, 10);
   state.date = input.value;
   load();
+}
+
+// 日视图 ⇄ 月视图切换：月视图隐藏分列看板与成员概览，显示月历
+export function toggleViewMode(mode) {
+  state.viewMode = mode === 'month' ? 'month' : 'day';
+  const sel = document.getElementById('taskBoardViewMode');
+  if (sel && sel.value !== state.viewMode) sel.value = state.viewMode;
+  const isMonth = state.viewMode === 'month';
+  document.getElementById('taskBoardSummary')?.classList.toggle('hidden', isMonth);
+  document.getElementById('taskBoardColumns')?.classList.toggle('hidden', isMonth);
+  document.getElementById('taskBoardAssigneeSummary')?.classList.toggle('hidden', isMonth);
+  document.getElementById('taskBoardMonthView')?.classList.toggle('hidden', !isMonth);
+  if (state.data) render(state.data);
+  else load();
 }
 
 export function gotoToday() {
@@ -701,8 +735,8 @@ const ZT_STATUS_META = {
   closed: { label: '已关闭', bg: '#f1f5f9', color: '#94a3b8' },
 };
 
-// 禅道状态 → 看板分栏（暂停归入"阻塞"栏；已取消/已关闭不进看板，只在下方面板可见）
-const ZT_BOARD_MAP = { wait: 'todo', doing: 'in_progress', pause: 'blocked', done: 'done' };
+// 禅道状态 → 看板分栏（阻塞列已删除：暂停归入进行中；已关闭/已取消进「已关闭」列）
+const ZT_BOARD_MAP = { wait: 'todo', doing: 'in_progress', pause: 'in_progress', done: 'done', closed: 'closed', cancel: 'closed' };
 
 function myUserId() {
   return Number((window.currentUser && window.currentUser.id) || 0);
@@ -740,14 +774,153 @@ function zentaoForBoard() {
     const start = t.est_started || t.deadline;
     const end = t.deadline || t.est_started;
     const finishedDay = t.finished_date ? String(t.finished_date).slice(0, 10) : null;
+    const isFinished = t.status === 'done' || t.status === 'closed' || t.status === 'cancel';
     if (start) {
       if (start <= date && date <= end) return true;
-      // 完成日在跨度外（如逾期完成）：完成当天也算
-      return t.status === 'done' && finishedDay === date;
+      // 完成/关闭日在跨度外（如逾期完成）：完成当天也算
+      return isFinished && finishedDay === date;
     }
     if (finishedDay) return finishedDay === date;
     return date === todayISO(); // 完全没有日期信息的任务：只出现在今天的看板
   });
+}
+
+// ─── 月视图：按任务起止时间在月历上铺排 ─────────────────────────────────
+// 每个任务按「实际开始(real_started)/计划开始(est_started) → 完成(finished_date)/
+// 截止(deadline)/今天」的跨度投射到每一天：开始日标「开始」，结束日标「结束」，
+// 中间标「进行中」，当天始末标「开始->结束」并注明工时。数据来自禅道镜像，
+// 每次加载/刷新按最新起止时间实时重排。
+
+const MONTH_MARK_META = {
+  start:    { label: '开始',   bg: '#dcfce7', color: '#166534' },
+  ongoing:  { label: '进行中', bg: '#dbeafe', color: '#1d4ed8' },
+  end:      { label: '结束',   bg: '#f3e8ff', color: '#7c3aed' },
+  same_day: { label: '开始->结束', bg: '#fef3c7', color: '#92400e' },
+  planned:  { label: '计划开始', bg: '#f1f5f9', color: '#64748b' },
+};
+
+function dayOf(v) {
+  return v ? String(v).slice(0, 10) : null;
+}
+
+// 单个任务 → { 'YYYY-MM-DD': markKey } 映射（只生成落在 [monthStart, monthEnd] 内的天）
+function projectTaskToDays(t, monthStart, monthEnd, today) {
+  const marks = {};
+  const started = dayOf(t.real_started);
+  const planned = dayOf(t.est_started);
+  const start = started || planned;
+  if (!start) return marks;
+  const finished = dayOf(t.finished_date);
+  const isFinished = t.status === 'done' || t.status === 'closed' || t.status === 'cancel';
+  // 未开始（wait）且只有计划时间：只在计划开始日打「计划开始」标记
+  if (!started && !isFinished && t.status === 'wait') {
+    if (start >= monthStart && start <= monthEnd) marks[start] = 'planned';
+    return marks;
+  }
+  // 结束边界：已完成用完成日；进行中/暂停延伸到今天
+  const end = isFinished ? (finished || start) : (today >= start ? today : start);
+  if (start === end) {
+    if (start >= monthStart && start <= monthEnd) marks[start] = isFinished ? 'same_day' : 'start';
+    return marks;
+  }
+  // 用本地时间拼日期串：toISOString 是 UTC，在东八区会把本地日期偏移一天
+  const localDay = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+  const cur = new Date(start + 'T00:00:00');
+  const stop = new Date(end + 'T00:00:00');
+  while (cur <= stop) {
+    const day = localDay(cur);
+    if (day >= monthStart && day <= monthEnd) {
+      if (day === start) marks[day] = 'start';
+      else if (day === end) marks[day] = isFinished ? 'end' : 'ongoing';
+      else marks[day] = 'ongoing';
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+  return marks;
+}
+
+function monthTaskEntry(t, markKey) {
+  const meta = MONTH_MARK_META[markKey];
+  const hours = markKey === 'same_day' && t.consumed != null ? ` ${t.consumed}h` : '';
+  const person = t.assigned_to_realname || t.assigned_to || '';
+  const title = `#${t.task_id} ${t.name || ''}\n指派：${person || '未指派'}\n状态：${(ZT_STATUS_META[t.status] || {}).label || t.status}`;
+  return `
+    <div title="${escapeHtml(title)}" style="display:flex; align-items:center; gap:4px; font-size:11px; padding:2px 4px; border-radius:4px; background:${meta.bg}; color:${meta.color}; overflow:hidden;">
+      <span style="flex-shrink:0; font-weight:600;">${meta.label}${hours}</span>
+      <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">#${t.task_id} ${escapeHtml(t.name || '')}</span>
+    </div>`;
+}
+
+// 月视图沿用看板顶部筛选（成员/只看我的/状态），但不按看板日期过滤
+function zentaoForMonth() {
+  const assignee = document.getElementById('taskBoardAssigneeFilter')?.value;
+  const statusFilter = document.getElementById('taskBoardStatusFilter')?.value;
+  const mineOnly = document.getElementById('taskBoardMineOnly')?.checked;
+  return state.zentao.filter((t) => {
+    if (statusFilter && ZT_BOARD_MAP[t.status] !== statusFilter) return false;
+    if (assignee && Number(assignee) !== Number(t.assignee_user_id || 0)) return false;
+    if (mineOnly && !ztIsMine(t)) return false;
+    return true;
+  });
+}
+
+function renderMonthView() {
+  const root = document.getElementById('taskBoardMonthView');
+  if (!root || state.viewMode !== 'month') return;
+  const base = new Date((state.date || todayISO()) + 'T00:00:00');
+  const year = base.getFullYear();
+  const month = base.getMonth();
+  const first = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthStart = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+  const monthEnd = `${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+  const today = todayISO();
+
+  // 汇总：每天 → 该天的任务条目（按标记排序：开始->结束、开始、结束、进行中、计划）
+  const byDay = {};
+  const markOrder = { same_day: 0, start: 1, end: 2, ongoing: 3, planned: 4 };
+  zentaoForMonth().forEach((t) => {
+    const marks = projectTaskToDays(t, monthStart, monthEnd, today);
+    Object.entries(marks).forEach(([day, mark]) => {
+      (byDay[day] = byDay[day] || []).push({ t, mark });
+    });
+  });
+  Object.values(byDay).forEach((list) => list.sort((a, b) => (markOrder[a.mark] ?? 9) - (markOrder[b.mark] ?? 9) || a.t.task_id - b.t.task_id));
+
+  // 网格：周一开头；月首前置空白补齐
+  const lead = (first.getDay() + 6) % 7;
+  const cells = [];
+  for (let i = 0; i < lead; i++) cells.push('<div></div>');
+  for (let d = 1; d <= daysInMonth; d++) {
+    const day = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const entries = byDay[day] || [];
+    const isToday = day === today;
+    const shown = entries.slice(0, 8);
+    const more = entries.length - shown.length;
+    cells.push(`
+      <div style="border:1px solid ${isToday ? '#3b82f6' : '#e2e8f0'}; ${isToday ? 'box-shadow: inset 0 0 0 1px #3b82f6;' : ''} border-radius:8px; padding:6px; min-height:96px; background:#fff; display:flex; flex-direction:column; gap:3px;">
+        <div style="font-size:12px; font-weight:700; color:${isToday ? '#1d4ed8' : '#475569'}; display:flex; justify-content:space-between;">
+          <span>${d}</span>${entries.length ? `<span style="font-weight:400; color:#94a3b8;">${entries.length}项</span>` : ''}
+        </div>
+        ${shown.map(({ t, mark }) => monthTaskEntry(t, mark)).join('')}
+        ${more > 0 ? `<div class="muted" style="font-size:10px;">还有 ${more} 项…</div>` : ''}
+      </div>`);
+  }
+
+  const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
+  const legend = Object.entries(MONTH_MARK_META)
+    .map(([, m]) => `<span class="badge" style="background:${m.bg}; color:${m.color}; font-size:11px;">${m.label}</span>`)
+    .join(' ');
+  root.innerHTML = `
+    <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+      <strong style="font-size:16px; color:#0f172a;">${year} 年 ${month + 1} 月 · 禅道任务月历</strong>
+      <span class="row" style="gap:6px; align-items:center;">${legend}</span>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(7, minmax(0,1fr)); gap:6px; margin-bottom:4px;">
+      ${weekdays.map((w) => `<div style="text-align:center; font-size:12px; color:#64748b; font-weight:600;">周${w}</div>`).join('')}
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(7, minmax(0,1fr)); gap:6px;">${cells.join('')}</div>
+  `;
 }
 
 // 禅道任务操作按钮（看板卡片与底部面板共用）：像任务工作台那样开始/暂停/完成/关闭。
@@ -993,6 +1166,7 @@ window.OmniQATaskBoardTab = {
   carryOver,
   shiftDate,
   gotoToday,
+  toggleViewMode,
   loadZentao,
   refreshZentao,
   reloadZentaoFromMirror,

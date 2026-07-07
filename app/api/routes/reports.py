@@ -27,6 +27,17 @@ def reports_summary(
     return service.summary(start_date, end_date, current_user, user_id, major_version_id, software_id)
 
 
+@router.get("/reports/weekly-task-export")
+def reports_weekly_task_export(
+    week_offset: int = 0,
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """本周工作内容（禅道任务，按大版本/人员分组、父子合并）。返回 JSON，
+    前端用 text 字段生成 txt 下载（避免响应头中文文件名编码问题）。"""
+    return ReportService(db).weekly_task_report(week_offset=week_offset)
+
+
 @router.get("/reports/advanced")
 def reports_advanced(start_date: date, end_date: date, major_version_id: Optional[int] = None, software_id: Optional[int] = None, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     service = ReportService(db)

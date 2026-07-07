@@ -827,6 +827,127 @@ class ReportService:
         result.sort(key=lambda r: r["bug_count"], reverse=True)
         return result
 
+    _TASK_STATUS_ZH = {
+        "wait": "未开始", "doing": "进行中", "pause": "已暂停",
+        "done": "已完成", "closed": "已关闭", "cancel": "已取消",
+    }
+
+    def weekly_task_report(self, week_offset: int = 0) -> dict:
+        """本周工作内容 txt：本周内有活动的禅道任务，按大版本→人员分组，
+        子任务合并到父任务下缩进显示，标注起止时间与状态。
+
+        活动跨度：开始=实际开始(real_started)/计划开始(est_started)，
+        结束=完成时间(finished_date)/截止(deadline)/今天；跨度与本周
+        （周一~周日）有交集即纳入。已取消的任务不算工作内容，排除。
+        """
+        from app.models.zentao_task_mirror import ZentaoTaskMirror
+
+        today = local_now().date()
+        monday = today - timedelta(days=today.weekday()) + timedelta(weeks=week_offset)
+        sunday = monday + timedelta(days=6)
+
+        def span_of(t: ZentaoTaskMirror) -> tuple[date, date] | None:
+            start = (t.real_started.date() if t.real_started else None) or t.est_started
+            if not start:
+                return None
+            if str(t.status or "").strip().lower() in {"done", "closed"}:
+                end = (t.finished_date.date() if t.finished_date else None) or t.deadline or start
+            else:
+                end = max(start, min(today, t.deadline or today))
+            if end < start:
+                end = start
+            return start, end
+
+        rows = self.db.query(ZentaoTaskMirror).filter(
+            func.lower(func.coalesce(ZentaoTaskMirror.status, "")) != "cancel"
+        ).all()
+        in_week: dict[int, tuple[ZentaoTaskMirror, date, date]] = {}
+        for t in rows:
+            span = span_of(t)
+            if span and span[0] <= sunday and span[1] >= monday:
+                in_week[t.task_id] = (t, span[0], span[1])
+
+        # 子任务合并到父任务下：父任务不在周内也拉进来当容器行
+        by_id = {t.task_id: t for t in rows}
+        parents_needed = {
+            int(t.parent) for t, _, _ in in_week.values()
+            if t.parent and int(t.parent) > 0 and int(t.parent) not in in_week
+        }
+        container_parents = {pid: by_id[pid] for pid in parents_needed if pid in by_id}
+
+        # 执行 → 大版本名
+        exec_ids = {t.execution_id for t, _, _ in in_week.values()} | {p.execution_id for p in container_parents.values()}
+        exec_name: dict[int, str] = {}
+        if exec_ids:
+            for v in self.db.query(Version).filter(Version.zentao_execution_id.in_(list(exec_ids))).all():
+                if v.zentao_execution_id is not None:
+                    exec_name.setdefault(int(v.zentao_execution_id), v.version_no)
+
+        def fmt_dates(start: date | None, end: date | None) -> str:
+            f = lambda d: d.strftime("%m-%d")  # noqa: E731
+            if start and end:
+                return f"{f(start)}~{f(end)}"
+            if start:
+                return f"{f(start)}~"
+            return "时间未知"
+
+        def task_line(t: ZentaoTaskMirror, start: date | None, end: date | None, indent: str = "") -> str:
+            status = self._TASK_STATUS_ZH.get(str(t.status or "").strip().lower(), t.status or "未知")
+            hours = f" (工时{t.consumed:g}h)" if t.consumed else ""
+            return f"{indent}t#{t.task_id} {t.name or ''} {fmt_dates(start, end)} {status}{hours}"
+
+        # 大版本 → 人员 → [(父任务或独立任务, 子任务列表)]
+        def person_of(t: ZentaoTaskMirror) -> str:
+            return t.assigned_to_realname or t.assigned_to or "未指派"
+
+        grouped: dict[str, dict[str, dict[int, dict]]] = {}
+        def bucket(version: str, person: str) -> dict[int, dict]:
+            return grouped.setdefault(version, {}).setdefault(person, {})
+
+        def version_of(t: ZentaoTaskMirror) -> str:
+            return exec_name.get(int(t.execution_id or 0)) or t.execution_name_cache or f"执行{t.execution_id}"
+
+        for t, start, end in in_week.values():
+            pid = int(t.parent or 0)
+            if pid > 0:
+                parent = by_id.get(pid)  # 父任务缺失（未同步）时子任务独立成行
+                if parent is not None:
+                    ver, person = version_of(parent), person_of(parent)
+                    slot = bucket(ver, person).setdefault(pid, {"task": parent, "span": in_week.get(pid, (None, None, None))[1:], "children": []})
+                    slot["children"].append((t, start, end))
+                    continue
+            slot = bucket(version_of(t), person_of(t)).setdefault(t.task_id, {"task": t, "span": (start, end), "children": []})
+            slot["span"] = (start, end)
+
+        lines: list[str] = [
+            f"本周工作内容（{monday.isoformat()} ~ {sunday.isoformat()}）",
+            f"生成时间：{local_now().strftime('%Y-%m-%d %H:%M')}",
+            "",
+        ]
+        for version in sorted(grouped):
+            lines.append(f"{version}：")
+            for person in sorted(grouped[version]):
+                lines.append(f"◆ {person}")
+                slots = sorted(grouped[version][person].values(), key=lambda s: s["task"].task_id)
+                for slot in slots:
+                    t = slot["task"]
+                    start, end = slot["span"] if slot["span"][0] else (span_of(t) or (None, None))
+                    lines.append(task_line(t, start, end, indent="  "))
+                    for child, cs, ce in sorted(slot["children"], key=lambda x: x[0].task_id):
+                        who = person_of(child)
+                        suffix = f" [{who}]" if who != person else ""
+                        lines.append(task_line(child, cs, ce, indent="    └ ") + suffix)
+                lines.append("")
+            lines.append("")
+        if not grouped:
+            lines.append("本周暂无任务活动记录。")
+
+        return {
+            "week_start": monday.isoformat(),
+            "week_end": sunday.isoformat(),
+            "text": "\n".join(lines).rstrip() + "\n",
+        }
+
     def governance(
         self,
         start_date: date,
