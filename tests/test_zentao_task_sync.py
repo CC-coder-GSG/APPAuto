@@ -122,6 +122,47 @@ def test_adopts_existing_task_instead_of_recreating(db_session, monkeypatch, set
     assert child_creates == []  # r1 的 story 没有新建子任务
 
 
+def test_incremental_assignment_reuses_existing_parent(db_session, monkeypatch, setup):
+    # 执行下已有同名存活父任务 9000 → 增量分配的新子任务应挂进去，不再建新父任务
+    existing = [{"id": 9000, "type": "test", "story": 0, "parent": 0,
+                 "status": "wait", "name": "V4.0.3.15 测试任务", "assignedTo": {"account": "boss"}}]
+    client = FakeClient(assignable={"alice": "爱丽丝", "bob": "鲍勃"}, existing_tasks=existing)
+    _patch_client(monkeypatch, client)
+    svc = ZentaoTaskSyncService(db_session)
+    res = svc.create_tasks_for_assignment(
+        setup["major"].id,
+        [{"requirement_id": setup["r2"].id, "owner_id": setup["bob"].id}],
+        est_started="2026-06-29", deadline="2026-07-03", actor=setup["actor"],
+    )
+    assert res["ok"] is True, res["errors"]
+    assert res["parent_task_id"] == 9000
+    assert res["reused_parent"] is True
+    # 只新建了 1 个子任务（没有新父任务），且挂到旧父任务 9000 下
+    assert len(client.created) == 1
+    assert client.linked == [(client.created[0]["id"], 9000)]
+    db_session.refresh(setup["r2"])
+    assert setup["r2"].zentao_parent_task_id == 9000
+
+
+def test_dead_parent_not_reused(db_session, monkeypatch, setup):
+    # 同名父任务已被取消 → 不复用，新建一个
+    existing = [{"id": 9000, "type": "test", "story": 0, "parent": 0,
+                 "status": "cancel", "name": "V4.0.3.15 测试任务"}]
+    client = FakeClient(assignable={"alice": "爱丽丝", "bob": "鲍勃"}, existing_tasks=existing)
+    _patch_client(monkeypatch, client)
+    svc = ZentaoTaskSyncService(db_session)
+    res = svc.create_tasks_for_assignment(
+        setup["major"].id,
+        [{"requirement_id": setup["r2"].id, "owner_id": setup["bob"].id}],
+        est_started="2026-06-29", deadline="2026-07-03", actor=setup["actor"],
+    )
+    assert res["ok"] is True, res["errors"]
+    assert res["reused_parent"] is False
+    assert res["parent_task_id"] not in (None, 9000)
+    # 新建了 1 父 + 1 子
+    assert len(client.created) == 2
+
+
 def test_child_estimate_uses_requirement_hours(db_session, monkeypatch, setup):
     client = FakeClient(assignable={"alice": "爱丽丝", "bob": "鲍勃"})
     _patch_client(monkeypatch, client)

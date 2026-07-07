@@ -6,9 +6,10 @@
   - 禅道为权威，本地回写 zentao_task_id / parent / 状态缓存做镜像。
 
 能力 A（分配 → 建任务）：
-  每次「分配并发布」在该执行下**新建一个测试父任务**，子任务**只含本次新分配、
-  此前没建过任务的需求**（requirement.zentao_task_id 为空）；已有任务但换了负责人的
-  需求直接改派其现有子任务，不进新父任务。
+  「分配并发布」在该执行下建测试父任务，子任务**只含本次新分配、此前没建过
+  任务的需求**（requirement.zentao_task_id 为空）；已有任务但换了负责人的需求
+  直接改派其现有子任务。增量分配（2026-07-07）：执行下已有同名存活父任务时
+  复用它挂新子任务，整个版本只保留一个「{版本号} 测试任务」父任务。
 
 能力 C（开始/完成/重新激活）：
   start_requirement_task / finish_requirement_task / reactivate_requirement_task，
@@ -133,6 +134,7 @@ class ZentaoTaskSyncService:
         out: dict = {
             "ok": False,
             "parent_task_id": None,
+            "reused_parent": False,  # True=挂进执行下已有的同名父任务（增量分配）
             "created_tasks": [],
             "reassigned_tasks": [],
             "unassigned": [],   # [{requirement_id, owner_name}] 解析不到禅道账号
@@ -269,30 +271,46 @@ class ZentaoTaskSyncService:
                 logger.warning("commit adopt req %s failed: %s", req.id, exc)
                 self.db.rollback()
 
-        # ── 真正缺失的：建父任务 + 逐条子任务，每条建完即提交 ──
+        # ── 真正缺失的：复用/新建父任务 + 逐条子任务，每条建完即提交 ──
+        # 增量分配（2026-07-07）：执行下已有同名存活父任务时直接复用，把本批
+        # 新子任务挂进去——整个版本始终只有一个「测试任务」父任务，而不是每批一个。
         parent_id: Optional[int] = None
         if create_new_items:
             parent_name = f"{major.version_no} 测试任务"
-            parent_desc = (
-                f"由测试管理系统于 {local_now().strftime('%Y-%m-%d %H:%M')} 分配，"
-                f"共 {len(create_new_items)} 个研发需求子任务。"
-            )
-            actor_acc = self._resolve_account(actor, assignable) if actor else None
-            try:
-                created = client.create_execution_task(
-                    exec_id,
-                    name=parent_name,
-                    assigned_to=actor_acc,
-                    task_type="test",
-                    est_started=_fmt_date(start_d),
-                    deadline=_fmt_date(end_d),
-                    estimate=parent_estimate,
-                    desc=parent_desc,
-                ) or {}
-                parent_id = created.get("id") if isinstance(created, dict) else None
-            except Exception as exc:
-                logger.warning("create parent task in exec %s failed: %s", exec_id, exc)
-                out["errors"].append(f"创建父任务失败：{exc}")
+            reuse = None
+            for t in by_id.values():
+                if _is_dead_task(t) or str(t.get("name") or "").strip() != parent_name:
+                    continue
+                # 只认顶层任务（parent<=0），避免误把某个子任务当父容器
+                if (_coerce_int(t.get("parent")) or 0) > 0:
+                    continue
+                if reuse is None or (_coerce_int(t.get("id")) or 0) > (_coerce_int(reuse.get("id")) or 0):
+                    reuse = t
+            if reuse is not None:
+                parent_id = _coerce_int(reuse.get("id"))
+                out["reused_parent"] = True
+                logger.info("assignment reuses existing parent task #%s (%s)", parent_id, parent_name)
+            else:
+                parent_desc = (
+                    f"由测试管理系统于 {local_now().strftime('%Y-%m-%d %H:%M')} 分配，"
+                    f"共 {len(create_new_items)} 个研发需求子任务。"
+                )
+                actor_acc = self._resolve_account(actor, assignable) if actor else None
+                try:
+                    created = client.create_execution_task(
+                        exec_id,
+                        name=parent_name,
+                        assigned_to=actor_acc,
+                        task_type="test",
+                        est_started=_fmt_date(start_d),
+                        deadline=_fmt_date(end_d),
+                        estimate=parent_estimate,
+                        desc=parent_desc,
+                    ) or {}
+                    parent_id = created.get("id") if isinstance(created, dict) else None
+                except Exception as exc:
+                    logger.warning("create parent task in exec %s failed: %s", exec_id, exc)
+                    out["errors"].append(f"创建父任务失败：{exc}")
 
             if parent_id:
                 out["parent_task_id"] = parent_id
