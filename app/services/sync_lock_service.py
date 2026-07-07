@@ -4,7 +4,7 @@ import logging
 import os
 import socket
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -17,6 +17,23 @@ logger = logging.getLogger(__name__)
 
 def _holder_id() -> str:
     return f"{socket.gethostname()}#{os.getpid()}"
+
+
+def _coerce_dt(value) -> datetime | None:
+    """SQLite 原生 SQL 读出的 acquired_at 是字符串——必须转回 datetime 再比较。
+
+    2026-07-07 修复：此前字符串与 datetime 直接比较抛 TypeError，被外层
+    except 吞掉后 return False（当作锁被占用）→ 一旦某次同步崩溃残留锁行，
+    该锁 key 永久死锁，TTL 回收永远执行不到（服务器上 Bug/用例增量同步
+    因此分别断了数周）。
+    """
+    if value is None or isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        logger.warning("sync_lock acquired_at 无法解析：%r（按已过期处理）", value)
+        return None
 
 
 def acquire_sync_lock(db: Session, key: str, *, ttl_seconds: int = 600) -> bool:
@@ -50,14 +67,16 @@ def acquire_sync_lock(db: Session, key: str, *, ttl_seconds: int = 600) -> bool:
                 db.rollback()
                 return False
 
-        prev = existing[0]
+        prev_raw = existing[0]
+        prev = _coerce_dt(prev_raw)
         if prev and prev > cutoff:
             return False
 
+        # 回收条件：过期（<= cutoff）或值未变（CAS，覆盖 NULL/无法解析的脏值）
         result = db.execute(
             text(
                 "UPDATE sync_locks SET holder = :holder, acquired_at = :now, ttl_seconds = :ttl "
-                "WHERE key = :key AND (acquired_at IS NULL OR acquired_at <= :cutoff)"
+                "WHERE key = :key AND (acquired_at IS NULL OR acquired_at <= :cutoff OR acquired_at = :prev_raw)"
             ),
             {
                 "key": key,
@@ -65,6 +84,7 @@ def acquire_sync_lock(db: Session, key: str, *, ttl_seconds: int = 600) -> bool:
                 "now": now,
                 "ttl": ttl_seconds,
                 "cutoff": cutoff,
+                "prev_raw": prev_raw,
             },
         )
         db.commit()
