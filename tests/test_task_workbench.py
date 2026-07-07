@@ -37,10 +37,10 @@ def _req(db, major_id, req_no, *, task_id=None, story_id=None, owner_id=None):
     return r
 
 
-def _mirror(db, task_id, user_id, *, account="alice", story=None, status="wait", is_parent=0):
+def _mirror(db, task_id, user_id, *, account="alice", story=None, status="wait", is_parent=0, parent=0):
     row = ZentaoTaskMirror(
         task_id=task_id, execution_id=1900, execution_name_cache="V-TW-1",
-        parent=0, is_parent=is_parent, name=f"任务{task_id}", type="test", status=status,
+        parent=parent, is_parent=is_parent, name=f"任务{task_id}", type="test", status=status,
         story=story, assigned_to=account, assigned_to_realname=None, assignee_user_id=user_id,
     )
     db.add(row)
@@ -138,16 +138,116 @@ def test_own_requirement_task_shows_jump_not_operate(db_session):
     assert t["can_operate"] is False
 
 
-def test_list_mine_excludes_parents_and_others(db_session):
+def test_list_mine_includes_parents_with_children(db_session):
+    # 2026-07-06：父任务同步在其指派人名下展示，带全部子任务与完成进度；
+    # 他人任务仍然排除（scope=mine）。
     alice = _user(db_session, "alice_tw2", account="alice")
     bob = _user(db_session, "bob_tw2", account="bob")
     major = _major(db_session, "V-TW-2")
-    _mirror(db_session, 101, alice.id)                    # mine
-    _mirror(db_session, 102, alice.id, is_parent=1)       # parent → excluded
-    _mirror(db_session, 103, bob.id, account="bob")       # others → excluded (scope=mine)
+    _mirror(db_session, 101, alice.id)                                          # mine 独立任务
+    _mirror(db_session, 102, alice.id, is_parent=1, status="doing")             # mine 父任务
+    _mirror(db_session, 103, bob.id, account="bob")                             # 他人任务 → 排除
+    _mirror(db_session, 104, alice.id, parent=102, status="done")               # 父任务的子任务（我的）
+    _mirror(db_session, 105, bob.id, account="bob", parent=102, status="wait")  # 父任务的子任务（他人的）
 
     rows = ZentaoTaskMirrorService(db_session).list_mine_with_links(alice)
-    assert {t["task_id"] for t in rows} == {101}
+    by_id = {t["task_id"]: t for t in rows}
+    assert set(by_id) == {101, 102, 104}
+    parent = by_id[102]
+    assert parent["is_parent"] is True
+    assert parent["children_total"] == 2
+    assert parent["children_done"] == 1
+    assert {c["task_id"] for c in parent["children"]} == {104, 105}
+    # 我的子任务带父任务概要
+    assert by_id[104]["parent_info"]["task_id"] == 102
+    assert by_id[101]["parent_info"] is None
+
+
+def test_parent_task_operations_follow_zentao_rules(db_session, monkeypatch):
+    # 子任务未完成：父任务只能暂停/取消，不能开始/完成/关闭/设置工时
+    alice = _user(db_session, "alice_pt", account="alice")
+    _major(db_session, "V-TW-PT")
+    _mirror(db_session, 210, alice.id, is_parent=1, status="doing")
+    _mirror(db_session, 211, alice.id, parent=210, status="doing")
+    client = FakeClient()
+    client.set_task(210, {"status": "doing", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: None)
+    monkeypatch.setattr(tms, "get_system_zentao_web_login", lambda db: None)
+    svc = ZentaoTaskMirrorService(db_session)
+
+    for bad in ("start", "finish", "close", "set_time"):
+        with pytest.raises(HTTPException) as ei:
+            svc.operate_task(task_id=210, action=bad, current_user=alice, hours=4)
+        assert ei.value.status_code == 400
+
+    # 暂停允许（REST pause 生效）
+    res = svc.operate_task(task_id=210, action="pause", current_user=alice)
+    assert res["ok"] is True
+
+    # 暂停后允许「继续」(start)
+    res2 = svc.operate_task(task_id=210, action="start", current_user=alice)
+    assert res2["ok"] is True
+
+
+def test_parent_task_done_can_close(db_session, monkeypatch):
+    # 子任务全部完成 → 禅道自动置父任务 done → 此时允许关闭
+    alice = _user(db_session, "alice_pd", account="alice")
+    _major(db_session, "V-TW-PD")
+    _mirror(db_session, 220, alice.id, is_parent=1, status="done")
+    _mirror(db_session, 221, alice.id, parent=220, status="done")
+    client = FakeClient()
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=220, action="close", current_user=alice)
+    assert res["ok"] is True
+    assert any(c[0] == "close" for c in client.calls)
+
+
+def test_cancel_action_via_rest(db_session, monkeypatch):
+    alice = _user(db_session, "alice_cx", account="alice")
+    _major(db_session, "V-TW-CX")
+    _mirror(db_session, 230, alice.id, is_parent=1, status="doing")
+    _mirror(db_session, 231, alice.id, parent=230, status="wait")
+
+    class CancelClient(FakeClient):
+        def cancel_task(self, task_id, **kw):
+            self.calls.append(("cancel", task_id, kw))
+            self._tasks.setdefault(task_id, {}).update({"status": "cancel"})
+            return {"id": task_id}
+
+    client = CancelClient()
+    client.set_task(230, {"status": "doing", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: None)
+    monkeypatch.setattr(tms, "get_system_zentao_web_login", lambda db: None)
+
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=230, action="cancel", current_user=alice)
+    assert res["ok"] is True
+    row = db_session.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == 230).first()
+    assert row.status == "cancel"
+
+
+def test_assign_open_to_all_users(db_session, monkeypatch):
+    # bob 不是指派人，也能把 alice 的任务指派给 carol（面向所有用户开放）
+    alice = _user(db_session, "alice_as", account="alice")
+    bob = _user(db_session, "bob_as", account="bob")
+    _user(db_session, "carol_as", account="carol")
+    _major(db_session, "V-TW-AS")
+    _mirror(db_session, 240, alice.id, account="alice", status="wait")
+    client = FakeClient()
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+
+    svc = ZentaoTaskMirrorService(db_session)
+    res = svc.operate_task(task_id=240, action="assign", current_user=bob, assigned_to="carol")
+    assert res["ok"] is True
+    assert ("reassign", 240, "carol") in client.calls
+    row = db_session.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == 240).first()
+    assert row.assigned_to == "carol"
+
+    # 未提供目标人员 → 400
+    with pytest.raises(HTTPException) as ei:
+        svc.operate_task(task_id=240, action="assign", current_user=bob, assigned_to="  ")
+    assert ei.value.status_code == 400
 
 
 def test_operate_task_blocked_for_non_assignee(db_session, monkeypatch):

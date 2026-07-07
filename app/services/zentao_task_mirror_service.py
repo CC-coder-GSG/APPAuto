@@ -19,7 +19,7 @@ from app.services.zentao_system_client import (
     get_user_zentao_client,
     get_user_zentao_web_login,
 )
-from app.services.zentao_web_session import ZentaoWebSessionError, pause_task_via_web
+from app.services.zentao_web_session import ZentaoWebSessionError, cancel_task_via_web, pause_task_via_web
 from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
 
 logger = logging.getLogger(__name__)
@@ -227,19 +227,59 @@ class ZentaoTaskMirrorService:
         return [self._serialize(r) for r in rows]
 
     def list_mine_with_links(self, current_user: User) -> list[dict]:
-        """任务工作台数据：当前用户名下的（非父）任务，并标注是否关联本平台需求。
+        """任务工作台数据：当前用户名下的任务（含父任务），并标注是否关联本平台需求。
 
         关联判定：优先按 requirements.zentao_task_id == task_id；否则按
         requirements.zentao_story_id == task.story。命中则带上需求 id / 编号 /
         大版本，供前端「跳转到需求工作台对应位置」。
+
+        父任务同步在其指派人名下展示（2026-07-06）：
+        - 父任务带 children（全部子任务，含他人的）与完成进度，前端嵌套展示；
+        - 子任务带 parent_info，前端标注所属父任务（与禅道层级一致）。
         """
         from sqlalchemy.orm import joinedload
 
         from app.models import Requirement
 
-        tasks = self.list_tasks(scope="mine", current_user_id=current_user.id)
+        tasks = self.list_tasks(scope="mine", current_user_id=current_user.id, include_parents=True)
         if not tasks:
             return []
+
+        # 父子关系：我的父任务 → 其全部子任务；我的子任务 → 其父任务概要。
+        my_parent_ids = [t["task_id"] for t in tasks if t.get("is_parent")]
+        children_map: dict[int, list[dict]] = {}
+        if my_parent_ids:
+            child_rows = (
+                self.db.query(ZentaoTaskMirror)
+                .filter(ZentaoTaskMirror.parent.in_(my_parent_ids))
+                .order_by(ZentaoTaskMirror.task_id.asc())
+                .all()
+            )
+            for c in child_rows:
+                children_map.setdefault(int(c.parent), []).append(self._serialize(c))
+        referenced_parent_ids = {int(t["parent"]) for t in tasks if _coerce_int(t.get("parent")) and int(t["parent"]) > 0}
+        parents_map: dict[int, dict] = {}
+        if referenced_parent_ids:
+            for p in self.db.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id.in_(referenced_parent_ids)).all():
+                parents_map[p.task_id] = {
+                    "task_id": p.task_id,
+                    "name": p.name,
+                    "status": p.status,
+                    "assigned_to_realname": p.assigned_to_realname or p.assigned_to,
+                }
+        _finished = {"done", "closed", "cancel"}
+        for t in tasks:
+            if t.get("is_parent"):
+                kids = children_map.get(t["task_id"], [])
+                t["children"] = kids
+                t["children_total"] = len(kids)
+                t["children_done"] = sum(1 for k in kids if str(k.get("status") or "").strip().lower() in _finished)
+            else:
+                t["children"] = []
+                t["children_total"] = 0
+                t["children_done"] = 0
+            pid = _coerce_int(t.get("parent"))
+            t["parent_info"] = parents_map.get(pid) if pid and pid > 0 else None
         task_ids = [t["task_id"] for t in tasks]
         story_ids = [t["story"] for t in tasks if t.get("story")]
 
@@ -440,7 +480,7 @@ class ZentaoTaskMirrorService:
     # 独立（未关联需求）任务的禅道操作：开始 / 完成 / 关闭 / 设置工时
     # ------------------------------------------------------------------
 
-    _OP_ACTIONS = {"start", "pause", "finish", "close", "reactivate", "set_time"}
+    _OP_ACTIONS = {"start", "pause", "finish", "close", "cancel", "reactivate", "set_time", "assign"}
 
     def operate_task(
         self,
@@ -451,8 +491,9 @@ class ZentaoTaskMirrorService:
         hours: Optional[float] = None,
         consumed: Optional[float] = None,
         comment: Optional[str] = None,
+        assigned_to: Optional[str] = None,
     ) -> dict:
-        """对未关联需求的禅道任务执行操作。仅任务指派人本人可操作。"""
+        """对禅道任务执行操作。除 assign（面向所有用户开放）外，仅任务指派人本人可操作。"""
         from fastapi import HTTPException
 
         if action not in self._OP_ACTIONS:
@@ -460,12 +501,17 @@ class ZentaoTaskMirrorService:
         row = self.db.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == task_id).first()
         if not row:
             raise HTTPException(status_code=404, detail="任务不存在或未同步")
+        if action == "assign":
+            assigned_to = (assigned_to or "").strip()
+            if not assigned_to:
+                raise HTTPException(status_code=400, detail="请选择要指派的人员")
         # 权限：任务须指派给当前账号本人（禅道账号匹配，或镜像已映射到本人）。
-        # 例外：管理员可以关闭「已完成」的任务（2026-07-03 需求）。
+        # 例外 1：管理员可以关闭「已完成」的任务（2026-07-03 需求）。
+        # 例外 2：assign（指派/转派）面向所有用户开放（2026-07-06 需求）。
         my_account = (current_user.zentao_account or "").strip().lower()
         acc = (row.assigned_to or "").strip().lower()
         is_mine = (row.assignee_user_id == current_user.id) or (bool(my_account) and acc == my_account)
-        if not is_mine:
+        if not is_mine and action != "assign":
             role_val = getattr(current_user.role, "value", None) or str(current_user.role or "")
             admin_close = (
                 action == "close"
@@ -474,6 +520,33 @@ class ZentaoTaskMirrorService:
             )
             if not admin_close:
                 raise HTTPException(status_code=403, detail="该任务未指派给你，无法操作")
+
+        # 父任务与禅道保持一致：状态由子任务驱动（全部完成后禅道自动完成父任务），
+        # 子任务未完成时父任务只能暂停或取消；不允许直接开始/完成/设置工时。
+        if row.is_parent and action != "assign":
+            status_l = str(row.status or "").strip().lower()
+            if status_l == "pause":
+                allowed = {"start", "cancel"}          # 继续 / 取消
+            elif status_l in {"closed", "cancel"}:
+                allowed = {"reactivate"}
+            elif status_l == "done":
+                allowed = {"close", "reactivate"}      # 子任务全完成后禅道置 done → 可关闭
+            else:  # wait / doing
+                allowed = {"pause", "cancel"}
+            if action not in allowed:
+                children = self.db.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.parent == row.task_id).all()
+                pending = [c for c in children if str(c.status or "").strip().lower() not in {"done", "closed", "cancel"}]
+                if action in {"finish", "close"} and pending:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"父任务不能直接{'完成' if action == 'finish' else '关闭'}：还有 {len(pending)} 个子任务未完成"
+                               "（与禅道一致，子任务全部完成后父任务自动完成）",
+                    )
+                zh = {"start": "继续", "pause": "暂停", "cancel": "取消", "reactivate": "重新激活", "close": "关闭"}
+                raise HTTPException(
+                    status_code=400,
+                    detail="父任务状态由子任务驱动（与禅道一致），当前可用操作：" + "、".join(zh.get(a, a) for a in sorted(allowed)),
+                )
 
         # 候选客户端：优先「操作人本人」（禅道正确记录操作人、保持指派），失败/未生效再回退
         # 系统管理员账号（chenwenbo）。这样即便本人 token 被当作 guest（返回 401），也能由管理员
@@ -492,12 +565,12 @@ class ZentaoTaskMirrorService:
         if action == "set_time" and (hours is None or hours <= 0 or hours > 999):
             raise HTTPException(status_code=400, detail="工时需在 0~999 小时之间")
 
-        _expected = {"start": "doing", "pause": "pause", "reactivate": "doing", "finish": "done", "close": "closed"}.get(action)
+        _expected = {"start": "doing", "pause": "pause", "reactivate": "doing", "finish": "done", "close": "closed", "cancel": "cancel"}.get(action)
 
-        # 暂停：REST 优先（ipd4.3 空 body 会被静默忽略，pause_task 已固定带 comment 字段）；
+        # 暂停/取消：REST 优先（ipd4.3 空 body 会被静默忽略，pause/cancel_task 已固定带 comment 字段）；
         # REST 未生效（如 token 被当 guest 时 200 无效果）再回退网页 cookie 会话。
         web_logins = {}
-        if action == "pause":
+        if action in {"pause", "cancel"}:
             web_logins["self"] = get_user_zentao_web_login(current_user.id, self.db)
             web_logins["system"] = get_system_zentao_web_login(self.db)
 
@@ -507,20 +580,23 @@ class ZentaoTaskMirrorService:
                 if (row.status or "").strip().lower() == "pause":
                     return cli.restart_task(task_id, consumed=(row.consumed or 0.0), left=left, assigned_to=original_account)
                 return cli.start_task(task_id, real_started=_fmt_now(), left=left, assigned_to=original_account)
-            if action == "pause":
+            if action in {"pause", "cancel"}:
+                rest_call = cli.pause_task if action == "pause" else cli.cancel_task
+                web_call = pause_task_via_web if action == "pause" else cancel_task_via_web
+                zh = "暂停" if action == "pause" else "取消"
                 resp = None
                 try:
-                    resp = cli.pause_task(task_id, comment=comment)
-                    if str((cli.get_task(task_id) or {}).get("status") or "").strip().lower() == "pause":
+                    resp = rest_call(task_id, comment=comment)
+                    if str((cli.get_task(task_id) or {}).get("status") or "").strip().lower() == _expected:
                         return resp
                 except Exception as exc:  # noqa: BLE001 — REST 失败/未生效都尝试网页会话
-                    logger.warning("pause via REST (%s) task %s failed: %s", label, task_id, exc)
+                    logger.warning("%s via REST (%s) task %s failed: %s", action, label, task_id, exc)
                 web = web_logins.get(label)
                 if web is not None:
-                    return pause_task_via_web(web, task_id, comment=comment)
+                    return web_call(web, task_id, comment=comment)
                 if resp is not None:
                     return resp  # 无网页凭据：交给外层校验判定未生效
-                raise ZentaoWebSessionError("REST 暂停失败且无网页登录凭据")
+                raise ZentaoWebSessionError(f"REST {zh}失败且无网页登录凭据")
             if action == "finish":
                 cur = consumed if (consumed and consumed > 0) else (row.left or row.estimate or 1.0)
                 return cli.finish_task(task_id, current_consumed=cur, finished_date=_fmt_now())
@@ -531,6 +607,8 @@ class ZentaoTaskMirrorService:
                 return cli.close_task(task_id, comment=comment)
             if action == "set_time":
                 return cli.update_task(task_id, {"estimate": hours, "left": hours})
+            if action == "assign":
+                return cli.reassign_task(task_id, assigned_to)
             return None
 
         errors: list[str] = []
@@ -548,14 +626,24 @@ class ZentaoTaskMirrorService:
                 continue
             self._refresh_one_task(cli, row)
             logger.info("operate task %s action=%s via %s resp=%r status=%s", task_id, action, label, last_resp, row.status)
-            if not _expected or (row.status or "").strip().lower() == _expected:
+            if action == "assign":
+                # 指派按回读的指派人校验（状态不变化）
+                took_effect = (row.assigned_to or "").strip().lower() == assigned_to.strip().lower()
+            else:
+                took_effect = not _expected or (row.status or "").strip().lower() == _expected
+            if took_effect:
                 used_client = cli
-                break  # 生效（或无需校验状态）
-            # 200 但状态未切换 → 试下一个候选账号
+                break  # 生效（或无需校验）
+            # 200 但未生效 → 试下一个候选账号
             last_err = None
         if used_client is None:
             if last_err is not None:
                 errors.append(str(last_err))
+            elif action == "assign":
+                errors.append(
+                    f"禅道未生效：任务当前指派人为「{row.assigned_to or '空'}」（期望「{assigned_to}」）。"
+                    f"禅道返回：{str(last_resp)[:200]}"
+                )
             else:
                 errors.append(
                     f"禅道未生效：任务当前状态为「{row.status or '未知'}」（期望「{_expected}」）。"
@@ -575,6 +663,28 @@ class ZentaoTaskMirrorService:
                     logger.warning("restore assignee task %s -> %s failed: %s", task_id, original_account, exc)
         self.db.commit()
         return {"ok": not errors, "errors": errors, "task": self._serialize(row)}
+
+    def assignable_users(self, task_id: int) -> dict:
+        """任务所在执行的可指派人列表（指派弹窗数据源，面向所有用户）。"""
+        from fastapi import HTTPException
+
+        row = self.db.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == task_id).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="任务不存在或未同步")
+        if not row.execution_id:
+            raise HTTPException(status_code=400, detail="任务缺少执行信息，无法拉取可指派人")
+        client = get_system_zentao_client(self.db)
+        if client is None:
+            raise HTTPException(status_code=502, detail="找不到可用的禅道账号绑定")
+        try:
+            users = client.list_assignable_users(int(row.execution_id)) or {}
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"拉取可指派人失败：{exc}")
+        return {
+            "task_id": task_id,
+            "current": row.assigned_to,
+            "users": [{"account": acc, "realname": name} for acc, name in users.items()],
+        }
 
     def _refresh_one_task(self, client, row: ZentaoTaskMirror) -> Optional[dict]:
         try:

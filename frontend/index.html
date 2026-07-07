@@ -9,7 +9,7 @@
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20260706-2"></script>
+  <script type="module" src="/static/js/app.js?v=20260706-5"></script>
   <script src="/static/js/weave-motion.js?v=20260703-1" defer></script>
   <style>
     /* Header layout */
@@ -635,6 +635,9 @@
                     <option value="closed">已关闭</option>
                   </select>
                 </label>
+                <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;" title="勾选后隐藏已关闭/已取消的任务（筛选「已关闭」时不生效）">
+                  <input type="checkbox" id="taskWorkbenchHideClosed" onchange="taskWorkbenchHideClosedChanged(this.checked)" style="width:15px; height:15px; cursor:pointer;">隐藏已关闭
+                </label>
                 <label id="taskWorkbenchSelectAllWrap" style="display:none !important; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
                   <input type="checkbox" id="taskWorkbenchSelectAll" onchange="taskWorkbenchToggleSelectAll(this.checked)" style="width:15px; height:15px; cursor:pointer; accent-color:#dc2626;">全选可关闭任务
                 </label>
@@ -645,6 +648,19 @@
               <div id="taskWorkbenchCards"></div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="taskAssignModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
+      <div style="width: min(440px, 92vw); background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px;">
+        <h3 style="margin:0 0 4px 0;">👤 指派任务 <span id="taskAssignTaskLabel" style="color:#1d4ed8;"></span></h3>
+        <div id="taskAssignHint" class="muted" style="font-size:12px; margin-bottom:10px;"></div>
+        <input id="taskAssignInput" placeholder="输入姓名或账号模糊搜索，点击选择…" autocomplete="off" style="width:100%; box-sizing:border-box;">
+        <div id="taskAssignList" style="max-height:250px; overflow:auto; border:1px solid #e2e8f0; border-radius:8px; margin-top:8px;"></div>
+        <div class="row" style="justify-content:flex-end; gap:8px; margin-top:14px;">
+          <button class="secondary" onclick="closeTaskAssignModal()">取消</button>
+          <button onclick="confirmTaskAssign()">确认指派</button>
         </div>
       </div>
     </div>
@@ -2773,6 +2789,18 @@ function taskWorkbenchRememberFold(taskId, open) {
 }
 function taskWorkbenchFilterChanged(value) {
   return window.OmniQATaskWorkbenchTab?.taskWorkbenchFilterChanged(value);
+}
+function taskWorkbenchHideClosedChanged(checked) {
+  return window.OmniQATaskWorkbenchTab?.taskWorkbenchHideClosedChanged(checked);
+}
+function openTaskAssign(taskId, source) {
+  return window.OmniQATaskWorkbenchTab?.openTaskAssign(taskId, source);
+}
+function closeTaskAssignModal() {
+  return window.OmniQATaskWorkbenchTab?.closeTaskAssignModal();
+}
+function confirmTaskAssign() {
+  return window.OmniQATaskWorkbenchTab?.confirmTaskAssign();
 }
 function taskWorkbenchToggleSelect(taskId, checked) {
   return window.OmniQATaskWorkbenchTab?.taskWorkbenchToggleSelect(taskId, checked);

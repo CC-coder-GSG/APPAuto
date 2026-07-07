@@ -690,6 +690,14 @@ class ZentaoClient:
         """
         return self.post(f"tasks/{task_id}/close", {"comment": comment or ""})
 
+    def cancel_task(self, task_id: int, *, comment: str | None = None) -> dict | None:
+        """POST /v1/tasks/{id}/cancel —— 取消任务（status→cancel）。
+
+        与 pause/close 同理：ipd4.3 空 body 会被静默忽略，固定带 comment 字段。
+        REST 未生效时由调用方回退网页 cookie 会话（cancel_task_via_web）。
+        """
+        return self.post(f"tasks/{task_id}/cancel", {"comment": comment or ""})
+
     def list_assignable_users(self, execution_id: int) -> dict[str, str]:
         """该执行可指派用户 {account: realname}。
 

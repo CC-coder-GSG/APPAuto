@@ -97,9 +97,10 @@ def _login(client: httpx.Client, login: ZentaoWebLogin) -> None:
         )
 
 
-def pause_task_via_web(login: ZentaoWebLogin, task_id: int, *, comment: str | None = None) -> dict:
-    """网页会话暂停任务（status→pause）。成功返回禅道响应，失败抛 ZentaoWebSessionError。"""
+def _task_action_via_web(login: ZentaoWebLogin, task_id: int, *, action: str, status: str, comment: str | None = None) -> dict:
+    """网页会话提交任务动作表单（pause/cancel 协议一致：隐藏字段 status 必填）。"""
     base = login.base_url.rstrip("/")
+    zh = {"pause": "暂停", "cancel": "取消"}.get(action, action)
     with httpx.Client(
         timeout=_TIMEOUT,
         follow_redirects=True,
@@ -107,17 +108,17 @@ def pause_task_via_web(login: ZentaoWebLogin, task_id: int, *, comment: str | No
     ) as client:
         _login(client, login)
         resp = client.post(
-            f"{base}/task-pause-{task_id}.html",
-            # status=pause 是暂停弹窗的隐藏字段，缺了服务端不执行动作
-            files=_form({"comment": comment or "", "uid": "", "status": "pause"}),
+            f"{base}/task-{action}-{task_id}.html",
+            # status 是动作弹窗的隐藏字段，缺了服务端只当作渲染表单页，不执行动作
+            files=_form({"comment": comment or "", "uid": "", "status": status}),
             headers={"X-Requested-With": "XMLHttpRequest", "X-Zui-Modal": "true"},
         )
         try:
             payload = _loads_lenient(resp.text)
         except Exception:
-            raise ZentaoWebSessionError(f"禅道暂停返回非 JSON：{(resp.text or '')[:200]}")
+            raise ZentaoWebSessionError(f"禅道{zh}返回非 JSON：{(resp.text or '')[:200]}")
         if not (isinstance(payload, dict) and payload.get("result") == "success"):
-            raise ZentaoWebSessionError(f"禅道暂停未执行：{_fail_reason(payload)}")
+            raise ZentaoWebSessionError(f"禅道{zh}未执行：{_fail_reason(payload)}")
         try:
             client.get(f"{base}/user-logout.html")
         except Exception:
@@ -125,4 +126,14 @@ def pause_task_via_web(login: ZentaoWebLogin, task_id: int, *, comment: str | No
         return payload
 
 
-__all__ = ["ZentaoWebLogin", "ZentaoWebSessionError", "pause_task_via_web"]
+def pause_task_via_web(login: ZentaoWebLogin, task_id: int, *, comment: str | None = None) -> dict:
+    """网页会话暂停任务（status→pause）。成功返回禅道响应，失败抛 ZentaoWebSessionError。"""
+    return _task_action_via_web(login, task_id, action="pause", status="pause", comment=comment)
+
+
+def cancel_task_via_web(login: ZentaoWebLogin, task_id: int, *, comment: str | None = None) -> dict:
+    """网页会话取消任务（status→cancel）。协议与暂停一致，仅动作与隐藏 status 不同。"""
+    return _task_action_via_web(login, task_id, action="cancel", status="cancel", comment=comment)
+
+
+__all__ = ["ZentaoWebLogin", "ZentaoWebSessionError", "pause_task_via_web", "cancel_task_via_web"]

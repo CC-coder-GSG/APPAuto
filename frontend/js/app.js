@@ -17,9 +17,9 @@ import { resizeAllCharts } from './components/charts.js?v=20260706-2';
 import { runGuardrails } from './guardrails.js?v=20260417-3';
 
 const OPTIONAL_TAB_MODULES = [
-  { name: 'mine', path: './tabs/mine.js?v=20260630-1' },
-  { name: 'task-workbench', path: './tabs/task-workbench.js?v=20260701-1' },
-  { name: 'task-board', path: './tabs/task-board.js?v=20260703-3' },
+  { name: 'mine', path: './tabs/mine.js?v=20260706-1' },
+  { name: 'task-workbench', path: './tabs/task-workbench.js?v=20260706-2' },
+  { name: 'task-board', path: './tabs/task-board.js?v=20260706-1' },
   { name: 'feedback', path: './tabs/feedback.js?v=20260417-3' },
   { name: 'report', path: './tabs/report.js?v=20260706-2' },
   { name: 'retest', path: './tabs/retest.js?v=20260615-1' },

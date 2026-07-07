@@ -13,23 +13,28 @@ let taskWorkbenchData = [];
 const openTaskIds = new Set();
 // 状态筛选（all / wait / doing / pause / done / closed，closed 含 cancel）。
 let statusFilter = 'all';
+// 隐藏已关闭/已取消的任务；状态筛选显式选「已关闭」时不生效（明确要看时以筛选为准）。
+let hideClosed = false;
 // 批量关闭：勾选的任务 id。
 const selectedTaskIds = new Set();
 
 const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
 
 function taskMatchesFilter(t) {
-  if (statusFilter === 'all') return true;
   const s = String(t.status || '');
+  if (hideClosed && statusFilter !== 'closed' && (s === 'closed' || s === 'cancel')) return false;
+  if (statusFilter === 'all') return true;
   if (statusFilter === 'closed') return s === 'closed' || s === 'cancel';
   return s === statusFilter;
 }
 
 // 可参与批量关闭：本人可操作且尚未关闭/取消；
 // 关联需求的任务在「已完成」状态下也允许关闭（后端按指派人放行）。
+// 父任务与禅道一致：子任务未全部完成前不能关闭，只有 done 状态才可关。
 function isBatchClosable(t) {
   const s = String(t.status || '');
   if (s === 'closed' || s === 'cancel') return false;
+  if (t.is_parent && s !== 'done') return false;
   if (t.can_operate) return true;
   return !!t.show_jump && s === 'done' && !!t.assigned_to_me;
 }
@@ -51,6 +56,10 @@ function metaBadge(label, value) {
 
 function renderTaskActions(t) {
   const link = t.linked_requirement;
+  // 指派（转派）面向所有用户开放：任何任务都可以指派给指定的人。
+  const assignBtn = `<button class="secondary" style="padding:2px 10px; font-size:12px; color:#7c3aed; border-color:#ddd6fe;"
+    onclick="event.stopPropagation(); openTaskAssign(${t.task_id})" title="把该任务指派给指定的人（所有人可用）">👤 指派</button>`;
+  const wrap = (parts) => `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>`;
   // 关联需求且该需求归属本人 → 跳转到需求工作台管理，不在此直接操作禅道。
   // 例外：任务已完成时，除跳转外也允许直接关闭（避免只为关闭再绕一圈）。
   if (t.show_jump && link) {
@@ -61,26 +70,52 @@ function renderTaskActions(t) {
       parts.push(`<button style="padding:2px 10px; font-size:12px; color:#b91c1c; border-color:#fca5a5;"
         onclick="event.stopPropagation(); taskWorkbenchOperate(${t.task_id}, 'close')">⛔ 关闭</button>`);
     }
-    return `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>`;
+    parts.push(assignBtn);
+    return wrap(parts);
   }
-  // 不可操作：任务未指派给本人（且不是可跳转的自有需求）。
+  // 不可操作：任务未指派给本人（且不是可跳转的自有需求）。指派仍开放。
   if (!t.can_operate) {
-    return `<span class="muted" style="font-size:12px;">该任务未指派给你，无法操作</span>`;
+    return wrap([`<span class="muted" style="font-size:12px;">该任务未指派给你，无法操作</span>`, assignBtn]);
   }
-  // 可操作：独立任务，或需求归属他人的衍生任务（本人是任务指派人）。
   const id = t.task_id;
   const status = t.status;
+  const btn = (label, action, bg, extra = '') =>
+    `<button style="padding:2px 10px; font-size:12px; ${bg ? `background:${bg};` : ''} ${extra}" onclick="event.stopPropagation(); taskWorkbenchOperate(${id}, '${action}')">${label}</button>`;
+
+  // 父任务与禅道一致：状态由子任务驱动，子任务未完成时只能暂停/取消；
+  // 子任务全部完成后禅道自动置为已完成，此时可关闭。
+  if (t.is_parent) {
+    const parts = [];
+    const hint = `<span class="muted" style="font-size:12px;">父任务由子任务驱动，子任务全部完成后自动完成</span>`;
+    if (status === 'pause') {
+      parts.push(btn('▶ 继续', 'start', '#16a34a'));
+      parts.push(btn('🚫 取消', 'cancel', '', 'color:#b91c1c; border-color:#fca5a5;'));
+    } else if (status === 'closed' || status === 'cancel') {
+      parts.push(`<span class="muted" style="font-size:12px;">${status === 'cancel' ? '任务已取消' : '任务已关闭'}</span>`);
+      parts.push(btn('♻ 重新激活', 'reactivate', '#0ea5e9'));
+    } else if (status === 'done') {
+      parts.push(`<button class="secondary" disabled style="padding:2px 10px; font-size:12px; opacity:.7;">✅ 已完成</button>`);
+      parts.push(btn('⛔ 关闭', 'close', '', 'color:#b91c1c; border-color:#fca5a5;'));
+    } else { // wait / doing
+      parts.push(btn('⏸ 暂停', 'pause', '#d97706'));
+      parts.push(btn('🚫 取消', 'cancel', '', 'color:#b91c1c; border-color:#fca5a5;'));
+      parts.push(hint);
+    }
+    parts.push(assignBtn);
+    return wrap(parts);
+  }
+
+  // 可操作：独立任务，或需求归属他人的衍生任务（本人是任务指派人）。
   const isDone = status === 'done';
   const isClosed = status === 'closed' || status === 'cancel';
   const isDoing = status === 'doing';
-  const btn = (label, action, bg, extra = '') =>
-    `<button style="padding:2px 10px; font-size:12px; ${bg ? `background:${bg};` : ''} ${extra}" onclick="event.stopPropagation(); taskWorkbenchOperate(${id}, '${action}')">${label}</button>`;
   const isPaused = status === 'pause';
   const parts = [];
   if (isClosed) {
     parts.push(`<span class="muted" style="font-size:12px;">任务已关闭</span>`);
     parts.push(btn('♻ 重新激活', 'reactivate', '#0ea5e9'));
-    return `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>`;
+    parts.push(assignBtn);
+    return wrap(parts);
   }
   // 开始（未开始或已暂停时；已暂停时「开始」即继续）；进行中显示「暂停」。
   if (isDoing) {
@@ -101,7 +136,28 @@ function renderTaskActions(t) {
   }
   // 关闭
   parts.push(btn('⛔ 关闭', 'close', '', 'color:#b91c1c; border-color:#fca5a5;'));
-  return `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>`;
+  parts.push(assignBtn);
+  return wrap(parts);
+}
+
+// 父任务卡片内嵌的子任务列表（含他人的子任务，与禅道层级一致）
+function renderChildrenList(t) {
+  if (!t.is_parent) return '';
+  const kids = t.children || [];
+  if (!kids.length) {
+    return `<div class="muted" style="font-size:12px; margin-bottom:10px;">该父任务暂无子任务</div>`;
+  }
+  const rows = kids.map((k) => `
+    <div style="display:flex; align-items:center; gap:8px; padding:6px 10px; border-bottom:1px dashed #e2e8f0;">
+      <span style="color:#1d4ed8; font-size:12px; flex-shrink:0;">#${k.task_id}</span>
+      <span style="font-size:13px; color:#334155; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(k.name || '')}</span>
+      ${statusBadge(k.status)}
+      <span class="muted" style="font-size:12px; flex-shrink:0;">👤 ${escapeHtml(k.assigned_to_realname || k.assigned_to || '未指派')}</span>
+    </div>`).join('');
+  return `<div style="margin-bottom:10px; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden;">
+    <div style="background:#f8fafc; padding:6px 10px; font-size:12px; color:#475569; font-weight:600;">子任务（${t.children_done || 0}/${t.children_total || 0} 完成）</div>
+    ${rows}
+  </div>`;
 }
 
 function renderTaskCard(t) {
@@ -111,8 +167,19 @@ function renderTaskCard(t) {
   if (link) {
     const ownerHint = t.requirement_mine ? '' : `（负责人：${escapeHtml(link.owner_name || '他人')}）`;
     linkedBadge = `<span class="badge" style="background:#faf5ff; color:#7c3aed; border:1px solid #e9d5ff;">关联需求 ${escapeHtml(link.zentao_req_id || '')}${ownerHint}</span>`;
+  } else if (t.is_parent) {
+    linkedBadge = '';
   } else {
     linkedBadge = `<span class="badge" style="background:#fff7ed; color:#c2410c; border:1px solid #fed7aa;">独立任务（无关联需求）</span>`;
+  }
+  // 父子层级徽章（与禅道层级一致）：父任务显示子任务完成进度；子任务标注所属父任务。
+  let hierarchyBadge = '';
+  if (t.is_parent) {
+    hierarchyBadge = `<span class="badge" style="background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe;"
+      title="父任务：状态由子任务驱动，子任务全部完成后禅道自动完成父任务">👑 父任务 · 子任务 ${t.children_done || 0}/${t.children_total || 0} 完成</span>`;
+  } else if (t.parent_info) {
+    hierarchyBadge = `<span class="badge" style="background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0;"
+      title="所属父任务（指派人：${escapeHtml(t.parent_info.assigned_to_realname || '未知')}）">↳ 父任务 #${t.parent_info.task_id} ${escapeHtml(t.parent_info.name || '')}</span>`;
   }
   const metas = [
     metaBadge('执行', t.execution_name),
@@ -139,12 +206,14 @@ function renderTaskCard(t) {
           <span>${escapeHtml(t.name || '')}</span>
           ${previewBtn}
           ${statusBadge(t.status)}
+          ${hierarchyBadge}
           ${linkedBadge}
         </div>
         <span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开)</span>
       </summary>
       <div style="margin-top:12px;">
         <div class="row" style="margin-bottom:10px; gap:6px; flex-wrap:wrap;">${metas || '<span class="muted">暂无更多信息</span>'}</div>
+        ${renderChildrenList(t)}
         <div class="row" style="gap:8px; flex-wrap:wrap; align-items:center;">${renderTaskActions(t)}</div>
       </div>
     </details>`;
@@ -181,14 +250,21 @@ function renderTaskWorkbench() {
 
   const filterSel = document.getElementById('taskWorkbenchStatusFilter');
   if (filterSel && filterSel.value !== statusFilter) filterSel.value = statusFilter;
+  const hideClosedCb = document.getElementById('taskWorkbenchHideClosed');
+  if (hideClosedCb && hideClosedCb.checked !== hideClosed) hideClosedCb.checked = hideClosed;
 
   const visible = taskWorkbenchData.filter(taskMatchesFilter);
   const summaryEl = document.getElementById('taskWorkbenchSummary');
   const total = taskWorkbenchData.length;
   const linked = taskWorkbenchData.filter((t) => t.linked_requirement).length;
   if (summaryEl) {
-    const filterHint = statusFilter !== 'all'
-      ? `，当前筛选「${{ wait: '未开始', doing: '进行中', pause: '已暂停', done: '已完成', closed: '已关闭' }[statusFilter] || statusFilter}」显示 <b style="color:#1d4ed8;">${visible.length}</b> 个`
+    const hints = [];
+    if (statusFilter !== 'all') {
+      hints.push(`筛选「${{ wait: '未开始', doing: '进行中', pause: '已暂停', done: '已完成', closed: '已关闭' }[statusFilter] || statusFilter}」`);
+    }
+    if (hideClosed && statusFilter !== 'closed') hints.push('已隐藏已关闭');
+    const filterHint = hints.length
+      ? `，当前${hints.join('、')}显示 <b style="color:#1d4ed8;">${visible.length}</b> 个`
       : '';
     summaryEl.innerHTML = total
       ? `📋 你名下共有 <b style="color:#1d4ed8;">${total}</b> 个任务（关联需求 ${linked} 个，独立任务 ${total - linked} 个）${filterHint}`
@@ -234,6 +310,11 @@ function updateBatchBar(visibleTasks) {
 
 export function taskWorkbenchFilterChanged(value) {
   statusFilter = value || 'all';
+  renderTaskWorkbench();
+}
+
+export function taskWorkbenchHideClosedChanged(checked) {
+  hideClosed = !!checked;
   renderTaskWorkbench();
 }
 
@@ -327,7 +408,12 @@ export async function jumpToLinkedRequirement(reqId, majorVersionId) {
 }
 
 export async function taskWorkbenchOperate(taskId, action) {
-  const confirmText = { finish: '确认将该任务标记为完成？', close: '确认关闭该任务？', reactivate: '确认重新激活该任务？' }[action];
+  const confirmText = {
+    finish: '确认将该任务标记为完成？',
+    close: '确认关闭该任务？',
+    cancel: '确认取消该任务？（与禅道联动，取消后可重新激活）',
+    reactivate: '确认重新激活该任务？',
+  }[action];
   if (confirmText && !window.confirm(confirmText)) return;
   showLoading('正在同步禅道，请稍候…');
   try {
@@ -376,6 +462,112 @@ export function taskWorkbenchRememberFold(taskId, open) {
   window.scheduleWorkbenchViewportResize?.();
 }
 
+// ── 任务指派（面向所有用户开放，支持姓名/账号模糊搜索）──────────────────────
+
+const assignCtx = { taskId: null, items: [], picked: '', source: 'workbench' };
+
+function assignEls() {
+  return {
+    modal: document.getElementById('taskAssignModal'),
+    input: document.getElementById('taskAssignInput'),
+    list: document.getElementById('taskAssignList'),
+    hint: document.getElementById('taskAssignHint'),
+    label: document.getElementById('taskAssignTaskLabel'),
+  };
+}
+
+// 模糊过滤：输入的单词（拼音/账号字母）或汉字都能命中（大小写不敏感的子串匹配）
+function renderAssignList() {
+  const { input, list } = assignEls();
+  if (!input || !list) return;
+  const q = input.value.trim().toLowerCase();
+  const matched = q
+    ? assignCtx.items.filter((u) => (`${u.realname || ''} ${u.account || ''}`).toLowerCase().includes(q))
+    : assignCtx.items;
+  list.innerHTML = matched.length
+    ? matched.slice(0, 100).map((u) => `
+        <div class="zt-combo-item ${assignCtx.picked === u.account ? 'active' : ''}" data-account="${escapeHtml(u.account)}"
+          style="display:flex; justify-content:space-between; gap:8px; cursor:pointer;">
+          <span>${escapeHtml(u.realname || u.account)}</span>
+          <span class="muted" style="font-size:12px;">${escapeHtml(u.account)}</span>
+        </div>`).join('')
+    : '<div class="muted" style="padding:8px 10px; font-size:12px;">无匹配人员，试试换个关键字</div>';
+}
+
+export async function openTaskAssign(taskId, source = 'workbench') {
+  assignCtx.taskId = taskId;
+  assignCtx.items = [];
+  assignCtx.picked = '';
+  assignCtx.source = source;
+  const { modal, input, list, hint, label } = assignEls();
+  if (!modal || !input || !list) return;
+  if (label) label.textContent = `#${taskId}`;
+  if (hint) hint.textContent = '';
+  input.value = '';
+  list.innerHTML = '<div class="muted" style="padding:8px 10px; font-size:12px;">正在加载可指派人…</div>';
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+  if (!input.dataset.bound) {
+    input.dataset.bound = '1';
+    input.addEventListener('input', () => { assignCtx.picked = ''; renderAssignList(); });
+    list.addEventListener('click', (e) => {
+      const item = e.target.closest('[data-account]');
+      if (!item) return;
+      assignCtx.picked = item.getAttribute('data-account');
+      renderAssignList();
+    });
+  }
+  try {
+    const data = await (await api(`/workbench/tasks/${taskId}/assignable`)).json();
+    assignCtx.items = data.users || [];
+    if (hint) {
+      const cur = assignCtx.items.find((u) => u.account === data.current);
+      hint.textContent = data.current ? `当前指派：${cur ? `${cur.realname}（${data.current}）` : data.current}` : '当前未指派';
+    }
+    renderAssignList();
+  } catch (err) {
+    list.innerHTML = `<div class="muted" style="padding:8px 10px; font-size:12px;">加载可指派人失败：${escapeHtml(err.message || '未知错误')}</div>`;
+  }
+  input.focus();
+}
+
+export function closeTaskAssignModal() {
+  const { modal } = assignEls();
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.style.display = 'none';
+}
+
+export async function confirmTaskAssign() {
+  if (!assignCtx.taskId) return;
+  if (!assignCtx.picked) {
+    window.showMessage && window.showMessage('请先从列表中选择要指派的人员', 'info');
+    return;
+  }
+  const target = assignCtx.items.find((u) => u.account === assignCtx.picked);
+  showLoading('正在同步禅道指派，请稍候…');
+  try {
+    const res = await (await api(`/workbench/tasks/${assignCtx.taskId}/operate`, {
+      method: 'POST', headers: window.H, body: ({ action: 'assign', assigned_to: assignCtx.picked }),
+    })).json();
+    if (res.ok) {
+      window.showMessage && window.showMessage(`任务 #${assignCtx.taskId} 已指派给 ${target ? target.realname : assignCtx.picked}，已同步禅道`, 'success');
+      closeTaskAssignModal();
+    } else {
+      window.showMessage && window.showMessage('禅道指派有异常：' + (res.errors || []).join('；'), 'error');
+    }
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '指派失败', 'error');
+  } finally {
+    hideLoading();
+  }
+  // 刷新数据：任务工作台始终刷新；从任务看板发起时同时刷新看板的禅道数据
+  await loadTaskWorkbench();
+  if (assignCtx.source === 'board' && window.OmniQATaskBoardTab?.reloadZentaoFromMirror) {
+    window.OmniQATaskBoardTab.reloadZentaoFromMirror().catch?.(() => {});
+  }
+}
+
 window.OmniQATaskWorkbenchTab = {
   loadTaskWorkbench,
   refreshTaskWorkbench,
@@ -384,7 +576,11 @@ window.OmniQATaskWorkbenchTab = {
   taskWorkbenchSetTime,
   taskWorkbenchRememberFold,
   taskWorkbenchFilterChanged,
+  taskWorkbenchHideClosedChanged,
   taskWorkbenchToggleSelect,
   taskWorkbenchToggleSelectAll,
   taskWorkbenchBatchClose,
+  openTaskAssign,
+  closeTaskAssignModal,
+  confirmTaskAssign,
 };

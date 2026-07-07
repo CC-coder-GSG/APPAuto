@@ -756,7 +756,6 @@ function zentaoForBoard() {
 function ztActionsHtml(t) {
   const mine = ztIsMine(t);
   const isAdmin = !!(window.currentUser && window.currentUser.role === 'admin');
-  if (!mine && !(isAdmin && t.status === 'done')) return '';
   const id = t.task_id;
   const btn = (label, action, style) =>
     `<button style="padding:2px 8px; font-size:11px; ${style}" onclick="event.stopPropagation(); window.OmniQATaskBoardTab.ztOperate(${id}, '${action}')">${label}</button>`;
@@ -772,8 +771,18 @@ function ztActionsHtml(t) {
       parts.push(btn('✅ 完成', 'finish', 'background:#0d9488;'));
     }
   }
-  if (t.status === 'done') parts.push(btn('⛔ 关闭', 'close', 'background:#fff; color:#b91c1c; border:1px solid #fca5a5;'));
-  return parts.length ? `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>` : '';
+  if ((mine || isAdmin) && t.status === 'done') parts.push(btn('⛔ 关闭', 'close', 'background:#fff; color:#b91c1c; border:1px solid #fca5a5;'));
+  // 指派面向所有用户开放（复用任务工作台的指派弹窗，来源标记 board 以便回刷看板）
+  parts.push(`<button class="secondary" style="padding:2px 8px; font-size:11px; color:#7c3aed; border:1px solid #ddd6fe;"
+    onclick="event.stopPropagation(); window.OmniQATaskWorkbenchTab && window.OmniQATaskWorkbenchTab.openTaskAssign(${id}, 'board')">👤 指派</button>`);
+  return `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>`;
+}
+
+// 指派完成后的轻量回刷：只读镜像缓存重渲染，不触发禅道全量同步
+export async function reloadZentaoFromMirror() {
+  try { await fetchZentaoTasks(); } catch { return; }
+  if (state.data) render(state.data);
+  renderZentaoPanel();
 }
 
 export async function ztOperate(taskId, action) {
@@ -986,6 +995,7 @@ window.OmniQATaskBoardTab = {
   gotoToday,
   loadZentao,
   refreshZentao,
+  reloadZentaoFromMirror,
   renderZentaoPanel,
   ztOperate,
   toggleCreateMode,

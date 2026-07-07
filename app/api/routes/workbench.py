@@ -56,10 +56,11 @@ def retest_workbench_v2(
 
 
 class TaskOperatePayload(BaseModel):
-    action: str  # start | finish | close | reactivate | set_time
+    action: str  # start | pause | finish | close | cancel | reactivate | set_time | assign
     hours: Optional[float] = None
     consumed: Optional[float] = None
     comment: Optional[str] = None
+    assigned_to: Optional[str] = None  # assign 动作的目标禅道账号
 
 
 @router.get("/tasks")
@@ -91,7 +92,7 @@ def operate_my_task(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """对未关联需求的禅道任务执行操作（开始/完成/关闭/重新激活/设置工时）。"""
+    """对禅道任务执行操作（开始/暂停/完成/关闭/取消/重新激活/设置工时/指派）。"""
     from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
 
     return ZentaoTaskMirrorService(db).operate_task(
@@ -101,7 +102,20 @@ def operate_my_task(
         hours=payload.hours,
         consumed=payload.consumed,
         comment=payload.comment,
+        assigned_to=payload.assigned_to,
     )
+
+
+@router.get("/tasks/{task_id}/assignable")
+def task_assignable_users(
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """任务所在执行的可指派人列表（指派弹窗数据源，面向所有用户开放）。"""
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+
+    return ZentaoTaskMirrorService(db).assignable_users(task_id)
 
 
 @router.post("/preflight-refresh")
