@@ -20,6 +20,7 @@ from app.services.zentao_system_client import (
     get_user_zentao_web_login,
 )
 from app.services.zentao_web_session import ZentaoWebSessionError, cancel_task_via_web, pause_task_via_web
+from app.utils.task_naming import ensure_test_prefix
 from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
 
 logger = logging.getLogger(__name__)
@@ -414,6 +415,8 @@ class ZentaoTaskMirrorService:
         name = (name or "").strip()
         if not name:
             raise HTTPException(status_code=400, detail="任务名称不能为空")
+        # 命名规范（2026-07-08）：测试相关任务统一 [测试] 前缀（已带则不重复）
+        name = ensure_test_prefix(name)[:255]
         if task_type not in self._CREATE_TASK_TYPES:
             raise HTTPException(status_code=400, detail=f"不支持的任务类型：{task_type}")
         if pri not in (1, 2, 3, 4):

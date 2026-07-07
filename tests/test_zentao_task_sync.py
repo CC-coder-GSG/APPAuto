@@ -79,6 +79,10 @@ def test_create_parent_and_children_for_new_assignments(db_session, monkeypatch,
     assert len(client.created) == 3
     assert len(res["created_tasks"]) == 2
     assert len(client.linked) == 2
+    # 命名规范：父/子任务名统一 [测试] 前缀（2026-07-08）
+    assert all(c["name"].startswith("[测试]") for c in client.created)
+    assert any(c["name"] == "[测试]V4.0.3.15 测试任务" for c in client.created)
+    assert any(c["name"] == "[测试]需求一" for c in client.created)
     # 本地回写
     db_session.refresh(setup["r1"]); db_session.refresh(setup["r2"])
     assert setup["r1"].zentao_task_id is not None
@@ -122,8 +126,25 @@ def test_adopts_existing_task_instead_of_recreating(db_session, monkeypatch, set
     assert child_creates == []  # r1 的 story 没有新建子任务
 
 
+def test_incremental_assignment_reuses_prefixed_parent(db_session, monkeypatch, setup):
+    # 新命名规范的父任务（[测试] 前缀）→ 正常复用
+    existing = [{"id": 9100, "type": "test", "story": 0, "parent": 0,
+                 "status": "wait", "name": "[测试]V4.0.3.15 测试任务", "assignedTo": {"account": "boss"}}]
+    client = FakeClient(assignable={"alice": "爱丽丝", "bob": "鲍勃"}, existing_tasks=existing)
+    _patch_client(monkeypatch, client)
+    svc = ZentaoTaskSyncService(db_session)
+    res = svc.create_tasks_for_assignment(
+        setup["major"].id,
+        [{"requirement_id": setup["r2"].id, "owner_id": setup["bob"].id}],
+        est_started="2026-06-29", deadline="2026-07-03", actor=setup["actor"],
+    )
+    assert res["ok"] is True, res["errors"]
+    assert res["parent_task_id"] == 9100
+    assert res["reused_parent"] is True
+
+
 def test_incremental_assignment_reuses_existing_parent(db_session, monkeypatch, setup):
-    # 执行下已有同名存活父任务 9000 → 增量分配的新子任务应挂进去，不再建新父任务
+    # 执行下已有同名存活父任务 9000（旧命名，无前缀）→ 兼容复用，不因改名再建一个
     existing = [{"id": 9000, "type": "test", "story": 0, "parent": 0,
                  "status": "wait", "name": "V4.0.3.15 测试任务", "assignedTo": {"account": "boss"}}]
     client = FakeClient(assignable={"alice": "爱丽丝", "bob": "鲍勃"}, existing_tasks=existing)

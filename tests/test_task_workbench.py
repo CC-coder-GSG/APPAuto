@@ -463,6 +463,48 @@ def test_pause_and_close_always_send_nonempty_body(monkeypatch):
     assert sent[2][1] == {"comment": "备注"}
 
 
+def test_ensure_test_prefix_variants():
+    from app.utils.task_naming import ensure_test_prefix
+
+    assert ensure_test_prefix("RTK 打点验证") == "[测试]RTK 打点验证"
+    assert ensure_test_prefix("[测试]RTK 打点验证") == "[测试]RTK 打点验证"  # 不重复加
+    assert ensure_test_prefix("【测试】RTK 打点验证") == "[测试]RTK 打点验证"  # 全角变体归一
+    assert ensure_test_prefix("  [测试] 带空格  ") == "[测试]带空格"
+
+
+def test_create_board_task_adds_test_prefix(db_session, monkeypatch):
+    alice = _user(db_session, "alice_pfx", account="alice")
+    major = _major(db_session, "V-TW-PFX")
+
+    class CreateClient(FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.created = []
+
+        def create_execution_task(self, exec_id, **kw):
+            self.created.append(kw)
+            return {"id": 7777}
+
+        def list_execution_tasks(self, exec_id, limit=500):
+            return []
+
+    client = CreateClient()
+    monkeypatch.setattr(tms, "get_user_zentao_client", lambda uid, db: None)
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+
+    res = ZentaoTaskMirrorService(db_session).create_board_task(
+        current_user=alice, major_version_id=major.id, name="外业回归验证",
+    )
+    assert res["ok"] is True
+    assert client.created[0]["name"] == "[测试]外业回归验证"
+
+    # 用户自己带了前缀 → 不重复
+    ZentaoTaskMirrorService(db_session).create_board_task(
+        current_user=alice, major_version_id=major.id, name="[测试]外业回归验证2",
+    )
+    assert client.created[1]["name"] == "[测试]外业回归验证2"
+
+
 def test_operate_task_set_time_validates(db_session, monkeypatch):
     alice = _user(db_session, "alice_tw5", account="alice")
     major = _major(db_session, "V-TW-5")

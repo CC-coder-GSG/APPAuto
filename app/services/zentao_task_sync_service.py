@@ -33,6 +33,7 @@ from app.services.zentao_system_client import (
 )
 from app.services.zentao_web_session import ZentaoWebSessionError, pause_task_via_web
 from app.utils import work_hours
+from app.utils.task_naming import ensure_test_prefix
 from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
 
 logger = logging.getLogger(__name__)
@@ -276,10 +277,13 @@ class ZentaoTaskSyncService:
         # 新子任务挂进去——整个版本始终只有一个「测试任务」父任务，而不是每批一个。
         parent_id: Optional[int] = None
         if create_new_items:
-            parent_name = f"{major.version_no} 测试任务"
+            # [测试] 前缀是 2026-07-08 起的命名规范；复用匹配时兼容之前建的
+            # 无前缀父任务，避免增量分配因改名再多出一个父任务。
+            legacy_parent_name = f"{major.version_no} 测试任务"
+            parent_name = ensure_test_prefix(legacy_parent_name)
             reuse = None
             for t in by_id.values():
-                if _is_dead_task(t) or str(t.get("name") or "").strip() != parent_name:
+                if _is_dead_task(t) or str(t.get("name") or "").strip() not in (parent_name, legacy_parent_name):
                     continue
                 # 只认顶层任务（parent<=0），避免误把某个子任务当父容器
                 if (_coerce_int(t.get("parent")) or 0) > 0:
@@ -319,7 +323,7 @@ class ZentaoTaskSyncService:
                     if not acc:
                         out["unassigned"].append({"requirement_id": req.id, "owner_name": owner.shown_name})
                         continue
-                    child_name = (req.title or f"需求 {req.zentao_req_id}")[:180]
+                    child_name = ensure_test_prefix((req.title or f"需求 {req.zentao_req_id}")[:180])
                     child_desc = f"研发需求 {req.zentao_req_id}：{req.title}"
                     try:
                         child = client.create_execution_task(
