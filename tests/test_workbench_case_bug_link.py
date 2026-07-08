@@ -69,6 +69,38 @@ def test_prefixed_linked_case_id_matches_mirror(db_session):
     assert [b["bug_id"] for b in view[req.id][0]["bugs"]] == ["b#30001"]
 
 
+def test_case_linked_bug_not_duplicated_in_free_bugs(db_session):
+    """用例栏挂出的 Bug 不应再出现在自由 Bug 里（2026-07-08 修复回归）。"""
+    user, major, req = _seed(db_session)
+    case_bug = BugTracking(
+        major_version_id=major.id, requirement_id=None, source_type=BugSourceType.MANUAL,
+        bug_id="b#29660", zentao_bug_id="29660", zentao_linked_case_id="u#19712",
+        zentao_story_id=5923, created_by_id=user.id, zentao_deleted=False,
+    )
+    free_bug = BugTracking(
+        major_version_id=major.id, requirement_id=None, source_type=BugSourceType.MANUAL,
+        bug_id="b#29661", zentao_bug_id="29661",
+        zentao_story_id=5923, created_by_id=user.id, zentao_deleted=False,
+    )
+    db_session.add_all([case_bug, free_bug])
+    db_session.commit()
+
+    svc = WorkbenchLinkService(db_session)
+    case_view = svc.build_requirement_case_view([req], {})
+    assert [b["bug_id"] for b in case_view[req.id][0]["bugs"]] == ["b#29660"]
+
+    free_map, auto_map = svc.build_requirement_free_bug_view(
+        [req], {}, include_retest=False, exclude_case_view=case_view
+    )
+    free_ids = [b["bug_id"] for b in free_map.get(req.id, [])]
+    assert free_ids == ["b#29661"]  # 挂用例的 b#29660 不再重复出现
+    assert [b["bug_id"] for b in auto_map.get(req.id, [])] == ["b#29661"]
+
+    # 不传排除集时保持旧行为（两条都归集）
+    free_map_raw, _ = svc.build_requirement_free_bug_view([req], {}, include_retest=False)
+    assert {b["bug_id"] for b in free_map_raw.get(req.id, [])} == {"b#29660", "b#29661"}
+
+
 def test_normalize_zentao_bug_extracts_case_ref(db_session):
     svc = OverallTestService(db_session)
     raw = {

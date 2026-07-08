@@ -108,6 +108,7 @@ class WorkbenchService:
             reqs,
             minors,
             include_retest=False,
+            exclude_case_view=case_view_map,
         )
 
         # 当前用户的禅道账号（用于判定子任务是否指派给本人）。
@@ -217,7 +218,9 @@ class WorkbenchService:
 
         minors = self.link_service.minor_version_name_map()
         case_view_map = self.link_service.build_requirement_case_view(reqs, minors)
-        free_bug_map, _ = self.link_service.build_requirement_free_bug_view(reqs, minors, include_retest=False)
+        free_bug_map, _ = self.link_service.build_requirement_free_bug_view(
+            reqs, minors, include_retest=False, exclude_case_view=case_view_map
+        )
         retest_bug_map, _ = self.link_service.build_requirement_free_bug_view(reqs, minors, include_retest=True)
         retest_evidence_map = self.link_service.build_retest_evidence(reqs, minors)
 

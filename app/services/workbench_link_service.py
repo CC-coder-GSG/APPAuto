@@ -184,6 +184,7 @@ class WorkbenchLinkService:
         minors: dict[int, str],
         *,
         include_retest: bool = False,
+        exclude_case_view: dict[int, list[dict[str, Any]]] | None = None,
     ) -> tuple[dict[int, list[dict[str, Any]]], dict[int, list[dict[str, Any]]]]:
         req_ids = [req.id for req in reqs]
         major_ids = [req.major_version_id for req in reqs]
@@ -254,9 +255,19 @@ class WorkbenchLinkService:
         result: dict[int, list[dict[str, Any]]] = defaultdict(list)
         seen_bug_ids: dict[int, set[int]] = defaultdict(set)
 
+        # 用例栏（build_requirement_case_view）已经挂出的 Bug 不再归入自由
+        # Bug，否则同一 Bug 在用例和自由 Bug 两处重复显示。
+        if exclude_case_view:
+            for req_id, case_items in exclude_case_view.items():
+                for case_item in case_items:
+                    for case_bug in case_item.get("bugs") or []:
+                        seen_bug_ids[req_id].add(case_bug["id"])
+
         for bug in local_rows:
             req_id = int(bug.requirement_id or -1)
             if req_id <= 0:
+                continue
+            if bug.id in seen_bug_ids[req_id]:
                 continue
             result[req_id].append(self.serialize_bug_brief(bug, minors, auto_linked=False))
             seen_bug_ids[req_id].add(bug.id)
