@@ -11,25 +11,39 @@ from app.services.zentao_task_sync_service import ZentaoTaskSyncService
 
 
 class FakeClient:
-    def __init__(self):
+    """有状态假客户端：操作生效后 get_task 回读到新状态（回读校验依赖这一点）。
+
+    effective=False 模拟禅道 ipd4.3 的 guest 静默失败：REST 返回 200 但状态不变。
+    """
+
+    def __init__(self, *, effective=True, status="wait"):
         self.calls = []
-        self._task = {"id": 777, "consumed": 2.0, "status": "doing"}
+        self.effective = effective
+        self._task = {"id": 777, "consumed": 2.0, "status": status}
+
+    def _apply(self, status):
+        if self.effective:
+            self._task["status"] = status
 
     def start_task(self, task_id, *, real_started=None, left=None, assigned_to=None):
         self.calls.append(("start", task_id, real_started, left))
-        return {"id": task_id, "status": "doing"}
+        self._apply("doing")
+        return {"id": task_id, "status": self._task["status"]}
 
     def finish_task(self, task_id, *, current_consumed, finished_date=None, assigned_to=None):
         self.calls.append(("finish", task_id, current_consumed, finished_date))
-        return {"id": task_id, "status": "done"}
+        self._apply("done")
+        return {"id": task_id, "status": self._task["status"]}
 
     def restart_task(self, task_id, *, consumed, left, assigned_to=None):
         self.calls.append(("restart", task_id, consumed, left))
-        return {"id": task_id, "status": "doing"}
+        self._apply("doing")
+        return {"id": task_id, "status": self._task["status"]}
 
     def pause_task(self, task_id, *, comment=None):
         self.calls.append(("pause", task_id))
-        return {"id": task_id, "status": "pause"}
+        self._apply("pause")
+        return {"id": task_id, "status": self._task["status"]}
 
     def reassign_task(self, task_id, assigned_to):
         self.calls.append(("reassign", task_id, assigned_to))
@@ -104,6 +118,49 @@ def test_reactivate_calls_restart(db_session, monkeypatch, req):
     restart = next(c for c in client.calls if c[0] == "restart")
     assert restart[2] == 2.0   # consumed from get_task
     assert restart[3] == 4.0   # left = estimated hours
+
+
+def test_start_guest_token_falls_back_to_system_client(db_session, monkeypatch, req):
+    """本人 token 被当 guest（200 但未生效）→ 回读发现没切 doing → 系统账号兜底。"""
+    from app.models import User, UserRole
+    actor = User(username="tester_lc", password_hash="x", role=UserRole.USER)
+    db_session.add(actor)
+    db_session.commit()
+    guest = FakeClient(effective=False)
+    system = FakeClient()
+    monkeypatch.setattr(tss, "get_user_zentao_client", lambda uid, db: guest)
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: system)
+    res = ZentaoTaskSyncService(db_session).start_requirement_task(req, acting_user=actor)
+    assert res["ok"] is True
+    assert req.zentao_task_status_cache == "doing"
+    assert any(c[0] == "start" for c in guest.calls)
+    assert any(c[0] == "start" for c in system.calls)
+
+
+def test_start_all_candidates_ineffective_reports_and_keeps_truth(db_session, monkeypatch, req):
+    """所有候选都未生效 → errors 上报、缓存按回读落真实状态（不误标 doing）。"""
+    client = FakeClient(effective=False)
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    res = ZentaoTaskSyncService(db_session).start_requirement_task(req)
+    assert res["ok"] is False
+    assert any("未生效" in e for e in res["errors"])
+    assert req.zentao_task_status_cache == "wait"
+
+
+def test_start_rest_raises_but_actually_applied(db_session, monkeypatch, req):
+    """REST 抛错（如超时）但禅道已生效 → 回读判定成功，不误报失败。"""
+    client = FakeClient()
+
+    orig = client.start_task
+    def _flaky(*args, **kwargs):
+        orig(*args, **kwargs)  # 生效
+        raise TimeoutError("read timed out")
+    client.start_task = _flaky
+
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    res = ZentaoTaskSyncService(db_session).start_requirement_task(req)
+    assert res["ok"] is True
+    assert req.zentao_task_status_cache == "doing"
 
 
 def test_lifecycle_via_status_choke_point(db_session, monkeypatch, req):
