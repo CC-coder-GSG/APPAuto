@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { showLoading, hideLoading } from '../components/common.js';
+import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 import { closeModal, openModal } from '../components/modal.js';
 import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, sourceTypeZh } from '../utils.js';
 
@@ -461,12 +461,14 @@ export async function confirmMineTestExecutionModal() {
       test_completed: true,
       notes,
     });
-    window.showMessage && window.showMessage('测试执行记录已提交，需求已标记测试完成（禅道任务已联动完成）', 'success');
     const modal = document.getElementById('mineTestExecModal');
     if (modal) closeModal(modal);
     scheduleCompletionIncrementalRefresh(); // 测试完成 → 增量同步用例/Bug 保持最新
+    // 加载条挂到工作台重载完成再收起：提示出现时界面已是最新状态
+    setLoadingText('禅道已同步，正在刷新工作台…');
+    try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
     hideLoading();
-    await loadMyWorkbench();
+    window.showMessage && window.showMessage('测试执行记录已提交，需求已标记测试完成（禅道任务已联动完成）', 'success');
   } catch (err) {
     hideLoading();
     if (modalState.checkboxEl) modalState.checkboxEl.checked = false;
@@ -496,20 +498,24 @@ export async function handleTestCompletedToggle(reqId, checked, checkboxEl) {
     return;
   }
   showLoading('正在取消测试完成并同步禅道（重新激活任务），请稍候…');
+  let msg = '已取消测试完成状态（禅道任务已联动重新激活）';
+  let msgType = 'success';
   try {
     await api(`/requirements/${reqId}/status`, {
       method: 'PATCH',
       headers: window.H,
       body: { test_completed: false },
     });
-    window.showMessage && window.showMessage('已取消测试完成状态（禅道任务已联动重新激活）', 'success');
   } catch (err) {
     if (checkboxEl) checkboxEl.checked = true;
-    window.showMessage && window.showMessage(err.message || '状态更新失败', 'error');
-  } finally {
-    hideLoading();
-    await loadMyWorkbench();
+    msg = err.message || '状态更新失败';
+    msgType = 'error';
   }
+  // 加载条挂到工作台重载完成再收起，提示与界面更新同时出现
+  setLoadingText('正在刷新工作台数据…');
+  try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
+  hideLoading();
+  window.showMessage && window.showMessage(msg, msgType);
 }
 
 export function toggleMineMode() {
@@ -984,7 +990,12 @@ export async function setReqStatus(reqId, key, checked) {
   // 测试完成勾选/取消会联动禅道任务（完成/重新激活），给出等待提示。
   // showLoading/hideLoading 是计数器配对的，用标志位保证「确认框取消」的
   // 早退路径不会多调一次 hideLoading。
+  // 带加载条的路径（test_completed）把加载条挂到工作台重载完成、提示放在
+  // 重载之后，保证「条消失/提示出现」时界面已与禅道一致；
+  // 无加载条的路径（case_completed）保持提示即时、静默重载。
   let loadingShown = false;
+  let msg = '';
+  let msgType = 'success';
   try {
     if (!checked) {
       const ok = confirm(key === 'case_completed' ? '确认取消【用例完成】状态吗？' : '确认取消【测试完成】状态吗？');
@@ -1000,60 +1011,73 @@ export async function setReqStatus(reqId, key, checked) {
     const payload = {};
     payload[key] = checked;
     await api(`/requirements/${reqId}/status`, { method: 'PATCH', headers: window.H, body: payload });
-    window.showMessage && window.showMessage(loadingShown ? '需求状态已更新，已同步禅道' : '需求状态已更新', 'success');
+    msg = loadingShown ? '需求状态已更新，已同步禅道' : '需求状态已更新';
+    if (!loadingShown) window.showMessage && window.showMessage(msg, msgType);
     // 勾选完成 → 触发一次增量同步（去抖 + 冷却 + 后端节流，多次勾选不叠加开销）；
     // 用例完成走用例快速同步路径，新建用例及时可见
     if (checked && (key === 'case_completed' || key === 'test_completed')) {
       scheduleCompletionIncrementalRefresh({ testcasesRecent: key === 'case_completed' });
     }
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '状态更新失败', 'error');
-  } finally {
-    if (loadingShown) hideLoading();
-    await loadMyWorkbench();
+    msg = err.message || '状态更新失败';
+    msgType = 'error';
+    if (!loadingShown) window.showMessage && window.showMessage(msg, msgType);
+  }
+  if (loadingShown) setLoadingText('正在刷新工作台数据…');
+  try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
+  if (loadingShown) {
+    hideLoading();
+    window.showMessage && window.showMessage(msg, msgType);
   }
 }
 
-// 禅道任务联动：点击「开始」→ 记录开始时刻并让禅道子任务开始
+// 禅道任务联动：点击「开始」→ 记录开始时刻并让禅道子任务开始。
+// 加载条挂到工作台重载完成、提示放在重载之后：条消失时界面已与禅道一致。
 export async function startReqTask(reqId) {
   showLoading('正在开始任务并同步禅道，请稍候…');
+  let msg = '任务已开始，已同步禅道';
+  let msgType = 'success';
   try {
     const res = await api(`/requirements/${reqId}/task/start`, { method: 'POST', headers: window.H, body: {} });
     let data = null;
     try { data = await res.json(); } catch (_) { /* ignore */ }
     const errs = (data && data.errors) || [];
     if (errs.length) {
-      window.showMessage && window.showMessage(`任务已开始（禅道侧部分失败：${errs[0]}）`, 'error');
-    } else {
-      window.showMessage && window.showMessage('任务已开始，已同步禅道', 'success');
+      msg = `任务已开始（禅道侧部分失败：${errs[0]}）`;
+      msgType = 'error';
     }
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '开始任务失败', 'error');
-  } finally {
-    hideLoading();
-    await loadMyWorkbench();
+    msg = err.message || '开始任务失败';
+    msgType = 'error';
   }
+  setLoadingText(msgType === 'success' ? '禅道已同步，正在刷新工作台…' : '正在刷新工作台…');
+  try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
+  hideLoading();
+  window.showMessage && window.showMessage(msg, msgType);
 }
 
 // 禅道任务联动：点击「暂停」→ 让禅道子任务暂停（之后可用「开始」继续）
 export async function pauseReqTask(reqId) {
   showLoading('正在暂停任务并同步禅道，请稍候…');
+  let msg = '任务已暂停，已同步禅道';
+  let msgType = 'success';
   try {
     const res = await api(`/requirements/${reqId}/task/pause`, { method: 'POST', headers: window.H, body: {} });
     let data = null;
     try { data = await res.json(); } catch (_) { /* ignore */ }
     const errs = (data && data.errors) || [];
     if (errs.length) {
-      window.showMessage && window.showMessage(`任务已暂停（禅道侧部分失败：${errs[0]}）`, 'error');
-    } else {
-      window.showMessage && window.showMessage('任务已暂停，已同步禅道', 'success');
+      msg = `任务已暂停（禅道侧部分失败：${errs[0]}）`;
+      msgType = 'error';
     }
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '暂停任务失败', 'error');
-  } finally {
-    hideLoading();
-    await loadMyWorkbench();
+    msg = err.message || '暂停任务失败';
+    msgType = 'error';
   }
+  setLoadingText(msgType === 'success' ? '禅道已同步，正在刷新工作台…' : '正在刷新工作台…');
+  try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
+  hideLoading();
+  window.showMessage && window.showMessage(msg, msgType);
 }
 
 // 修改某需求的预计测试用时（小时）

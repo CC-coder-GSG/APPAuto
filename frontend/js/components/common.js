@@ -54,6 +54,12 @@ export function hideLoading(force = false) {
   if (_loadingCount === 0 && _loadingEl) _loadingEl.style.display = 'none';
 }
 
+// 更新加载条文案（不改变遮罩计数）：多阶段操作（同步禅道 → 刷新工作台）
+// 用它切换提示，让加载条一直挂到界面数据刷新完成，视觉上「条消失=界面已更新」。
+export function setLoadingText(message) {
+  if (_loadingCount > 0 && _loadingMsgEl) _loadingMsgEl.textContent = message;
+}
+
 // 包裹一个异步操作：自动显示/隐藏加载遮罩（无论成功失败都收起）。
 export async function withLoading(message, fn) {
   showLoading(message);
@@ -64,7 +70,8 @@ export async function withLoading(message, fn) {
   }
 }
 
-window.OmniQALoading = { show: showLoading, hide: hideLoading, withLoading };
+window.OmniQALoading = { show: showLoading, hide: hideLoading, setText: setLoadingText, withLoading };
 window.showLoading = showLoading;
 window.hideLoading = hideLoading;
+window.setLoadingText = setLoadingText;
 window.withLoading = withLoading;

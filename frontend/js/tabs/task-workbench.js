@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { escapeHtml, renderPreviewBtn } from '../utils.js';
-import { showLoading, hideLoading } from '../components/common.js';
+import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 
 // 任务工作台：展示当前账号名下的禅道任务。
 //  - 关联本平台需求的任务：不显示禅道操作按钮，只提供「跳转到需求工作台对应位置」。
@@ -349,9 +349,7 @@ export async function taskWorkbenchBatchClose() {
   const failed = [];
   try {
     for (let i = 0; i < ids.length; i++) {
-      // show/hide 成对调用：仅更新遮罩文案，不改变遮罩计数。
-      showLoading(`正在关闭任务 #${ids[i]}（${i + 1}/${ids.length}）…`);
-      hideLoading();
+      setLoadingText(`正在关闭任务 #${ids[i]}（${i + 1}/${ids.length}）…`);
       try {
         const res = await (await api(`/workbench/tasks/${ids[i]}/operate`, {
           method: 'POST', headers: window.H, body: ({ action: 'close' }),
@@ -366,6 +364,9 @@ export async function taskWorkbenchBatchClose() {
         failed.push(`#${ids[i]}：${err.message || '请求失败'}`);
       }
     }
+    // 加载条挂到任务列表重载完成再收起，提示与界面更新同时出现
+    setLoadingText('正在刷新任务列表…');
+    try { await loadTaskWorkbench(); } catch (e) { console.warn('task workbench reload failed', e); }
   } finally {
     hideLoading();
   }
@@ -374,7 +375,6 @@ export async function taskWorkbenchBatchClose() {
   } else {
     window.showMessage && window.showMessage(`已关闭 ${okCount} 个任务，已同步禅道`, 'success');
   }
-  await loadTaskWorkbench();
 }
 
 export async function refreshTaskWorkbench() {
@@ -415,22 +415,26 @@ export async function taskWorkbenchOperate(taskId, action) {
     reactivate: '确认重新激活该任务？',
   }[action];
   if (confirmText && !window.confirm(confirmText)) return;
+  // 加载条挂到任务列表重载完成、提示放在重载之后：条消失时界面已与禅道一致。
   showLoading('正在同步禅道，请稍候…');
+  let msg = '操作已同步禅道';
+  let msgType = 'success';
   try {
     const res = await (await api(`/workbench/tasks/${taskId}/operate`, {
       method: 'POST', headers: window.H, body: ({ action }),
     })).json();
-    if (res.ok) {
-      window.showMessage && window.showMessage('操作已同步禅道', 'success');
-    } else {
-      window.showMessage && window.showMessage('禅道操作有异常：' + (res.errors || []).join('；'), 'error');
+    if (!res.ok) {
+      msg = '禅道操作有异常：' + (res.errors || []).join('；');
+      msgType = 'error';
     }
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '操作失败', 'error');
-  } finally {
-    hideLoading();
+    msg = err.message || '操作失败';
+    msgType = 'error';
   }
-  await loadTaskWorkbench();
+  setLoadingText(msgType === 'success' ? '禅道已同步，正在刷新任务列表…' : '正在刷新任务列表…');
+  try { await loadTaskWorkbench(); } catch (e) { console.warn('task workbench reload failed', e); }
+  hideLoading();
+  window.showMessage && window.showMessage(msg, msgType);
 }
 
 export async function taskWorkbenchSetTime(taskId) {
@@ -442,18 +446,24 @@ export async function taskWorkbenchSetTime(taskId) {
     return;
   }
   showLoading('正在同步禅道，请稍候…');
+  let msg = '工时已更新';
+  let msgType = 'success';
   try {
     const res = await (await api(`/workbench/tasks/${taskId}/operate`, {
       method: 'POST', headers: window.H, body: ({ action: 'set_time', hours }),
     })).json();
-    if (res.ok) window.showMessage && window.showMessage('工时已更新', 'success');
-    else window.showMessage && window.showMessage('禅道操作有异常：' + (res.errors || []).join('；'), 'error');
+    if (!res.ok) {
+      msg = '禅道操作有异常：' + (res.errors || []).join('；');
+      msgType = 'error';
+    }
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '设置失败', 'error');
-  } finally {
-    hideLoading();
+    msg = err.message || '设置失败';
+    msgType = 'error';
   }
-  await loadTaskWorkbench();
+  setLoadingText(msgType === 'success' ? '禅道已同步，正在刷新任务列表…' : '正在刷新任务列表…');
+  try { await loadTaskWorkbench(); } catch (e) { console.warn('task workbench reload failed', e); }
+  hideLoading();
+  window.showMessage && window.showMessage(msg, msgType);
 }
 
 export function taskWorkbenchRememberFold(taskId, open) {
@@ -546,23 +556,28 @@ export async function confirmTaskAssign() {
   }
   const target = assignCtx.items.find((u) => u.account === assignCtx.picked);
   showLoading('正在同步禅道指派，请稍候…');
+  let msg = `任务 #${assignCtx.taskId} 已指派给 ${target ? target.realname : assignCtx.picked}，已同步禅道`;
+  let msgType = 'success';
   try {
     const res = await (await api(`/workbench/tasks/${assignCtx.taskId}/operate`, {
       method: 'POST', headers: window.H, body: ({ action: 'assign', assigned_to: assignCtx.picked }),
     })).json();
     if (res.ok) {
-      window.showMessage && window.showMessage(`任务 #${assignCtx.taskId} 已指派给 ${target ? target.realname : assignCtx.picked}，已同步禅道`, 'success');
       closeTaskAssignModal();
     } else {
-      window.showMessage && window.showMessage('禅道指派有异常：' + (res.errors || []).join('；'), 'error');
+      msg = '禅道指派有异常：' + (res.errors || []).join('；');
+      msgType = 'error';
     }
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || '指派失败', 'error');
-  } finally {
-    hideLoading();
+    msg = err.message || '指派失败';
+    msgType = 'error';
   }
-  // 刷新数据：任务工作台始终刷新；从任务看板发起时同时刷新看板的禅道数据
-  await loadTaskWorkbench();
+  // 刷新数据：任务工作台始终刷新；从任务看板发起时同时刷新看板的禅道数据。
+  // 加载条挂到重载完成、提示放在重载之后，条消失时界面已与禅道一致。
+  setLoadingText(msgType === 'success' ? '禅道已同步，正在刷新任务列表…' : '正在刷新任务列表…');
+  try { await loadTaskWorkbench(); } catch (e) { console.warn('task workbench reload failed', e); }
+  hideLoading();
+  window.showMessage && window.showMessage(msg, msgType);
   if (assignCtx.source === 'board' && window.OmniQATaskBoardTab?.reloadZentaoFromMirror) {
     window.OmniQATaskBoardTab.reloadZentaoFromMirror().catch?.(() => {});
   }
