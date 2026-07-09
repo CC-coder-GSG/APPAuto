@@ -152,7 +152,7 @@ function renderSummary(data, ztItems = []) {
   const s = data.summary || {};
   const ztCount = { total: ztItems.length, todo: 0, in_progress: 0, done: 0, closed: 0, deferred: 0 };
   ztItems.forEach((t) => {
-    const k = ZT_BOARD_MAP[t.status];
+    const k = t._boardCol || ZT_BOARD_MAP[t.status];
     if (k && k in ztCount) ztCount[k] += 1;
   });
   const cards = [
@@ -182,7 +182,7 @@ function renderColumns(data, ztItems = []) {
   const columns = data.columns || {};
   const ztByStatus = {};
   ztItems.forEach((t) => {
-    const k = ZT_BOARD_MAP[t.status];
+    const k = t._boardCol || ZT_BOARD_MAP[t.status];
     if (k) (ztByStatus[k] = ztByStatus[k] || []).push(t);
   });
   root.innerHTML = STATUS_ORDER.map((statusKey) => {
@@ -738,6 +738,30 @@ const ZT_STATUS_META = {
 // 禅道状态 → 看板分栏（阻塞列已删除：暂停归入进行中；已关闭/已取消进「已关闭」列）
 const ZT_BOARD_MAP = { wait: 'todo', doing: 'in_progress', pause: 'in_progress', done: 'done', closed: 'closed', cancel: 'closed' };
 
+// 按看板日期推导禅道任务归列（延期与历史回看都在这里算）：
+// - 未完成(wait/doing/pause)且看板日期已过截止 → 「延期」列，此后每天持续出现直到完成；
+// - 逾期完成的任务：截止日之后、完成日之前的日期仍归「延期」列，完成日起按现状归列；
+// - 完成日之前的日期按「当日时点」推导（实际开始日前=待处理，之后=进行中）。
+// 归列只依赖禅道的时间事实（real_started / finished_date / deadline），
+// 所以之后改任务状态不会改写既往日期看板的归列（与设计一致）。
+function ztColumnForDate(t, date) {
+  const mapped = ZT_BOARD_MAP[t.status];
+  if (!mapped) return null;
+  const deadline = dayOf(t.deadline);
+  const finishedDay = dayOf(t.finished_date);
+  const startedDay = dayOf(t.real_started);
+  const isFinished = t.status === 'done' || t.status === 'closed' || t.status === 'cancel';
+  if (isFinished) {
+    if (!finishedDay || date >= finishedDay) return mapped;
+    // date < 完成日：当时尚未完成，按当时的时点推导
+    if (deadline && date > deadline) return 'deferred';
+    return startedDay && date >= startedDay ? 'in_progress' : 'todo';
+  }
+  if (deadline && date > deadline) return 'deferred';
+  if (startedDay && date < startedDay) return 'todo';
+  return mapped;
+}
+
 function myUserId() {
   return Number((window.currentUser && window.currentUser.id) || 0);
 }
@@ -759,30 +783,43 @@ async function fetchZentaoTasks(opts = {}) {
   return data;
 }
 
-// 看板归类：按看板日期（任务日期跨度覆盖当日）+ 看板顶部筛选（指派人/状态/只看我的）
+// 看板归类：按看板日期（任务日期跨度覆盖当日 + 延期滞留）+ 看板顶部筛选（指派人/状态/只看我的）
+// 返回的任务带 _boardCol（按看板日期推导的归列），渲染与汇总都用它。
 function zentaoForBoard() {
   const date = state.date || todayISO();
   const assignee = document.getElementById('taskBoardAssigneeFilter')?.value;
   const statusFilter = document.getElementById('taskBoardStatusFilter')?.value;
   const mineOnly = document.getElementById('taskBoardMineOnly')?.checked;
-  return state.zentao.filter((t) => {
-    const mapped = ZT_BOARD_MAP[t.status];
-    if (!mapped) return false;
-    if (statusFilter && mapped !== statusFilter) return false;
-    if (assignee && Number(assignee) !== Number(t.assignee_user_id || 0)) return false;
-    if (mineOnly && !ztIsMine(t)) return false;
+  const out = [];
+  state.zentao.forEach((t) => {
+    const col = ztColumnForDate(t, date);
+    if (!col) return;
+    if (statusFilter && col !== statusFilter) return;
+    if (assignee && Number(assignee) !== Number(t.assignee_user_id || 0)) return;
+    if (mineOnly && !ztIsMine(t)) return;
     const start = t.est_started || t.deadline;
     const end = t.deadline || t.est_started;
-    const finishedDay = t.finished_date ? String(t.finished_date).slice(0, 10) : null;
+    const deadline = dayOf(t.deadline);
+    const finishedDay = dayOf(t.finished_date);
     const isFinished = t.status === 'done' || t.status === 'closed' || t.status === 'cancel';
-    if (start) {
-      if (start <= date && date <= end) return true;
-      // 完成/关闭日在跨度外（如逾期完成）：完成当天也算
-      return isFinished && finishedDay === date;
-    }
-    if (finishedDay) return finishedDay === date;
-    return date === todayISO(); // 完全没有日期信息的任务：只出现在今天的看板
+    const visible = (() => {
+      // 延期滞留：过截止仍未完成的任务，在截止日之后每天都出现（归延期列）；
+      // 逾期完成的任务补齐「截止日 → 完成日」之间的日期，保证历史回看一致。
+      if (deadline && date > deadline) {
+        if (!isFinished) return true;
+        if (finishedDay && date < finishedDay) return true;
+      }
+      if (start) {
+        if (start <= date && date <= end) return true;
+        // 完成/关闭日在跨度外（如逾期完成）：完成当天也算
+        return isFinished && finishedDay === date;
+      }
+      if (finishedDay) return finishedDay === date;
+      return date === todayISO(); // 完全没有日期信息的任务：只出现在今天的看板
+    })();
+    if (visible) out.push({ ...t, _boardCol: col });
   });
+  return out;
 }
 
 // ─── 月视图：按任务起止时间在月历上铺排 ─────────────────────────────────
@@ -797,6 +834,7 @@ const MONTH_MARK_META = {
   end:      { label: '结束',   bg: '#f3e8ff', color: '#7c3aed' },
   same_day: { label: '开始->结束', bg: '#fef3c7', color: '#92400e' },
   planned:  { label: '计划开始', bg: '#f1f5f9', color: '#64748b' },
+  delayed:  { label: '延期',   bg: '#fef9c3', color: '#a16207' },
 };
 
 function dayOf(v) {
@@ -812,9 +850,23 @@ function projectTaskToDays(t, monthStart, monthEnd, today) {
   if (!start) return marks;
   const finished = dayOf(t.finished_date);
   const isFinished = t.status === 'done' || t.status === 'closed' || t.status === 'cancel';
-  // 未开始（wait）且只有计划时间：只在计划开始日打「计划开始」标记
+  // 用本地时间拼日期串：toISOString 是 UTC，在东八区会把本地日期偏移一天
+  const localDay = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+  const deadlineDay = dayOf(t.deadline);
+  // 未开始（wait）且只有计划时间：计划开始日打「计划开始」标记；
+  // 已过截止仍未开始的，截止日之后每天补「延期」直到今天（与日看板延期列口径一致）
   if (!started && !isFinished && t.status === 'wait') {
     if (start >= monthStart && start <= monthEnd) marks[start] = 'planned';
+    if (deadlineDay && today > deadlineDay) {
+      const cur = new Date(deadlineDay + 'T00:00:00');
+      cur.setDate(cur.getDate() + 1);
+      const stop = new Date(today + 'T00:00:00');
+      while (cur <= stop) {
+        const day = localDay(cur);
+        if (day >= monthStart && day <= monthEnd && !marks[day]) marks[day] = 'delayed';
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
     return marks;
   }
   // 结束边界：已完成用完成日；进行中/暂停延伸到今天
@@ -823,16 +875,16 @@ function projectTaskToDays(t, monthStart, monthEnd, today) {
     if (start >= monthStart && start <= monthEnd) marks[start] = isFinished ? 'same_day' : 'start';
     return marks;
   }
-  // 用本地时间拼日期串：toISOString 是 UTC，在东八区会把本地日期偏移一天
-  const localDay = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
   const cur = new Date(start + 'T00:00:00');
   const stop = new Date(end + 'T00:00:00');
+  // 过截止未完成的日子标「延期」（含逾期完成任务在完成日前的日子），与日看板延期列口径一致
+  const delayedOn = (day) => !!deadlineDay && day > deadlineDay;
   while (cur <= stop) {
     const day = localDay(cur);
     if (day >= monthStart && day <= monthEnd) {
       if (day === start) marks[day] = 'start';
-      else if (day === end) marks[day] = isFinished ? 'end' : 'ongoing';
-      else marks[day] = 'ongoing';
+      else if (day === end) marks[day] = isFinished ? 'end' : (delayedOn(day) ? 'delayed' : 'ongoing');
+      else marks[day] = delayedOn(day) ? 'delayed' : 'ongoing';
     }
     cur.setDate(cur.getDate() + 1);
   }
@@ -878,7 +930,7 @@ function renderMonthView() {
 
   // 汇总：每天 → 该天的任务条目（按标记排序：开始->结束、开始、结束、进行中、计划）
   const byDay = {};
-  const markOrder = { same_day: 0, start: 1, end: 2, ongoing: 3, planned: 4 };
+  const markOrder = { same_day: 0, start: 1, end: 2, delayed: 3, ongoing: 4, planned: 5 };
   zentaoForMonth().forEach((t) => {
     const marks = projectTaskToDays(t, monthStart, monthEnd, today);
     Object.entries(marks).forEach(([day, mark]) => {
@@ -987,10 +1039,18 @@ function renderZentaoBoardCard(t) {
     ? window.OmniQAUtils.renderPreviewBtn('task', t.task_id)
     : '';
   const actions = ztActionsHtml(t);
+  // 延期列的卡片标注截至看板日期已延期的天数
+  let delayChip = '';
+  if (t._boardCol === 'deferred' && t.deadline) {
+    const boardDate = state.date || todayISO();
+    const days = Math.max(1, Math.round((new Date(boardDate) - new Date(dayOf(t.deadline))) / 86400000));
+    delayChip = `<span class="badge" style="background:#fef9c3; color:#a16207; border:1px solid #fde68a; font-size:11px;">⏰ 已延期 ${days} 天</span>`;
+  }
   return `
     <div data-task-card="zt-${t.task_id}" style="background:#fff; border:1px solid rgba(15,23,42,.08); border-left:3px solid ${meta.color}; border-radius:8px; padding:10px; box-shadow:0 1px 2px rgba(15,23,42,.04);">
       <div class="row" style="justify-content:space-between; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
         <span class="badge" style="background:#f0fdfa; color:#0f766e; border:1px solid #99f6e4; font-size:11px;">🐲 禅道 #${t.task_id}</span>
+        ${delayChip}
         <span class="badge" style="background:${meta.bg}; color:${meta.color}; font-size:11px;">${meta.label}</span>
       </div>
       <div style="font-weight:600; color:#0f172a; line-height:1.4;">${escapeHtml(t.name || '')} ${preview}</div>
