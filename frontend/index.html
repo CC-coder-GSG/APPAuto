@@ -2332,6 +2332,29 @@ async function switchWorkbenchSubtab(name, options={}){
   if(target==='demand') window.OmniQAFeatureTreeTab?.refreshWorkbenchEntry?.();
 }
 window.switchWorkbenchSubtab = switchWorkbenchSubtab;
+// 工作台子导航吸顶：滚动越过头部后固定在 tabs 栏下方，压缩高度节省版面（样式见 weave.css）
+(function initWorkbenchStickyHeader(){
+  const header=document.querySelector('#tab-mine .workbench-shell-header');
+  if(!header) return;
+  const appHeader=document.querySelector('.app-header');
+  function stickyTopPx(){
+    if(!appHeader || !appHeader.offsetHeight) return 8;
+    const headerTop=parseFloat(getComputedStyle(appHeader).top)||0;
+    return Math.round(headerTop+appHeader.offsetHeight+6);
+  }
+  let pending=false;
+  function apply(){
+    pending=false;
+    if(!header.offsetHeight){ header.classList.remove('is-stuck'); return; }
+    const top=stickyTopPx();
+    header.style.setProperty('--workbench-header-top', `${top}px`);
+    header.classList.toggle('is-stuck', header.getBoundingClientRect().top<=top+1);
+  }
+  function schedule(){ if(!pending){ pending=true; requestAnimationFrame(apply); } }
+  window.addEventListener('scroll', schedule, {passive:true});
+  window.addEventListener('resize', schedule);
+  schedule();
+})();
 function applyTabVisibility(){
   const buttonMap={
     'assign':'tabAssignBtn','mine':'tabMineBtn','task-board':'tabTaskBoardBtn','feedback':'tabFeedbackBtn',
