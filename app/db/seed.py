@@ -184,6 +184,9 @@ def ensure_requirement_schema_compat(db: Session) -> None:
     if "zentao_task_assigned_to" not in req_cols:
         db.execute(text("ALTER TABLE requirements ADD COLUMN zentao_task_assigned_to VARCHAR(120)"))
         db.commit()
+    if "task_consumed_accum" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN task_consumed_accum FLOAT NOT NULL DEFAULT 0"))
+        db.commit()
     if "test_completed_at" not in req_cols:
         db.execute(text("ALTER TABLE requirements ADD COLUMN test_completed_at DATETIME"))
         # Backfill existing test_completed=True rows with their updated_at as a
@@ -409,6 +412,13 @@ def ensure_zentao_task_mirror_schema_compat(db: Session) -> None:
         if col not in cols:
             db.execute(text(f"ALTER TABLE zentao_task_mirror ADD COLUMN {col} VARCHAR(120)"))
             db.commit()
+    # 平台侧工时结算字段（暂停期不计工时，2026-07-09）
+    if "local_started_at" not in cols:
+        db.execute(text("ALTER TABLE zentao_task_mirror ADD COLUMN local_started_at DATETIME"))
+        db.commit()
+    if "consumed_accum" not in cols:
+        db.execute(text("ALTER TABLE zentao_task_mirror ADD COLUMN consumed_accum FLOAT NOT NULL DEFAULT 0"))
+        db.commit()
 
 
 def ensure_zentao_testcase_mirror_schema_compat(db: Session) -> None:

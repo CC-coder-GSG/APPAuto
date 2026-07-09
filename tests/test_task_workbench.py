@@ -307,6 +307,65 @@ def test_operate_task_pause_then_resume(db_session, monkeypatch):
     assert row.status == "doing"
 
 
+def test_operate_hours_settlement_excludes_pause(db_session, monkeypatch):
+    """独立任务工时自动结算：暂停结算本段并停表，继续重新起算，
+    完成上报「累计 + 最后一段」，暂停期不计入。"""
+    from datetime import datetime
+
+    alice = _user(db_session, "alice_wh", account="alice")
+    _major(db_session, "V-TW-WH")
+    row = _mirror(db_session, 901, alice.id, account="alice", status="doing")
+    row.local_started_at = datetime(2026, 6, 29, 9, 0)   # 周一 9:00 开始（平台记录）
+    db_session.commit()
+    client = FakeClient()
+    client.set_task(901, {"status": "doing", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
+    svc = ZentaoTaskMirrorService(db_session)
+
+    # 周一 11:00 暂停：结算 2h、停表
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 6, 29, 11, 0))
+    r1 = svc.operate_task(task_id=901, action="pause", current_user=alice)
+    assert r1["ok"] is True
+    assert row.consumed_accum == 2.0
+    assert row.local_started_at is None
+
+    # 周三 9:00 继续：累计保留、重新起算
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 1, 9, 0))
+    r2 = svc.operate_task(task_id=901, action="start", current_user=alice)
+    assert r2["ok"] is True
+    assert row.consumed_accum == 2.0
+    assert row.local_started_at == datetime(2026, 7, 1, 9, 0)
+
+    # 周三 10:30 完成：currentConsumed = 2 + 1.5 = 3.5，暂停的一天半不计
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 1, 10, 30))
+    r3 = svc.operate_task(task_id=901, action="finish", current_user=alice)
+    assert r3["ok"] is True
+    finish = next(c for c in client.calls if c[0] == "finish")
+    assert finish[2]["current_consumed"] == 3.5
+    assert row.local_started_at is None
+
+
+def test_operate_finish_auto_consumed_from_zentao_real_started(db_session, monkeypatch):
+    """平台没记过开始（禅道网页上开始的任务）：完成时回退用禅道 real_started 起算。"""
+    from datetime import datetime
+
+    alice = _user(db_session, "alice_wh2", account="alice")
+    _major(db_session, "V-TW-WH2")
+    row = _mirror(db_session, 902, alice.id, account="alice", status="doing")
+    row.real_started = datetime(2026, 7, 1, 9, 0)
+    db_session.commit()
+    client = FakeClient()
+    client.set_task(902, {"status": "doing", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 1, 11, 0))
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=902, action="finish", current_user=alice)
+    assert res["ok"] is True
+    finish = next(c for c in client.calls if c[0] == "finish")
+    assert finish[2]["current_consumed"] == 2.0  # 9:00→11:00 工作时段内 2h
+
+
 def test_operate_start_preserves_assignee_via_reassign(db_session, monkeypatch):
     # 模拟禅道 start 后把指派人清空 → 兜底应改派回原指派人
     alice = _user(db_session, "alice_keep", account="alice")

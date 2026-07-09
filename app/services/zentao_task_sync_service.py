@@ -525,15 +525,21 @@ class ZentaoTaskSyncService:
         return False
 
     def start_requirement_task(self, requirement: Requirement, *, hours: Optional[float] = None, acting_user: Optional[User] = None) -> dict:
-        """点击「开始」：禅道子任务 start（暂停中的则 restart 继续），记录本地开始时刻。"""
+        """点击「开始」：禅道子任务 start（暂停中的则 restart 继续），记录本地开始时刻。
+
+        工时口径：暂停期不计工时。继续暂停任务时保留已结算的累计工时
+        （task_consumed_accum），只重置本段计时起点；全新开始则连累计一起清零。
+        """
         out: dict = {"ok": False, "errors": []}
         now = local_now()
+        paused = str(requirement.zentao_task_status_cache or "").strip().lower() == "pause"
+        if not paused:
+            requirement.task_consumed_accum = 0.0
         requirement.task_started_at = now
         left = hours if hours is not None else (requirement.estimated_test_hours or 4.0)
         if requirement.zentao_task_id:
             task_id = int(requirement.zentao_task_id)
             assignee = requirement.zentao_task_assigned_to or None
-            paused = str(requirement.zentao_task_status_cache or "").strip().lower() == "pause"
 
             def _op(client):
                 if paused:
@@ -560,6 +566,9 @@ class ZentaoTaskSyncService:
         REST 优先（ipd4.3 空 body 会被静默忽略，pause_task 已固定带 comment 字段）；
         REST 未生效（如 token 被当 guest）再回退网页 cookie 会话（zentao_web_session）。
         始终回读校验状态真的切到 pause。
+
+        工时口径：暂停生效时把「本段开始→暂停」结算进 task_consumed_accum 并清空
+        task_started_at，保证暂停到再次开始之间的时间不计工时。
         """
         out: dict = {"ok": False, "errors": []}
         if requirement.zentao_task_id:
@@ -601,23 +610,43 @@ class ZentaoTaskSyncService:
                 else:
                     detail = f"：{last_err}" if last_err else "（禅道返回成功但状态未切换）"
                     out["errors"].append(f"禅道暂停任务未生效{detail}")
+        if not out["errors"]:
+            self._settle_consumed_segment(requirement, local_now())
         self.db.commit()
         out["ok"] = not out["errors"]
         return out
 
+    def _settle_consumed_segment(self, requirement: Requirement, now) -> None:
+        """把「本段开始 → now」的工时结算进 task_consumed_accum 并清空计时起点。"""
+        started = requirement.task_started_at
+        if not started:
+            return
+        try:
+            hmap = get_holiday_map(self.db, started.date(), now.date())
+        except Exception:
+            hmap = {}
+        segment = work_hours.consumed_hours(started, now, hmap)
+        requirement.task_consumed_accum = round(float(requirement.task_consumed_accum or 0.0) + segment, 2)
+        requirement.task_started_at = None
+
     def finish_requirement_task(self, requirement: Requirement, *, acting_user: Optional[User] = None) -> dict:
-        """勾「测试完成」：算工时 → 禅道 finish，记录本地完成时刻。"""
+        """勾「测试完成」：算工时 → 禅道 finish，记录本地完成时刻。
+
+        总工时 = 暂停时结算的累计（task_consumed_accum）+ 最后一段（开始→完成）；
+        暂停中直接完成时只有累计部分，暂停期不计入。
+        """
         out: dict = {"ok": False, "errors": [], "consumed": 0.0}
         now = local_now()
         requirement.task_finished_at = now
         started = requirement.task_started_at
-        consumed = 0.0
+        consumed = float(requirement.task_consumed_accum or 0.0)
         if started:
             try:
                 hmap = get_holiday_map(self.db, started.date(), now.date())
             except Exception:
                 hmap = {}
-            consumed = work_hours.consumed_hours(started, now, hmap)
+            consumed += work_hours.consumed_hours(started, now, hmap)
+        consumed = round(consumed, 2)
         # 禅道要求 currentConsumed > 0
         if consumed <= 0:
             consumed = round(requirement.estimated_test_hours or 1.0, 2)
@@ -638,9 +667,15 @@ class ZentaoTaskSyncService:
         return out
 
     def reactivate_requirement_task(self, requirement: Requirement, *, acting_user: Optional[User] = None) -> dict:
-        """取消「测试完成」：禅道 restart（重新激活）。"""
+        """取消「测试完成」：禅道 restart（重新激活）。
+
+        工时口径：重新激活后从零起算新计时段（禅道 finish 的 currentConsumed 是
+        增量，会累加到禅道已有总耗时上；本地保留旧值会导致再次完成时重复上报）。
+        """
         out: dict = {"ok": False, "errors": []}
         requirement.task_finished_at = None
+        requirement.task_started_at = local_now()
+        requirement.task_consumed_accum = 0.0
         left = requirement.estimated_test_hours or 4.0
         if requirement.zentao_task_id:
             task_id = int(requirement.zentao_task_id)

@@ -118,6 +118,78 @@ def test_reactivate_calls_restart(db_session, monkeypatch, req):
     restart = next(c for c in client.calls if c[0] == "restart")
     assert restart[2] == 2.0   # consumed from get_task
     assert restart[3] == 4.0   # left = estimated hours
+    # 工时口径：重新激活从零起算新计时段（finish 的 currentConsumed 是增量）
+    assert req.task_started_at is not None
+    assert req.task_consumed_accum == 0.0
+
+
+# ─── 工时结算：暂停期不计工时 ────────────────────────────────────────────
+
+def test_pause_settles_segment_and_stops_clock(db_session, monkeypatch, req):
+    """暂停：本段（开始→暂停）结算进累计，计时起点清空。"""
+    client = FakeClient(status="doing")
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tss, "get_system_zentao_web_login", lambda db: None)
+    req.task_started_at = datetime(2026, 6, 29, 9, 0)   # 周一 9:00 开始
+    req.zentao_task_status_cache = "doing"
+    db_session.commit()
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 6, 29, 11, 0))  # 11:00 暂停
+    res = ZentaoTaskSyncService(db_session).pause_requirement_task(req)
+    assert res["ok"] is True
+    assert req.task_consumed_accum == 2.0
+    assert req.task_started_at is None
+
+
+def test_resume_then_finish_sums_segments_excluding_pause(db_session, monkeypatch, req):
+    """暂停中继续：累计保留、重新起算；完成 = 累计 + 最后一段（暂停期不计）。"""
+    client = FakeClient(status="pause")
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    req.task_consumed_accum = 2.0     # 周一已结算 2h
+    req.task_started_at = None
+    req.zentao_task_status_cache = "pause"
+    db_session.commit()
+    svc = ZentaoTaskSyncService(db_session)
+    # 周三 9:00 继续（隔了一天半的暂停期）
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 1, 9, 0))
+    res = svc.start_requirement_task(req)
+    assert res["ok"] is True
+    assert req.task_consumed_accum == 2.0                 # 继续不清累计
+    assert req.task_started_at == datetime(2026, 7, 1, 9, 0)
+    assert any(c[0] == "restart" for c in client.calls)   # 暂停中 → restart 而非 start
+    # 周三 10:30 完成：总工时 = 2 + 1.5，暂停的一天半不计入
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 1, 10, 30))
+    res = svc.finish_requirement_task(req)
+    assert res["ok"] is True
+    assert res["consumed"] == 3.5
+    finish_call = next(c for c in client.calls if c[0] == "finish")
+    assert finish_call[2] == 3.5
+
+
+def test_finish_while_paused_uses_accum_only(db_session, monkeypatch, req):
+    """暂停中直接完成（不先继续）：只算已结算累计，暂停期不计入。"""
+    client = FakeClient(status="pause")
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    req.task_consumed_accum = 2.0
+    req.task_started_at = None
+    req.zentao_task_status_cache = "pause"
+    db_session.commit()
+    # 暂停两天后直接完成
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 1, 15, 0))
+    res = ZentaoTaskSyncService(db_session).finish_requirement_task(req)
+    assert res["consumed"] == 2.0
+
+
+def test_fresh_start_resets_accum(db_session, monkeypatch, req):
+    """非暂停状态的全新开始：累计清零（不带上一轮的工时）。"""
+    client = FakeClient()
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    req.task_consumed_accum = 5.0
+    req.zentao_task_status_cache = "wait"
+    db_session.commit()
+    res = ZentaoTaskSyncService(db_session).start_requirement_task(req)
+    assert res["ok"] is True
+    assert req.task_consumed_accum == 0.0
+    assert req.task_started_at is not None
 
 
 def test_start_guest_token_falls_back_to_system_client(db_session, monkeypatch, req):

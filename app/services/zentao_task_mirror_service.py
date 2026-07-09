@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.models import User, Version, VersionType
 from app.models.zentao_task_mirror import ZentaoTaskMirror
+from app.services.holiday_service import get_holiday_map
+from app.utils import work_hours
 from app.services.zentao_system_client import (
     get_system_zentao_client,
     get_system_zentao_web_login,
@@ -573,6 +575,13 @@ class ZentaoTaskMirrorService:
 
         _expected = {"start": "doing", "pause": "pause", "reactivate": "doing", "finish": "done", "close": "closed", "cancel": "cancel"}.get(action)
 
+        # 工时结算（暂停期不计工时）：操作前先固化时点与暂停态——dispatch 生效后
+        # _refresh_one_task 会把 row.status 刷成新状态，之后就读不到操作前的状态了。
+        # 只在 finish 时算自动工时：get_holiday_map 缺年份数据会联网补，别的操作不该付这个代价。
+        op_now = local_now()
+        was_paused = (row.status or "").strip().lower() == "pause"
+        auto_consumed = self._auto_consumed_hours(row, op_now) if action == "finish" else 0.0
+
         # 暂停/取消：REST 优先（ipd4.3 空 body 会被静默忽略，pause/cancel_task 已固定带 comment 字段）；
         # REST 未生效（如 token 被当 guest 时 200 无效果）再回退网页 cookie 会话。
         web_logins = {}
@@ -604,7 +613,8 @@ class ZentaoTaskMirrorService:
                     return resp  # 无网页凭据：交给外层校验判定未生效
                 raise ZentaoWebSessionError(f"REST {zh}失败且无网页登录凭据")
             if action == "finish":
-                cur = consumed if (consumed and consumed > 0) else (row.left or row.estimate or 1.0)
+                # 优先级：前端显式传入 > 按开始/暂停自动结算 > 剩余/预计工时兜底（禅道要求>0）
+                cur = consumed if (consumed and consumed > 0) else (auto_consumed if auto_consumed > 0 else (row.left or row.estimate or 1.0))
                 return cli.finish_task(task_id, current_consumed=cur, finished_date=_fmt_now())
             if action == "reactivate":
                 left = hours if (hours and hours > 0) else (row.estimate or 1.0)
@@ -656,6 +666,22 @@ class ZentaoTaskMirrorService:
                     f"禅道返回：{str(last_resp)[:200]}"
                 )
 
+        # 工时结算簿记（仅操作生效时）：
+        # start（继续）保留累计、重置本段起点；start（全新）连累计一起清零；
+        # pause 把本段结算进累计并停表；reactivate 从零起算；finish 停表。
+        if used_client is not None:
+            if action == "start":
+                if not was_paused:
+                    row.consumed_accum = 0.0
+                row.local_started_at = op_now
+            elif action == "pause":
+                self._settle_local_segment(row, op_now)
+            elif action == "reactivate":
+                row.consumed_accum = 0.0
+                row.local_started_at = op_now
+            elif action == "finish":
+                row.local_started_at = None
+
         # 兜底校正：操作生效后若禅道把指派人清空/改掉（系统账号代操作的已知副作用），改派回本人。
         client = used_client or candidates[0][1]
         if used_client is not None and original_account and action in {"start", "pause", "reactivate", "set_time"}:
@@ -669,6 +695,34 @@ class ZentaoTaskMirrorService:
                     logger.warning("restore assignee task %s -> %s failed: %s", task_id, original_account, exc)
         self.db.commit()
         return {"ok": not errors, "errors": errors, "task": self._serialize(row)}
+
+    def _local_segment_start(self, row: ZentaoTaskMirror) -> Optional[datetime]:
+        """本段计时起点：平台记录的 local_started_at 优先；从未结算过（accum=0）
+        且没有本地起点时，回退禅道的实际开始时间 real_started（兼容在禅道网页
+        直接开始的任务）。已结算过则不回退——real_started 是首次开始，回退会把
+        已结算的时段重复计入。"""
+        if row.local_started_at:
+            return row.local_started_at
+        if not float(row.consumed_accum or 0.0):
+            return row.real_started
+        return None
+
+    def _auto_consumed_hours(self, row: ZentaoTaskMirror, now: datetime) -> float:
+        """自动工时 = 暂停结算累计 + 本段（起点→now，按工作日工作时段窗口）。"""
+        total = float(row.consumed_accum or 0.0)
+        started = self._local_segment_start(row)
+        if started and now > started:
+            try:
+                hmap = get_holiday_map(self.db, started.date(), now.date())
+            except Exception:  # noqa: BLE001 — 节假日数据拉不到时按默认周末规则算
+                hmap = {}
+            total += work_hours.consumed_hours(started, now, hmap)
+        return round(total, 2)
+
+    def _settle_local_segment(self, row: ZentaoTaskMirror, now: datetime) -> None:
+        """暂停：把「本段起点 → now」结算进 consumed_accum 并停表。"""
+        row.consumed_accum = self._auto_consumed_hours(row, now)
+        row.local_started_at = None
 
     def assignable_users(self, task_id: int) -> dict:
         """任务所在执行的可指派人列表（指派弹窗数据源，面向所有用户）。"""

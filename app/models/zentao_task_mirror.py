@@ -62,6 +62,11 @@ class ZentaoTaskMirror(Base):
 
     desc: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # 平台侧工时结算（独立任务开始/暂停/完成用；镜像同步不覆盖这两个字段）：
+    # local_started_at = 本段计时起点（暂停时清空）；consumed_accum = 暂停时结算的累计工时。
+    local_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    consumed_accum: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False)
 
 
