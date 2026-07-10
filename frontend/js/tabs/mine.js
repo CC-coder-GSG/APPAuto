@@ -2,6 +2,7 @@
 import { state } from '../state.js';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 import { closeModal, openModal } from '../components/modal.js';
+import { renderCaseReviewControls } from '../components/case-review.js';
 import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, sourceTypeZh } from '../utils.js';
 
 const RESULT_OPTIONS = [
@@ -30,6 +31,9 @@ let mineSseBound = false;
 let minePreflightPromise = null;
 let minePreflightKey = '';
 let minePreflightAt = 0;
+let minePreflightFailedAt = 0;
+let minePreflightHandled = null;
+let mineLoadSeq = 0;
 
 function getFoldStorageKey() {
   const uid = state.currentUser?.id || window.currentUser?.id || 'anonymous';
@@ -65,15 +69,21 @@ function renderAutoLinkedBadge(label = '自动归集') {
   return `<span class="badge" style="background:#ecfeff; color:#0f766e; border:1px solid #99f6e4; margin-left:8px; padding:2px 6px;">${label}</span>`;
 }
 
-async function preflightWorkbenchData(softwareId) {
-  if (!softwareId) return;
+// 注意：必须是普通函数并返回模块级 promise 本体（而非 async 包装的新 Promise），
+// schedulePreflightBackgroundRefresh 靠 promise 同一性去重「同一次同步只挂一次重载」
+function preflightWorkbenchData(softwareId) {
+  if (!softwareId) return null;
   const key = String(softwareId);
   const now = Date.now();
   if (minePreflightPromise && minePreflightKey === key) {
     return minePreflightPromise;
   }
   if (minePreflightKey === key && now - minePreflightAt < 30000) {
-    return;
+    return null;
+  }
+  // 失败短冷却：禅道慢/绑定失效时，避免每次切进工作台都重新等一遍慢失败
+  if (minePreflightKey === key && now - minePreflightFailedAt < 60000) {
+    return null;
   }
   minePreflightKey = key;
   minePreflightPromise = api('/workbench/preflight-refresh', {
@@ -85,14 +95,33 @@ async function preflightWorkbenchData(softwareId) {
       include_testcases: true,
       force: false,
     },
-  }).then(() => {
+  }).then(async (resp) => {
     minePreflightAt = Date.now();
+    try { return await resp.json(); } catch { return null; }
   }).catch((err) => {
+    minePreflightFailedAt = Date.now();
     console.warn('workbench preflight refresh failed', err);
+    return null;
   }).finally(() => {
     minePreflightPromise = null;
   });
   return minePreflightPromise;
+}
+
+// 后台 preflight：不阻塞首屏。真正发生了禅道同步（非 cached/无错误）且
+// 需求工作台仍在前台时，静默重载一次让新数据上屏。
+// 同一个 preflight 请求只挂一次重载回调（快速来回切页时防重复重载）。
+function schedulePreflightBackgroundRefresh(softwareId) {
+  const p = preflightWorkbenchData(softwareId);
+  if (!p || typeof p.then !== 'function' || p === minePreflightHandled) return;
+  minePreflightHandled = p;
+  p.then((res) => {
+    if (!res) return;
+    const synced = (part) => part && part.cached !== true && !part.error;
+    if (!synced(res.bugs) && !synced(res.testcases)) return;
+    if (window.isWorkbenchSubtabActive && !window.isWorkbenchSubtabActive('demand')) return;
+    loadMyWorkbench().catch((err) => console.warn('workbench reload after preflight failed', err));
+  });
 }
 
 // 勾选「用例完成 / 测试完成」后的增量刷新：
@@ -699,30 +728,39 @@ export async function loadMyWorkbench() {
   if (mode === 'version' && majorId) url += '&major_version_id=' + majorId;
   const currentSoftwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
   if (currentSoftwareId) url += `&software_id=${currentSoftwareId}`;
+  // 缓存优先：本地数据（禅道镜像缓存）立刻上屏，禅道 preflight 同步转后台，
+  // 真同步到新数据后静默重载一次。进页面不再空等禅道全量用例同步。
   if (currentSoftwareId) {
-    await preflightWorkbenchData(currentSoftwareId);
+    schedulePreflightBackgroundRefresh(currentSoftwareId);
   }
 
-  state.currentFeedbackTodoHtml = '';
-  if (window.OmniQAFeedbackTab && typeof window.OmniQAFeedbackTab.loadFeedbackTodoOnMine === 'function') {
-    try {
-      await window.OmniQAFeedbackTab.loadFeedbackTodoOnMine(mode === 'version' ? majorId : null);
-    } catch {
-      state.currentFeedbackTodoHtml = '';
+  // 三路数据并行拉取；seq 防竞态：只有最新一次加载的结果允许上屏
+  const seq = ++mineLoadSeq;
+
+  const feedbackPromise = (async () => {
+    if (window.OmniQAFeedbackTab && typeof window.OmniQAFeedbackTab.loadFeedbackTodoOnMine === 'function') {
+      try {
+        await window.OmniQAFeedbackTab.loadFeedbackTodoOnMine(mode === 'version' ? majorId : null);
+        return;
+      } catch { /* 失败清空，下方兜底 */ }
     }
-  }
+    state.currentFeedbackTodoHtml = '';
+  })();
 
-  state.currentDispatchHtml = '';
-  state.currentDispatchData = [];
-  if (mode === 'version' && majorId) {
-    const ddata = await (await api('/bugs/dispatched-to-me?major_version_id=' + majorId)).json();
-    state.currentDispatchData = ddata;
-    if (ddata.length > 0) {
-      state.currentDispatchHtml = renderDispatchPanel(ddata);
-    }
-  }
+  const dispatchPromise = (mode === 'version' && majorId)
+    ? api('/bugs/dispatched-to-me?major_version_id=' + majorId).then((r) => r.json())
+    : Promise.resolve([]);
 
-  state.currentMineData = await (await api(url)).json();
+  const [, ddata, mineData] = await Promise.all([
+    feedbackPromise,
+    dispatchPromise,
+    api(url).then((r) => r.json()),
+  ]);
+  if (seq !== mineLoadSeq) return; // 已有更新的加载在跑，丢弃本次结果
+
+  state.currentDispatchData = ddata;
+  state.currentDispatchHtml = ddata.length > 0 ? renderDispatchPanel(ddata) : '';
+  state.currentMineData = mineData;
   const summaryEl = document.getElementById('mineSummaryText');
   const pendingCount = state.currentMineData.filter((r) => !r.test_completed || !r.case_completed).length;
   if (summaryEl) {
@@ -831,6 +869,7 @@ export function renderMineCards() {
         <div class="row">
           ${renderCaseLink(c)}${renderPreviewBtn('testcase', caseZtId)}${c.auto_linked ? renderAutoLinkedBadge() : ''}
         </div>
+        <div style="margin-top:6px;">${renderCaseReviewControls(c, req.id)}</div>
         <div class="case-bugs" style="margin-top:6px;">${(c.bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无关联Bug</span>'}</div>
       </div>`;
     }).join('');

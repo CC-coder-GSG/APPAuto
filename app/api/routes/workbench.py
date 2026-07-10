@@ -121,6 +121,79 @@ def task_assignable_users(
     return ZentaoTaskMirrorService(db).assignable_users(task_id)
 
 
+@router.get("/review")
+def review_workbench(
+    major_version_id: Optional[int] = None,
+    software_id: Optional[int] = None,
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """审查工作台：所选大版本全部需求 + 用例（含按人独立的审查标签）。"""
+    return WorkbenchService(db).get_review_workbench(
+        major_version_id=major_version_id,
+        software_id=software_id,
+    )
+
+
+class CaseReviewPayload(BaseModel):
+    zentao_case_id: str
+    requirement_id: Optional[int] = None
+    status: str  # passed / failed
+    opinion: Optional[str] = None
+
+
+class CaseReviewFixPayload(BaseModel):
+    zentao_case_id: str
+    requirement_id: Optional[int] = None
+    content: str
+
+
+@router.post("/case-reviews")
+async def submit_case_review(
+    payload: CaseReviewPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """提交用例审查（通过/不通过）。不通过时企微播报提醒需求负责人。"""
+    from app.services.case_review_service import CaseReviewService
+    from app.services.push_service import PushService
+
+    svc = CaseReviewService(db)
+    result = svc.submit_review(
+        zentao_case_id=payload.zentao_case_id,
+        requirement_id=payload.requirement_id,
+        status=payload.status,
+        opinion=payload.opinion,
+        current_user=current_user,
+    )
+    if result.get("status") == "failed":
+        ctx = svc.wecom_context(
+            zentao_case_id=payload.zentao_case_id,
+            requirement_id=payload.requirement_id,
+            current_user=current_user,
+        )
+        ctx["opinion"] = (payload.opinion or "").strip()
+        await PushService(db).push_case_review_failed(ctx)
+    return result
+
+
+@router.post("/case-reviews/fix")
+def submit_case_review_fix(
+    payload: CaseReviewFixPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """修改完成：归档该用例全部 active 审查（回到未审查态），保留历史可查。"""
+    from app.services.case_review_service import CaseReviewService
+
+    return CaseReviewService(db).submit_fix(
+        zentao_case_id=payload.zentao_case_id,
+        requirement_id=payload.requirement_id,
+        content=payload.content,
+        current_user=current_user,
+    )
+
+
 @router.post("/preflight-refresh")
 def preflight_refresh(
     payload: WorkbenchPreflightPayload,

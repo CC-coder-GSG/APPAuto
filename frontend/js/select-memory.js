@@ -24,6 +24,8 @@
   const REMEMBER_IDS = new Set([
     // 我的工作台
     'mineDisplayMode', 'mineMajorSelect', 'mineMinorSelect',
+    // 审查工作台
+    'reviewMajorSelect',
     // 复测
     'retestDisplayMode', 'retestMajorSelect', 'retestMinorSelect',
     // 整体测试（全景大盘）

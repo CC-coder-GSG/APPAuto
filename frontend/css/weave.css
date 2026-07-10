@@ -1401,3 +1401,40 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
   .ftree-entry-btn--test, .ftree-mode-badge--test { animation: none !important; }
 }
 
+
+/* ── 用例审查（审查工作台 + 需求工作台联动标签）────────────────────────
+   低饱和配色与 Weaveflow 中性色系融合：通过=灰绿、不通过=灰红、待复审=灰琥珀 */
+.case-review-box { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.case-review-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px !important; line-height: 1; padding: 3px 8px !important;
+  border-radius: 999px !important; white-space: nowrap; cursor: default;
+}
+.case-review-tag.review-pass {
+  background: #e8f0ea !important; color: #3d6b4f !important; border: 1px solid #cfe0d4 !important;
+}
+.case-review-tag.review-fail {
+  background: #f6ebeb !important; color: #9f3f3f !important; border: 1px solid #e7d2d2 !important;
+  cursor: pointer;
+}
+.case-review-tag.review-fail:hover { background: #f0e0e0 !important; }
+.case-review-tag.review-pending {
+  background: #f4efe4 !important; color: #8a6d3b !important; border: 1px solid #e5dcc6 !important;
+  cursor: pointer;
+}
+.case-review-tag.review-pending:hover { background: #ece5d3 !important; }
+.case-review-tag.review-tag-mine { box-shadow: inset 0 0 0 1px rgba(90, 100, 180, .28); }
+.case-review-btn {
+  border: 1px solid var(--w-hairline-strong, #d8dce4) !important; background: var(--w-surface, #fff) !important;
+  color: var(--w-ink, #334155) !important; font-size: 12px !important; line-height: 1;
+  padding: 3px 9px !important; border-radius: 999px !important; cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.case-review-btn.review-btn-pass:hover { background: #e8f0ea !important; border-color: #cfe0d4 !important; color: #3d6b4f !important; }
+.case-review-btn.review-btn-fail:hover { background: #f6ebeb !important; border-color: #e7d2d2 !important; color: #9f3f3f !important; }
+.case-review-btn.review-btn-fix {
+  background: #eef0f8 !important; border-color: #d9ddf0 !important; color: #4b5394 !important;
+}
+.case-review-btn.review-btn-fix:hover { background: #e3e7f5 !important; }
+.case-review-history-link { font-size: 12px !important; color: var(--w-ink-faint, #94a3b8) !important; text-decoration: none; }
+.case-review-history-link:hover { color: var(--w-accent, #6366f1) !important; }

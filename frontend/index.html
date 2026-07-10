@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20260707-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20260710-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
@@ -576,6 +576,7 @@
           <button id="workbenchRetestBtn" type="button" onclick="switchWorkbenchSubtab('retest')">复测工作台<span id="workbenchRetestBadge" class="nav-badge hidden"></span></button>
           <button id="workbenchOverallTestBtn" type="button" onclick="switchWorkbenchSubtab('overall-test')">测试工作台<span id="workbenchOverallTestBadge" class="nav-badge hidden"></span></button>
           <button id="workbenchTaskBtn" type="button" onclick="switchWorkbenchSubtab('task')">任务工作台<span id="workbenchTaskBadge" class="nav-badge hidden"></span></button>
+          <button id="workbenchReviewBtn" type="button" onclick="switchWorkbenchSubtab('review')">审查工作台<span id="workbenchReviewBadge" class="nav-badge hidden"></span></button>
         </div>
       </div>
 
@@ -653,6 +654,24 @@
               </div>
               <div id="taskWorkbenchSummary" style="margin-bottom: 16px; font-weight: bold; color: #1d4ed8; background: #eff6ff; padding: 10px 16px; border-radius: 6px; display: none; border-left: 4px solid #3b82f6;"></div>
               <div id="taskWorkbenchCards"></div>
+            </div>
+          </div>
+          <div class="workbench-panel" data-workbench-panel="review">
+            <div class="workbench-panel-inner">
+              <h2>审查工作台</h2>
+              <div class="row" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px; align-items: center; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                <div style="display:flex; align-items:center;">
+                  <label style="margin-right:8px; font-weight:bold; color:#475569;">大版本</label>
+                  <select id="reviewMajorSelect" onchange="loadReviewWorkbench()" style="padding: 6px; border-radius: 4px; border: 1px solid #cbd5e1;"></select>
+                </div>
+                <div class="prefix-input" style="flex:1; min-width: 200px; background: #fff;">
+                  <span>🔍</span>
+                  <input id="reviewSearchInput" oninput="window.OmniQAReviewTab && window.OmniQAReviewTab.renderReviewCards()" placeholder="搜索需求编号/名称/负责人或用例编号/标题..." style="width:100%; border:none; outline:none; background:transparent;">
+                </div>
+                <button onclick="loadReviewWorkbench()">刷新工作台</button>
+              </div>
+              <div id="reviewStatsBar" style="margin-bottom: 16px; background:#f5f6fa; padding: 10px 16px; border-radius: 6px; border-left: 4px solid #8b8fd9;"></div>
+              <div id="reviewCards"></div>
             </div>
           </div>
         </div>
@@ -2175,19 +2194,21 @@ function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
 const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal','learning'];
 const DEFAULT_ALLOWED_TABS=['mine','task-board','feedback','retest','overall-test','field-test','testcase-center','report','jenkins','learning'];
-const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test','task'];
-const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test', task:'mine' };
+const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test','task','review'];
+const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test', task:'mine', review:'mine' };
 const WORKBENCH_SUBTAB_LOADERS={
   demand: ()=>loadMyWorkbench(),
   retest: ()=>loadRetest(),
   'overall-test': ()=>loadOverallTest(),
   task: ()=>loadTaskWorkbench(),
+  review: ()=>loadReviewWorkbench(),
 };
 const WORKBENCH_SUBTAB_ERROR_TEXT={
   demand:'加载需求工作台失败',
   retest:'加载复测工作台失败',
   'overall-test':'加载测试工作台失败',
   task:'加载任务工作台失败',
+  review:'加载审查工作台失败',
 };
 const WORKBENCH_SUBTAB_STORAGE_KEY='omniqa_workbench_subtab_v1';
 let currentWorkbenchSubtab='demand';
@@ -2220,7 +2241,7 @@ function readStoredWorkbenchSubtab(){
   return WORKBENCH_SUBTAB_ORDER.includes(saved)?saved:null;
 }
 function getResolvedWorkbenchSubtab(name){
-  if(name==='retest' || name==='overall-test' || name==='task') return name;
+  if(name==='retest' || name==='overall-test' || name==='task' || name==='review') return name;
   const saved=readStoredWorkbenchSubtab();
   if(saved && canAccessWorkbenchSubtab(saved)) return saved;
   return getDefaultWorkbenchSubtab();
@@ -2233,6 +2254,7 @@ function getWorkbenchSectionForSubtab(name){
   if(name==='retest') return document.getElementById('tab-retest');
   if(name==='overall-test') return document.getElementById('tab-overall-test');
   if(name==='task') return document.querySelector('[data-workbench-panel="task"]');
+  if(name==='review') return document.querySelector('[data-workbench-panel="review"]');
   return document.querySelector('[data-workbench-panel="demand"]');
 }
 function getWorkbenchVisibleSubtab(){ return currentWorkbenchSubtab; }
@@ -2291,6 +2313,7 @@ function applyWorkbenchSubtabVisibility(){
     retest:'workbenchRetestBtn',
     'overall-test':'workbenchOverallTestBtn',
     task:'workbenchTaskBtn',
+    review:'workbenchReviewBtn',
   };
   WORKBENCH_SUBTAB_ORDER.forEach((name)=>{
     const btn=document.getElementById(buttonMap[name]);
@@ -2329,6 +2352,7 @@ async function switchWorkbenchSubtab(name, options={}){
     retest:'workbenchRetestBtn',
     'overall-test':'workbenchOverallTestBtn',
     task:'workbenchTaskBtn',
+    review:'workbenchReviewBtn',
   };
   WORKBENCH_SUBTAB_ORDER.forEach((key)=>{
     const btn=document.getElementById(buttonMap[key]);
@@ -2348,6 +2372,7 @@ async function switchWorkbenchSubtab(name, options={}){
     if(target==='demand') window.OmniQASSE.clearScopeUnread('mine_requirement');
     if(target==='retest') window.OmniQASSE.clearScopeUnread('retest_requirement');
     if(target==='overall-test') window.OmniQASSE.clearScopeUnread('overall_bug');
+    if(target==='review') window.OmniQASSE.clearScopeUnread('review_requirement');
   }
 
   scheduleWorkbenchViewportResize();
@@ -2650,7 +2675,7 @@ async function loadVersions(){
 }
 function fillVersionSelects(){
   const majors=versions.filter(v=>v.version_type==='major');
-  ['mineMajorSelect','retestMajorSelect','createReqMajorSelect','ztVersionDiffMajorSelect'].forEach(id=>fillSelect(id,majors));
+  ['mineMajorSelect','retestMajorSelect','createReqMajorSelect','ztVersionDiffMajorSelect','reviewMajorSelect'].forEach(id=>fillSelect(id,majors));
   const s5MajorEl=document.getElementById('s5MajorSelect');
   if(s5MajorEl){
     s5MajorEl.innerHTML = majors.length
@@ -2686,7 +2711,7 @@ function fillVersionSelects(){
   if(window.SelectMemory){
     window.SelectMemory.applyMany([
       'mineMajorSelect','retestMajorSelect','s5MajorSelect','linkSourceMajorSelect',
-      'assignMajorSelect','feedbackMajorSelect','reportMajorSelect','vbMajorSelect'
+      'assignMajorSelect','feedbackMajorSelect','reportMajorSelect','vbMajorSelect','reviewMajorSelect'
     ]);
   }
   refreshAllLinkedMinorSelects();
@@ -2845,6 +2870,10 @@ function toggleMineMode() {
 
 async function loadMyWorkbench() {
   return window.OmniQAMineTab.loadMyWorkbench();
+}
+
+async function loadReviewWorkbench() {
+  return window.OmniQAReviewTab.loadReviewWorkbench();
 }
 
 async function loadTaskWorkbench() {

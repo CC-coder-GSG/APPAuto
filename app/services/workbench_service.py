@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import FinalTestRecord, Requirement, RequirementRetestRecord, User, Version
+from app.services.case_review_service import CaseReviewService
 from app.services.workbench_link_service import WorkbenchLinkService
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,8 @@ class WorkbenchService:
 
         minors = self.link_service.minor_version_name_map()
         case_view_map = self.link_service.build_requirement_case_view(reqs, minors)
+        # 用例审查标签（与审查工作台联动展示）
+        CaseReviewService(self.db).attach_reviews_to_case_view(case_view_map)
         free_bug_map, auto_story_bug_map = self.link_service.build_requirement_free_bug_view(
             reqs,
             minors,
@@ -149,6 +152,61 @@ class WorkbenchService:
                 "free_bugs": free_bug_map.get(r.id, []),
                 "auto_linked_case_count": sum(1 for c in case_view_map.get(r.id, []) if c.get("auto_linked")),
                 "auto_linked_bug_count": len(auto_story_bug_map.get(r.id, [])),
+            }
+            for r in reqs
+        ]
+
+    def get_review_workbench(
+        self,
+        *,
+        major_version_id: int | None = None,
+        software_id: int | None = None,
+    ) -> list[dict]:
+        """审查工作台：所选大版本的全部需求（不按负责人过滤），用于全员审查用例。
+
+        与需求工作台同源的用例视图（含审查标签），但不含 Bug 列表与完成勾选。
+        """
+        if not major_version_id:
+            return []
+        query = (
+            self.db.query(Requirement)
+            .options(
+                joinedload(Requirement.owner),
+                joinedload(Requirement.major_version),
+                joinedload(Requirement.test_cases),
+                joinedload(Requirement.test_notes_updated_by),
+            )
+            .filter(Requirement.major_version_id == major_version_id)
+        )
+        if software_id:
+            query = query.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
+        reqs = query.order_by(Requirement.id.desc()).all()
+
+        minors = self.link_service.minor_version_name_map()
+        case_view_map = self.link_service.build_requirement_case_view(reqs, minors)
+        CaseReviewService(self.db).attach_reviews_to_case_view(case_view_map)
+        # 审查台不展示 Bug：置空瘦身载荷（视图构建复用需求工作台逻辑）
+        for cases in case_view_map.values():
+            for c in cases:
+                c["bugs"] = []
+
+        return [
+            {
+                "id": r.id,
+                "zentao_req_id": r.zentao_req_id,
+                "title": r.title,
+                "major_version_id": r.major_version_id,
+                "major_version_name": r.major_version.version_no if r.major_version else "",
+                "owner_id": r.owner_id,
+                "owner_name": r.owner.shown_name if r.owner else "未分配",
+                "zentao_story_id": r.zentao_story_id,
+                "zentao_task_id": r.zentao_task_id,
+                "zentao_task_status": r.zentao_task_status_cache,
+                "zentao_task_assigned_to": r.zentao_task_assigned_to,
+                "test_notes": r.test_notes,
+                "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
+                "test_notes_updated_by_name": r.test_notes_updated_by.shown_name if r.test_notes_updated_by else None,
+                "test_cases": case_view_map.get(r.id, []),
             }
             for r in reqs
         ]

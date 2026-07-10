@@ -45,6 +45,19 @@ class PushService:
     async def push_bug_dispatch_notice(self, bug_id: str, username: str) -> None:
         await self.send_markdown(f"📢 **Bug 特派专项通知**\n> 缺陷 **{bug_id}** 已被管理员特派给 @{username} 进行专项验证！请前往【我的工作台】顶部处理。")
 
+    async def push_case_review_failed(self, ctx: dict) -> None:
+        """用例审查不通过播报：某人审查了某人负责的某个需求，某个用例审查未通过。"""
+        md = "\n".join(
+            [
+                "### 📋 用例审查通知",
+                f"> **{ctx.get('reviewer', '')}** 审查了 **{ctx.get('owner', '')}** 负责的需求「{ctx.get('requirement', '')}」",
+                f"> 用例 **{ctx.get('case_id', '')}** 审查<font color=\"warning\">未通过</font>，请及时修改。",
+                f"> 审查意见：{ctx.get('opinion', '')}",
+                f"> 时间：{ctx.get('time', '')}",
+            ]
+        )
+        await self.send_markdown(md)
+
     async def push_assignment_change(self, change_msgs: list[str]) -> None:
         if change_msgs:
             md = "### 需求负责人变更通知\n" + "\n".join(change_msgs) + "\n\n*提示：移交的需求已自动重置完成状态，请新负责人重新校验。*"

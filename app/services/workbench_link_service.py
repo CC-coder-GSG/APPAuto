@@ -153,6 +153,10 @@ class WorkbenchLinkService:
                         "bugs": bugs_payload,
                         "auto_linked": False,
                         "mirror_case_numeric_id": local_case.zentao_case_numeric_id,
+                        # 审查工作台条目展示：标题/创建人/所属
+                        "title": local_case.zentao_case_title,
+                        "creator": local_case.zentao_creator_name,
+                        "belongs": local_case.zentao_product_name,
                     }
                 )
 
@@ -173,6 +177,10 @@ class WorkbenchLinkService:
                             "bugs": auto_bugs,
                             "auto_linked": True,
                             "mirror_case_numeric_id": mirror.zentao_case_numeric_id,
+                            "title": mirror.title,
+                            "creator": None,  # 镜像未同步创建人；前端仅在有值时展示
+
+                            "belongs": " / ".join(x for x in [mirror.zentao_product_name, mirror.zentao_module_name] if x) or None,
                         }
                     )
             result[req.id] = items
