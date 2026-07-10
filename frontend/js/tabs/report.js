@@ -311,7 +311,12 @@ export function exportReportPdf() {
   });
 }
 
-// ── 导出本周工作内容 txt（先弹设置：勾选大版本/人员，确认后按勾选导出）──
+// ── 导出本周工作内容 txt/md（先弹设置：勾选大版本/人员/格式/图表，确认后按勾选导出）──
+
+// md 附图数据：打开设置弹窗时按本周区间拉 /reports/summary（user_id=0 全员视角，
+// 非管理员会被后端降级为个人视角、无 team_comparison → 团队对比选项置灰）
+let weeklyChartData = null;
+let weeklyChartPromise = null;
 
 function weeklyModalEls() {
   return {
@@ -334,6 +339,47 @@ function renderWeeklyChecklist(wrap, items, kind) {
     : '<span class="muted" style="font-size:12px;">本周暂无数据</span>';
 }
 
+function resetWeeklyExportOptions() {
+  const txtRadio = document.querySelector('#weeklyExportModal input[name="weeklyExportFmt"][value="txt"]');
+  if (txtRadio) txtRadio.checked = true;
+  const area = document.getElementById('weeklyExportChartsArea');
+  if (area) area.style.display = 'none';
+  ['weeklyChartTrend', 'weeklyChartBugDist', 'weeklyChartTeam'].forEach((id) => {
+    const cb = document.getElementById(id);
+    if (cb) { cb.checked = true; cb.disabled = false; }
+  });
+  const teamArea = document.getElementById('weeklyExportTeamArea');
+  if (teamArea) teamArea.style.display = '';
+  const membersWrap = document.getElementById('weeklyExportTeamMembers');
+  if (membersWrap) membersWrap.innerHTML = '<span class="muted" style="font-size:12px;">加载中…</span>';
+  const chartsHint = document.getElementById('weeklyExportChartsHint');
+  if (chartsHint) chartsHint.textContent = '';
+}
+
+async function loadWeeklyChartData(weekStart, weekEnd) {
+  const chartsHint = document.getElementById('weeklyExportChartsHint');
+  const membersWrap = document.getElementById('weeklyExportTeamMembers');
+  const teamCb = document.getElementById('weeklyChartTeam');
+  const teamArea = document.getElementById('weeklyExportTeamArea');
+  const membersAll = document.getElementById('weeklyExportMembersAll');
+  try {
+    weeklyChartData = await (await api(`/reports/summary?start_date=${weekStart}&end_date=${weekEnd}&user_id=0`)).json();
+  } catch (e) {
+    weeklyChartData = null;
+    if (chartsHint) chartsHint.textContent = '图表数据加载失败，本次导出将不包含图表';
+    return;
+  }
+  const team = weeklyChartData.team_comparison || [];
+  if (team.length) {
+    if (membersWrap) renderWeeklyChecklist(membersWrap, team.map((i) => i.username), 'member');
+    if (membersAll) membersAll.checked = true;
+  } else {
+    if (teamCb) { teamCb.checked = false; teamCb.disabled = true; }
+    if (teamArea) teamArea.style.display = 'none';
+    if (chartsHint) chartsHint.textContent = '团队对比需管理员全员视角，当前账号不可导出该图';
+  }
+}
+
 // 点「导出本周工作」→ 拉取本周全集（版本/人员清单），弹设置窗
 export async function exportWeeklyTasks() {
   const { modal, hint, versionsWrap, personsWrap, versionsAll, personsAll } = weeklyModalEls();
@@ -345,11 +391,30 @@ export async function exportWeeklyTasks() {
     renderWeeklyChecklist(personsWrap, data.available_persons || [], 'person');
     if (versionsAll) versionsAll.checked = true;
     if (personsAll) personsAll.checked = true;
+    resetWeeklyExportOptions();
+    weeklyChartData = null;
+    weeklyChartPromise = loadWeeklyChartData(data.week_start, data.week_end);
     modal.classList.remove('hidden');
     modal.style.display = 'flex';
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '加载本周任务数据失败', 'error');
   }
+}
+
+function weeklyFmt() {
+  const checked = document.querySelector('#weeklyExportModal input[name="weeklyExportFmt"]:checked');
+  return checked ? checked.value : 'txt';
+}
+
+// 格式切换：md 才显示图表勾选区
+export function weeklyExportFmtChange() {
+  const area = document.getElementById('weeklyExportChartsArea');
+  if (area) area.style.display = weeklyFmt() === 'md' ? '' : 'none';
+}
+
+export function weeklyChartTeamToggle(checked) {
+  const teamArea = document.getElementById('weeklyExportTeamArea');
+  if (teamArea) teamArea.style.display = checked ? '' : 'none';
 }
 
 export function closeWeeklyExportModal() {
@@ -366,13 +431,134 @@ export function weeklyExportToggleAll(kind, checked) {
 // 单项勾选变化时同步「全选」框状态
 export function weeklyExportSyncAll(kind) {
   const boxes = [...document.querySelectorAll(`#weeklyExportModal input[data-weekly-${kind}]`)];
-  const all = document.getElementById(kind === 'version' ? 'weeklyExportVersionsAll' : 'weeklyExportPersonsAll');
+  const allIds = { version: 'weeklyExportVersionsAll', person: 'weeklyExportPersonsAll', member: 'weeklyExportMembersAll' };
+  const all = document.getElementById(allIds[kind]);
   if (all) all.checked = boxes.length > 0 && boxes.every((cb) => cb.checked);
 }
 
 function weeklyPicked(kind) {
   const boxes = [...document.querySelectorAll(`#weeklyExportModal input[data-weekly-${kind}]`)];
   return { picked: boxes.filter((cb) => cb.checked).map((cb) => cb.value), total: boxes.length };
+}
+
+// 离屏渲染 ECharts → PNG dataURL（供 md 内嵌图片；Typora/VSCode 等可直接显示）
+function renderWeeklyChartPng(option, width = 860, height = 420) {
+  if (typeof echarts === 'undefined') return '';
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed; left:-10000px; top:0; width:${width}px; height:${height}px;`;
+  document.body.appendChild(el);
+  const chart = echarts.init(el, null, { renderer: 'canvas' });
+  try {
+    chart.setOption({ animation: false, backgroundColor: '#ffffff', ...option });
+    return chart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#ffffff' });
+  } catch (e) {
+    console.error('导出图表渲染失败:', e);
+    return '';
+  } finally {
+    chart.dispose();
+    el.remove();
+  }
+}
+
+function weeklyTrendOption(trend) {
+  const metricDefs = [
+    ['执行需求', 'executed_requirements'],
+    ['创建用例', 'created_cases'],
+    ['创建Bug', 'created_bugs'],
+    ['创建反馈', 'created_feedbacks'],
+    ['处理反馈', 'processed_feedbacks'],
+    ['复测需求', 'retested_reqs'],
+    ['关闭Bug', 'closed_bugs'],
+  ];
+  return {
+    title: { text: '趋势折线图' },
+    grid: { top: 60, bottom: 40, left: 50, right: 30 },
+    legend: { data: metricDefs.map(([n]) => n), top: 30 },
+    xAxis: { type: 'category', data: trend.map((i) => i.date) },
+    yAxis: { type: 'value' },
+    series: metricDefs.map(([name, key]) => ({ name, type: 'line', smooth: true, data: trend.map((i) => i[key] || 0) })),
+  };
+}
+
+function weeklyBugDistOption(rows) {
+  const pieData = rows.map((i) => ({ name: i.major_version_no || '未关联大版本', value: i.count }));
+  return {
+    title: { text: '大版本Bug分布', left: 'center' },
+    legend: { top: 'bottom', type: 'scroll' },
+    series: [{ type: 'pie', radius: '50%', center: ['50%', '52%'], showEmptyCircle: false, minShowLabelAngle: 10, label: { formatter: '{b}: {c}个' }, data: pieData }],
+    graphic: pieData.length ? [] : [{
+      type: 'text', left: 'center', top: 'middle',
+      style: { text: '本周暂无 Bug 数据', fill: '#94a3b8', fontSize: 13 },
+    }],
+  };
+}
+
+function weeklyTeamOption(team) {
+  const names = team.map((i) => i.username);
+  const metricDefs = [
+    ['执行需求', 'executed_requirements'],
+    ['创建用例', 'created_cases'],
+    ['创建Bug', 'created_bugs'],
+    ['处理反馈', 'processed_feedbacks'],
+    ['复测需求', 'retested_reqs'],
+    ['关闭Bug', 'closed_bugs'],
+  ];
+  const series = metricDefs.map(([name, key]) => ({ name, type: 'bar', data: team.map((i) => i[key] || 0) }));
+  const common = {
+    title: { text: '团队对比' },
+    legend: { type: 'scroll', data: metricDefs.map(([n]) => n), top: 28 },
+    series,
+  };
+  // 与报表页同口径：人数多转横向条形，导出图不能滚动 → 靠加高画布放下全部人
+  if (team.length > 6) {
+    return {
+      ...common,
+      grid: { top: 64, bottom: 40, left: 90, right: 56 },
+      xAxis: { type: 'value' },
+      yAxis: { type: 'category', data: names, inverse: true, axisLabel: { interval: 0, fontSize: 12 } },
+    };
+  }
+  const rotate = team.length > 4 ? 22 : 0;
+  return {
+    ...common,
+    grid: { top: 64, bottom: rotate ? 70 : 44, left: 50, right: 30 },
+    xAxis: { type: 'category', data: names, axisLabel: { interval: 0, rotate, fontSize: 12 } },
+    yAxis: { type: 'value' },
+  };
+}
+
+function weeklyChartMdSection(title, option, height = 420) {
+  const url = renderWeeklyChartPng(option, 860, height);
+  return url ? `### ${title}\n\n![${title}](${url})\n` : '';
+}
+
+async function buildWeeklyChartsMd() {
+  if (weeklyChartPromise) { try { await weeklyChartPromise; } catch (e) { /* 图表数据加载失败已提示 */ } }
+  if (!weeklyChartData) return '';
+  const want = (id) => { const cb = document.getElementById(id); return !!cb && cb.checked && !cb.disabled; };
+  const parts = [];
+  if (want('weeklyChartTrend')) parts.push(weeklyChartMdSection('趋势折线图', weeklyTrendOption(weeklyChartData.trend || [])));
+  if (want('weeklyChartBugDist')) parts.push(weeklyChartMdSection('大版本Bug分布', weeklyBugDistOption(weeklyChartData.bug_major_dist || [])));
+  if (want('weeklyChartTeam')) {
+    const picked = weeklyPicked('member').picked;
+    const rows = (weeklyChartData.team_comparison || []).filter((i) => picked.includes(i.username));
+    if (rows.length) {
+      const height = rows.length > 6 ? Math.max(420, rows.length * 78 + 120) : 420;
+      parts.push(weeklyChartMdSection('团队对比', weeklyTeamOption(rows), height));
+    }
+  }
+  return parts.filter(Boolean).join('\n');
+}
+
+function downloadTextFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
 }
 
 export async function confirmWeeklyExport() {
@@ -386,6 +572,15 @@ export async function confirmWeeklyExport() {
     window.showMessage && window.showMessage('请至少勾选一个人员', 'info');
     return;
   }
+  const fmt = weeklyFmt();
+  const teamCb = document.getElementById('weeklyChartTeam');
+  if (fmt === 'md' && teamCb && teamCb.checked && !teamCb.disabled) {
+    const members = weeklyPicked('member');
+    if (members.total && !members.picked.length) {
+      window.showMessage && window.showMessage('团队对比已勾选，请至少勾选一个团队成员（或取消团队对比）', 'info');
+      return;
+    }
+  }
   const params = new URLSearchParams();
   // 全选时不传参（导出全部），部分勾选才传清单
   if (versions.picked.length < versions.total) params.set('versions', versions.picked.join(','));
@@ -393,14 +588,14 @@ export async function confirmWeeklyExport() {
   const qs = params.toString();
   try {
     const data = await (await api('/reports/weekly-task-export' + (qs ? `?${qs}` : ''))).json();
-    const blob = new Blob([data.text || ''], { type: 'text/plain;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `本周工作内容_${data.week_start}_${data.week_end}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(a.href);
+    if (fmt === 'md') {
+      let md = (data.markdown || '').replace(/\s+$/, '') + '\n';
+      const charts = await buildWeeklyChartsMd();
+      if (charts) md += `\n---\n\n## 图表\n\n${charts}`;
+      downloadTextFile(md, `本周工作内容_${data.week_start}_${data.week_end}.md`, 'text/markdown;charset=utf-8');
+    } else {
+      downloadTextFile(data.text || '', `本周工作内容_${data.week_start}_${data.week_end}.txt`, 'text/plain;charset=utf-8');
+    }
     closeWeeklyExportModal();
     window.showMessage && window.showMessage('本周工作内容已导出', 'success');
   } catch (err) {
@@ -496,6 +691,8 @@ window.OmniQAReportTab = {
   confirmWeeklyExport,
   weeklyExportToggleAll,
   weeklyExportSyncAll,
+  weeklyExportFmtChange,
+  weeklyChartTeamToggle,
   loadZentaoSyncStats,
 };
 window.openGovernanceDetail = openGovernanceDetail;

@@ -853,7 +853,8 @@ class ReportService:
 
         versions / persons：导出设置勾选的大版本名与人员名，None=全部。
         返回值附带 available_versions / available_persons（未过滤的全集），
-        供导出设置弹窗渲染勾选列表。
+        供导出设置弹窗渲染勾选列表；text 为 txt 导出正文，markdown 为
+        同源同构的 md 导出正文（前端可再附加图表图片）。
         """
         from app.models.zentao_task_mirror import ZentaoTaskMirror
 
@@ -961,46 +962,66 @@ class ReportService:
             slot = bucket(version_of(t), person_of(t)).setdefault(t.task_id, {"task": t, "span": (start, end), "children": []})
             slot["span"] = (start, end)
 
+        generated_at = local_now().strftime("%Y-%m-%d %H:%M")
         lines: list[str] = [
             f"本周工作内容（{monday.isoformat()} ~ {sunday.isoformat()}）",
-            f"生成时间：{local_now().strftime('%Y-%m-%d %H:%M')}",
+            f"生成时间：{generated_at}",
+            "",
+        ]
+        # markdown 与 txt 同源同构：标题/版本/人员用标题层级，任务用列表项
+        md: list[str] = [
+            f"# 本周工作内容（{monday.isoformat()} ~ {sunday.isoformat()}）",
+            "",
+            f"> 生成时间：{generated_at}",
             "",
         ]
         for version in sorted(grouped):
             lines.append(f"{version}：")
+            md.append(f"## {version}")
+            md.append("")
             # 版本小结按顶层条目（父任务/独立任务）计数，子任务并入父任务不重复计；
             # 父任务可能挂在多个人名下（人员筛选兜底），按 task_id 去重
             seen_status: dict[int, str] = {}
             for person in sorted(grouped[version]):
                 lines.append(f"◆ {person}")
+                md.append(f"### ◆ {person}")
+                md.append("")
                 slots = sorted(grouped[version][person].values(), key=lambda s: s["task"].task_id)
                 for slot in slots:
                     t = slot["task"]
                     seen_status[t.task_id] = str(t.status or "").strip().lower()
                     start, end = slot["span"] if slot["span"][0] else (span_of(t) or (None, None))
                     lines.append(task_line(t, start, end, indent="  "))
+                    md.append(f"- {task_line(t, start, end)}")
                     # 行内已带 [完成者/指派:X]，子任务不再额外标注
                     for child, cs, ce in sorted(slot["children"], key=lambda x: x[0].task_id):
                         lines.append(task_line(child, cs, ce, indent="    └ "))
+                        md.append(f"    - {task_line(child, cs, ce)}")
                 lines.append("")
+                md.append("")
             stats = {"wait": 0, "doing": 0, "done": 0, "pause": 0}
             for status_l in seen_status.values():
                 if status_l in ("done", "closed"):  # 已关闭并入已完成
                     stats["done"] += 1
                 elif status_l in stats:
                     stats[status_l] += 1
-            lines.append(
+            summary_line = (
                 f"小结：共 {len(seen_status)} 个需求，未开始 {stats['wait']} 个、"
                 f"进行中 {stats['doing']} 个、已完成 {stats['done']} 个、暂停 {stats['pause']} 个"
             )
+            lines.append(summary_line)
             lines.append("")
+            md.append(f"**{summary_line}**")
+            md.append("")
         if not grouped:
             lines.append("本周暂无任务活动记录。")
+            md.append("本周暂无任务活动记录。")
 
         return {
             "week_start": monday.isoformat(),
             "week_end": sunday.isoformat(),
             "text": "\n".join(lines).rstrip() + "\n",
+            "markdown": "\n".join(md).rstrip() + "\n",
             "available_versions": available_versions,
             "available_persons": available_persons,
         }

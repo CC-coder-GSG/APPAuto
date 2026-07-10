@@ -750,6 +750,29 @@
         <label style="font-size:12px; color:#64748b; cursor:pointer;"><input type="checkbox" id="weeklyExportPersonsAll" checked onchange="weeklyExportToggleAll('person', this.checked)"> 全选</label>
       </div>
       <div id="weeklyExportPersons" style="display:flex; flex-wrap:wrap; gap:6px 14px; margin:8px 0 4px 0;"></div>
+      <div class="row" style="justify-content:space-between; align-items:center; margin-top:8px;">
+        <strong style="font-size:13px; color:#334155;">导出格式</strong>
+      </div>
+      <div style="display:flex; gap:18px; margin:8px 0 4px 0;">
+        <label style="font-size:13px; cursor:pointer;"><input type="radio" name="weeklyExportFmt" value="txt" checked onchange="weeklyExportFmtChange()"> TXT 纯文本</label>
+        <label style="font-size:13px; cursor:pointer;"><input type="radio" name="weeklyExportFmt" value="md" onchange="weeklyExportFmtChange()"> Markdown（可附图表）</label>
+      </div>
+      <div id="weeklyExportChartsArea" style="display:none; border-top:1px dashed #e2e8f0; margin-top:10px; padding-top:10px;">
+        <strong style="font-size:13px; color:#334155;">附加图表（按本周区间生成，内嵌为图片）</strong>
+        <div id="weeklyExportChartsHint" class="muted" style="font-size:12px; margin:4px 0;"></div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px 14px; margin:8px 0 4px 0;">
+          <label style="font-size:13px; cursor:pointer;"><input type="checkbox" id="weeklyChartTrend" checked> 趋势折线图</label>
+          <label style="font-size:13px; cursor:pointer;"><input type="checkbox" id="weeklyChartBugDist" checked> 大版本Bug分布</label>
+          <label style="font-size:13px; cursor:pointer;"><input type="checkbox" id="weeklyChartTeam" checked onchange="weeklyChartTeamToggle(this.checked)"> 团队对比</label>
+        </div>
+        <div id="weeklyExportTeamArea">
+          <div class="row" style="justify-content:space-between; align-items:center; margin-top:6px;">
+            <span style="font-size:12px; color:#64748b;">团队对比 · 导出人员</span>
+            <label style="font-size:12px; color:#64748b; cursor:pointer;"><input type="checkbox" id="weeklyExportMembersAll" checked onchange="weeklyExportToggleAll('member', this.checked)"> 全选</label>
+          </div>
+          <div id="weeklyExportTeamMembers" style="display:flex; flex-wrap:wrap; gap:6px 14px; margin:8px 0 4px 0;"></div>
+        </div>
+      </div>
       <div class="row" style="justify-content:flex-end; gap:8px; margin-top:14px;">
         <button class="secondary" onclick="closeWeeklyExportModal()">取消</button>
         <button onclick="confirmWeeklyExport()">确认导出</button>
@@ -3294,6 +3317,12 @@ function weeklyExportToggleAll(kind, checked) {
 }
 function weeklyExportSyncAll(kind) {
   return window.OmniQAReportTab.weeklyExportSyncAll(kind);
+}
+function weeklyExportFmtChange() {
+  return window.OmniQAReportTab.weeklyExportFmtChange();
+}
+function weeklyChartTeamToggle(checked) {
+  return window.OmniQAReportTab.weeklyChartTeamToggle(checked);
 }
 
 function exportTreePdf() {

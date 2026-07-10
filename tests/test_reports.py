@@ -204,6 +204,15 @@ def test_weekly_task_report_groups_by_version_and_person(db_session):
     # 版本小结：顶层条目计数（父任务16776 + 独立任务16800，子任务不重复计）
     assert "小结：共 2 个需求，未开始 0 个、进行中 1 个、已完成 1 个、暂停 0 个" in text
 
+    # markdown 导出与 txt 同源同构：标题层级 + 列表项 + 小结加粗
+    md = result["markdown"]
+    assert md.startswith(f"# 本周工作内容（{monday.isoformat()}")
+    assert "## V4.0.4.0" in md
+    assert "- t#16776 父任务描述" in md
+    assert "    - t#16777 子任务A" in md
+    assert "### ◆ 张三" in md
+    assert "**小结：共 2 个需求，未开始 0 个、进行中 1 个、已完成 1 个、暂停 0 个**" in md
+
 
 def test_weekly_task_report_finisher_and_filters(db_session):
     from app.models.zentao_task_mirror import ZentaoTaskMirror
