@@ -848,6 +848,9 @@ class ReportService:
         人员口径：未开始的任务展示指派人；进行中/已完成/已关闭展示完成者
         （禅道 finishedBy；进行中尚无完成者时回退指派人）。
 
+        每个大版本块末尾附一行小结：顶层条目（需求）总数与未开始/进行中/
+        已完成（含已关闭）/暂停各自数量。
+
         versions / persons：导出设置勾选的大版本名与人员名，None=全部。
         返回值附带 available_versions / available_persons（未过滤的全集），
         供导出设置弹窗渲染勾选列表。
@@ -965,17 +968,31 @@ class ReportService:
         ]
         for version in sorted(grouped):
             lines.append(f"{version}：")
+            # 版本小结按顶层条目（父任务/独立任务）计数，子任务并入父任务不重复计；
+            # 父任务可能挂在多个人名下（人员筛选兜底），按 task_id 去重
+            seen_status: dict[int, str] = {}
             for person in sorted(grouped[version]):
                 lines.append(f"◆ {person}")
                 slots = sorted(grouped[version][person].values(), key=lambda s: s["task"].task_id)
                 for slot in slots:
                     t = slot["task"]
+                    seen_status[t.task_id] = str(t.status or "").strip().lower()
                     start, end = slot["span"] if slot["span"][0] else (span_of(t) or (None, None))
                     lines.append(task_line(t, start, end, indent="  "))
                     # 行内已带 [完成者/指派:X]，子任务不再额外标注
                     for child, cs, ce in sorted(slot["children"], key=lambda x: x[0].task_id):
                         lines.append(task_line(child, cs, ce, indent="    └ "))
                 lines.append("")
+            stats = {"wait": 0, "doing": 0, "done": 0, "pause": 0}
+            for status_l in seen_status.values():
+                if status_l in ("done", "closed"):  # 已关闭并入已完成
+                    stats["done"] += 1
+                elif status_l in stats:
+                    stats[status_l] += 1
+            lines.append(
+                f"小结：共 {len(seen_status)} 个需求，未开始 {stats['wait']} 个、"
+                f"进行中 {stats['doing']} 个、已完成 {stats['done']} 个、暂停 {stats['pause']} 个"
+            )
             lines.append("")
         if not grouped:
             lines.append("本周暂无任务活动记录。")

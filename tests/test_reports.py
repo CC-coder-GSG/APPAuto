@@ -201,6 +201,8 @@ def test_weekly_task_report_groups_by_version_and_person(db_session):
     assert "[完成者:张三]" in text
     assert result["available_versions"] == ["V4.0.4.0"]
     assert set(result["available_persons"]) == {"陈文博", "张三"}
+    # 版本小结：顶层条目计数（父任务16776 + 独立任务16800，子任务不重复计）
+    assert "小结：共 2 个需求，未开始 0 个、进行中 1 个、已完成 1 个、暂停 0 个" in text
 
 
 def test_weekly_task_report_finisher_and_filters(db_session):
@@ -238,6 +240,11 @@ def test_weekly_task_report_finisher_and_filters(db_session):
     assert "[完成者:王五]" in full["text"]
     assert "[指派:赵六]" in full["text"]
     assert "王五" in full["available_persons"] and "赵六" in full["available_persons"]
+    assert "小结：共 2 个需求，未开始 1 个、进行中 0 个、已完成 1 个、暂停 0 个" in full["text"]
+
+    # 人员筛选后小结只统计导出的任务
+    picked_stats = svc.weekly_task_report(persons=["王五"])
+    assert "小结：共 1 个需求，未开始 0 个、进行中 0 个、已完成 1 个、暂停 0 个" in picked_stats["text"]
 
     # 人员筛选：只勾王五 → 赵六的任务不导出
     picked = svc.weekly_task_report(persons=["王五"])
