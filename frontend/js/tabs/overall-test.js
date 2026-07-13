@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { state } from '../state.js';
 import { withPrefix, sourceTypeZh, escapeHtml } from '../utils.js';
-import { showLoading, hideLoading } from '../components/common.js';
+import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 
 let overallTestSseBound = false;
 let overallTestUnreadClearTimer = null;
@@ -1438,13 +1438,27 @@ function _buildSearchableUserSelect(selectId, users, currentAssigned = '') {
   }
 }
 
-export function openS5ReactivateModal(bugDbId, zentaoBugId) {
+// 激活成功后的刷新回调：由入口方（我的工作台/特派面板）传入，默认刷新测试工作台。
+let _s5ReactivateOnDone = null;
+
+function _setS5ReactivateSubmitting(submitting) {
+  const btn = document.getElementById('s5ReactivateSubmitBtn');
+  if (!btn) return;
+  btn.disabled = submitting;
+  btn.innerHTML = submitting
+    ? '<span style="display:inline-block; width:12px; height:12px; border:2px solid rgba(255,255,255,.45); border-top-color:#fff; border-radius:50%; animation:omniqaSpin .8s linear infinite; vertical-align:-2px; margin-right:6px;"></span>激活中…'
+    : '确认重新激活';
+}
+
+export function openS5ReactivateModal(bugDbId, zentaoBugId, opts = {}) {
   _s5ModalBugDbId = bugDbId;
   _s5ModalZtId = zentaoBugId;
+  _s5ReactivateOnDone = typeof opts.onDone === 'function' ? opts.onDone : null;
   const modal = document.getElementById('s5ReactivateModal');
   if (!modal) return;
 
   // Reset form
+  _setS5ReactivateSubmitting(false);
   const commentEl = document.getElementById('s5ReactivateComment');
   if (commentEl) commentEl.value = '';
   const userContainer = document.getElementById('s5ReactivateUserSelectContainer');
@@ -1486,6 +1500,10 @@ export async function submitS5Reactivate() {
   const comment = document.getElementById('s5ReactivateComment')?.value || '';
 
   if (!_s5ModalZtId) return;
+  // 提交期间：按钮转圈禁用 + 顶部加载气泡，防止重复点击；加载条一直挂到
+  // 列表刷新完成（条消失 = 界面已是激活后的最新状态）。
+  _setS5ReactivateSubmitting(true);
+  showLoading('正在重新激活禅道 Bug，请稍候…');
   try {
     await api(`/zentao/bugs/${Number(_s5ModalZtId)}/active`, {
       method: 'POST',
@@ -1504,10 +1522,19 @@ export async function submitS5Reactivate() {
       closeS5ReactivateModal();
       return;
     }
+    const onDone = _s5ReactivateOnDone;
     closeS5ReactivateModal();
-    await loadOverallTest({ syncBeforeLoad: false, showSuccess: false });
+    setLoadingText('已重新激活，正在刷新列表…');
+    if (onDone) {
+      await onDone();
+    } else {
+      await loadOverallTest({ syncBeforeLoad: false, showSuccess: false });
+    }
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '激活失败', 'error');
+  } finally {
+    hideLoading();
+    _setS5ReactivateSubmitting(false);
   }
 }
 
@@ -1515,6 +1542,7 @@ export function closeS5ReactivateModal() {
   const modal = document.getElementById('s5ReactivateModal');
   if (modal) { modal.classList.add('hidden'); modal.style.display = 'none'; }
   unbindModalEsc('s5ReactivateModal');
+  _s5ReactivateOnDone = null;
   if (_s5ReactivateResolver) {
     const resolver = _s5ReactivateResolver;
     _s5ReactivateResolver = null;

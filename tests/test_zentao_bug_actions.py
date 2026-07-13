@@ -3,10 +3,16 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from datetime import datetime
+
 from app.api.deps import get_current_user, get_db
 from app.api.routes import zentao_bug_actions
 from app.models import User, UserRole
+from app.models.bug import BugTracking, BugSourceType
+from app.models.enums import VersionType
+from app.models.stage5 import BugStage5Record
 from app.models.user_zentao_binding import UserZentaoBinding
+from app.models.version import Version
 
 
 class _FakeZentaoClient:
@@ -171,6 +177,127 @@ def test_create_bug_returns_diagnostic_when_empty_success_has_no_id(db_session, 
         detail = resp.json()["detail"]
         assert "无权访问产品 15" in detail
         assert '{"message": "success"}' in detail
+    finally:
+        app = client.app
+        app.dependency_overrides.clear()
+
+
+class _ActivateClient:
+    """Fake client for the reactivate route: active_bug succeeds and the
+    read-back returns an active bug with a fresh assignee."""
+
+    def __init__(self, live_status="active"):
+        self.live_status = live_status
+        self.active_calls = []
+
+    def active_bug(self, bug_id, assigned_to="", opened_build=None, comment=""):
+        self.active_calls.append({"bug_id": bug_id, "assigned_to": assigned_to})
+        return {"message": "success"}
+
+    def get_bug_with_fallback(self, bug_id):
+        return {
+            "id": bug_id,
+            "status": self.live_status,
+            "assignedTo": {"account": "chenwenbo", "realname": "陈文博"},
+        }
+
+
+def _create_closed_zentao_bug(db_session, user_id: int) -> BugTracking:
+    major = Version(version_no="9.9.9", version_type=VersionType.MAJOR)
+    db_session.add(major)
+    db_session.commit()
+    row = BugTracking(
+        major_version_id=major.id,
+        source_type=BugSourceType.MANUAL,
+        bug_id="b#777",
+        zentao_bug_id="777",
+        zentao_live_status="closed",
+        closed=True,
+        closed_by_id=user_id,
+        zentao_closed_by_account="chenwenbo",
+        zentao_closed_by_name="陈文博",
+        zentao_close_date=datetime(2026, 7, 1, 10, 0),
+        zentao_close_comment="done",
+        zentao_assigned_to_account="closed",
+        zentao_assigned_to_name="Closed",
+    )
+    db_session.add(row)
+    db_session.commit()
+    db_session.add(BugStage5Record(
+        bug_tracking_id=row.id,
+        user_id=user_id,
+        test_done=True,
+        resolution="fixed",
+        source="zentao_sync",
+    ))
+    db_session.commit()
+    db_session.refresh(row)
+    return row
+
+
+def test_active_bug_resets_all_local_closed_traces(db_session, monkeypatch):
+    user = _create_user(db_session)
+    _bind_user(db_session, user.id)
+    row = _create_closed_zentao_bug(db_session, user.id)
+    client = _make_client(db_session, user)
+    fake = _ActivateClient()
+    monkeypatch.setattr(zentao_bug_actions, "_get_client", lambda user_id, db: fake)
+
+    try:
+        resp = client.post("/zentao/bugs/777/active", json={
+            "assigned_to": "chenwenbo",
+            "opened_build": [],
+            "comment": "回归失败重开",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["live_status"] == "active"
+        assert fake.active_calls and fake.active_calls[0]["assigned_to"] == "chenwenbo"
+
+        db_session.refresh(row)
+        assert row.closed is False
+        assert row.closed_by_id is None
+        assert row.zentao_live_status == "active"
+        assert row.zentao_close_date is None
+        assert (row.zentao_close_comment or "") == ""
+        assert (row.zentao_closed_by_name or "") == ""
+        # 关闭时缓存的 "closed" 占位指派必须被真实指派人覆盖，
+        # 否则前端 isS5BugEffectivelyClosed 仍会把该行渲染成已关闭。
+        assert row.zentao_assigned_to_account == "chenwenbo"
+        assert row.zentao_assigned_to_name == "陈文博"
+
+        record = db_session.query(BugStage5Record).filter(
+            BugStage5Record.bug_tracking_id == row.id,
+        ).one()
+        assert record.test_done is False
+    finally:
+        app = client.app
+        app.dependency_overrides.clear()
+
+
+def test_active_bug_rejects_when_zentao_still_closed(db_session, monkeypatch):
+    user = _create_user(db_session)
+    _bind_user(db_session, user.id)
+    row = _create_closed_zentao_bug(db_session, user.id)
+    client = _make_client(db_session, user)
+    fake = _ActivateClient(live_status="closed")
+    monkeypatch.setattr(zentao_bug_actions, "_get_client", lambda user_id, db: fake)
+
+    try:
+        resp = client.post("/zentao/bugs/777/active", json={
+            "assigned_to": "chenwenbo",
+            "opened_build": [],
+            "comment": "",
+        })
+        assert resp.status_code == 502
+        assert "禅道未成功激活" in resp.json()["detail"]
+
+        db_session.refresh(row)
+        assert row.closed is True
+        assert row.zentao_live_status == "closed"
+        record = db_session.query(BugStage5Record).filter(
+            BugStage5Record.bug_tracking_id == row.id,
+        ).one()
+        assert record.test_done is True
     finally:
         app = client.app
         app.dependency_overrides.clear()

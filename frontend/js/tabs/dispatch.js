@@ -210,7 +210,11 @@ export function dispatchAssignBug(id) {
 export function dispatchReactivateBug(id) {
   const bug = findDispatchedBug(id);
   if (!bug?.zentao_bug_id) return;
-  window.OmniQAOverallTestTab?.openS5ReactivateModal?.(id, bug.zentao_bug_id);
+  // 激活成功后刷新我的工作台（本面板数据来自 loadMyWorkbench），
+  // 而不是默认的测试工作台，保证当前列表立即更新。
+  window.OmniQAOverallTestTab?.openS5ReactivateModal?.(id, bug.zentao_bug_id, {
+    onDone: () => window.OmniQAMineTab?.loadMyWorkbench?.(),
+  });
 }
 
 window.OmniQADispatchTab = { searchDispatchBug, confirmDispatchBug, loadDispatchedAll, saveDispatchedBug, toggleDispatchedClose, dispatchEditBug, dispatchRemoveBug, dispatchAssignBug, dispatchReactivateBug };

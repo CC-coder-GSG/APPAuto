@@ -987,6 +987,7 @@ def active_zentao_bug(
     if client is None:
         raise HTTPException(status_code=400, detail="当前用户未配置可用的禅道绑定")
 
+    active_client = client
     try:
         client.active_bug(
             zt_id,
@@ -1003,17 +1004,34 @@ def active_zentao_bug(
             try:
                 client2.active_bug(zt_id, assigned_to=payload.assigned_to,
                                    opened_build=payload.opened_build or [], comment=payload.comment)
+                active_client = client2
             except ZentaoAPIError as exc2:
                 raise HTTPException(status_code=exc2.status_code or 502, detail=f"禅道激活失败: {exc2.message}")
         else:
             raise HTTPException(status_code=exc.status_code or 502, detail=f"禅道激活失败: {exc.message}")
 
+    # 激活后回读禅道确认真实状态：禅道写接口可能返回空体/软失败而未真正激活，
+    # 此时不动本地状态，避免本地显示已激活而禅道仍是关闭。回读同时拿到最新
+    # 指派人，用于覆盖关闭时缓存的 "closed" 占位指派（前端会把它当作已关闭标记）。
+    live = _fetch_live_bug_brief(active_client, zt_id)
+    live_status = str(live.get("status") or "").strip().lower()
+    if live_status == "closed":
+        raise HTTPException(
+            status_code=502,
+            detail="禅道未成功激活（当前状态仍为 closed），本地状态未变更，请稍后重试",
+        )
+
     # Reset local closed state and live status
-    _update_local_live_status(db, str(zt_id), "active")
-    _reset_local_closed(db, str(zt_id))
+    _update_local_live_status(db, str(zt_id), live_status or "active")
+    _reset_local_closed(
+        db,
+        str(zt_id),
+        assigned_account=(live.get("assigned_account") or payload.assigned_to or None),
+        assigned_name=(live.get("assigned_name") or payload.assigned_to or None),
+    )
     audit(db, action="zentao_bug.active", target_type="bug", actor_id=current_user.id,
           target_id=str(zt_id), detail=f"assignedTo={payload.assigned_to}, comment={payload.comment[:100]}")
-    return {"message": "禅道 Bug 已重新激活"}
+    return {"message": "禅道 Bug 已重新激活", "live_status": live_status or "active"}
 
 
 @router.post("/bugs/{zt_id}/assign")
@@ -1136,6 +1154,35 @@ def _fetch_live_status(client: ZentaoClient, zt_id: int) -> str:
     return ""
 
 
+def _fetch_live_bug_brief(client: ZentaoClient, zt_id: int) -> dict:
+    """
+    Return {"status", "assigned_account", "assigned_name"} read live from
+    Zentao, or {} when the bug is not fetchable. assignedTo may come back as
+    a plain account string (v1 API) or a {"account", "realname"} dict (page
+    JSON fallback); both forms are normalized here.
+    """
+    raw = None
+    try:
+        raw = client.get_bug_with_fallback(zt_id)
+    except Exception:
+        return {}
+    bug = raw.get("bug") if isinstance(raw, dict) and isinstance(raw.get("bug"), dict) else raw
+    if not isinstance(bug, dict):
+        return {}
+    assigned = bug.get("assignedTo")
+    if isinstance(assigned, dict):
+        account = str(assigned.get("account") or "").strip()
+        name = str(assigned.get("realname") or account).strip()
+    else:
+        account = str(assigned or "").strip()
+        name = account
+    return {
+        "status": str(bug.get("status") or ""),
+        "assigned_account": account,
+        "assigned_name": name,
+    }
+
+
 def _update_local_live_status(db: Session, zt_id_str: str, status: str) -> None:
     try:
         rows = db.query(BugTracking).filter(BugTracking.zentao_bug_id == zt_id_str).all()
@@ -1153,8 +1200,24 @@ def _update_local_live_status(db: Session, zt_id_str: str, status: str) -> None:
         db.rollback()
 
 
-def _reset_local_closed(db: Session, zt_id_str: str) -> None:
-    """After reactivation, reset the local closed flag so the bug shows as pending."""
+def _reset_local_closed(
+    db: Session,
+    zt_id_str: str,
+    *,
+    assigned_account: str | None = None,
+    assigned_name: str | None = None,
+) -> None:
+    """
+    After reactivation, reset every local trace of the closure so the bug
+    shows as pending again immediately (mirror of _apply_local_close_side_effects):
+    - BugTracking.closed / closed_by / zentao close fields
+    - cached assignee: Zentao parks closed bugs on the literal account
+      "closed", which the frontend treats as a closed marker — overwrite it
+      with the fresh assignee (or clear the stale placeholder)
+    - BugStage5Record.test_done unchecked for all users, so closure
+      confirmations and report counters reflect the reactivation at once
+    """
+    from app.models.stage5 import BugStage5Record
     try:
         rows = db.query(BugTracking).filter(BugTracking.zentao_bug_id == zt_id_str).all()
         for row in rows:
@@ -1164,7 +1227,26 @@ def _reset_local_closed(db: Session, zt_id_str: str) -> None:
             row.zentao_closed_by_name = ""
             row.zentao_close_date = None
             row.zentao_close_comment = ""
+            if assigned_account:
+                row.zentao_assigned_to_account = assigned_account
+                row.zentao_assigned_to_name = assigned_name or assigned_account
+            elif str(row.zentao_assigned_to_name or "").strip().lower() == "closed" \
+                    or str(row.zentao_assigned_to_account or "").strip().lower() == "closed":
+                row.zentao_assigned_to_account = None
+                row.zentao_assigned_to_name = None
             row.updated_at = local_now()
+
+            stale_records = (
+                db.query(BugStage5Record)
+                .filter(
+                    BugStage5Record.bug_tracking_id == row.id,
+                    BugStage5Record.test_done.is_(True),
+                )
+                .all()
+            )
+            for record in stale_records:
+                record.test_done = False
+                record.updated_at = local_now()
         db.commit()
     except Exception as e:
         logger.warning("_reset_local_closed: %s", e)
