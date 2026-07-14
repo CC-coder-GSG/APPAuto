@@ -17,6 +17,8 @@ const TAB_PERMISSION_OPTIONS = [
   { key: 'dispatch', label: 'BUG特派' },
   { key: 'zentao-ai', label: '禅道AI用例生成' },
   { key: 'cad-test', label: 'CAD测试统计' },
+  { key: 'terminal', label: '终端控制台' },
+  { key: 'learning', label: '学习中心' },
 ];
 
 function bugZentaoMeta(b) {

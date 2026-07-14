@@ -19,7 +19,11 @@ function currentUserId() {
 
 // ── 标签 + 操作按钮（嵌入用例条目） ──────────────────────────────────────
 
-export function renderCaseReviewControls(c, reqId) {
+// opts.actions === false → 只读模式：仅展示审查状态标签与意见/历史查看，
+// 不渲染 通过/不通过/修改完成 操作按钮。审查操作只属于审查工作台；
+// 需求工作台用只读模式做状态联动展示。
+export function renderCaseReviewControls(c, reqId, opts = {}) {
+  const withActions = opts.actions !== false;
   const key = String(c.case_key || String(c.zentao_case_id || '').replace(/\D/g, ''));
   if (!key) return '';
   caseRegistry.set(key, { caseObj: c, reqId: reqId ?? null });
@@ -28,6 +32,7 @@ export function renderCaseReviewControls(c, reqId) {
   const history = c.review_history || [];
   const myId = currentUserId();
   const hasFailed = active.some((r) => r.status === 'failed');
+  if (withActions === false && !active.length && !history.length) return ''; // 只读且无任何审查记录：不占行
 
   const tags = active.map((r) => {
     const mine = Number(r.reviewer_id) === myId ? ' review-tag-mine' : '';
@@ -44,18 +49,20 @@ export function renderCaseReviewControls(c, reqId) {
         onclick="caseReviewShowHistory('${key}')">◌ 未审查 · 历史 ${history.length}</span>`
     : '';
 
-  const fixBtn = hasFailed
+  const fixBtn = (withActions && hasFailed)
     ? `<button class="case-review-btn review-btn-fix" onclick="caseReviewFixOpen('${key}')" title="已按审查意见修改，填写修改内容后该用例回到未审查状态">修改完成</button>`
     : '';
   const historyBtn = (active.length && history.length > active.length)
     ? `<a href="javascript:void(0)" class="case-review-history-link" onclick="caseReviewShowHistory('${key}')" title="查看全部审查/修改历史">历史</a>`
     : '';
+  const actionBtns = withActions
+    ? `<button class="case-review-btn review-btn-pass" onclick="caseReviewSubmit('${key}', 'passed')" title="标记我对该用例审查通过">✓ 通过</button>
+    <button class="case-review-btn review-btn-fail" onclick="caseReviewFailOpen('${key}')" title="审查不通过，需填写审查意见并企微播报">✗ 不通过</button>`
+    : '';
 
   return `<span class="case-review-box" data-case-key="${key}">
     ${tags}${pendingTag}
-    <button class="case-review-btn review-btn-pass" onclick="caseReviewSubmit('${key}', 'passed')" title="标记我对该用例审查通过">✓ 通过</button>
-    <button class="case-review-btn review-btn-fail" onclick="caseReviewFailOpen('${key}')" title="审查不通过，需填写审查意见并企微播报">✗ 不通过</button>
-    ${fixBtn}${historyBtn}
+    ${actionBtns}${fixBtn}${historyBtn}
   </span>`;
 }
 

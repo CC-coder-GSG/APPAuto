@@ -3,7 +3,7 @@
 // 但不含用例完成/测试完成勾选与 Bug 列表。
 import { api } from '../api.js';
 import { escapeHtml, renderCaseLink, renderPreviewBtn } from '../utils.js';
-import { renderCaseReviewControls } from '../components/case-review.js';
+import { renderCaseReviewControls } from '../components/case-review.js?v=20260714-1';
 
 let reviewData = [];
 let reviewSseBound = false;

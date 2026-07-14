@@ -2,7 +2,7 @@
 import { state } from '../state.js';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 import { closeModal, openModal } from '../components/modal.js';
-import { renderCaseReviewControls } from '../components/case-review.js';
+import { renderCaseReviewControls } from '../components/case-review.js?v=20260714-1';
 import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, sourceTypeZh } from '../utils.js';
 
 const RESULT_OPTIONS = [
@@ -869,7 +869,7 @@ export function renderMineCards() {
         <div class="row">
           ${renderCaseLink(c)}${renderPreviewBtn('testcase', caseZtId)}${c.auto_linked ? renderAutoLinkedBadge() : ''}
         </div>
-        <div style="margin-top:6px;">${renderCaseReviewControls(c, req.id)}</div>
+        ${(() => { const rv = renderCaseReviewControls(c, req.id, { actions: false }); return rv ? `<div style="margin-top:6px;">${rv}</div>` : ''; })()}
         <div class="case-bugs" style="margin-top:6px;">${(c.bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无关联Bug</span>'}</div>
       </div>`;
     }).join('');
