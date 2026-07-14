@@ -27,7 +27,7 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'overall-test', path: './tabs/overall-test.js?v=20260630-3' },
   { name: 'field-test', path: './tabs/field-test.js?v=20260417-3' },
   { name: 'build-records', path: './tabs/build-records.js?v=20260513-1' },
-  { name: 'testcase-center', path: './tabs/testcase-center.js?v=20260427-2' },
+  { name: 'testcase-center', path: './tabs/testcase-center.js?v=20260714-1' },
   { name: 'activity', path: './tabs/activity.js?v=20260417-3' },
   { name: 'assign', path: './tabs/assign.js?v=20260630-2' },
   { name: 'dispatch', path: './tabs/dispatch.js?v=20260417-3' },
@@ -37,7 +37,7 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'cad-test', path: './tabs/cad-test.js?v=20260622-1' },
   { name: 'terminal', path: './tabs/terminal.js?v=20260611-1' },
   { name: 'learning', path: './tabs/learning.js?v=20260615-5' },
-  { name: 'feature-tree', path: './tabs/feature-tree.js?v=20260624-8' },
+  { name: 'feature-tree', path: './tabs/feature-tree.js?v=20260714-1' },
 ];
 
 window.__omniqaOptionalModuleFailures = {};

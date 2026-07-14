@@ -6,7 +6,14 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ValidationFailed
-from app.models import FeatureTreeMark, FeatureTreeNode, SoftwareProduct, User
+from app.models import (
+    FeatureTreeCaseLink,
+    FeatureTreeMark,
+    FeatureTreeNode,
+    SoftwareProduct,
+    User,
+    ZentaoTestCaseMirror,
+)
 from app.services.sse_service import sse_publish
 from app.utils.time_utils import local_now
 
@@ -79,7 +86,12 @@ class FeatureTreeService:
                     "updated_at": m.updated_at.isoformat() if m.updated_at else None,
                 })
 
-        by_id = {n.id: self._serialize(n, marks_by_node.get(n.id, [])) for n in nodes}
+        cases_by_node = self._cases_by_node([n.id for n in nodes])
+
+        by_id = {
+            n.id: self._serialize(n, marks_by_node.get(n.id, []), cases_by_node.get(n.id, []))
+            for n in nodes
+        }
         for n in nodes:
             if n.parent_id and n.parent_id in by_id:
                 by_id[n.parent_id]["children"].append(by_id[n.id])
@@ -91,7 +103,8 @@ class FeatureTreeService:
             "tree": by_id.get(root.id),
         }
 
-    def _serialize(self, n: FeatureTreeNode, marks: list[dict[str, Any]]) -> dict[str, Any]:
+    def _serialize(self, n: FeatureTreeNode, marks: list[dict[str, Any]],
+                   cases: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "id": n.id,
             "parent_id": n.parent_id,
@@ -101,8 +114,101 @@ class FeatureTreeService:
             "has_note": html_has_content(n.note_html),
             "note_updated_at": n.note_updated_at.isoformat() if n.note_updated_at else None,
             "marks": marks,
+            "cases": cases,
             "children": [],
         }
+
+    def _cases_by_node(self, node_ids: list[int]) -> dict[int, list[dict[str, Any]]]:
+        """批量取出各节点的关联用例（联镜像表补标题/状态/链接），一次查询。"""
+        if not node_ids:
+            return {}
+        rows = (
+            self.db.query(FeatureTreeCaseLink, ZentaoTestCaseMirror)
+            .outerjoin(
+                ZentaoTestCaseMirror,
+                ZentaoTestCaseMirror.zentao_case_numeric_id == FeatureTreeCaseLink.zentao_case_numeric_id,
+            )
+            .filter(FeatureTreeCaseLink.node_id.in_(node_ids))
+            .order_by(FeatureTreeCaseLink.id)
+            .all()
+        )
+        out: dict[int, list[dict[str, Any]]] = {}
+        for link, mirror in rows:
+            out.setdefault(link.node_id, []).append(self._serialize_case(link, mirror))
+        return out
+
+    @staticmethod
+    def _serialize_case(link: FeatureTreeCaseLink,
+                        mirror: Optional[ZentaoTestCaseMirror]) -> dict[str, Any]:
+        return {
+            "case_numeric_id": link.zentao_case_numeric_id,
+            "case_id": mirror.zentao_case_id if mirror else str(link.zentao_case_numeric_id),
+            "title": (mirror.title or "") if mirror else "（用例已不在镜像库）",
+            "status": (mirror.status or "") if mirror else "",
+            "url": (mirror.zentao_case_url or "") if mirror else "",
+            "deleted": bool(mirror.deleted) if mirror else True,
+        }
+
+    # ── 关联用例 ────────────────────────────────────────────
+    def search_cases(self, software_id: int, keyword: str, limit: int = 15) -> list[dict[str, Any]]:
+        """在该软件的禅道用例镜像里按 编号/标题 模糊搜索，供关联选择。"""
+        from app.services.zentao_testcase_service import ZentaoTestCaseService
+
+        data = ZentaoTestCaseService(self.db).list_cases(
+            software_id=software_id, keyword=keyword, page=1, page_size=limit,
+        )
+        return [
+            {
+                "case_numeric_id": item.get("zentao_case_numeric_id"),
+                "case_id": item.get("zentao_case_id"),
+                "title": item.get("title") or "",
+                "status": item.get("status") or "",
+                "url": item.get("zentao_case_url") or "",
+            }
+            for item in data.get("items", [])
+        ]
+
+    def link_case(self, node_id: int, case_numeric_id: int, user: User) -> dict[str, Any]:
+        node = self._get_node(node_id)
+        mirror = (
+            self.db.query(ZentaoTestCaseMirror)
+            .filter(ZentaoTestCaseMirror.zentao_case_numeric_id == case_numeric_id)
+            .first()
+        )
+        if not mirror:
+            raise ValidationFailed("用例不存在（镜像库中未找到）")
+        existing = (
+            self.db.query(FeatureTreeCaseLink)
+            .filter(
+                FeatureTreeCaseLink.node_id == node_id,
+                FeatureTreeCaseLink.zentao_case_numeric_id == case_numeric_id,
+            )
+            .first()
+        )
+        if existing:
+            raise ValidationFailed("该用例已关联到此节点")
+        link = FeatureTreeCaseLink(
+            node_id=node_id, zentao_case_numeric_id=case_numeric_id, created_by=user.id,
+        )
+        self.db.add(link)
+        self.db.commit()
+        self._notify(node.software_id)
+        return self._serialize_case(link, mirror)
+
+    def unlink_case(self, node_id: int, case_numeric_id: int) -> dict[str, Any]:
+        node = self._get_node(node_id)
+        deleted = (
+            self.db.query(FeatureTreeCaseLink)
+            .filter(
+                FeatureTreeCaseLink.node_id == node_id,
+                FeatureTreeCaseLink.zentao_case_numeric_id == case_numeric_id,
+            )
+            .delete()
+        )
+        self.db.commit()
+        if deleted:
+            self._notify(node.software_id)
+        return {"node_id": node_id, "case_numeric_id": case_numeric_id, "deleted": bool(deleted)}
 
     def _ensure_root(self, software: SoftwareProduct) -> FeatureTreeNode:
         root = (

@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20260710-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20260714-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
@@ -223,12 +223,14 @@
       </div>
       <div class="ftree-toolbar">
         <span id="ftreeLegend" class="ftree-legend"></span>
+        <button class="secondary" onclick="window.OmniQAFeatureTreeTab?.collapseAll()" title="只保留前两层，其余分支收起（大图更流畅）">▾ 收起分支</button>
+        <button class="secondary" onclick="window.OmniQAFeatureTreeTab?.expandAll()" title="展开全部分支">▸ 全部展开</button>
         <button class="secondary" onclick="window.OmniQAFeatureTreeTab?.fit()" title="重置视图">⤢ 居中</button>
         <button class="secondary" onclick="window.OmniQAFeatureTreeTab?.reload()" title="刷新">🔄 刷新</button>
       </div>
     </div>
     <div id="ftreeCanvas" class="ftree-canvas"></div>
-    <div id="ftreeHint" class="ftree-hint">点击节点可添加分支 / 重命名 / 备注。📝 表示有功能备注，彩色圆点表示测试人已标记。</div>
+    <div id="ftreeHint" class="ftree-hint">点击节点可添加分支 / 重命名 / 备注 / 关联用例 / 折叠。📝 备注，🧪 关联用例（悬停查看，可预览 / 跳转 / 删除），▸ 已折叠，彩色圆点为测试标记。</div>
 
     <!-- 复制节点选择态横幅 -->
     <div id="ftreeCopyBanner" class="ftree-copy-banner hidden">
@@ -260,6 +262,20 @@
           <button class="secondary" onclick="window.OmniQAFeatureTreeTab?.closeEditor()">取消</button>
           <button onclick="window.OmniQAFeatureTreeTab?.saveEditor()">保存</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 关联用例弹窗：模糊搜索禅道用例镜像，点选即关联到当前节点 -->
+    <div id="ftreeCaseModal" class="ftree-modal-overlay hidden">
+      <div class="ftree-modal ftree-case-modal">
+        <div class="ftree-modal-head">
+          <h3 id="ftreeCaseTitle">关联用例</h3>
+          <button class="ftree-modal-close" onclick="window.OmniQAFeatureTreeTab?.closeCaseModal()">✕</button>
+        </div>
+        <input id="ftreeCaseSearch" class="ftree-case-search" type="text"
+               placeholder="输入用例编号或标题关键字进行模糊搜索…" autocomplete="off">
+        <div id="ftreeCaseLinked" class="ftree-case-linked"></div>
+        <div id="ftreeCaseResults" class="ftree-case-results"><div class="ftree-case-empty">输入关键字开始搜索</div></div>
       </div>
     </div>
   </section>

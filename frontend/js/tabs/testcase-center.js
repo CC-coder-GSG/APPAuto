@@ -275,7 +275,16 @@ function renderLinkedBugs(detail) {
 export async function openTestcaseCenterDetail(caseNumericId) {
   const softwareId = currentSoftwareId();
   const detail = await (await api(`/zentao/testcases/${caseNumericId}?software_id=${softwareId || ''}`)).json();
+  showTestcaseDetailModal(detail);
+}
+
+// 用已取到的 detail 渲染详情弹窗。功能图谱等其他入口拿到详情后也走这里，
+// 复用同一套步骤表格 / 关联 Bug 渲染。
+export function showTestcaseDetailModal(detail) {
   const modal = document.getElementById('testcaseCenterDetailModal');
+  // 弹窗原生在用例中心 section 里；从功能图谱等其他页签打开时该 section 是 hidden，
+  // 祖先 display:none 会连带隐藏弹窗 → 迁到 body 下（fixed 全屏遮罩本就与页签无关）。
+  if (modal && modal.parentElement !== document.body) document.body.appendChild(modal);
   const titleEl = document.getElementById('testcaseCenterDetailTitle');
   const metaEl = document.getElementById('testcaseCenterDetailMeta');
   const badgesEl = document.getElementById('testcaseCenterDetailBadges');
@@ -357,6 +366,7 @@ window.OmniQATestcaseCenterTab = {
   syncTestcaseCenter,
   syncTestcaseCenterRecent,
   openTestcaseCenterDetail,
+  showTestcaseDetailModal,
   closeTestcaseCenterDetail,
   nextTestcaseCenterPage,
   prevTestcaseCenterPage,

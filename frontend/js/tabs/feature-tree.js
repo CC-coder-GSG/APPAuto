@@ -30,7 +30,14 @@ const state = {
   sseBound: false,
   imgPasteBound: false,
   copyMode: null,      // 复制节点选择态：{ sourceId, sourceName }
+  collapsed: new Set(),// 折叠的节点 id：其子树不参与渲染（大图性能 + 聚焦）
+  perf: false,         // 精简渲染模式：渲染节点多时自动开，关阴影/动画/hover 联动
+  caseCtx: null,       // 关联用例弹窗上下文：{ nodeId }
 };
+
+// 渲染节点数超过该值进入精简模式：canvas 阴影、整树动画、hover 全图淡出
+// 在 ~1000 节点时是主要卡顿来源，精简模式全部关闭。
+const PERF_NODE_LIMIT = 300;
 
 function $(id) { return document.getElementById(id); }
 function escapeHtml(s) {
@@ -90,6 +97,7 @@ async function open(mode, ctx = {}) {
   if (!state.softwareId) { window.showMessage && window.showMessage('请先选择软件', 'error'); return; }
 
   state.originTab = getVisibleTabName();
+  loadCollapsed();
   try {
     await fetchTree();
   } catch (err) {
@@ -173,6 +181,54 @@ function renderLegend() {
   ).join('');
 }
 
+// ── 折叠（子树不渲染）────────────────────────────────────
+function collapsedStorageKey() { return `ftreeCollapsed:${state.softwareId}`; }
+function loadCollapsed() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(collapsedStorageKey()) || '[]');
+    state.collapsed = new Set(Array.isArray(arr) ? arr.map(Number) : []);
+  } catch (e) { state.collapsed = new Set(); }
+}
+function persistCollapsed() {
+  try { localStorage.setItem(collapsedStorageKey(), JSON.stringify([...state.collapsed])); } catch (e) { /* 忽略 */ }
+}
+function descendantCount(n) {
+  let c = 0;
+  (n.children || []).forEach((ch) => { c += 1 + descendantCount(ch); });
+  return c;
+}
+function isCollapsed(n) {
+  return state.collapsed.has(n.id) && (n.children || []).length > 0;
+}
+// 折叠裁剪后实际会渲染的节点数（决定是否进入精简模式）
+function countRendered(n) {
+  if (!n) return 0;
+  if (isCollapsed(n)) return 1;
+  return 1 + (n.children || []).reduce((s, c) => s + countRendered(c), 0);
+}
+function toggleCollapse(node) {
+  if (state.collapsed.has(node.id)) state.collapsed.delete(node.id);
+  else state.collapsed.add(node.id);
+  persistCollapsed();
+  renderChart({ view: 'keep' });
+}
+function collapseAll() {
+  // 只保留 根 + 一级 + 二级：把深度 ≥2 且有子分支的节点全部折叠
+  state.collapsed = new Set();
+  const walk = (n, depth) => {
+    (n.children || []).forEach((c) => walk(c, depth + 1));
+    if (depth >= 2 && (n.children || []).length) state.collapsed.add(n.id);
+  };
+  if (state.data) walk(state.data, 0);
+  persistCollapsed();
+  renderChart({ view: 'keep' });
+}
+function expandAll() {
+  state.collapsed = new Set();
+  persistCollapsed();
+  renderChart({ view: 'keep' });
+}
+
 // ── ECharts 渲染 ──────────────────────────────────────────
 function toEchartNode(n) {
   const isRoot = !!n.is_root;
@@ -192,12 +248,15 @@ function toEchartNode(n) {
     shadowBlur = 14;
     shadowColor = mc;
   }
+  // 精简模式：canvas 阴影按节点数放大重绘成本，是大图最贵的一项，全部去掉
+  if (state.perf) shadowBlur = 0;
+  const collapsed = isCollapsed(n);
   return {
     name: n.name,
     value: n.id,
     _meta: n,
     itemStyle: { color, borderColor, borderWidth, shadowBlur, shadowColor },
-    children: (n.children || []).map(toEchartNode),
+    children: collapsed ? [] : (n.children || []).map(toEchartNode),
   };
 }
 
@@ -205,6 +264,8 @@ function buildRich() {
   const rich = {
     nm: { fontSize: 13, color: '#1c1917', fontWeight: 600, padding: [3, 7], backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 8, borderColor: 'rgba(28,25,23,0.10)', borderWidth: 1 },
     note: { fontSize: 13, padding: [0, 2] },
+    case: { fontSize: 11, color: '#0e7490', fontWeight: 700, padding: [1, 4], backgroundColor: 'rgba(207,250,254,0.95)', borderRadius: 6 },
+    col: { fontSize: 11, color: '#7c7cf2', fontWeight: 700, padding: [1, 4], backgroundColor: 'rgba(232,232,253,0.95)', borderRadius: 6 },
     more: { fontSize: 11, color: '#a8a29e', padding: [0, 2] },
   };
   MARK_PALETTE.forEach((c, i) => { rich['c' + i] = { color: c, fontSize: 17, padding: [0, 1] }; });
@@ -217,6 +278,8 @@ function labelFormatter(params) {
   let s = `{nm|${sanitizeLabel(m.name)}}`;
   const badges = [];
   if (m.has_note) badges.push('{note|📝}');
+  if ((m.cases || []).length) badges.push(`{case|🧪${m.cases.length}}`);
+  if (isCollapsed(m)) badges.push(`{col|▸${descendantCount(m)}}`);
   const marks = m.marks || [];
   marks.slice(0, 8).forEach((mk) => {
     const idx = MARK_PALETTE.indexOf(mk.color);
@@ -232,6 +295,22 @@ function tooltipFormatter(params) {
   if (!m) return '';
   let h = `<div class="ftree-tip-name">${escapeHtml(m.name)}</div>`;
   if (m.has_note && m.note_html) h += `<div class="ftree-tip-note">${m.note_html}</div>`;
+  if (isCollapsed(m)) h += `<div class="ftree-tip-collapsed">▸ 已折叠 ${descendantCount(m)} 个子分支（点击节点菜单展开）</div>`;
+  const cases = m.cases || [];
+  if (cases.length) {
+    h += `<div class="ftree-tip-cases"><div class="ftree-tip-cases-head">🧪 关联用例（${cases.length}）</div>`;
+    cases.forEach((c) => {
+      h += `<div class="ftree-tip-case${c.deleted ? ' ftree-tip-case--deleted' : ''}">`
+        + `<span class="ftree-tip-case-id">${escapeHtml(c.case_id || '')}</span>`
+        + `<span class="ftree-tip-case-title" title="${escapeHtml(c.title || '')}">${escapeHtml(c.title || '')}</span>`
+        + `<span class="ftree-tip-case-acts">`
+        + `<button onclick="window.OmniQAFeatureTreeTab.caseAction(${m.id},${c.case_numeric_id},'preview')" title="预览用例详情">预览</button>`
+        + (c.url ? `<button onclick="window.OmniQAFeatureTreeTab.caseAction(${m.id},${c.case_numeric_id},'jump')" title="在禅道中打开">跳转</button>` : '')
+        + `<button class="ftree-tip-case-del" onclick="window.OmniQAFeatureTreeTab.caseAction(${m.id},${c.case_numeric_id},'unlink')" title="解除关联">删除</button>`
+        + `</span></div>`;
+    });
+    h += `</div>`;
+  }
   (m.marks || []).forEach((mk) => {
     h += `<div class="ftree-tip-mark"><span class="ftree-tip-dot" style="background:${mk.color}"></span>`
       + `<b>${escapeHtml(mk.display_name)}</b> 已测`
@@ -260,9 +339,14 @@ function buildOption(seriesData) {
       edgeShape: 'curve',
       lineStyle: { color: 'rgba(139,138,247,0.45)', width: 1.4, curveness: 0.5 },
       label: { formatter: labelFormatter, rich: buildRich() },
-      emphasis: { focus: 'descendant', itemStyle: { shadowBlur: 18, shadowColor: 'rgba(109,108,245,0.6)' } },
-      animationDuration: 500,
-      animationDurationUpdate: 450,
+      // 精简模式：focus:'descendant' 会在每次 hover 时给全图其余节点加淡出效果，
+      // 上千节点等于每次 hover 全量重绘，是 hover 卡顿的主因，故关闭。
+      emphasis: state.perf
+        ? { focus: 'none', itemStyle: { borderWidth: 3 } }
+        : { focus: 'descendant', itemStyle: { shadowBlur: 18, shadowColor: 'rgba(109,108,245,0.6)' } },
+      animation: !state.perf,
+      animationDuration: state.perf ? 0 : 500,
+      animationDurationUpdate: state.perf ? 0 : 450,
       animationEasing: 'cubicOut',
     }],
   };
@@ -275,11 +359,23 @@ function renderChart({ view = 'restore' } = {}) {
   if (!dom || !window.echarts) return;
   let firstInit = false;
   if (!state.chart || (state.chart.isDisposed && state.chart.isDisposed())) {
-    state.chart = window.echarts.getInstanceByDom(dom) || window.echarts.init(dom);
+    // useDirtyRect：hover/tooltip 等局部变化只重绘脏矩形，大图收益显著
+    state.chart = window.echarts.getInstanceByDom(dom) || window.echarts.init(dom, null, { useDirtyRect: true });
     state.chart.on('click', onNodeClick);
     window.addEventListener('resize', resize);
     bindRoamPersist();
     firstInit = true;
+  }
+  const prevPerf = state.perf;
+  state.perf = countRendered(state.data) > PERF_NODE_LIMIT;
+  // 精简模式切换会改 series 级配置（emphasis/animation），merge 更新不生效，需整体重建
+  if (!firstInit && prevPerf !== state.perf && view === 'keep') {
+    const keep = captureView();
+    state.chart.setOption(buildOption([toEchartNode(state.data)]), { notMerge: true });
+    requestAnimationFrame(() => applyView(keep));
+    state.rendered = true;
+    resize();
+    return;
   }
   const seriesData = [toEchartNode(state.data)];
   if (view === 'keep' && state.rendered && !firstInit) {
@@ -360,7 +456,7 @@ function treeSignature(node) {
   const parts = [];
   const walk = (n) => {
     if (!n) return;
-    parts.push(`${n.id}:${n.name}:${n.note_updated_at || ''}:${(n.marks || []).map((m) => m.user_id + '@' + (m.updated_at || '')).join(',')}`);
+    parts.push(`${n.id}:${n.name}:${n.note_updated_at || ''}:${(n.marks || []).map((m) => m.user_id + '@' + (m.updated_at || '')).join(',')}:${(n.cases || []).map((c) => c.case_numeric_id).join(',')}`);
     (n.children || []).forEach(walk);
   };
   walk(node);
@@ -452,6 +548,12 @@ function openMenu(node, x, y) {
   if (!node.is_root) items.push({ icon: '✏️', label: '重命名', act: () => renameNode(node) });
   if (!node.is_root) items.push({ icon: '📋', label: '复制节点', act: () => startCopy(node) });
   items.push({ icon: '📝', label: node.has_note ? '编辑备注' : '添加备注', act: () => openEditor(node, 'note') });
+  const caseCount = (node.cases || []).length;
+  items.push({ icon: '🧪', label: caseCount ? `关联用例（已关联 ${caseCount}）` : '关联用例', act: () => openCaseModal(node) });
+  if ((node.children || []).length) {
+    const collapsed = state.collapsed.has(node.id);
+    items.push({ icon: collapsed ? '▸' : '▾', label: collapsed ? `展开子分支（${descendantCount(node)}）` : '折叠子分支', act: () => toggleCollapse(node) });
+  }
   if (state.mode === 'test') {
     const isLeaf = !node.children || node.children.length === 0;
     const mine = (node.marks || []).find((mk) => Number(mk.user_id) === Number(currentUserId()));
@@ -520,6 +622,135 @@ async function removeMark(node) {
     await api(`/feature-tree/nodes/${node.id}/mark?version_id=${state.versionId}`, { method: 'DELETE' });
     await reload();
   } catch (err) { window.showMessage && window.showMessage(err.message || '取消标记失败', 'error'); }
+}
+
+// ── 关联用例 ─────────────────────────────────────────────
+let caseSearchTimer = null;
+let caseSearchSeq = 0;
+
+function openCaseModal(node) {
+  state.caseCtx = { nodeId: node.id };
+  const modal = $('ftreeCaseModal');
+  const input = $('ftreeCaseSearch');
+  if (!modal || !input) return;
+  const titleEl = $('ftreeCaseTitle');
+  if (titleEl) titleEl.textContent = `关联用例 · ${node.name}`;
+  input.value = '';
+  bindCaseModal();
+  renderLinkedCases();
+  modal.classList.remove('hidden');
+  input.focus();
+  runCaseSearch(''); // 空关键字 = 展示最近更新的用例，便于直接挑选
+}
+
+function closeCaseModal() {
+  const modal = $('ftreeCaseModal');
+  if (modal) modal.classList.add('hidden');
+  state.caseCtx = null;
+  clearTimeout(caseSearchTimer);
+}
+
+function bindCaseModal() {
+  const modal = $('ftreeCaseModal');
+  if (!modal || modal._bound) return;
+  modal._bound = true;
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeCaseModal(); });
+  const input = $('ftreeCaseSearch');
+  input.addEventListener('input', () => {
+    clearTimeout(caseSearchTimer);
+    caseSearchTimer = setTimeout(() => runCaseSearch(input.value.trim()), 300);
+  });
+}
+
+function renderLinkedCases() {
+  const box = $('ftreeCaseLinked');
+  if (!box || !state.caseCtx) return;
+  const node = state.flat.get(state.caseCtx.nodeId);
+  const cases = (node && node.cases) || [];
+  if (!cases.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="ftree-case-linked-head">已关联（${cases.length}）</div>`
+    + cases.map((c) =>
+      `<span class="ftree-case-chip${c.deleted ? ' ftree-case-chip--deleted' : ''}" title="${escapeHtml(c.title || '')}">`
+      + `${escapeHtml(c.case_id || '')} ${escapeHtml((c.title || '').slice(0, 18))}`
+      + `<button class="ftree-case-chip-x" onclick="window.OmniQAFeatureTreeTab.caseAction(${node.id},${c.case_numeric_id},'unlink')" title="解除关联">✕</button></span>`
+    ).join('');
+}
+
+async function runCaseSearch(keyword) {
+  const box = $('ftreeCaseResults');
+  if (!box || !state.caseCtx) return;
+  const seq = ++caseSearchSeq;
+  box.innerHTML = '<div class="ftree-case-empty">搜索中…</div>';
+  let items = [];
+  try {
+    const qs = new URLSearchParams({ software_id: String(state.softwareId), keyword });
+    const data = await (await api('/feature-tree/case-search?' + qs.toString())).json();
+    items = data.items || [];
+  } catch (err) {
+    if (seq === caseSearchSeq) box.innerHTML = `<div class="ftree-case-empty">${escapeHtml(err.message || '搜索失败')}</div>`;
+    return;
+  }
+  if (seq !== caseSearchSeq || !state.caseCtx) return; // 已有更新的搜索/弹窗已关
+  if (!items.length) { box.innerHTML = '<div class="ftree-case-empty">没有匹配的用例</div>'; return; }
+  const node = state.flat.get(state.caseCtx.nodeId);
+  const linked = new Set(((node && node.cases) || []).map((c) => Number(c.case_numeric_id)));
+  box.innerHTML = items.map((c) => {
+    const done = linked.has(Number(c.case_numeric_id));
+    return `<div class="ftree-case-row" data-cnid="${c.case_numeric_id}">`
+      + `<span class="ftree-case-row-id">${escapeHtml(c.case_id || '')}</span>`
+      + `<span class="ftree-case-row-title" title="${escapeHtml(c.title || '')}">${escapeHtml(c.title || '')}</span>`
+      + (c.status ? `<span class="ftree-case-row-status">${escapeHtml(c.status)}</span>` : '')
+      + `<button class="ftree-case-row-link" ${done ? 'disabled' : ''}>${done ? '✓ 已关联' : '关联'}</button>`
+      + `</div>`;
+  }).join('');
+  box.querySelectorAll('.ftree-case-row-link:not([disabled])').forEach((btn) => {
+    btn.onclick = () => linkCase(Number(btn.closest('.ftree-case-row').dataset.cnid), btn);
+  });
+}
+
+async function linkCase(caseNumericId, btn) {
+  if (!state.caseCtx) return;
+  const nodeId = state.caseCtx.nodeId;
+  if (btn) { btn.disabled = true; btn.textContent = '关联中…'; }
+  try {
+    await api(`/feature-tree/nodes/${nodeId}/cases`, { method: 'POST', body: { case_numeric_id: caseNumericId } });
+    await reload({ force: true });
+    if (btn) btn.textContent = '✓ 已关联';
+    renderLinkedCases();
+    window.showMessage && window.showMessage('已关联用例');
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = '关联'; }
+    window.showMessage && window.showMessage(err.message || '关联失败', 'error');
+  }
+}
+
+// tooltip / 弹窗里的用例操作：预览（复用用例中心详情弹窗）、跳转禅道、解除关联
+async function caseAction(nodeId, caseNumericId, action) {
+  const node = state.flat.get(Number(nodeId));
+  const c = node && (node.cases || []).find((x) => Number(x.case_numeric_id) === Number(caseNumericId));
+  if (action === 'jump') {
+    if (c && c.url) window.open(c.url, '_blank', 'noopener');
+    else window.showMessage && window.showMessage('该用例没有禅道链接', 'error');
+    return;
+  }
+  if (action === 'preview') {
+    try {
+      const detail = await (await api(`/feature-tree/cases/${caseNumericId}?software_id=${state.softwareId}`)).json();
+      const tc = window.OmniQATestcaseCenterTab;
+      if (tc && tc.showTestcaseDetailModal) tc.showTestcaseDetailModal(detail);
+    } catch (err) { window.showMessage && window.showMessage(err.message || '加载用例详情失败', 'error'); }
+    return;
+  }
+  if (action === 'unlink') {
+    const label = c ? `用例 ${c.case_id}` : '该用例';
+    if (!window.confirm(`解除「${(node && node.name) || '节点'}」与 ${label} 的关联？（不会删除禅道用例本身）`)) return;
+    try {
+      await api(`/feature-tree/nodes/${nodeId}/cases/${caseNumericId}`, { method: 'DELETE' });
+      await reload({ force: true });
+      renderLinkedCases();
+      window.showMessage && window.showMessage('已解除关联');
+    } catch (err) { window.showMessage && window.showMessage(err.message || '解除关联失败', 'error'); }
+  }
 }
 
 // ── 富文本编辑弹窗 ───────────────────────────────────────
@@ -645,6 +876,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   const modal = $('ftreeEditorModal');
   if (modal && !modal.classList.contains('hidden')) { closeEditor(); return; }
+  const caseModal = $('ftreeCaseModal');
+  if (caseModal && !caseModal.classList.contains('hidden')) { closeCaseModal(); return; }
   if (state.copyMode) { cancelCopy(); return; }
   const menu = $('ftreeMenu');
   if (menu && !menu.classList.contains('hidden')) hideMenu();
@@ -661,4 +894,6 @@ window.OmniQAFeatureTreeTab = {
   open, openFromWorkbench, refreshWorkbenchEntry, close, fit,
   reload: () => reload({ force: true }), // 手动"刷新"按钮：强制重绘
   closeEditor, saveEditor, cancelCopy,
+  closeCaseModal, caseAction,
+  collapseAll, expandAll,
 };

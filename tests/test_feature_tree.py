@@ -373,3 +373,124 @@ def test_deleting_unmarked_child_triggers_parent_auto(db_session):
 
     svc.delete_node(b["id"])  # 删掉未标记的 B → 剩余子(A)全标 → root 自动
     assert _marks_of(svc.get_tree(sw.id, version_id=v)["tree"])[user.id]["is_auto"] is True
+
+
+# ── 关联用例（节点 ↔ 禅道用例镜像）─────────────────────────
+def _mirror_case(db, numeric_id: int, title: str, *, product_id: int = 77,
+                 case_id: str | None = None, deleted: bool = False):
+    from app.models import ZentaoTestCaseMirror
+
+    row = ZentaoTestCaseMirror(
+        zentao_case_id=case_id or f"CASE-{numeric_id}",
+        zentao_case_numeric_id=numeric_id,
+        zentao_product_id=product_id,
+        title=title,
+        status="normal",
+        zentao_case_url=f"http://zentao/testcase-view-{numeric_id}.html",
+        deleted=deleted,
+    )
+    db.add(row)
+    db.commit()
+    return row
+
+
+def test_link_case_and_tree_carries_cases(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    node = svc.create_node(sw.id, root_id, "登录", user)
+    _mirror_case(db_session, 9001, "登录-密码错误提示")
+
+    linked = svc.link_case(node["id"], 9001, user)
+    assert linked["case_id"] == "CASE-9001"
+    assert linked["title"] == "登录-密码错误提示"
+
+    fetched = svc.get_tree(sw.id)["tree"]["children"][0]
+    assert len(fetched["cases"]) == 1
+    case = fetched["cases"][0]
+    assert case["case_numeric_id"] == 9001
+    assert case["url"].endswith("testcase-view-9001.html")
+    assert case["deleted"] is False
+
+
+def test_link_case_rejects_duplicate_and_missing_mirror(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    node = svc.create_node(sw.id, root_id, "登录", user)
+    _mirror_case(db_session, 9001, "用例A")
+
+    svc.link_case(node["id"], 9001, user)
+    with pytest.raises(ValidationFailed):
+        svc.link_case(node["id"], 9001, user)  # 重复关联
+    with pytest.raises(ValidationFailed):
+        svc.link_case(node["id"], 424242, user)  # 镜像库没有的用例
+
+
+def test_unlink_case(db_session):
+    from app.models import FeatureTreeCaseLink
+
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    node = svc.create_node(sw.id, root_id, "登录", user)
+    _mirror_case(db_session, 9001, "用例A")
+    svc.link_case(node["id"], 9001, user)
+
+    result = svc.unlink_case(node["id"], 9001)
+    assert result["deleted"] is True
+    assert db_session.query(FeatureTreeCaseLink).count() == 0
+    # 再解一次：幂等，不报错
+    assert svc.unlink_case(node["id"], 9001)["deleted"] is False
+
+
+def test_delete_node_cascades_case_links(db_session):
+    from app.models import FeatureTreeCaseLink
+
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    node = svc.create_node(sw.id, root_id, "登录", user)
+    _mirror_case(db_session, 9001, "用例A")
+    svc.link_case(node["id"], 9001, user)
+
+    svc.delete_node(node["id"])
+    assert db_session.query(FeatureTreeCaseLink).count() == 0
+
+
+def test_search_cases_fuzzy_by_title_and_id(db_session):
+    sw = _software(db_session)
+    sw.zentao_product_id = 77
+    db_session.commit()
+    svc = FeatureTreeService(db_session)
+    _mirror_case(db_session, 9001, "登录-密码错误提示")
+    _mirror_case(db_session, 9002, "登录-验证码", case_id="CASE-9002")
+    _mirror_case(db_session, 9003, "绘图-直线")
+    _mirror_case(db_session, 9004, "别的产品的用例", product_id=88)
+
+    hits = svc.search_cases(sw.id, "登录")
+    assert {h["case_numeric_id"] for h in hits} == {9001, 9002}
+
+    by_id = svc.search_cases(sw.id, "case-9002")
+    assert [h["case_numeric_id"] for h in by_id] == [9002]
+
+    # 空关键字：返回该软件（产品）范围内的用例，不含其他产品
+    all_mine = svc.search_cases(sw.id, "")
+    assert {h["case_numeric_id"] for h in all_mine} == {9001, 9002, 9003}
+
+
+def test_link_case_survives_mirror_row_deletion_flag(db_session):
+    sw = _software(db_session)
+    user = _user(db_session, "u")
+    svc = FeatureTreeService(db_session)
+    root_id = svc.get_tree(sw.id)["tree"]["id"]
+    node = svc.create_node(sw.id, root_id, "登录", user)
+    _mirror_case(db_session, 9001, "用例A", deleted=True)
+
+    svc.link_case(node["id"], 9001, user)
+    case = svc.get_tree(sw.id)["tree"]["children"][0]["cases"][0]
+    assert case["deleted"] is True

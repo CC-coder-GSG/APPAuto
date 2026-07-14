@@ -40,6 +40,10 @@ class NodeCopyPayload(BaseModel):
     target_id: int
 
 
+class CaseLinkPayload(BaseModel):
+    case_numeric_id: int
+
+
 @router.get("/feature-tree")
 def get_feature_tree(
     software_id: int,
@@ -113,6 +117,52 @@ def delete_mark(
     db: Session = Depends(get_db),
 ):
     return FeatureTreeService(db).delete_mark(node_id, version_id, current_user)
+
+
+@router.get("/feature-tree/case-search")
+def search_cases(
+    software_id: int,
+    keyword: str = Query("", max_length=200),
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """按 用例编号/标题 在该软件的禅道用例镜像里模糊搜索（供节点关联用例选择）。"""
+    return {"items": FeatureTreeService(db).search_cases(software_id, keyword)}
+
+
+@router.get("/feature-tree/cases/{case_numeric_id}")
+def get_case_detail(
+    case_numeric_id: int,
+    software_id: Optional[int] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """节点关联用例的预览详情。功能图谱全员可用，故不走用例中心的 tab 权限。"""
+    from app.services.zentao_testcase_service import ZentaoTestCaseService
+
+    return ZentaoTestCaseService(db).get_case_detail(
+        case_numeric_id, software_id=software_id, current_user=current_user,
+    )
+
+
+@router.post("/feature-tree/nodes/{node_id}/cases", status_code=201)
+def link_case(
+    node_id: int,
+    payload: CaseLinkPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return FeatureTreeService(db).link_case(node_id, payload.case_numeric_id, current_user)
+
+
+@router.delete("/feature-tree/nodes/{node_id}/cases/{case_numeric_id}")
+def unlink_case(
+    node_id: int,
+    case_numeric_id: int,
+    _: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return FeatureTreeService(db).unlink_case(node_id, case_numeric_id)
 
 
 @router.post("/feature-tree/upload-image")

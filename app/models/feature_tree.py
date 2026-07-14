@@ -45,6 +45,7 @@ class FeatureTreeNode(Base):
         order_by="FeatureTreeNode.sort_order, FeatureTreeNode.id",
     )
     marks = relationship("FeatureTreeMark", back_populates="node", cascade="all, delete-orphan")
+    case_links = relationship("FeatureTreeCaseLink", back_populates="node", cascade="all, delete-orphan")
 
 
 class FeatureTreeMark(Base):
@@ -74,4 +75,28 @@ class FeatureTreeMark(Base):
     node = relationship("FeatureTreeNode", back_populates="marks")
 
 
-__all__ = ["FeatureTreeNode", "FeatureTreeMark"]
+class FeatureTreeCaseLink(Base):
+    """功能节点 ↔ 禅道用例（镜像库 zentao_testcase_mirror）的关联。
+
+    以 zentao_case_numeric_id 为锚（镜像表的唯一键），不设外键——镜像行可能被
+    重新同步/软删，关联关系保留，前端按 deleted 标注"用例已删除"。
+    一个节点可关联多条用例；同一 (node, case) 只有一条。
+    """
+
+    __tablename__ = "feature_tree_case_links"
+    __table_args__ = (
+        UniqueConstraint("node_id", "zentao_case_numeric_id", name="uq_feature_case_link_node_case"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    node_id: Mapped[int] = mapped_column(
+        ForeignKey("feature_tree_nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    zentao_case_numeric_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    created_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
+
+    node = relationship("FeatureTreeNode", back_populates="case_links")
+
+
+__all__ = ["FeatureTreeNode", "FeatureTreeMark", "FeatureTreeCaseLink"]
