@@ -368,9 +368,23 @@ function renderChart({ view = 'restore' } = {}) {
   }
   const prevPerf = state.perf;
   state.perf = countRendered(state.data) > PERF_NODE_LIMIT;
-  // 精简模式切换会改 series 级配置（emphasis/animation），merge 更新不生效，需整体重建
-  if (!firstInit && prevPerf !== state.perf && view === 'keep') {
-    const keep = captureView();
+  // 渲染结构签名：折叠裁剪后实际参与渲染的节点 id 集。结构变化（折叠/展开/增删分支）
+  // 时 ECharts tree 的 diff 更新会在移除节点时访问已销毁父图元的 __edge 而崩
+  // （notMerge 也复用旧 view 走同一 diff），必须先 chart.clear() 销毁旧 view 再全量重建。
+  const structSig = (function ids(n) {
+    if (!n) return '';
+    if (isCollapsed(n)) return String(n.id);
+    return n.id + '(' + (n.children || []).map(ids).join(',') + ')';
+  })(state.data);
+  const structChanged = structSig !== state.lastStructSig;
+  state.lastStructSig = structSig;
+  const keep = (!firstInit && view === 'keep') ? captureView() : null; // clear() 前先存视角
+  if (!firstInit && structChanged) {
+    try { state.chart.clear(); } catch (e) { /* 忽略 */ }
+  }
+  // 结构变化 / 精简模式切换（series 级 emphasis/animation 配置，merge 不生效）：
+  // 整体重建，并保留当前缩放/平移
+  if (!firstInit && view === 'keep' && (structChanged || prevPerf !== state.perf)) {
     state.chart.setOption(buildOption([toEchartNode(state.data)]), { notMerge: true });
     requestAnimationFrame(() => applyView(keep));
     state.rendered = true;
@@ -379,7 +393,7 @@ function renderChart({ view = 'restore' } = {}) {
   }
   const seriesData = [toEchartNode(state.data)];
   if (view === 'keep' && state.rendered && !firstInit) {
-    // 合并更新数据，不动坐标系 → 当前缩放/平移保留
+    // 结构未变的纯内容更新（改名/备注/标记/用例徽标）：merge 更新数据，不动坐标系
     state.chart.setOption({ series: [{ data: seriesData }] });
   } else {
     state.chart.setOption(buildOption(seriesData), { notMerge: true });
