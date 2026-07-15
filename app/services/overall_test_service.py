@@ -1025,6 +1025,10 @@ class OverallTestService:
         if deleted_count or candidates:
             self.db.commit()
         return deleted_count
+
+    def _fetch_product_bugs_with_retry(
+        self, client: ZentaoClient, product_id: int, user_id: int
+    ) -> list[dict]:
         try:
             return self._fetch_bug_collection(
                 client, f"products/{product_id}/bugs", limit=500, max_pages=50
@@ -1096,6 +1100,36 @@ class OverallTestService:
                 major = self.db.query(Version).filter(Version.id == minor.parent_id).first()
                 if major:
                     return major.id, minor.id
+
+        # 产品 Bug 列表接口的 openedBuild 只给构建名称（无数字 ID）；
+        # 名称去掉架构后缀后与本地小版本 version_no 一致，按名称匹配。
+        # 全量同步单次要解析数千条，结果按名称在实例内缓存。
+        if not hasattr(self, "_minor_by_build_name_cache"):
+            self._minor_by_build_name_cache: dict[str, tuple[int, int] | None] = {}
+        for name in normalized.get("opened_build_names") or []:
+            if name in self._minor_by_build_name_cache:
+                hit = self._minor_by_build_name_cache[name]
+                if hit:
+                    return hit
+                continue
+            resolved: tuple[int, int] | None = None
+            minor_rows = (
+                self.db.query(Version)
+                .filter(
+                    Version.version_type == VersionType.MINOR,
+                    Version.version_no == name,
+                    Version.parent_id.isnot(None),
+                )
+                .all()
+            )
+            for minor in minor_rows:
+                major = self.db.query(Version).filter(Version.id == minor.parent_id).first()
+                if major:
+                    resolved = (major.id, minor.id)
+                    break
+            self._minor_by_build_name_cache[name] = resolved
+            if resolved:
+                return resolved
 
         exec_ref = normalized.get("execution_ref_id")
         if exec_ref:
@@ -1513,9 +1547,14 @@ class OverallTestService:
         if not bug_id:
             return None
         bug_id_str = str(bug_id)
-        opened_build_ids = self._extract_build_ids(
-            bug.get("openedBuilds") or bug.get("openedBuild") or bug.get("foundBuild")
-        )
+        opened_build_raw = bug.get("openedBuilds") or bug.get("openedBuild") or bug.get("foundBuild")
+        opened_build_ids = self._extract_build_ids(opened_build_raw)
+        # 产品 Bug 列表接口（/products/{id}/bugs）的 openedBuild 给的是构建
+        # 名称字符串（如 "4.0.4.0.260715(40400034)(64-bit)"）而非数字 ID，
+        # 上面的 _extract_build_ids 会整个丢弃 → 发现版本永远解析不出来。
+        # 这里把名称也留下来，供 _resolve_major_minor_for_bug 按小版本
+        # version_no 匹配（本地小版本号去掉位数后缀后与构建名一致）。
+        opened_build_names = self._extract_build_names(opened_build_raw)
         closed_by_raw = bug.get("closedBy") or {}
         if isinstance(closed_by_raw, dict):
             closed_by_account = str(closed_by_raw.get("account") or "").strip()
@@ -1635,7 +1674,13 @@ class OverallTestService:
             "project_ref_id": project_ref_id,
             "story_ref_id": story_ref_id,
             "case_ref_id": case_ref_id,
-            "affected_version": str(bug.get("v1") or bug.get("v2") or "").strip() or None,
+            "opened_build_names": opened_build_names,
+            # v1/v2（影响版本）绝大多数 Bug 为空；回退用 openedBuild 构建名，
+            # 前端「发现于」在匹配不到本地小版本时显示这个字符串而不是「未知」。
+            "affected_version": (
+                str(bug.get("v1") or bug.get("v2") or "").strip()
+                or (opened_build_names[0] if opened_build_names else None)
+            ),
         }
 
     @staticmethod
@@ -1982,6 +2027,45 @@ class OverallTestService:
                 seen.add(item)
                 deduped.append(item)
         return deduped
+
+    # openedBuild 构建名里的架构后缀（本地小版本 version_no 不带它）
+    _BUILD_ARCH_SUFFIX_RE = re.compile(r"\s*\((?:32|64)[- ]?bit\)\s*$", re.IGNORECASE)
+
+    def _extract_build_names(self, raw_value: object) -> list[str]:
+        """从 openedBuild(s) 中提取构建名称字符串（非数字 ID 的部分）。
+
+        名称形如 "4.0.4.0.260715(40400034)(64-bit)"，去掉架构后缀后与本地
+        MINOR Version.version_no 一致。纯数字（真实构建 ID，走
+        _extract_build_ids）与 "trunk"（禅道占位值）不算名称。
+        """
+        names: list[str] = []
+
+        def _push(value: object) -> None:
+            text = self._BUILD_ARCH_SUFFIX_RE.sub("", str(value or "").strip())
+            if not text or text.isdigit() or text.lower() == "trunk":
+                return
+            if text not in names:
+                names.append(text)
+
+        if isinstance(raw_value, list):
+            for item in raw_value:
+                if isinstance(item, dict):
+                    _push(item.get("name"))
+                else:
+                    _push(item)
+        elif isinstance(raw_value, dict):
+            _push(raw_value.get("name"))
+            for value in raw_value.values():
+                if isinstance(value, dict):
+                    _push(value.get("name"))
+                elif isinstance(value, str):
+                    _push(value)
+        else:
+            # 名称字符串；多构建时禅道用逗号分隔。名称内含括号/空格，
+            # 只能按逗号切，不能按空白切。
+            for part in str(raw_value or "").split(","):
+                _push(part)
+        return names
 
     @staticmethod
     def _extend_unique_bug_rows(target: list[dict], seen_ids: set[str], rows: list[dict]) -> None:

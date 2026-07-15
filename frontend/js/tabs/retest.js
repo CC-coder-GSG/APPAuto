@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { renderBugLink, renderCaseLink, renderPreviewBtn } from '../utils.js';
+import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn } from '../utils.js';
 let retestSseBound = false;
 let retestPreflightPromise = null;
 let retestPreflightKey = '';
@@ -12,6 +12,14 @@ function getRetestMode() {
 
 function renderAutoLinkedBadge(label = '自动归集') {
   return `<span class="badge" style="background:#ecfeff; color:#0f766e; border:1px solid #99f6e4; margin-left:6px; padding:1px 6px;">${label}</span>`;
+}
+
+// 跨大版本归集：Bug 挂在其他大版本下时标注来源（与工作台 mine.js 一致）
+function renderCrossMajorBadge(req, b) {
+  const cross = b.major_version_id && req.major_version_id
+    && Number(b.major_version_id) !== Number(req.major_version_id) && b.major_version_no;
+  if (!cross) return '';
+  return `<span title="该Bug记录在其他大版本下" style="background:#ede9fe; color:#6d28d9; padding:1px 5px; border-radius:4px; font-size:10px; font-weight:600; margin-left:4px;">🔀来自 ${escapeHtml(b.major_version_no)}</span>`;
 }
 
 async function preflightRetestData(softwareId) {
@@ -135,7 +143,7 @@ export async function loadRetest() {
         const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
         const linkedBadge = b.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
         return `<div style="margin-top:4px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-          <span class="badge" style="background:#fef2f2; color:#dc2626; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${linkedBadge}
+          <span class="badge" style="background:#fef2f2; color:#dc2626; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${renderCrossMajorBadge(req, b)}${linkedBadge}
           <label style="font-size:12px; color:#b91c1c; display:flex; align-items:center; gap:4px; margin:0;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
         </div>`;
       }).join('');
@@ -152,7 +160,7 @@ export async function loadRetest() {
       const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
       const linkedBadge = b.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
       return `<div style="margin-bottom:6px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-      <span class="badge" style="background:#fff7ed; color:#ea580c; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${linkedBadge}
+      <span class="badge" style="background:#fff7ed; color:#ea580c; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${renderCrossMajorBadge(req, b)}${linkedBadge}
       <label style="font-size:12px; color:#b91c1c; display:flex; align-items:center; gap:4px; margin:0;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
     </div>`;
     }).join('');
@@ -173,7 +181,7 @@ export async function loadRetest() {
         ? '<span class="badge" style="background:#dcfce7; color:#166534; margin-left:6px; padding:1px 6px;">✅已闭环</span>'
         : '<span class="badge" style="background:#fef9c3; color:#854d0e; margin-left:6px; padding:1px 6px;">⏳未闭环</span>';
       return `<div style="margin-bottom:6px;">
-      <span class="badge" style="background:#fff7ed; color:#c2410c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(测后自动归集)</span></span>${closedTag}${renderAutoLinkedBadge('自动归集Bug')}
+      <span class="badge" style="background:#fff7ed; color:#c2410c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(测后自动归集)</span></span>${renderCrossMajorBadge(req, b)}${closedTag}${renderAutoLinkedBadge('自动归集Bug')}
     </div>`;
     }).join('');
 

@@ -34,12 +34,21 @@ def _case_key_sql_variants(keys: set[str]) -> list[str]:
 class WorkbenchLinkService:
     def __init__(self, db: Session):
         self.db = db
+        self._major_names: dict[int, str] | None = None
 
     def minor_version_name_map(self) -> dict[int, str]:
         return {
             version.id: version.version_no
             for version in self.db.query(Version).filter(Version.version_type == VersionType.MINOR).all()
         }
+
+    def _major_name_map(self) -> dict[int, str]:
+        if self._major_names is None:
+            self._major_names = {
+                version.id: version.version_no
+                for version in self.db.query(Version).filter(Version.version_type == VersionType.MAJOR).all()
+            }
+        return self._major_names
 
     def serialize_bug_brief(
         self,
@@ -48,18 +57,27 @@ class WorkbenchLinkService:
         *,
         auto_linked: bool = False,
     ) -> dict[str, Any]:
+        # 发现于：优先本地小版本；匹配不到时回退禅道侧的影响版本/构建名
+        # 字符串（zentao_affected_version），而不是一律「未知」。
+        found_no = minors.get(bug.found_minor_version_id) if bug.found_minor_version_id else None
+        if not found_no:
+            found_no = (bug.zentao_affected_version or "").strip() or "未知"
         return {
             "id": bug.id,
             "bug_id": bug.bug_id,
             "zentao_bug_id": bug.zentao_bug_id,
             "zentao_bug_url": bug.zentao_bug_url,
             "zentao_bug_title": bug.zentao_bug_title,
-            "found_minor_version_no": minors.get(bug.found_minor_version_id, "未知") if bug.found_minor_version_id else "未知",
+            "found_minor_version_no": found_no,
             "fixed_minor_version_no": minors.get(bug.fixed_minor_version_id, "未知") if bug.fixed_minor_version_id else None,
             "dispatched_to_name": bug.dispatched_to.shown_name if getattr(bug, "dispatched_to", None) else None,
             "is_retest_failed": getattr(bug, "is_retest_failed", False),
             "closed": bool(getattr(bug, "closed", False)),
             "auto_linked": bool(auto_linked),
+            # 跨大版本归集展示：前端与需求卡的 major_version_id 比对，
+            # 不一致时显示「来自 X」徽章。
+            "major_version_id": bug.major_version_id,
+            "major_version_no": self._major_name_map().get(bug.major_version_id),
         }
 
     def build_requirement_case_view(
@@ -68,7 +86,6 @@ class WorkbenchLinkService:
         minors: dict[int, str],
     ) -> dict[int, list[dict[str, Any]]]:
         req_ids = [req.id for req in reqs]
-        major_ids = [req.major_version_id for req in reqs if req.major_version_id]
         local_case_ids = [case.id for req in reqs for case in (req.test_cases or [])]
         local_case_bug_rows = (
             self.db.query(BugTracking)
@@ -111,14 +128,17 @@ class WorkbenchLinkService:
         # Reverse-lookup Bugs by Zentao linked-case id. Covers the "this Bug
         # was opened against a testcase but never tagged with the parent
         # story" case, which is otherwise invisible to the story-id join.
+        # 不按大版本过滤：同一需求可能横跨多个大版本，其他大版本上关联的
+        # Bug 也要挂出来（前端按 major_version_id 差异加「来自 X」徽章）。
         case_keyed_bug_map: dict[str, list[BugTracking]] = defaultdict(list)
-        if all_mirror_case_keys and major_ids:
+        if all_mirror_case_keys:
             linked_bug_rows = (
                 self.db.query(BugTracking)
                 .options(joinedload(BugTracking.dispatched_to))
                 .filter(
-                    BugTracking.zentao_linked_case_id.isnot(None),
-                    BugTracking.major_version_id.in_(major_ids),
+                    BugTracking.zentao_linked_case_id.in_(
+                        _case_key_sql_variants(all_mirror_case_keys)
+                    ),
                     BugTracking.zentao_deleted.isnot(True),
                 )
                 .all()
@@ -195,7 +215,6 @@ class WorkbenchLinkService:
         exclude_case_view: dict[int, list[dict[str, Any]]] | None = None,
     ) -> tuple[dict[int, list[dict[str, Any]]], dict[int, list[dict[str, Any]]]]:
         req_ids = [req.id for req in reqs]
-        major_ids = [req.major_version_id for req in reqs]
         story_ids = [int(req.zentao_story_id) for req in reqs if req.zentao_story_id]
 
         local_query = (
@@ -235,13 +254,13 @@ class WorkbenchLinkService:
         if all_mirror_keys:
             story_filter_terms.append(BugTracking.zentao_linked_case_id.in_(_case_key_sql_variants(all_mirror_keys)))
 
-        if story_filter_terms and major_ids:
+        # 不按大版本过滤：跨大版本的同需求 Bug 一并归集，前端加来源徽章。
+        if story_filter_terms:
             story_query = (
                 self.db.query(BugTracking)
                 .options(joinedload(BugTracking.dispatched_to))
                 .filter(
                     or_(*story_filter_terms),
-                    BugTracking.major_version_id.in_(major_ids),
                     BugTracking.zentao_deleted.isnot(True),
                 )
             )
@@ -322,7 +341,6 @@ class WorkbenchLinkService:
         if not reqs:
             return {}
 
-        major_ids = [req.major_version_id for req in reqs if req.major_version_id]
         story_ids = [int(req.zentao_story_id) for req in reqs if req.zentao_story_id]
 
         # Same story → mirror keys map as in build_requirement_free_bug_view.
@@ -348,15 +366,15 @@ class WorkbenchLinkService:
         if all_mirror_keys:
             story_filter_terms.append(BugTracking.zentao_linked_case_id.in_(_case_key_sql_variants(all_mirror_keys)))
 
-        if not (story_filter_terms and major_ids):
+        if not story_filter_terms:
             return {req.id: [] for req in reqs}
 
+        # 不按大版本过滤：跨大版本的同需求 Bug 也纳入测后归集证据。
         candidate_rows = (
             self.db.query(BugTracking)
             .options(joinedload(BugTracking.dispatched_to))
             .filter(
                 or_(*story_filter_terms),
-                BugTracking.major_version_id.in_(major_ids),
                 BugTracking.zentao_deleted.isnot(True),
             )
             .all()
