@@ -35,7 +35,18 @@ class BugTracking(Base):
     created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     dispatched_to_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     closed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # 旧「标记未修好」勾选（2026-07 复测结论改版后仅保留历史数据，只读不再使用）
     is_retest_failed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # ── 复测问题留痕（2026-07 复测结论改版）───────────────────────
+    # 复测激活：复测人在复测工作台真实激活了禅道 Bug，本地记录激活人/时间/
+    # 所属需求，作为「复测发现未修好」的依据。
+    retest_activated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    retest_activated_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    retest_activated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    retest_activated_req_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    # 取消复测结论（误报）：勾选后该 Bug 不再作为复测问题参与结论判定
+    retest_dismissed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    retest_dismissed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     zentao_bug_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
     zentao_bug_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     zentao_client_record_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
@@ -99,6 +110,7 @@ class BugTracking(Base):
     requirement = relationship("Requirement", back_populates="bug_tracks")
     major_version = relationship("Version", back_populates="bugs", foreign_keys=[major_version_id])
     dispatched_to = relationship("User", foreign_keys=[dispatched_to_id])
+    retest_activated_by = relationship("User", foreign_keys=[retest_activated_by_id])
     stage5_records = relationship("BugStage5Record", back_populates="bug", cascade="all, delete-orphan")
 
 

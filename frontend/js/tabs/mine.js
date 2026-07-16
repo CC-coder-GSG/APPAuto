@@ -98,10 +98,15 @@ function renderStoryTaskChips(tasks, domScope, reqId) {
     const tone = TASK_CHIP_TONE[t.status] || TASK_CHIP_TONE.wait;
     const struck = t.status === 'cancel' || t.status === 'closed' ? ' qa-task-chip--closed' : '';
     const assignee = t.assigned_to_name ? `<span class="qa-task-chip-assignee">👤${escapeHtml(t.assigned_to_name)}</span>` : '';
-    const tip = `任务 #${t.task_id}【${tone.zh}】${t.name || ''}${t.assigned_to_name ? ' · 当前指派：' + t.assigned_to_name : ''}（点击预览）`;
+    // 完成者单独展示：任务完成后 assignedTo 常已流转给下一环节的人
+    const finisher = t.finished_by_name ? `<span class="qa-task-chip-assignee">✔${escapeHtml(t.finished_by_name)}完成</span>` : '';
+    const tip = `任务 #${t.task_id}【${tone.zh}】${t.name || ''}`
+      + (t.assigned_to_name ? ` · 当前指派：${t.assigned_to_name}` : '')
+      + (t.finished_by_name ? ` · 由 ${t.finished_by_name} 完成` : '')
+      + '（点击预览）';
     return `<span class="qa-task-chip${struck}" style="background:${tone.bg}; color:${tone.fg}; border-color:${tone.bd};" title="${escapeHtml(tip)}"
       onclick="event.preventDefault(); event.stopPropagation(); window.OmniQAPreview && window.OmniQAPreview.openTask(${t.task_id})">
-      ⚙#${t.task_id}<span class="qa-task-chip-title">${escapeHtml(t.name || '')}</span>${assignee}<span class="qa-task-chip-status">${tone.zh}</span></span>`;
+      ⚙#${t.task_id}<span class="qa-task-chip-title">${escapeHtml(t.name || '')}</span>${assignee}${finisher}<span class="qa-task-chip-status">${tone.zh}</span></span>`;
   };
   const head = tasks.slice(0, MAX_INLINE).map(chip).join('');
   const rest = tasks.slice(MAX_INLINE);
@@ -256,9 +261,16 @@ function renderBugChip(req, bug) {
     ? '<span title="已闭环" style="color:#16a34a; margin-left:4px;">✅</span>'
     : '';
   const resultBtn = `<a href="javascript:void(0)" title="修复结果 / 闭环确认" onclick="openBugResultModal(${bug.id}, '${bug.bug_id}', ${bug.closed ? 'true' : 'false'}, '${bug.zentao_bug_id || ''}')" style="color:#16a34a; margin-left:6px; text-decoration:none;">🛠️</a>`;
+  // 复测问题标记（原测试人视角）：激活 → 复测发现未修好；测后归集 → 复测新发现的问题
+  const retestProblemBadge = bug.retest_problem
+    ? `<span style="background:#dc2626; color:#fff; padding:1px 6px; border-radius:4px; font-size:11px; font-weight:700; margin-left:4px;">${bug.retest_problem_kind === 'activated' ? '🔄复测发现未修好' : '🆕复测新发现的问题'}${bug.retest_activated_by_name ? '·' + escapeHtml(bug.retest_activated_by_name) : ''}</span>`
+    : '';
+  const chipTone = bug.retest_problem
+    ? 'background:#fef2f2; border:1.5px solid #ef4444;'
+    : 'background:#f1f5f9; border:1px solid #cbd5e1;';
 
-  return `<span class="badge" style="background:#f1f5f9; border:1px solid #cbd5e1; padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
-      ${renderBugLink(bug)} ${ztSlot} ${previewBugBtn} ${verText} ${crossMajorBadge} ${dBadge} ${autoBadge}${renderZentaoCheckBadge(bug)}${closedHint}
+  return `<span class="badge" style="${chipTone} padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
+      ${renderBugLink(bug)} ${ztSlot} ${previewBugBtn} ${verText} ${crossMajorBadge} ${dBadge} ${autoBadge}${renderZentaoCheckBadge(bug)}${retestProblemBadge}${closedHint}
       ${resultBtn}
       <a href="javascript:void(0)" title="编辑" onclick="${immutable ? 'return false;' : `editWorkbenchBug(${bug.id}, '${bug.bug_id}')`}" style="color:${immutable ? '#94a3b8' : '#3b82f6'}; margin-left:4px; text-decoration:none;">✎</a>
       <a href="javascript:void(0)" title="删除" onclick="${immutable ? 'return false;' : `removeWorkbenchBug(${bug.id})`}" style="color:${immutable ? '#94a3b8' : '#ef4444'}; margin-left:2px; text-decoration:none;">×</a>
@@ -1050,11 +1062,17 @@ export function renderMineCards() {
       ? `<span class="qa-story-id-nohref" data-zt-story-id="${ztStoryId}">${req.zentao_req_id}</span>`
       : (req.zentao_req_id || '');
     const previewBtn = renderPreviewBtn('story', ztStoryId);
+    // 复测出现问题：标题旁醒目文本 + 整卡红框（对所有能看到该需求卡片的人展示）
+    const retestFailed = req.retest_conclusion === 'failed';
+    const retestFailTag = retestFailed
+      ? '<span style="background:#dc2626; color:#fff; padding:2px 8px; border-radius:6px; font-size:12px; font-weight:700; margin-left:8px; white-space:nowrap; vertical-align:middle;">🚨此需求复测出现未发现的问题</span>'
+      : '';
+    const retestFailBorder = retestFailed ? 'border:2px solid #ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.12);' : '';
 
     return `
-      <details class="mine-req-card" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; transition: all 0.3s;">
+      <details class="mine-req-card" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; ${retestFailBorder} transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
-          <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${ztStorySlot}${previewBtn}${aiResultSlot}${renderStoryTaskChips(req.story_tasks, 'mine', req.id)}</div>
+          <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${renderStoryTaskChips(req.story_tasks, 'mine', req.id)}</div>
           ${isFullyCompleted ? '<span style="color:#16a34a; font-size:14px; background:#f0fdf4; padding:4px 8px; border-radius:4px; border:1px solid #bbf7d0;">✅ 测试已完成</span>' : '<span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开卡片)</span>'}
         </summary>
         <div style="margin-top: 12px;">

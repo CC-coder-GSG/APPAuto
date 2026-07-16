@@ -42,10 +42,15 @@ function renderStoryTaskChips(tasks, domScope, reqId) {
     const tone = TASK_CHIP_TONE[t.status] || TASK_CHIP_TONE.wait;
     const struck = t.status === 'cancel' || t.status === 'closed' ? ' qa-task-chip--closed' : '';
     const assignee = t.assigned_to_name ? `<span class="qa-task-chip-assignee">👤${escapeHtml(t.assigned_to_name)}</span>` : '';
-    const tip = `任务 #${t.task_id}【${tone.zh}】${t.name || ''}${t.assigned_to_name ? ' · 当前指派：' + t.assigned_to_name : ''}（点击预览）`;
+    // 完成者单独展示：任务完成后 assignedTo 常已流转给下一环节的人
+    const finisher = t.finished_by_name ? `<span class="qa-task-chip-assignee">✔${escapeHtml(t.finished_by_name)}完成</span>` : '';
+    const tip = `任务 #${t.task_id}【${tone.zh}】${t.name || ''}`
+      + (t.assigned_to_name ? ` · 当前指派：${t.assigned_to_name}` : '')
+      + (t.finished_by_name ? ` · 由 ${t.finished_by_name} 完成` : '')
+      + '（点击预览）';
     return `<span class="qa-task-chip${struck}" style="background:${tone.bg}; color:${tone.fg}; border-color:${tone.bd};" title="${escapeHtml(tip)}"
       onclick="event.preventDefault(); event.stopPropagation(); window.OmniQAPreview && window.OmniQAPreview.openTask(${t.task_id})">
-      ⚙#${t.task_id}<span class="qa-task-chip-title">${escapeHtml(t.name || '')}</span>${assignee}<span class="qa-task-chip-status">${tone.zh}</span></span>`;
+      ⚙#${t.task_id}<span class="qa-task-chip-title">${escapeHtml(t.name || '')}</span>${assignee}${finisher}<span class="qa-task-chip-status">${tone.zh}</span></span>`;
   };
   const head = tasks.slice(0, MAX_INLINE).map(chip).join('');
   const rest = tasks.slice(MAX_INLINE);
@@ -180,16 +185,43 @@ export async function loadRetest() {
   }
 
   container.innerHTML = data.map((req) => {
-    let evidenceCount = 0;
+    // 复测结论（后端统一判定）：pending 未处理 / failed 复测出现问题 / passed 复测通过
+    const conclusion = req.retest_conclusion || 'pending';
+    const activeProblems = Number(req.retest_active_problem_count || 0);
+
+    // 复测问题相关的行内控件：问题徽章（着重色）+「取消复测结论」误报勾选 +
+    // 旧 Bug 的「激活」入口（走禅道真实激活弹窗，成功后记录复测激活留痕）
+    const problemBits = (b) => {
+      const bits = [];
+      const ztNumeric = (b.bug_id || '').replace(/\D/g, '') || String(b.zentao_bug_id || '').replace(/\D/g, '');
+      if (b.retest_problem_kind) {
+        if (b.retest_problem) {
+          bits.push('<span style="background:#dc2626; color:#fff; padding:1px 6px; border-radius:4px; font-size:11px; font-weight:700;">🚨复测出现的bug</span>');
+          if (b.retest_problem_kind === 'activated') {
+            bits.push(`<span style="background:#fee2e2; color:#b91c1c; border:1px solid #ef4444; padding:1px 6px; border-radius:4px; font-size:11px; font-weight:700;">🔄复测激活bug${b.retest_activated_by_name ? '·' + escapeHtml(b.retest_activated_by_name) : ''}</span>`);
+          }
+        } else {
+          bits.push('<span style="background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0; padding:1px 6px; border-radius:4px; font-size:11px;">已标记误报</span>');
+        }
+        bits.push(`<label style="font-size:12px; color:#64748b; display:flex; align-items:center; gap:4px; margin:0;" title="勾选表示该问题属误发现，不计入复测结论"><input type="checkbox" ${b.retest_dismissed ? 'checked' : ''} onchange="window.OmniQARetestTab.retestDismissBug(${b.id}, ${req.id}, this.checked)"> 取消复测结论</label>`);
+      } else if (!b.retest_activated && ztNumeric) {
+        bits.push(`<button class="secondary" style="padding:1px 8px; font-size:12px; color:#b91c1c; border-color:#fecaca;" title="在禅道中重新激活该 Bug，并记录为复测发现未修好" onclick="window.OmniQARetestTab.retestActivateBug(${b.id}, ${ztNumeric}, ${req.id})">🔄激活</button>`);
+      }
+      return bits.join('');
+    };
+    // 问题 Bug 整条着重显示
+    const problemStyle = (b, base) => (b.retest_problem
+      ? 'background:#fef2f2; color:#b91c1c; border:1.5px solid #ef4444; font-weight:700; padding: 2px 6px;'
+      : base);
+
     const caseHtml = (req.test_cases || []).map((c) => {
       const bugs = (c.bugs || []).map((b) => {
-        if (b.is_retest_failed) evidenceCount++;
         const ztBugId = (b.bug_id || '').replace(/\D/g, '');
         const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
         const linkedBadge = b.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
         return `<div style="margin-top:4px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-          <span class="badge" style="background:#fef2f2; color:#dc2626; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${renderCrossMajorBadge(req, b)}${linkedBadge}${renderZentaoCheckBadge(b)}
-          <label style="font-size:12px; color:#b91c1c; display:flex; align-items:center; gap:4px; margin:0;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
+          <span class="badge" style="${problemStyle(b, 'background:#fef2f2; color:#dc2626; padding: 2px 6px;')}">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${renderCrossMajorBadge(req, b)}${linkedBadge}${renderZentaoCheckBadge(b)}
+          ${problemBits(b)}
         </div>`;
       }).join('');
       const caseZtId = String(c.zentao_case_id || '').replace(/\D/g, '');
@@ -200,51 +232,50 @@ export async function loadRetest() {
     }).join('');
 
     const freeBugHtml = (req.free_bugs || []).map((b) => {
-      if (b.is_retest_failed) evidenceCount++;
       const ztBugId = (b.bug_id || '').replace(/\D/g, '');
       const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
       const linkedBadge = b.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
       return `<div style="margin-bottom:6px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-      <span class="badge" style="background:#fff7ed; color:#ea580c; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${renderCrossMajorBadge(req, b)}${linkedBadge}${renderZentaoCheckBadge(b)}
-      <label style="font-size:12px; color:#b91c1c; display:flex; align-items:center; gap:4px; margin:0;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
+      <span class="badge" style="${problemStyle(b, 'background:#fff7ed; color:#ea580c; padding: 2px 6px;')}">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${renderCrossMajorBadge(req, b)}${linkedBadge}${renderZentaoCheckBadge(b)}
+      ${problemBits(b)}
     </div>`;
     }).join('');
 
-    // 复测新增漏测 Bug 已改为由禅道自动归集，不再单独展示/手工录入，
-    // 但历史 retest_bugs 仍作为打回证据参与计数。
-    (req.retest_bugs || []).forEach((b) => {
-      if (!b.closed) evidenceCount++;
-    });
-
     const evidenceBugs = req.retest_evidence_bugs || [];
-    // 仅"未闭环"的测后归集 Bug 才算作打回证据 / 阻止通过的依据（与后端口径一致）
-    evidenceCount += evidenceBugs.filter((b) => !b.closed).length;
     const evidenceBugHtml = evidenceBugs.map((b) => {
       const ztBugId = (b.bug_id || '').replace(/\D/g, '');
       const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
       const closedTag = b.closed
         ? '<span class="badge" style="background:#dcfce7; color:#166534; margin-left:6px; padding:1px 6px;">✅已闭环</span>'
         : '<span class="badge" style="background:#fef9c3; color:#854d0e; margin-left:6px; padding:1px 6px;">⏳未闭环</span>';
-      return `<div style="margin-bottom:6px;">
-      <span class="badge" style="background:#fff7ed; color:#c2410c; margin-right:4px; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(测后自动归集)</span></span>${renderCrossMajorBadge(req, b)}${closedTag}${renderAutoLinkedBadge('自动归集Bug')}
+      return `<div style="margin-bottom:6px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
+      <span class="badge" style="${problemStyle(b, 'background:#fff7ed; color:#c2410c; padding: 2px 6px;')}">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(测后自动归集${b.zentao_opened_by_name ? '·' + escapeHtml(b.zentao_opened_by_name) + '提出' : ''})</span></span>${renderCrossMajorBadge(req, b)}${closedTag}${renderAutoLinkedBadge('自动归集Bug')}
+      ${problemBits(b)}
     </div>`;
     }).join('');
 
-    const hasEvidence = evidenceCount > 0;
-    // 复测状态按用户独立：只看"我自己"是否复测过
+    // 需求级结论标签（全员可见）
+    const conclusionTag = conclusion === 'failed'
+      ? '<span class="badge" style="background:#dc2626; color:#fff; border:1.5px solid #b91c1c; font-weight:700;">🚨复测出现问题</span>'
+      : conclusion === 'passed'
+        ? '<span class="badge" style="background:#dcfce7; color:#166534; border:1px solid #bbf7d0;">✅复测通过</span>'
+        : '<span class="badge" style="background:#f1f5f9; color:#64748b; border:1px solid #e2e8f0;">未处理</span>';
+    // 我的显式结论（点过通过才有；历史打回记录保留展示）
     const isCompleted = req.my_retest_completed;
-    const statusTag = isCompleted
-      ? (req.my_retest_passed ? '<span class="badge" style="background:#dcfce7;color:#166534;">✅我已通过</span>' : '<span class="badge" style="background:#fee2e2;color:#b91c1c;">❌我已打回</span>')
-      : '<span class="badge">未提交复测结论</span>';
-    // 已复测人标签：列出所有提交过复测结论的人及其结论
+    const myTag = isCompleted
+      ? (req.my_retest_passed ? '<span class="badge" style="background:#dcfce7;color:#166534;">✅我已通过</span>' : '<span class="badge" style="background:#fee2e2;color:#b91c1c;">❌我已打回(历史)</span>')
+      : '';
+    // 所有复测人的结论：显式记录 + 问题归属人（某人激活/提出 Bug → 某人复测未通过）
     const retestRecordsHtml = (req.retest_records || []).map((rec) => {
       const tone = rec.passed
         ? 'background:#dcfce7;color:#166534;border:1px solid #bbf7d0;'
         : 'background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;';
       return `<span class="badge" style="${tone} margin-left:4px;">${rec.passed ? '✅' : '❌'} ${rec.user_name}${rec.is_me ? '（我）' : ''}</span>`;
     }).join('');
-    const retestRecordsBar = retestRecordsHtml
-      ? `<span style="margin-left:8px; font-size:12px; color:#64748b;">已复测:</span>${retestRecordsHtml}`
+    const failActorHtml = (req.retest_fail_actors || []).map((n) =>
+      `<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #ef4444; font-weight:600; margin-left:4px;">❌ ${escapeHtml(n)} 复测未通过</span>`).join('');
+    const retestRecordsBar = (retestRecordsHtml || failActorHtml)
+      ? `<span style="margin-left:8px; font-size:12px; color:#64748b;">复测结论:</span>${retestRecordsHtml}${failActorHtml}`
       : '';
 
     // 需求标题：禅道需求号渲染为可跳转的蓝色链接（由 hydrator 升级），并附预览按钮（对齐需求/测试工作台）
@@ -267,20 +298,26 @@ export async function loadRetest() {
         </div>`
       : '<div class="muted" style="margin-bottom:12px; font-size:12px;">📝 原测试人未填写测试要点</div>';
 
+    // 出现问题的卡片保持展开并红框醒目；通过的折叠置灰
+    const cardOpen = conclusion === 'failed' || !isCompleted;
+    const cardBorder = conclusion === 'failed'
+      ? 'border: 2px solid #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,.12);'
+      : 'border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05);';
     return `
-      <details class="card retest-req-card" data-req-id="${req.id}" ${isCompleted ? '' : 'open'} ontoggle="window.scheduleWorkbenchViewportResize?.()" style="border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px; background: ${isCompleted ? '#f8fafc' : '#fff'}; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: all 0.3s;">
-        <summary style="outline:none; cursor:pointer; list-style:none; display: flex; justify-content: space-between; align-items: center; border-bottom: ${isCompleted ? 'none' : '1px dashed #cbd5e1'}; padding-bottom: ${isCompleted ? '0' : '12px'}; margin-bottom: ${isCompleted ? '0' : '12px'};">
+      <details class="card retest-req-card" data-req-id="${req.id}" ${cardOpen ? 'open' : ''} ontoggle="window.scheduleWorkbenchViewportResize?.()" style="${cardBorder} border-radius: 8px; margin-bottom: 16px; background: ${conclusion === 'passed' ? '#f8fafc' : '#fff'}; transition: all 0.3s;">
+        <summary style="outline:none; cursor:pointer; list-style:none; display: flex; justify-content: space-between; align-items: center; border-bottom: ${cardOpen ? '1px dashed #cbd5e1' : 'none'}; padding-bottom: ${cardOpen ? '12px' : '0'}; margin-bottom: ${cardOpen ? '12px' : '0'};">
           <div style="flex:1; min-width:0;">
-            <span style="font-size: 16px; font-weight: bold; color: ${isCompleted ? '#94a3b8; text-decoration:line-through;' : '#0f172a'};">📄 ${reqIdHtml} ${req.title}</span>${ztStorySlot}${previewBtn}
+            <span style="font-size: 16px; font-weight: bold; color: ${conclusion === 'passed' ? '#94a3b8; text-decoration:line-through;' : '#0f172a'};">📄 ${reqIdHtml} ${req.title}</span>${ztStorySlot}${previewBtn}
+            <span style="margin-left:8px;">${conclusionTag}</span>
             ${mode === 'all_pending' ? `<span class="badge" style="margin-left:8px; background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd;">🏷️${req.major_version_name || '未知版本'}</span>` : ''}
             <span class="badge" style="margin-left: 12px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;">👤 原测试人: ${req.owner || '未知'}</span>
             ${req.auto_linked_case_count > 0 ? renderAutoLinkedBadge(`自动归集用例 ${req.auto_linked_case_count}`) : ''}
-            <span style="margin-left:8px;">${statusTag}</span>
+            ${myTag ? `<span style="margin-left:8px;">${myTag}</span>` : ''}
             ${retestRecordsBar}
             ${renderStoryTaskChips(req.story_tasks, 'retest', req.id)}
           </div>
-          <div onclick="event.stopPropagation()"><button style="background:#16a34a;" onclick='setRetest(${req.id}, true, ${hasEvidence})'>✅通过</button>
-            <button class="danger" onclick='setRetest(${req.id}, false, ${hasEvidence})'>❌打回</button>
+          <div onclick="event.stopPropagation()">
+            <button style="background:${activeProblems > 0 ? '#94a3b8' : '#16a34a'};" title="${activeProblems > 0 ? '存在复测问题 Bug，无法通过；若属误报请先勾选「取消复测结论」' : '确认该需求复测通过'}" onclick='setRetest(${req.id}, true, ${activeProblems})'>✅通过</button>
           </div>
         </summary>
 
@@ -315,13 +352,9 @@ export async function loadRetest() {
   window.OmniQAZentao?.hydrateContainer(container);
 }
 
-export async function setRetest(id, passed, hasEvidence) {
-  if (passed && hasEvidence) {
-    window.showMessage && window.showMessage('逻辑冲突：该需求存在未修好的Bug或新增漏测Bug，绝对无法标记为【通过】！', 'error');
-    return;
-  }
-  if (!passed && !hasEvidence) {
-    window.showMessage && window.showMessage('空口无凭：请至少勾选一个未修好的旧Bug，或新增一个漏测Bug作为打回证据！', 'error');
+export async function setRetest(id, passed, activeProblemCount) {
+  if (Number(activeProblemCount || 0) > 0) {
+    window.showMessage && window.showMessage('无法通过：该需求存在复测激活/新归集的问题 Bug。若确认属误报，请先勾选对应 Bug 的「取消复测结论」。', 'error');
     return;
   }
   const minorId = Number(document.getElementById('retestMinorSelect')?.value || 0);
@@ -330,17 +363,42 @@ export async function setRetest(id, passed, hasEvidence) {
     return;
   }
   try {
-    await api(`/requirements/${id}/retest`, { method: 'PUT', headers: window.H, body: { retest_completed: true, retest_passed: passed, retest_minor_version_id: minorId } });
-    window.showMessage && window.showMessage(passed ? '🎉 复测结果已标记为通过' : '🚨 已打回给原测试人', 'success');
+    await api(`/requirements/${id}/retest`, { method: 'PUT', headers: window.H, body: { retest_completed: true, retest_passed: true, retest_minor_version_id: minorId } });
+    window.showMessage && window.showMessage('🎉 复测结果已标记为通过', 'success');
     await loadRetest();
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '操作失败', 'error');
   }
 }
 
-export async function toggleBugFail(id, checked) {
-  await api(`/bugs/${id}/retest-fail`, { method: 'PATCH', headers: window.H, body: { is_retest_failed: checked } });
-  window.showMessage && window.showMessage(checked ? '已标记未修好' : '已取消未修好标记', 'success');
+// 复测激活：先走禅道真实激活弹窗（选指派人/版本/备注，带回读确认），
+// 成功后记录「复测激活」留痕 —— 该需求结论自动转为复测未通过。
+export async function retestActivateBug(bugId, ztBugId, reqId) {
+  const reactivate = window.OmniQAOverallTestTab?.openS5ReactivateModalAsync;
+  if (typeof reactivate !== 'function' || !ztBugId) {
+    window.showMessage && window.showMessage('该 Bug 未关联禅道或激活组件未加载，无法激活', 'error');
+    return;
+  }
+  const activated = await reactivate(bugId, ztBugId);
+  if (!activated) return; // 用户取消或禅道激活失败（弹窗内已提示）
+  try {
+    await api(`/bugs/${bugId}/retest-activated`, { method: 'PATCH', headers: window.H, body: { requirement_id: reqId } });
+    window.showMessage && window.showMessage('已激活并记录为复测问题，该需求转为复测未通过', 'success');
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '复测激活留痕失败', 'error');
+  }
+  await loadRetest();
+}
+
+// 取消复测结论（误报标记）：全部问题被标记误报后结论自动回到复测通过
+export async function retestDismissBug(bugId, reqId, checked) {
+  try {
+    const resp = await api(`/bugs/${bugId}/retest-dismiss`, { method: 'PATCH', headers: window.H, body: { requirement_id: reqId, dismissed: !!checked } });
+    const data = await resp.json();
+    window.showMessage && window.showMessage(data.message || '已更新', 'success');
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '操作失败', 'error');
+  }
   await loadRetest();
 }
 
@@ -354,7 +412,7 @@ export async function pushRetest() {
   window.showMessage && window.showMessage('复测结果已推送');
 }
 
-window.OmniQARetestTab = { loadRetest, toggleRetestMode, setRetest, toggleBugFail, pushRetest };
+window.OmniQARetestTab = { loadRetest, toggleRetestMode, setRetest, retestActivateBug, retestDismissBug, pushRetest };
 
 function bindRetestSSE() {
   if (retestSseBound) return;

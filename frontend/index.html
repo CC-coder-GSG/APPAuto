@@ -3306,12 +3306,8 @@ async function toggleRetestMode(){
   }
 }
 
-async function setRetest(id, passed, hasEvidence){
-  return window.OmniQARetestTab.setRetest(id, passed, hasEvidence);
-}
-
-async function toggleBugFail(id, checked){
-  return window.OmniQARetestTab.toggleBugFail(id, checked);
+async function setRetest(id, passed, activeProblemCount){
+  return window.OmniQARetestTab.setRetest(id, passed, activeProblemCount);
 }
 
 async function pushRetest(){

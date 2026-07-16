@@ -74,6 +74,12 @@ class WorkbenchLinkService:
             "zentao_deleted": bool(getattr(bug, "zentao_deleted", False)),
             "story_mismatch": story_mismatch,
             "zentao_story_id": bug.zentao_story_id,
+            # 复测问题留痕：激活人/误报标记/禅道提出人（复测结论判定用）
+            "retest_activated": bool(getattr(bug, "retest_activated", False)),
+            "retest_activated_by_name": bug.retest_activated_by.shown_name if getattr(bug, "retest_activated_by", None) else None,
+            "retest_dismissed": bool(getattr(bug, "retest_dismissed", False)),
+            "zentao_opened_by_account": bug.zentao_opened_by_account,
+            "zentao_opened_by_name": bug.zentao_opened_by_name,
             "id": bug.id,
             "bug_id": bug.bug_id,
             "zentao_bug_id": bug.zentao_bug_id,
@@ -416,6 +422,8 @@ class WorkbenchLinkService:
                         "status": task.status,
                         "type": task.type,
                         "assigned_to_name": task.assigned_to_realname or task.assigned_to or None,
+                        # 完成者单独给：任务完成后 assignedTo 常被流转给下一环节的人
+                        "finished_by_name": task.finished_by_realname or task.finished_by or None,
                     }
                 )
             items.sort(key=lambda x: (self._TASK_STATUS_ORDER.get(x["status"], 9), x["task_id"]))

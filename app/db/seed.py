@@ -333,6 +333,13 @@ def ensure_bug_schema_compat(db: Session) -> None:
         "zentao_opened_at": "DATETIME",
         "zentao_opened_by_account": "VARCHAR(100)",
         "zentao_opened_by_name": "VARCHAR(100)",
+        # 复测问题留痕（2026-07-16 复测结论改版）
+        "retest_activated": "BOOLEAN NOT NULL DEFAULT 0",
+        "retest_activated_by_id": "INTEGER",
+        "retest_activated_at": "DATETIME",
+        "retest_activated_req_id": "INTEGER",
+        "retest_dismissed": "BOOLEAN NOT NULL DEFAULT 0",
+        "retest_dismissed_by_id": "INTEGER",
     }
     for col, sql_type in column_defs.items():
         if col not in cols:

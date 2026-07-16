@@ -3,7 +3,6 @@
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import BugSourceType, BugTracking, Requirement, RequirementRetestRecord, User, Version, VersionType
@@ -124,49 +123,80 @@ class RetestService:
             for r in reqs
         ]
 
-    def _has_open_problem(self, req: Requirement) -> bool:
+    def compute_retest_problems(self, req: Requirement) -> list[dict]:
         """
-        该需求是否仍存在"未闭环的问题"——即可作为打回证据、且会阻止标记通过的依据。
+        该需求当前的「复测问题 Bug」清单（2026-07 改版后的唯一口径）：
 
-        统一口径（前后端一致）：
-        1. 被勾选「标记未修好」的旧 Bug（is_retest_failed）
-        2. 未闭环的 RETEST 来源 Bug
-        3. 未闭环的"测试完成后自动归集 Bug"（retest_evidence_bugs）
-        已闭环的 Bug 视为已修复，不再算作证据。
+        1. 复测激活：复测人在复测工作台真实激活了禅道 Bug（retest_activated，
+           按 retest_activated_req_id 归属需求）；
+        2. 测后归集：需求测试完成后禅道新增并归集到该需求的 Bug，且禅道
+           提出人 ≠ 原测试人（原测试人自己补录的不算复测问题）。
+
+        每项形如 {bug_db_id, kind: 'activated'|'collected', actor_name, dismissed}；
+        勾选「取消复测结论」（retest_dismissed）的问题保留在清单里但
+        dismissed=True，不参与结论判定。
         """
-        has_failed_old = (
-            self.db.query(BugTracking)
-            .filter(BugTracking.requirement_id == req.id, BugTracking.is_retest_failed.is_(True))
-            .first()
-        )
-        if has_failed_old:
-            return True
+        problems: list[dict] = []
+        seen: set[int] = set()
 
-        has_open_retest = (
+        activated_rows = (
             self.db.query(BugTracking)
+            .options(joinedload(BugTracking.retest_activated_by))
             .filter(
-                BugTracking.requirement_id == req.id,
-                BugTracking.source_type == BugSourceType.RETEST,
-                or_(BugTracking.closed.is_(False), BugTracking.closed.is_(None)),
+                BugTracking.retest_activated.is_(True),
+                BugTracking.retest_activated_req_id == req.id,
             )
-            .first()
+            .all()
         )
-        if has_open_retest:
-            return True
+        for bug in activated_rows:
+            problems.append(
+                {
+                    "bug_db_id": bug.id,
+                    "kind": "activated",
+                    "actor_name": bug.retest_activated_by.shown_name if bug.retest_activated_by else None,
+                    "dismissed": bool(bug.retest_dismissed),
+                }
+            )
+            seen.add(bug.id)
 
-        # 测后自动归集 Bug（禅道侧在需求测试完成后新增的、归属到该需求的 Bug）
+        # 测后归集问题：复用工作台的归集证据口径（测试完成时间之后禅道新增）
+        owner_account = ""
+        if req.owner and req.owner.zentao_account:
+            owner_account = req.owner.zentao_account.strip().lower()
         link = WorkbenchLinkService(self.db)
         minors = link.minor_version_name_map()
         evidence = link.build_retest_evidence([req], minors).get(req.id, [])
-        if any(not bug.get("closed") for bug in evidence):
-            return True
-        return False
+        for bug in evidence:
+            if bug["id"] in seen:
+                continue
+            opener = (bug.get("zentao_opened_by_account") or "").strip().lower()
+            # 提出人可确认是原测试人本人 → 不算复测问题；提出人未知时保守计入
+            #（误报有「取消复测结论」勾选兜底）
+            if owner_account and opener and opener == owner_account:
+                continue
+            problems.append(
+                {
+                    "bug_db_id": bug["id"],
+                    "kind": "collected",
+                    "actor_name": bug.get("zentao_opened_by_name"),
+                    "dismissed": bool(bug.get("retest_dismissed")),
+                }
+            )
+            seen.add(bug["id"])
+        return problems
 
-    def _recompute_aggregate(self, req: Requirement) -> None:
+    def compute_conclusion(self, req: Requirement, problems: list[dict] | None = None) -> str:
         """
-        基于剩余的 per-user 复测记录，刷新 Requirement 行上的共享聚合字段
-        （供需求状态机 / 报表 / 看板沿用）。取最新一条记录作为聚合结论。
+        需求级复测结论（三态）：
+        - failed ：存在未标记误报的复测问题（优先级最高，覆盖任何通过记录）
+        - passed ：无有效问题，且有人点过通过 / 或问题全部被标记误报
+        - pending：默认未处理
         """
+        if problems is None:
+            problems = self.compute_retest_problems(req)
+        active = [p for p in problems if not p["dismissed"]]
+        if active:
+            return "failed"
         records = (
             self.db.query(RequirementRetestRecord)
             .filter(RequirementRetestRecord.requirement_id == req.id)
@@ -174,12 +204,60 @@ class RetestService:
             .all()
         )
         if records:
-            latest = records[0]
+            # 历史打回记录（passed=False）保留原义
+            return "passed" if records[0].passed else "failed"
+        if problems:
+            return "passed"  # 出现过问题但全部被标记误报 → 视为通过
+        return "pending"
+
+    def _recompute_aggregate(self, req: Requirement) -> None:
+        """
+        刷新 Requirement 行上的共享聚合字段（供需求状态机 / 报表 / 看板沿用）。
+
+        改版后的优先级：有效复测问题 > 复测记录 > 全误报视为通过 > 未处理。
+        「先通过后激活/归集到 Bug」的自动降级由此天然成立——聚合每次都按
+        当前问题清单重算，通过记录仍保留但结论被问题覆盖。
+        """
+        problems = self.compute_retest_problems(req)
+        active = [p for p in problems if not p["dismissed"]]
+        records = (
+            self.db.query(RequirementRetestRecord)
+            .filter(RequirementRetestRecord.requirement_id == req.id)
+            .order_by(RequirementRetestRecord.updated_at.desc(), RequirementRetestRecord.id.desc())
+            .all()
+        )
+        latest = records[0] if records else None
+        if active:
+            # 复测未通过：任何人的问题都覆盖通过结论
+            activated_by = next(
+                (
+                    bug.retest_activated_by_id
+                    for bug in self.db.query(BugTracking)
+                    .filter(BugTracking.id.in_([p["bug_db_id"] for p in active if p["kind"] == "activated"]))
+                    .order_by(BugTracking.retest_activated_at.desc())
+                    .all()
+                    if bug.retest_activated_by_id
+                ),
+                None,
+            ) if any(p["kind"] == "activated" for p in active) else None
+            req.retest_completed = True
+            req.retest_passed = False
+            req.retest_minor_version_id = latest.minor_version_id if latest else None
+            req.retested_by_id = activated_by or (latest.user_id if latest else None)
+            req.retested_at = local_now()
+        elif latest:
             req.retest_completed = True
             req.retest_passed = bool(latest.passed)
             req.retest_minor_version_id = latest.minor_version_id
             req.retested_by_id = latest.user_id
             req.retested_at = latest.updated_at or local_now()
+        elif problems:
+            # 出现过问题但全部被标记误报 → 系统判定通过
+            req.retest_completed = True
+            req.retest_passed = True
+            req.retest_minor_version_id = None
+            req.retested_by_id = None
+            req.retested_at = local_now()
         else:
             req.retest_completed = False
             req.retest_passed = None
@@ -196,21 +274,30 @@ class RetestService:
         retest_minor_version_id: int | None,
         current_user: User,
     ) -> dict:
-        req = self.db.query(Requirement).filter(Requirement.id == requirement_id).first()
+        req = (
+            self.db.query(Requirement)
+            .options(joinedload(Requirement.owner))
+            .filter(Requirement.id == requirement_id)
+            .first()
+        )
         if not req:
             raise HTTPException(status_code=404, detail="Requirement not found")
         if req.owner_id == current_user.id:
             raise HTTPException(status_code=403, detail="Self-tested requirement cannot be cross-retested by self")
 
+        # 2026-07 改版：打回按钮已下线，复测问题只通过「激活 Bug / 测后归集」记录
         if retest_completed and retest_passed is False:
-            if not self._has_open_problem(req):
-                raise HTTPException(status_code=400, detail="打回无效：请至少勾选一个未修好的旧 Bug，或存在未闭环的复测/漏测 Bug 作为证据！")
+            raise HTTPException(
+                status_code=400,
+                detail="「打回」已下线：复测发现问题请直接激活对应禅道 Bug（或等待系统归集新 Bug），结论会自动判定为复测未通过。",
+            )
 
         if retest_completed and retest_passed is True:
-            if self._has_open_problem(req):
+            problems = self.compute_retest_problems(req)
+            if any(not p["dismissed"] for p in problems):
                 raise HTTPException(
                     status_code=400,
-                    detail="无法标记通过：该需求仍存在未修好的旧 Bug，或未闭环的复测/测后归集 Bug，请先处理后再标记通过。",
+                    detail="无法标记通过：该需求存在复测激活 / 新归集的问题 Bug。若确认属误报，请先勾选对应 Bug 的「取消复测结论」。",
                 )
 
         # 写入"当前用户"的复测记录（per-user），不再直接共享给所有人
@@ -245,37 +332,140 @@ class RetestService:
                 "retest_completed": retest_completed,
                 "retest_passed": retest_passed if retest_completed else None,
                 "retested_by_id": current_user.id if retest_completed else None,
+                "retest_conclusion": self.compute_conclusion(req),
             },
             channels=["global"],
         )
         return {"message": "Retest status updated"}
 
+    def _get_bug_and_requirement(self, bug_id: int, requirement_id: int) -> tuple[BugTracking, Requirement]:
+        bug = self.db.query(BugTracking).filter(BugTracking.id == bug_id).first()
+        if not bug:
+            raise HTTPException(status_code=404, detail="Bug not found")
+        req = (
+            self.db.query(Requirement)
+            .options(joinedload(Requirement.owner))
+            .filter(Requirement.id == requirement_id)
+            .first()
+        )
+        if not req:
+            raise HTTPException(status_code=404, detail="Requirement not found")
+        return bug, req
+
+    def mark_bug_activated(self, bug_id: int, requirement_id: int, current_user: User) -> dict:
+        """
+        复测激活留痕：前端先走禅道真实激活链路（/zentao/bugs/{id}/active，
+        带回读确认），成功后调本接口记录「复测激活」——该 Bug 即成为复测
+        问题，需求结论自动转为复测未通过。
+        """
+        bug, req = self._get_bug_and_requirement(bug_id, requirement_id)
+        bug.retest_activated = True
+        bug.retest_activated_by_id = current_user.id
+        bug.retest_activated_at = local_now()
+        bug.retest_activated_req_id = req.id
+        bug.retest_dismissed = False
+        bug.retest_dismissed_by_id = None
+        bug.closed = False  # 禅道已激活，本地闭环状态同步复位
+        self.db.flush()  # 重算前先落盘：问题清单靠查询判定
+        self._recompute_aggregate(req)
+        self.db.commit()
+        audit(
+            self.db, action="retest.bug_activated", target_type="bug",
+            actor_id=current_user.id, target_id=str(bug.id),
+            detail=f"requirement_id={req.id},zentao_bug_id={bug.zentao_bug_id or ''}",
+        )
+        conclusion = self.compute_conclusion(req)
+        sse_publish(
+            "retest_requirement_status_changed",
+            {"requirement_id": req.id, "retest_conclusion": conclusion, "retest_passed": req.retest_passed},
+            channels=["global"],
+        )
+        return {"message": "已记录复测激活，该需求结论转为复测未通过", "retest_conclusion": conclusion}
+
+    def toggle_bug_dismissed(self, bug_id: int, requirement_id: int, dismissed: bool, current_user: User) -> dict:
+        """勾选/取消「取消复测结论」（误报标记）：全部问题被标记误报时结论回到复测通过。"""
+        bug, req = self._get_bug_and_requirement(bug_id, requirement_id)
+        bug.retest_dismissed = bool(dismissed)
+        bug.retest_dismissed_by_id = current_user.id if dismissed else None
+        self.db.flush()  # 重算前先落盘：问题清单靠查询判定
+        self._recompute_aggregate(req)
+        self.db.commit()
+        audit(
+            self.db, action="retest.bug_dismissed", target_type="bug",
+            actor_id=current_user.id, target_id=str(bug.id),
+            detail=f"requirement_id={req.id},dismissed={bool(dismissed)}",
+        )
+        conclusion = self.compute_conclusion(req)
+        sse_publish(
+            "retest_requirement_status_changed",
+            {"requirement_id": req.id, "retest_conclusion": conclusion, "retest_passed": req.retest_passed},
+            channels=["global"],
+        )
+        return {
+            "message": "已标记误报，不再计入复测问题" if dismissed else "已恢复为复测问题",
+            "retest_conclusion": conclusion,
+        }
+
     def build_retest_push_message(self, major_version_id: int, current_user: User) -> tuple[str, int]:
-        # 基于"当前用户自己"的 per-user 复测记录汇总（不再读共享聚合字段）
-        records = (
-            self.db.query(RequirementRetestRecord)
-            .join(Requirement, RequirementRetestRecord.requirement_id == Requirement.id)
-            .options(
-                joinedload(RequirementRetestRecord.requirement).joinedload(Requirement.owner),
-                joinedload(RequirementRetestRecord.minor_version),
-            )
+        """
+        复测结果通报（2026-07 改版）：按**需求级结论**汇总该大版本全部已测试
+        完成的需求，与工作台展示同口径——未处理的不进通报；未通过的列出
+        问题构成（复测激活/测后归集 + 责任人）；通过的列出复测人。
+        """
+        reqs = (
+            self.db.query(Requirement)
+            .options(joinedload(Requirement.owner))
             .filter(
                 Requirement.major_version_id == major_version_id,
-                RequirementRetestRecord.user_id == current_user.id,
+                Requirement.test_completed.is_(True),
             )
+            .order_by(Requirement.id.asc())
             .all()
         )
-        if not records:
-            raise HTTPException(status_code=400, detail="No retested requirements by current user")
+        req_ids = [r.id for r in reqs]
+        records_by_req: dict[int, list[RequirementRetestRecord]] = {}
+        if req_ids:
+            for rec in (
+                self.db.query(RequirementRetestRecord)
+                .options(joinedload(RequirementRetestRecord.user), joinedload(RequirementRetestRecord.minor_version))
+                .filter(RequirementRetestRecord.requirement_id.in_(req_ids))
+                .order_by(RequirementRetestRecord.updated_at.asc(), RequirementRetestRecord.id.asc())
+                .all()
+            ):
+                records_by_req.setdefault(rec.requirement_id, []).append(rec)
 
-        msg_lines = [f"### 复测结果专项通报 (复测人: @{current_user.shown_name})"]
-        for rec in records:
-            req = rec.requirement
-            owner_name = req.owner.shown_name if req and req.owner else "未知"
-            minor_ver = rec.minor_version.version_no if rec.minor_version else "未知"
-            if rec.passed:
-                msg_lines.append(f"> ✅ **[通过]** {req.zentao_req_id} (原测试: @{owner_name} | 验证发包: {minor_ver})")
+        msg_lines = [f"### 复测结果专项通报 (发起人: @{current_user.shown_name})"]
+        count = 0
+        for req in reqs:
+            problems = self.compute_retest_problems(req)
+            conclusion = self.compute_conclusion(req, problems)
+            if conclusion == "pending":
+                continue
+            count += 1
+            owner_name = req.owner.shown_name if req.owner else "未知"
+            recs = records_by_req.get(req.id, [])
+            if conclusion == "passed":
+                retesters = "/".join(dict.fromkeys(f"@{r.user.shown_name}" for r in recs if r.user)) or "系统判定(问题全部误报)"
+                minor_ver = next((r.minor_version.version_no for r in reversed(recs) if r.minor_version), "未知")
+                msg_lines.append(
+                    f"> ✅ **[通过]** {req.zentao_req_id} (原测试: @{owner_name} | 复测: {retesters} | 验证发包: {minor_ver})"
+                )
             else:
-                msg_lines.append(f"> ❌ **[打回]** <font color=\"warning\">{req.zentao_req_id}</font> (原测试: @{owner_name} | 验证发包: {minor_ver}) - *存在漏测或未修复问题！*")
+                active = [p for p in problems if not p["dismissed"]]
+                parts = []
+                activated = [p for p in active if p["kind"] == "activated"]
+                collected = [p for p in active if p["kind"] == "collected"]
+                if activated:
+                    names = "/".join(dict.fromkeys(f"@{p['actor_name']}" for p in activated if p["actor_name"])) or "未知"
+                    parts.append(f"复测激活 {len(activated)} 个Bug({names})")
+                if collected:
+                    names = "/".join(dict.fromkeys(f"@{p['actor_name']}" for p in collected if p["actor_name"])) or "未知"
+                    parts.append(f"新归集 {len(collected)} 个Bug({names})")
+                detail = "、".join(parts) or "存在历史打回记录"
+                msg_lines.append(
+                    f"> ❌ **[未通过]** <font color=\"warning\">{req.zentao_req_id}</font> (原测试: @{owner_name}) - *{detail}*"
+                )
+        if not count:
+            raise HTTPException(status_code=400, detail="该大版本暂无复测结论可推送（需求均为未处理状态）")
 
-        return "\n".join(msg_lines), len(records)
+        return "\n".join(msg_lines), count

@@ -39,6 +39,80 @@ class WorkbenchService:
         except Exception as exc:  # noqa: BLE001 — 禅道侧异常绝不阻断工作台加载
             logger.warning("workbench task status sync major %s failed: %s", major_version_id, exc)
 
+    def _latest_retest_passed_map(self, req_ids: list[int]) -> dict[int, bool]:
+        """req_id → 最新一条复测记录的 passed（无记录则缺键）。"""
+        if not req_ids:
+            return {}
+        rows = (
+            self.db.query(RequirementRetestRecord)
+            .filter(RequirementRetestRecord.requirement_id.in_(req_ids))
+            .order_by(RequirementRetestRecord.updated_at.asc(), RequirementRetestRecord.id.asc())
+            .all()
+        )
+        out: dict[int, bool] = {}
+        for rec in rows:  # 升序遍历，后写覆盖 → 留下最新
+            out[rec.requirement_id] = bool(rec.passed)
+        return out
+
+    def _retest_flags_for_req(
+        self,
+        r: Requirement,
+        bug_dicts: list[dict],
+        evidence_ids: set[int],
+        latest_passed: bool | None,
+    ) -> dict:
+        """
+        复测结论改版（2026-07）的展示层判定：给卡片上的 Bug dict 就地打
+        「复测问题」标记，并汇总需求级结论（与 RetestService 同口径）：
+
+        - 问题 = 复测激活的 Bug，或测后归集且提出人≠原测试人的 Bug；
+        - 勾选「取消复测结论」的问题不再生效（retest_problem=False 但保留 kind 供置灰展示）；
+        - 结论 failed > passed(有通过记录 / 问题全误报) > pending。
+        """
+        owner_account = ""
+        if r.owner and r.owner.zentao_account:
+            owner_account = r.owner.zentao_account.strip().lower()
+        seen: set[int] = set()
+        problems_any = 0
+        active_count = 0
+        fail_actors: list[str] = []
+        for b in bug_dicts:
+            kind = None
+            if b.get("retest_activated"):
+                kind = "activated"
+            elif b["id"] in evidence_ids:
+                opener = (b.get("zentao_opened_by_account") or "").strip().lower()
+                # 提出人可确认是原测试人本人 → 不算复测问题（自查自纠）
+                if not (owner_account and opener and opener == owner_account):
+                    kind = "collected"
+            if not kind:
+                continue
+            b["retest_problem_kind"] = kind
+            active = not b.get("retest_dismissed")
+            b["retest_problem"] = active
+            if b["id"] in seen:
+                continue
+            seen.add(b["id"])
+            problems_any += 1
+            if active:
+                active_count += 1
+                actor = b.get("retest_activated_by_name") if kind == "activated" else b.get("zentao_opened_by_name")
+                if actor and actor not in fail_actors:
+                    fail_actors.append(actor)
+        if active_count:
+            conclusion = "failed"
+        elif latest_passed is not None:
+            conclusion = "passed" if latest_passed else "failed"  # 历史打回记录保留原义
+        elif problems_any:
+            conclusion = "passed"  # 出现过问题但全部标记误报 → 视为通过
+        else:
+            conclusion = "pending"
+        return {
+            "retest_conclusion": conclusion,
+            "retest_active_problem_count": active_count,
+            "retest_fail_actors": fail_actors,
+        }
+
     def get_my_workbench(
         self,
         *,
@@ -115,6 +189,22 @@ class WorkbenchService:
         )
         story_task_map = self.link_service.build_story_task_map(reqs)
 
+        # 复测结论改版：给卡片 Bug 打「复测问题」标记 + 需求级结论。
+        # 「归集问题」只对已测试完成的需求判定（口径=测后归集证据）。
+        completed_reqs = [r for r in reqs if r.test_completed and r.test_completed_at]
+        retest_evidence_ids: dict[int, set[int]] = {}
+        if completed_reqs:
+            for rid, bugs in self.link_service.build_retest_evidence(completed_reqs, minors).items():
+                retest_evidence_ids[rid] = {b["id"] for b in bugs}
+        latest_passed_map = self._latest_retest_passed_map([r.id for r in reqs])
+        retest_flag_map: dict[int, dict] = {}
+        for r in reqs:
+            bug_dicts = [b for item in case_view_map.get(r.id, []) for b in (item.get("bugs") or [])]
+            bug_dicts += list(free_bug_map.get(r.id, []))
+            retest_flag_map[r.id] = self._retest_flags_for_req(
+                r, bug_dicts, retest_evidence_ids.get(r.id, set()), latest_passed_map.get(r.id)
+            )
+
         # 当前用户的禅道账号（用于判定子任务是否指派给本人）。
         my_account = (current_user.zentao_account or "").strip().lower()
 
@@ -148,6 +238,8 @@ class WorkbenchService:
                 "task_assigned_to_me": _task_assigned_to_me(r),
                 # 需求 story 关联的禅道任务（标题旁标签展示，含当前指派人）
                 "story_tasks": story_task_map.get(r.id, []),
+                # 复测结论（pending/passed/failed）+ 未通过归属人（醒目标签展示）
+                **retest_flag_map.get(r.id, {}),
                 "test_notes": r.test_notes,
                 "test_notes_html": r.test_notes_html,
                 "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
@@ -288,8 +380,10 @@ class WorkbenchService:
         retest_bug_map, _ = self.link_service.build_requirement_free_bug_view(reqs, minors, include_retest=True)
         retest_evidence_map = self.link_service.build_retest_evidence(reqs, minors)
         story_task_map = self.link_service.build_story_task_map(reqs)
+        latest_passed_map = self._latest_retest_passed_map(req_ids)
 
         result = []
+        aggregate_dirty = False
         for r in reqs:
             evidence = retest_evidence_map.get(r.id, [])
             existing_retest_ids = {b["id"] for b in retest_bug_map.get(r.id, [])}
@@ -308,7 +402,27 @@ class WorkbenchService:
                 and bug["id"] not in existing_case_bug_ids
             ]
             my_record = my_record_map.get(r.id)
+
+            # 复测结论改版：给卡片各区块的 Bug 打「复测问题」标记 + 需求级结论
+            card_bug_dicts = (
+                [b for case in case_view_map.get(r.id, []) for b in (case.get("bugs") or [])]
+                + list(free_bug_map.get(r.id, []))
+                + list(retest_bug_map.get(r.id, []))
+                + filtered_evidence
+            )
+            flags = self._retest_flags_for_req(
+                r, card_bug_dicts, {b["id"] for b in evidence}, latest_passed_map.get(r.id)
+            )
+            # 读时校准聚合：归集 Bug 由禅道同步产生、不经过复测写路径，聚合
+            # 字段可能滞后；与结论不一致时就地重算（报表/看板读同一字段）。
+            expected = {"failed": (True, False), "passed": (True, True), "pending": (False, None)}[flags["retest_conclusion"]]
+            if (bool(r.retest_completed), r.retest_passed) != expected:
+                from app.services.retest_service import RetestService
+
+                RetestService(self.db)._recompute_aggregate(r)
+                aggregate_dirty = True
             result.append({
+                **flags,
                 "id": r.id,
                 "zentao_req_id": r.zentao_req_id,
                 "title": r.title,
@@ -341,4 +455,6 @@ class WorkbenchService:
                 "auto_linked_case_count": sum(1 for c in case_view_map.get(r.id, []) if c.get("auto_linked")),
                 "auto_linked_evidence_count": len(filtered_evidence),
             })
+        if aggregate_dirty:
+            self.db.commit()
         return result

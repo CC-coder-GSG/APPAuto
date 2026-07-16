@@ -35,6 +35,15 @@ class BugRetestFailPayload(BaseModel):
     is_retest_failed: bool
 
 
+class BugRetestActivatedPayload(BaseModel):
+    requirement_id: int
+
+
+class BugRetestDismissPayload(BaseModel):
+    requirement_id: int
+    dismissed: bool
+
+
 @router.post("/bugs/execution")
 def create_execution_bug(payload: ExecutionBugPayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not B_PATTERN.match(payload.bug_id):
@@ -70,6 +79,22 @@ def delete_bug(bug_id: int, current_user: User = Depends(get_current_user), db: 
 def toggle_bug_retest_fail(bug_id: int, payload: BugRetestFailPayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     service = BugService(db)
     return service.toggle_retest_fail(bug_id, payload.is_retest_failed, actor_id=current_user.id)
+
+
+@router.patch("/bugs/{bug_id}/retest-activated")
+def mark_bug_retest_activated(bug_id: int, payload: BugRetestActivatedPayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """复测激活留痕（禅道真实激活由 /zentao/bugs/{id}/active 先行完成）。"""
+    from app.services.retest_service import RetestService
+
+    return RetestService(db).mark_bug_activated(bug_id, payload.requirement_id, current_user)
+
+
+@router.patch("/bugs/{bug_id}/retest-dismiss")
+def toggle_bug_retest_dismiss(bug_id: int, payload: BugRetestDismissPayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """勾选/取消「取消复测结论」（复测问题误报标记）。"""
+    from app.services.retest_service import RetestService
+
+    return RetestService(db).toggle_bug_dismissed(bug_id, payload.requirement_id, payload.dismissed, current_user)
 
 
 @router.get("/bugs/search")
