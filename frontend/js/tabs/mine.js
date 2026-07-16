@@ -301,6 +301,116 @@ export function closeReqTestNotesModal() {
   notesModalState.reqId = null;
 }
 
+// ── 测试要点富文本编辑 ──────────────────────────────────────
+// 旧数据是纯文本：进编辑器前转 HTML；保存时同时导出纯文本版（test_notes），
+// 供移动端编辑、数据管理台/报表预览等纯文本消费方降级使用。
+function plainNotesToHtml(text) {
+  return escapeHtml(text).replace(/\n/g, '<br>');
+}
+// contenteditable 清空后常残留 <br>/<div><br></div>/&nbsp;：含图片算有内容，否则剥标签判空
+function isBlankNotesHtml(html) {
+  if (!html) return true;
+  if (/<img\b/i.test(html)) return false;
+  const t = html.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ');
+  return !t.trim();
+}
+
+// 工具条操作（字号下拉/颜色选择器）会让编辑器失焦丢选区，这里持续记录
+// 编辑器内的最后选区，应用格式前先恢复。
+let notesSavedRange = null;
+function restoreNotesSelection() {
+  const ed = document.getElementById('mineReqNotesEditor');
+  if (!ed) return;
+  ed.focus();
+  if (notesSavedRange && ed.contains(notesSavedRange.startContainer)) {
+    const sel = document.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(notesSavedRange);
+  }
+}
+
+async function uploadAndInsertNotesImage(file) {
+  try {
+    const form = new FormData();
+    form.append('file', file, file.name || `paste-${Date.now()}.png`);
+    const resp = await api('/feature-tree/upload-image', { method: 'POST', body: form });
+    const data = await resp.json();
+    if (data && data.url) {
+      restoreNotesSelection();
+      document.execCommand('insertHTML', false, `<img src="${data.url}" style="max-width:100%;">`);
+    }
+  } catch (err) { window.showMessage && window.showMessage(err.message || '图片上传失败', 'error'); }
+}
+
+function bindNotesEditorTools() {
+  const modal = document.getElementById('mineReqNotesModal');
+  if (!modal || modal._notesToolsBound) return;
+  modal._notesToolsBound = true;
+
+  document.addEventListener('selectionchange', () => {
+    const ed = document.getElementById('mineReqNotesEditor');
+    const sel = document.getSelection();
+    if (ed && sel && sel.rangeCount && ed.contains(sel.anchorNode)) {
+      notesSavedRange = sel.getRangeAt(0).cloneRange();
+    }
+  });
+
+  // 加粗/下划线/清除格式：mousedown + preventDefault，不让编辑器失焦
+  modal.querySelectorAll('.qa-notes-toolbar [data-cmd]').forEach((btn) => {
+    btn.addEventListener('mousedown', (e) => { e.preventDefault(); document.execCommand(btn.dataset.cmd, false, null); });
+  });
+
+  const sizeSel = document.getElementById('mineReqNotesFontSize');
+  if (sizeSel) {
+    sizeSel.addEventListener('change', () => {
+      const v = sizeSel.value;
+      sizeSel.value = '';
+      if (!v) return;
+      restoreNotesSelection();
+      document.execCommand('fontSize', false, v);
+    });
+  }
+
+  const colorInput = document.getElementById('mineReqNotesColor');
+  if (colorInput) {
+    colorInput.addEventListener('input', () => {
+      restoreNotesSelection();
+      document.execCommand('foreColor', false, colorInput.value);
+    });
+  }
+
+  const imgBtn = document.getElementById('mineReqNotesImageBtn');
+  const imgInput = document.getElementById('mineReqNotesImageInput');
+  if (imgBtn && imgInput) {
+    imgBtn.addEventListener('click', () => imgInput.click());
+    imgInput.addEventListener('change', async () => {
+      const f = imgInput.files && imgInput.files[0];
+      if (f) await uploadAndInsertNotesImage(f);
+      imgInput.value = '';
+    });
+  }
+
+  const ed = document.getElementById('mineReqNotesEditor');
+  if (ed) {
+    ed.addEventListener('paste', async (event) => {
+      const cd = event.clipboardData;
+      if (!cd) return;
+      const imgs = Array.from(cd.items || []).filter((it) => it.kind === 'file' && (it.type || '').startsWith('image/'));
+      if (!imgs.length) return;
+      event.preventDefault();
+      for (const it of imgs) { const f = it.getAsFile(); if (f) await uploadAndInsertNotesImage(f); }
+    });
+  }
+}
+
+export function toggleReqNotesMaximize() {
+  const dialog = document.getElementById('mineReqNotesDialog');
+  const btn = document.getElementById('mineReqNotesMaxBtn');
+  if (!dialog) return;
+  const maxed = dialog.classList.toggle('qa-notes-dialog--max');
+  if (btn) btn.innerText = maxed ? '⤡ 还原' : '⤢ 放大';
+}
+
 export function openReqTestNotesModal(reqId) {
   const req = getRequirementById(reqId);
   if (!req) {
@@ -309,13 +419,14 @@ export function openReqTestNotesModal(reqId) {
   }
   const modal = document.getElementById('mineReqNotesModal');
   const titleEl = document.getElementById('mineReqNotesTitle');
-  const textarea = document.getElementById('mineReqNotesText');
+  const editor = document.getElementById('mineReqNotesEditor');
   const metaEl = document.getElementById('mineReqNotesMeta');
-  if (!modal || !titleEl || !textarea || !metaEl) return;
+  if (!modal || !titleEl || !editor || !metaEl) return;
 
   notesModalState.reqId = reqId;
+  notesSavedRange = null;
   titleEl.innerText = `需求测试要点 - ${req.zentao_req_id} ${req.title}`;
-  textarea.value = req.test_notes || '';
+  editor.innerHTML = req.test_notes_html || (req.test_notes ? plainNotesToHtml(req.test_notes) : '');
 
   if (req.test_notes_updated_at || req.test_notes_updated_by_name) {
     const t = req.test_notes_updated_at ? new Date(req.test_notes_updated_at).toLocaleString() : '未知时间';
@@ -325,6 +436,7 @@ export function openReqTestNotesModal(reqId) {
     metaEl.innerText = '尚未填写测试要点';
   }
 
+  bindNotesEditorTools();
   openModal(modal);
 }
 
@@ -334,13 +446,17 @@ export async function saveReqTestNotes() {
     closeReqTestNotesModal();
     return;
   }
-  const textarea = document.getElementById('mineReqNotesText');
-  const text = (textarea?.value || '').trim();
+  const editor = document.getElementById('mineReqNotesEditor');
+  const html = (editor?.innerHTML || '').trim();
+  const blank = isBlankNotesHtml(html);
+  // 纯文本降级版：图片占位标注，避免"仅贴图"的要点在纯文本侧显示为空/未填写
+  let text = blank ? '' : (editor?.innerText || '').replace(/ /g, ' ').trim();
+  if (!blank && !text) text = '[图片要点，请在网页端查看]';
   try {
     await api(`/requirements/${reqId}/test-notes`, {
       method: 'PUT',
       headers: window.H,
-      body: { test_notes: text || null },
+      body: { test_notes: text || null, test_notes_html: blank ? null : html },
     });
     window.showMessage && window.showMessage('测试要点保存成功', 'success');
     closeReqTestNotesModal();
@@ -1271,6 +1387,7 @@ window.OmniQAMineTab = {
   openReqTestNotesModal,
   closeReqTestNotesModal,
   saveReqTestNotes,
+  toggleReqNotesMaximize,
   openBugResultModal,
   closeBugResultModal,
   confirmBugResultModal,

@@ -146,6 +146,7 @@ class WorkbenchService:
                 "zentao_task_assigned_to": r.zentao_task_assigned_to,
                 "task_assigned_to_me": _task_assigned_to_me(r),
                 "test_notes": r.test_notes,
+                "test_notes_html": r.test_notes_html,
                 "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
                 "test_notes_updated_by_name": r.test_notes_updated_by.shown_name if r.test_notes_updated_by else None,
                 "test_cases": case_view_map.get(r.id, []),
@@ -204,6 +205,7 @@ class WorkbenchService:
                 "zentao_task_status": r.zentao_task_status_cache,
                 "zentao_task_assigned_to": r.zentao_task_assigned_to,
                 "test_notes": r.test_notes,
+                "test_notes_html": r.test_notes_html,
                 "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
                 "test_notes_updated_by_name": r.test_notes_updated_by.shown_name if r.test_notes_updated_by else None,
                 "test_cases": case_view_map.get(r.id, []),
@@ -226,6 +228,7 @@ class WorkbenchService:
                 joinedload(Requirement.test_cases),
                 joinedload(Requirement.retester),
                 joinedload(Requirement.major_version),
+                joinedload(Requirement.test_notes_updated_by),
             )
             .filter(
                 Requirement.test_completed.is_(True),
@@ -320,6 +323,11 @@ class WorkbenchService:
                 "retest_records": retest_records_map.get(r.id, []),
                 "zentao_story_id": r.zentao_story_id,
                 "test_completed_at": r.test_completed_at.isoformat() if r.test_completed_at else None,
+                # 原测试人填写的测试要点（复测人只读参考，不可编辑）
+                "test_notes": r.test_notes,
+                "test_notes_html": r.test_notes_html,
+                "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
+                "test_notes_updated_by_name": r.test_notes_updated_by.shown_name if r.test_notes_updated_by else None,
                 "test_cases": case_view_map.get(r.id, []),
                 "free_bugs": free_bug_map.get(r.id, []),
                 "retest_bugs": retest_bug_map.get(r.id, []),

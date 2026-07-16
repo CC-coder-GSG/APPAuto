@@ -210,6 +210,18 @@ export async function loadRetest() {
       : (req.zentao_req_id || '');
     const previewBtn = renderPreviewBtn('story', ztStoryId);
 
+    // 原测试人填写的测试要点（只读展示，编辑仍在需求工作台）：优先富文本版
+    const notesInner = req.test_notes_html
+      || (req.test_notes ? escapeHtml(req.test_notes).replace(/\n/g, '<br>') : '');
+    const notesMeta = [req.test_notes_updated_by_name, req.test_notes_updated_at ? new Date(req.test_notes_updated_at).toLocaleString() : '']
+      .filter(Boolean).join(' · ');
+    const notesBlock = notesInner
+      ? `<div style="margin-bottom:12px; padding:10px 12px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:6px;">
+          <div style="font-weight:bold; color:#0369a1; margin-bottom:6px; font-size:13px;">📝 原测试人填写的测试要点${notesMeta ? `<span style="font-weight:normal; font-size:12px; color:#64748b; margin-left:8px;">${escapeHtml(notesMeta)}</span>` : ''}</div>
+          <div class="qa-rich-view">${notesInner}</div>
+        </div>`
+      : '<div class="muted" style="margin-bottom:12px; font-size:12px;">📝 原测试人未填写测试要点</div>';
+
     return `
       <details class="card retest-req-card" data-req-id="${req.id}" ${isCompleted ? '' : 'open'} ontoggle="window.scheduleWorkbenchViewportResize?.()" style="border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px; background: ${isCompleted ? '#f8fafc' : '#fff'}; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; list-style:none; display: flex; justify-content: space-between; align-items: center; border-bottom: ${isCompleted ? 'none' : '1px dashed #cbd5e1'}; padding-bottom: ${isCompleted ? '0' : '12px'}; margin-bottom: ${isCompleted ? '0' : '12px'};">
@@ -227,6 +239,7 @@ export async function loadRetest() {
         </summary>
 
         <div style="margin-top: 12px;">
+          ${notesBlock}
           <div class="row" style="align-items: flex-start; margin: 0;">
             <div style="flex: 1; padding-right: 16px; border-right: 1px dashed #e2e8f0;">
               <div style="font-weight: bold; margin-bottom: 12px; color: #334155; font-size: 13px;">【原测试用例 & 关联Bug】</div>

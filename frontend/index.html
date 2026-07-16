@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20260714-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20260716-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
@@ -717,20 +717,29 @@
     </div>
 
     <div id="mineReqNotesModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
-      <div style="width: min(680px, 94vw); background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px 18px 14px 18px;">
-        <h3 id="mineReqNotesTitle" style="margin: 0 0 12px 0; color:#0f172a;">需求测试要点</h3>
-        <div id="mineReqNotesMeta" class="muted" style="margin-bottom:10px;"></div>
-        <div style="margin-bottom: 14px;">
-          <label style="display:block; margin-bottom:6px;">测试要点</label>
-          <textarea id="mineReqNotesText" rows="10" placeholder="建议记录：
-1. 核心测试目标
-2. 重点场景
-3. 边界条件
-4. 风险点/易错点
-5. 依赖条件
-6. 外场/设备/环境注意事项" style="width:100%;"></textarea>
+      <div id="mineReqNotesDialog" class="qa-notes-dialog">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px;">
+          <h3 id="mineReqNotesTitle" style="margin:0; color:#0f172a; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">需求测试要点</h3>
+          <button id="mineReqNotesMaxBtn" class="secondary qa-notes-maxbtn" onclick="toggleReqNotesMaximize()" title="放大/还原编辑窗口">⤢ 放大</button>
         </div>
-        <div class="row" style="justify-content: flex-end; gap: 8px;">
+        <div id="mineReqNotesMeta" class="muted" style="margin-bottom:10px;"></div>
+        <div class="qa-notes-toolbar">
+          <select id="mineReqNotesFontSize" title="字号">
+            <option value="">字号</option>
+            <option value="2">小</option>
+            <option value="3">正常</option>
+            <option value="5">大</option>
+            <option value="7">特大</option>
+          </select>
+          <button type="button" data-cmd="bold" title="加粗"><b>B</b></button>
+          <button type="button" data-cmd="underline" title="下划线"><u>U</u></button>
+          <label class="qa-notes-colorwrap" title="文字颜色"><span>A</span><input type="color" id="mineReqNotesColor" value="#dc2626"></label>
+          <button type="button" id="mineReqNotesImageBtn" title="插入图片（也可直接 Ctrl+V 粘贴截图）">🖼 图片</button>
+          <button type="button" data-cmd="removeFormat" title="清除所选文字的格式">⌫ 清除格式</button>
+          <input type="file" id="mineReqNotesImageInput" accept="image/*" style="display:none;">
+        </div>
+        <div id="mineReqNotesEditor" class="qa-notes-editor" contenteditable="true" data-placeholder="建议记录：核心测试目标 / 重点场景 / 边界条件 / 风险点 / 依赖条件 / 外场设备环境注意事项。支持字号、加粗、下划线、颜色，可直接粘贴图片。"></div>
+        <div class="row" style="justify-content: flex-end; gap: 8px; margin-top:12px;">
           <button class="secondary" onclick="closeReqTestNotesModal()">取消</button>
           <button onclick="saveReqTestNotes()">保存</button>
         </div>
@@ -2992,6 +3001,10 @@ function closeReqTestNotesModal(){
 
 async function saveReqTestNotes(){
   return window.OmniQAMineTab.saveReqTestNotes();
+}
+
+function toggleReqNotesMaximize(){
+  return window.OmniQAMineTab.toggleReqNotesMaximize();
 }
 
 function openBugResultModal(bugId, bugIdText, closed, zentaoBugId){

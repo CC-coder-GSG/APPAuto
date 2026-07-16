@@ -155,9 +155,12 @@ window.reviewShowTestNotes = (reqId) => {
     .filter(Boolean).join(' · ');
   const modal = document.getElementById('caseReviewModal');
   if (window.caseReviewCloseModal && modal) window.caseReviewCloseModal();
-  // 复用审查弹窗容器展示只读要点
+  // 复用审查弹窗容器展示只读要点：优先富文本版，旧纯文本数据降级 pre-wrap
+  const notesInner = req.test_notes_html
+    ? `<div class="qa-rich-view">${req.test_notes_html}</div>`
+    : `<div style="font-size:13px; color:#475569; white-space:pre-wrap;">${escapeHtml(req.test_notes || '')}</div>`;
   const body = `
-    <div style="font-size:13px; color:#475569; white-space:pre-wrap;">${escapeHtml(req.test_notes || '')}</div>
+    ${notesInner}
     ${meta ? `<div class="muted" style="font-size:12px; margin-top:8px;">${escapeHtml(meta)}</div>` : ''}`;
   if (window.OmniQACaseReviewOpenModal) {
     window.OmniQACaseReviewOpenModal(`📝 测试要点 · ${escapeHtml(req.zentao_req_id || '')}`, body);

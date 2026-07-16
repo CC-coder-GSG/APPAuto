@@ -1494,3 +1494,47 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
 .case-review-btn.review-btn-fix:hover { background: #e3e7f5 !important; }
 .case-review-history-link { font-size: 12px !important; color: var(--w-ink-faint, #94a3b8) !important; text-decoration: none; }
 .case-review-history-link:hover { color: var(--w-accent, #6366f1) !important; }
+
+/* ── 需求测试要点：富文本编辑弹窗（mine）+ 只读展示（retest/review） ── */
+.qa-notes-dialog {
+  width: min(760px, 94vw); max-height: 92vh; display: flex; flex-direction: column;
+  background: var(--w-surface, #fff); border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .18); padding: 18px 18px 14px;
+  transition: width .2s ease, height .2s ease;
+}
+/* 放大模式：接近满屏，方便长文/贴图编辑 */
+.qa-notes-dialog.qa-notes-dialog--max { width: 96vw; height: 94vh; max-height: 94vh; }
+.qa-notes-maxbtn { padding: 3px 10px !important; font-size: 12px !important; white-space: nowrap; }
+.qa-notes-toolbar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px;
+}
+.qa-notes-toolbar button {
+  border: 1px solid var(--w-hairline-strong, #d8dce4) !important; background: var(--w-surface, #fff) !important;
+  color: var(--w-ink, #334155) !important; font-size: 13px !important; line-height: 1.2;
+  padding: 4px 10px !important; border-radius: 8px !important; cursor: pointer;
+}
+.qa-notes-toolbar button:hover { background: var(--w-accent-soft, #eef0f8) !important; }
+.qa-notes-toolbar select {
+  border: 1px solid var(--w-hairline-strong, #d8dce4); background: var(--w-surface, #fff);
+  color: var(--w-ink, #334155); font-size: 13px; padding: 3px 6px; border-radius: 8px; width: auto;
+}
+.qa-notes-colorwrap {
+  display: inline-flex; align-items: center; gap: 2px; margin: 0; cursor: pointer;
+  border: 1px solid var(--w-hairline-strong, #d8dce4); border-radius: 8px; padding: 2px 6px;
+  font-size: 13px; font-weight: 700; color: #dc2626; background: var(--w-surface, #fff);
+}
+.qa-notes-colorwrap input[type="color"] {
+  width: 22px; height: 20px; border: none; padding: 0; background: transparent; cursor: pointer;
+}
+.qa-notes-editor {
+  flex: 1 1 auto; min-height: 280px; overflow-y: auto; outline: none;
+  border: 1px solid var(--w-hairline-strong, #d8dce4); border-radius: 10px;
+  padding: 12px 14px; font-size: 14px; line-height: 1.7; background: var(--w-surface, #fff);
+}
+.qa-notes-dialog--max .qa-notes-editor { min-height: 0; }
+.qa-notes-editor:focus { border-color: var(--w-accent, #6366f1); box-shadow: 0 0 0 3px var(--primary-ring, rgba(99, 102, 241, .18)); }
+.qa-notes-editor:empty::before { content: attr(data-placeholder); color: var(--w-ink-faint, #94a3b8); }
+.qa-notes-editor img { max-width: 100%; border-radius: 6px; }
+/* 只读富文本块：复测工作台原测试人要点 / 审查台查看 */
+.qa-rich-view { font-size: 13px; color: #475569; line-height: 1.7; word-break: break-word; }
+.qa-rich-view img { max-width: 100%; max-height: 320px; border-radius: 6px; display: block; margin: 4px 0; }

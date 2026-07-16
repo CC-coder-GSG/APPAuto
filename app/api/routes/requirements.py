@@ -75,6 +75,8 @@ class CaseUpdatePayload(BaseModel):
 
 class ReqTestNotesPayload(BaseModel):
     test_notes: Optional[str] = None
+    # 富文本版（网页端传）；不传则以纯文本为准清空 HTML 版
+    test_notes_html: Optional[str] = None
 
 
 class EstimatedHoursPayload(BaseModel):
@@ -433,6 +435,7 @@ def my_workbench(
             "task_started_at": r.task_started_at.isoformat() if r.task_started_at else None,
             "task_finished_at": r.task_finished_at.isoformat() if r.task_finished_at else None,
             "test_notes": r.test_notes,
+            "test_notes_html": r.test_notes_html,
             "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
             "test_notes_updated_by_name": r.test_notes_updated_by.shown_name if r.test_notes_updated_by else None,
             "test_cases": [{"id": c.id, "zentao_case_id": c.zentao_case_id, "zentao_case_url": c.zentao_case_url, "bugs": case_bug_map.get(str(c.id), [])} for c in r.test_cases],
@@ -627,7 +630,9 @@ def update_requirement_test_notes(
     db: Session = Depends(get_db),
 ):
     service = RequirementService(db)
-    return service.update_test_notes(requirement_id, payload.test_notes, current_user)
+    return service.update_test_notes(
+        requirement_id, payload.test_notes, current_user, test_notes_html=payload.test_notes_html
+    )
 
 
 @router.get("/requirements/{requirement_id}/timeline")

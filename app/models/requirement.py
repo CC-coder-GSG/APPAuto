@@ -31,6 +31,9 @@ class Requirement(Base):
     retest_minor_version_id: Mapped[Optional[int]] = mapped_column(ForeignKey("versions.id"), nullable=True)
     retest_passed: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     test_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 富文本版测试要点（HTML）。test_notes 保留为纯文本降级：移动端编辑、
+    # 数据管理台/报表预览仍读纯文本；网页端保存时两者同时写入。
+    test_notes_html: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     test_notes_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     test_notes_updated_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     status: Mapped[RequirementStatus] = mapped_column(SAEnum(RequirementStatus), default=RequirementStatus.PENDING, nullable=False)

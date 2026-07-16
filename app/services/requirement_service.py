@@ -510,6 +510,7 @@ class RequirementService:
                 "status": r.status,
                 "case_ids": [c.zentao_case_id for c in r.test_cases],
                 "test_notes": r.test_notes,
+                "test_notes_html": r.test_notes_html,
                 "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
                 "test_notes_updated_by_id": r.test_notes_updated_by_id,
                 "test_notes_updated_by_name": r.test_notes_updated_by.shown_name if r.test_notes_updated_by else None,
@@ -604,7 +605,13 @@ class RequirementService:
             "errors": result.get("errors", []),
         }
 
-    def update_test_notes(self, requirement_id: int, test_notes: str | None, current_user: User) -> dict:
+    def update_test_notes(
+        self,
+        requirement_id: int,
+        test_notes: str | None,
+        current_user: User,
+        test_notes_html: str | None = None,
+    ) -> dict:
         req = (
             self.db.query(Requirement)
             .options(joinedload(Requirement.test_notes_updated_by))
@@ -619,6 +626,9 @@ class RequirementService:
 
         old_len = len((req.test_notes or "").strip())
         req.test_notes = (test_notes or "").strip() or None
+        # 网页端富文本传 HTML；移动端等只传纯文本的调用方不带此参数，
+        # 此时 HTML 版以纯文本为准清空，避免两个版本内容漂移。
+        req.test_notes_html = (test_notes_html or "").strip() or None
         req.test_notes_updated_at = local_now()
         req.test_notes_updated_by_id = current_user.id
         self.db.commit()
@@ -637,6 +647,7 @@ class RequirementService:
             "message": "测试要点保存成功",
             "requirement_id": req.id,
             "test_notes": req.test_notes,
+            "test_notes_html": req.test_notes_html,
             "test_notes_updated_at": req.test_notes_updated_at.isoformat() if req.test_notes_updated_at else None,
             "test_notes_updated_by_id": req.test_notes_updated_by_id,
             "test_notes_updated_by_name": current_user.shown_name,

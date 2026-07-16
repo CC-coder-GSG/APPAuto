@@ -147,6 +147,9 @@ def ensure_requirement_schema_compat(db: Session) -> None:
     if "test_notes" not in req_cols:
         db.execute(text("ALTER TABLE requirements ADD COLUMN test_notes TEXT"))
         db.commit()
+    if "test_notes_html" not in req_cols:
+        db.execute(text("ALTER TABLE requirements ADD COLUMN test_notes_html TEXT"))
+        db.commit()
     if "test_notes_updated_at" not in req_cols:
         db.execute(text("ALTER TABLE requirements ADD COLUMN test_notes_updated_at DATETIME"))
         db.commit()
