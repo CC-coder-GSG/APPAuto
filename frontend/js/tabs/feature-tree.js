@@ -321,7 +321,7 @@ function tooltipFormatter(params) {
   return h;
 }
 
-function buildOption(seriesData) {
+function buildOption(seriesData, viewState) {
   return {
     backgroundColor: 'transparent',
     tooltip: { trigger: 'item', enterable: true, appendToBody: true, confine: true,
@@ -332,6 +332,10 @@ function buildOption(seriesData) {
       data: seriesData,
       layout: 'radial',
       roam: true,
+      // 漫游状态随 option 重建带回：ECharts 的 pan/zoom 通过 treeRoam action 写在
+      // series option 的 center/zoom 上，notMerge 重建会丢，这里显式塞回
+      center: (viewState && viewState.center) || null,
+      zoom: (viewState && viewState.zoom) || 1,
       initialTreeDepth: -1,
       expandAndCollapse: false,
       symbol: 'circle',
@@ -385,8 +389,7 @@ function renderChart({ view = 'restore' } = {}) {
   // 结构变化 / 精简模式切换（series 级 emphasis/animation 配置，merge 不生效）：
   // 整体重建，并保留当前缩放/平移
   if (!firstInit && view === 'keep' && (structChanged || prevPerf !== state.perf)) {
-    state.chart.setOption(buildOption([toEchartNode(state.data)]), { notMerge: true });
-    requestAnimationFrame(() => applyView(keep));
+    state.chart.setOption(buildOption([toEchartNode(state.data)], keep), { notMerge: true });
     state.rendered = true;
     resize();
     return;
@@ -396,9 +399,9 @@ function renderChart({ view = 'restore' } = {}) {
     // 结构未变的纯内容更新（改名/备注/标记/用例徽标）：merge 更新数据，不动坐标系
     state.chart.setOption({ series: [{ data: seriesData }] });
   } else {
-    state.chart.setOption(buildOption(seriesData), { notMerge: true });
-    if (view === 'restore') restorePersistedView();
-    else if (view === 'reset') clearPersistedView();
+    if (view === 'reset') clearPersistedView();
+    const saved = view === 'restore' ? loadPersistedView() : null;
+    state.chart.setOption(buildOption(seriesData, saved), { notMerge: true });
   }
   state.rendered = true;
   resize();
@@ -411,30 +414,17 @@ function fit() { renderChart({ view: 'reset' }); }
 function viewStorageKey() {
   return `ftreeView:${state.softwareId}:${state.mode}:${state.versionId || 0}`;
 }
-// 取径向树的可平移/缩放渲染组（ECharts tree 内部 _mainGroup）。
-// 用内部结构，全部 try/catch 包裹：取不到就降级（不报错、仅不持久化）。
-function getRoamGroup() {
-  try {
-    const views = state.chart && state.chart._chartsViews;
-    if (!views || !views.length) return null;
-    const v = views.find((x) => x && x.__model && x.__model.subType === 'tree');
-    return (v && (v._mainGroup || v.group)) || null;
-  } catch (e) { return null; }
-}
+// 视角 = tree 系列的 center/zoom。ECharts 的 pan/zoom 会派发 treeRoam action，
+// 把结果写回 series option（setCenter/setZoom），所以用公开的 getOption() 就能拿到
+// 当前视角，重建时塞回 buildOption 即可恢复——不再摸内部渲染组（那个 _mainGroup
+// 存的是径向布局居中偏移，每次 render 都会被坐标系重算覆盖，恢复不住）。
 function captureView() {
-  const g = getRoamGroup();
-  if (!g) return null;
-  return { x: g.x, y: g.y, sx: g.scaleX, sy: g.scaleY };
-}
-function applyView(t) {
-  if (!t) return;
-  const g = getRoamGroup();
-  if (!g) return;
   try {
-    g.x = t.x; g.y = t.y; g.scaleX = t.sx; g.scaleY = t.sy;
-    g.dirty && g.dirty();
-    state.chart.getZr().refresh();
-  } catch (e) { /* 忽略 */ }
+    const opt = state.chart && state.chart.getOption();
+    const s = opt && opt.series && opt.series[0];
+    if (!s || (!s.center && (s.zoom == null || s.zoom === 1))) return null; // 从未漫游过
+    return { center: s.center || null, zoom: s.zoom || 1 };
+  } catch (e) { return null; }
 }
 function persistView() {
   const t = captureView();
@@ -444,12 +434,12 @@ function persistView() {
 function clearPersistedView() {
   try { localStorage.removeItem(viewStorageKey()); } catch (e) { /* 忽略 */ }
 }
-function restorePersistedView() {
-  let t = null;
-  try { t = JSON.parse(localStorage.getItem(viewStorageKey()) || 'null'); } catch (e) { t = null; }
-  if (!t) return;
-  // 等 ECharts 完成本次布局后再套用变换
-  requestAnimationFrame(() => applyView(t));
+function loadPersistedView() {
+  try {
+    const t = JSON.parse(localStorage.getItem(viewStorageKey()) || 'null');
+    // 旧格式（x/y/sx 渲染组变换）没有 center/zoom，直接忽略
+    return (t && (t.center || t.zoom)) ? t : null;
+  } catch (e) { return null; }
 }
 let _roamPersistBound = false;
 function bindRoamPersist() {
