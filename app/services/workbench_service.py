@@ -113,6 +113,7 @@ class WorkbenchService:
             include_retest=False,
             exclude_case_view=case_view_map,
         )
+        story_task_map = self.link_service.build_story_task_map(reqs)
 
         # 当前用户的禅道账号（用于判定子任务是否指派给本人）。
         my_account = (current_user.zentao_account or "").strip().lower()
@@ -145,6 +146,8 @@ class WorkbenchService:
                 # 开始/预计用时、以及勾选完成时是否联动禅道完成任务）。
                 "zentao_task_assigned_to": r.zentao_task_assigned_to,
                 "task_assigned_to_me": _task_assigned_to_me(r),
+                # 需求 story 关联的禅道任务（标题旁标签展示，含当前指派人）
+                "story_tasks": story_task_map.get(r.id, []),
                 "test_notes": r.test_notes,
                 "test_notes_html": r.test_notes_html,
                 "test_notes_updated_at": r.test_notes_updated_at.isoformat() if r.test_notes_updated_at else None,
@@ -284,6 +287,7 @@ class WorkbenchService:
         )
         retest_bug_map, _ = self.link_service.build_requirement_free_bug_view(reqs, minors, include_retest=True)
         retest_evidence_map = self.link_service.build_retest_evidence(reqs, minors)
+        story_task_map = self.link_service.build_story_task_map(reqs)
 
         result = []
         for r in reqs:
@@ -323,6 +327,8 @@ class WorkbenchService:
                 "retest_records": retest_records_map.get(r.id, []),
                 "zentao_story_id": r.zentao_story_id,
                 "test_completed_at": r.test_completed_at.isoformat() if r.test_completed_at else None,
+                # 需求 story 关联的禅道任务（标题旁标签展示，含当前指派人）
+                "story_tasks": story_task_map.get(r.id, []),
                 # 原测试人填写的测试要点（复测人只读参考，不可编辑）
                 "test_notes": r.test_notes,
                 "test_notes_html": r.test_notes_html,

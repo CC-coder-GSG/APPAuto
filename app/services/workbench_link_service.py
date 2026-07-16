@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import BugSourceType, BugTracking, Requirement, Version, VersionType, ZentaoTestCaseMirror
+from app.models import BugSourceType, BugTracking, Requirement, Version, VersionType, ZentaoTaskMirror, ZentaoTestCaseMirror
 
 
 def _case_key(value: Any) -> str:
@@ -56,13 +56,24 @@ class WorkbenchLinkService:
         minors: dict[int, str],
         *,
         auto_linked: bool = False,
+        expect_story_id: int | None = None,
     ) -> dict[str, Any]:
         # 发现于：优先本地小版本；匹配不到时回退禅道侧的影响版本/构建名
         # 字符串（zentao_affected_version），而不是一律「未知」。
         found_no = minors.get(bug.found_minor_version_id) if bug.found_minor_version_id else None
         if not found_no:
             found_no = (bug.zentao_affected_version or "").strip() or "未知"
+        # 禅道校对：本地挂在某需求下的 Bug，若禅道侧标记了 story 且与该需求
+        # 的 story 不一致，前端提示「归属不一致」；禅道已删除的也标出来。
+        story_mismatch = bool(
+            expect_story_id
+            and bug.zentao_story_id
+            and int(bug.zentao_story_id) != int(expect_story_id)
+        )
         return {
+            "zentao_deleted": bool(getattr(bug, "zentao_deleted", False)),
+            "story_mismatch": story_mismatch,
+            "zentao_story_id": bug.zentao_story_id,
             "id": bug.id,
             "bug_id": bug.bug_id,
             "zentao_bug_id": bug.zentao_bug_id,
@@ -100,9 +111,11 @@ class WorkbenchLinkService:
             else []
         )
 
-        case_bug_map: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        # 存原始行，序列化推迟到需求循环里做——序列化时要携带该需求的
+        # story id，用于「禅道归属不一致」校对。
+        case_bug_rows_map: dict[str, list[BugTracking]] = defaultdict(list)
         for bug in local_case_bug_rows:
-            case_bug_map[str(bug.source_ref or "")].append(self.serialize_bug_brief(bug, minors))
+            case_bug_rows_map[str(bug.source_ref or "")].append(bug)
 
         story_ids = [int(req.zentao_story_id) for req in reqs if req.zentao_story_id]
         mirror_rows = (
@@ -124,6 +137,23 @@ class WorkbenchLinkService:
             key = _case_key(row.zentao_case_id)
             if key:
                 all_mirror_case_keys.add(key)
+
+        # 禅道校对：按本地用例的 numeric id 反查镜像（不排除已删除行），
+        # 用于标注「禅道已删除」和「禅道归属不一致」。
+        local_numeric_ids = [
+            int(case.zentao_case_numeric_id)
+            for req in reqs
+            for case in (req.test_cases or [])
+            if case.zentao_case_numeric_id
+        ]
+        mirror_by_numeric: dict[int, ZentaoTestCaseMirror] = {}
+        if local_numeric_ids:
+            for row in (
+                self.db.query(ZentaoTestCaseMirror)
+                .filter(ZentaoTestCaseMirror.zentao_case_numeric_id.in_(local_numeric_ids))
+                .all()
+            ):
+                mirror_by_numeric[int(row.zentao_case_numeric_id)] = row
 
         # Reverse-lookup Bugs by Zentao linked-case id. Covers the "this Bug
         # was opened against a testcase but never tagged with the parent
@@ -152,19 +182,26 @@ class WorkbenchLinkService:
 
         result: dict[int, list[dict[str, Any]]] = {}
         for req in reqs:
+            expect_story = int(req.zentao_story_id) if req.zentao_story_id else None
             items: list[dict[str, Any]] = []
             existing_case_ids: set[str] = set()
             for local_case in req.test_cases or []:
                 local_key = _case_key(local_case.zentao_case_id)
                 existing_case_ids.add(local_key)
-                bugs_payload = list(case_bug_map.get(str(local_case.id), []))
+                bugs_payload = [
+                    self.serialize_bug_brief(bug, minors, expect_story_id=expect_story)
+                    for bug in case_bug_rows_map.get(str(local_case.id), [])
+                ]
                 seen_bug_ids = {b["id"] for b in bugs_payload}
                 # Auto-linked Bug via testcase reverse mapping.
                 for bug in case_keyed_bug_map.get(local_key, []):
                     if bug.id in seen_bug_ids:
                         continue
-                    bugs_payload.append(self.serialize_bug_brief(bug, minors, auto_linked=True))
+                    bugs_payload.append(self.serialize_bug_brief(bug, minors, auto_linked=True, expect_story_id=expect_story))
                     seen_bug_ids.add(bug.id)
+                # 禅道校对：镜像里该用例是否已删除 / story 归属是否与本需求一致
+                mirror = mirror_by_numeric.get(int(local_case.zentao_case_numeric_id or 0))
+                mirror_story = int(mirror.zentao_story_id) if mirror and mirror.zentao_story_id else None
                 items.append(
                     {
                         "id": local_case.id,
@@ -173,6 +210,9 @@ class WorkbenchLinkService:
                         "bugs": bugs_payload,
                         "auto_linked": False,
                         "mirror_case_numeric_id": local_case.zentao_case_numeric_id,
+                        "zentao_deleted": bool(mirror.deleted) if mirror else False,
+                        "story_mismatch": bool(mirror_story and expect_story and mirror_story != expect_story),
+                        "mirror_story_id": mirror_story,
                         # 审查工作台条目展示：标题/创建人/所属
                         "title": local_case.zentao_case_title,
                         "creator": local_case.zentao_creator_name,
@@ -186,7 +226,7 @@ class WorkbenchLinkService:
                     if case_key and case_key in existing_case_ids:
                         continue
                     auto_bugs = [
-                        self.serialize_bug_brief(bug, minors, auto_linked=True)
+                        self.serialize_bug_brief(bug, minors, auto_linked=True, expect_story_id=expect_story)
                         for bug in case_keyed_bug_map.get(case_key, [])
                     ]
                     items.append(
@@ -196,6 +236,10 @@ class WorkbenchLinkService:
                             "zentao_case_url": mirror.zentao_case_url,
                             "bugs": auto_bugs,
                             "auto_linked": True,
+                            # 镜像行本就按 story 命中且过滤了已删除，校对必然一致
+                            "zentao_deleted": False,
+                            "story_mismatch": False,
+                            "mirror_story_id": int(mirror.zentao_story_id) if mirror.zentao_story_id else None,
                             "mirror_case_numeric_id": mirror.zentao_case_numeric_id,
                             "title": mirror.title,
                             "creator": None,  # 镜像未同步创建人；前端仅在有值时展示
@@ -275,7 +319,9 @@ class WorkbenchLinkService:
             story_rows = []
 
         req_by_story: dict[int, list[Requirement]] = defaultdict(list)
+        req_story_map: dict[int, int | None] = {}
         for req in reqs:
+            req_story_map[req.id] = int(req.zentao_story_id) if req.zentao_story_id else None
             if req.zentao_story_id:
                 req_by_story[int(req.zentao_story_id)].append(req)
 
@@ -296,7 +342,9 @@ class WorkbenchLinkService:
                 continue
             if bug.id in seen_bug_ids[req_id]:
                 continue
-            result[req_id].append(self.serialize_bug_brief(bug, minors, auto_linked=False))
+            result[req_id].append(
+                self.serialize_bug_brief(bug, minors, auto_linked=False, expect_story_id=req_story_map.get(req_id))
+            )
             seen_bug_ids[req_id].add(bug.id)
 
         auto_linked_story_bug_map: dict[int, list[dict[str, Any]]] = defaultdict(list)
@@ -317,13 +365,62 @@ class WorkbenchLinkService:
             for req in target_reqs:
                 if bug.id in seen_bug_ids[req.id]:
                     continue
-                auto_linked_story_bug_map[req.id].append(self.serialize_bug_brief(bug, minors, auto_linked=True))
+                auto_linked_story_bug_map[req.id].append(
+                    self.serialize_bug_brief(
+                        bug, minors, auto_linked=True,
+                        expect_story_id=int(req.zentao_story_id) if req.zentao_story_id else None,
+                    )
+                )
                 seen_bug_ids[req.id].add(bug.id)
 
         for req_id, rows in auto_linked_story_bug_map.items():
             result[req_id].extend(rows)
 
         return result, auto_linked_story_bug_map
+
+    # 任务状态展示优先级：进行中 > 未开始 > 已暂停 > 已完成 > 取消/关闭
+    _TASK_STATUS_ORDER = {"doing": 0, "wait": 1, "pause": 2, "done": 3, "cancel": 4, "closed": 5}
+
+    def build_story_task_map(self, reqs: list[Requirement]) -> dict[int, list[dict[str, Any]]]:
+        """需求 → 禅道 story 关联任务列表（来自任务镜像，含当前指派人）。
+
+        排除两类：本系统为需求创建的测试子任务及其父任务（工作台已有专属
+        标签/操作按钮），以及禅道的父容器任务（子任务已逐条列出，避免重复）。
+        """
+        story_ids = [int(req.zentao_story_id) for req in reqs if req.zentao_story_id]
+        if not story_ids:
+            return {req.id: [] for req in reqs}
+
+        rows = (
+            self.db.query(ZentaoTaskMirror)
+            .filter(ZentaoTaskMirror.story.in_(story_ids))
+            .order_by(ZentaoTaskMirror.task_id.asc())
+            .all()
+        )
+        by_story: dict[int, list[ZentaoTaskMirror]] = defaultdict(list)
+        for task in rows:
+            if task.story:
+                by_story[int(task.story)].append(task)
+
+        result: dict[int, list[dict[str, Any]]] = {}
+        for req in reqs:
+            own_task_ids = {int(req.zentao_task_id or 0), int(getattr(req, "zentao_parent_task_id", None) or 0)}
+            items: list[dict[str, Any]] = []
+            for task in by_story.get(int(req.zentao_story_id or 0), []):
+                if task.task_id in own_task_ids or task.is_parent:
+                    continue
+                items.append(
+                    {
+                        "task_id": task.task_id,
+                        "name": task.name,
+                        "status": task.status,
+                        "type": task.type,
+                        "assigned_to_name": task.assigned_to_realname or task.assigned_to or None,
+                    }
+                )
+            items.sort(key=lambda x: (self._TASK_STATUS_ORDER.get(x["status"], 9), x["task_id"]))
+            result[req.id] = items
+        return result
 
     def build_retest_evidence(
         self,
@@ -414,7 +511,12 @@ class WorkbenchLinkService:
                     continue
                 if bug.id in seen_bug_ids[req.id]:
                     continue
-                result[req.id].append(self.serialize_bug_brief(bug, minors, auto_linked=True))
+                result[req.id].append(
+                    self.serialize_bug_brief(
+                        bug, minors, auto_linked=True,
+                        expect_story_id=int(req.zentao_story_id) if req.zentao_story_id else None,
+                    )
+                )
                 seen_bug_ids[req.id].add(bug.id)
 
         return result

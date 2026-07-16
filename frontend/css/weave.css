@@ -1538,3 +1538,24 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
 /* 只读富文本块：复测工作台原测试人要点 / 审查台查看 */
 .qa-rich-view { font-size: 13px; color: #475569; line-height: 1.7; word-break: break-word; }
 .qa-rich-view img { max-width: 100%; max-height: 320px; border-radius: 6px; display: block; margin: 4px 0; }
+
+/* ── 需求 story 关联禅道任务标签（需求/复测工作台标题旁） ── */
+.qa-task-chips {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  margin-top: 6px; min-width: 0; font-weight: normal;
+}
+.qa-task-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  max-width: 300px; min-width: 0; padding: 2px 9px; border-radius: 999px;
+  border: 1px solid; font-size: 12px; line-height: 1.5; cursor: pointer;
+  transition: filter .15s ease;
+}
+.qa-task-chip:hover { filter: brightness(.96); }
+.qa-task-chip-title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto;
+}
+.qa-task-chip-assignee { white-space: nowrap; opacity: .85; }
+.qa-task-chip-status { white-space: nowrap; opacity: .75; }
+.qa-task-chip--closed .qa-task-chip-title { text-decoration: line-through; }
+.qa-task-chip-more { background: var(--w-surface, #fff); color: var(--w-ink-faint, #64748b); border-color: var(--w-hairline-strong, #d8dce4); }
+.qa-task-chips-rest { display: contents; }

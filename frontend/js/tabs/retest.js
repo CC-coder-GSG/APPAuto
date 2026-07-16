@@ -14,6 +14,51 @@ function renderAutoLinkedBadge(label = '自动归集') {
   return `<span class="badge" style="background:#ecfeff; color:#0f766e; border:1px solid #99f6e4; margin-left:6px; padding:1px 6px;">${label}</span>`;
 }
 
+// 禅道校对徽章：本地关联的用例/Bug 与禅道镜像比对不一致时提示（与 mine.js 一致）
+function renderZentaoCheckBadge(item) {
+  if (item.zentao_deleted) {
+    return '<span title="禅道侧该记录已删除，本地关联可能已失效" style="background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; padding:1px 5px; border-radius:4px; font-size:10px; font-weight:600; margin-left:4px;">⚠禅道已删除</span>';
+  }
+  if (item.story_mismatch) {
+    const sid = item.mirror_story_id || item.zentao_story_id || '?';
+    return `<span title="禅道上该记录归属另一需求（story #${sid}），与本需求不一致，请核实关联" style="background:#fffbeb; color:#b45309; border:1px solid #fde68a; padding:1px 5px; border-radius:4px; font-size:10px; font-weight:600; margin-left:4px;">⚠归属不一致</span>`;
+  }
+  return '';
+}
+
+// story 关联禅道任务标签（与 mine.js 一致）：最多平铺 3 个，其余折叠 +N
+const TASK_CHIP_TONE = {
+  doing: { zh: '进行中', bg: '#eff6ff', fg: '#1d4ed8', bd: '#bfdbfe' },
+  wait: { zh: '未开始', bg: '#f8fafc', fg: '#475569', bd: '#e2e8f0' },
+  pause: { zh: '已暂停', bg: '#fffbeb', fg: '#b45309', bd: '#fde68a' },
+  done: { zh: '已完成', bg: '#f0fdf4', fg: '#15803d', bd: '#bbf7d0' },
+  cancel: { zh: '已取消', bg: '#f8fafc', fg: '#94a3b8', bd: '#e2e8f0' },
+  closed: { zh: '已关闭', bg: '#f8fafc', fg: '#94a3b8', bd: '#e2e8f0' },
+};
+function renderStoryTaskChips(tasks, domScope, reqId) {
+  if (!tasks || !tasks.length) return '';
+  const MAX_INLINE = 3;
+  const chip = (t) => {
+    const tone = TASK_CHIP_TONE[t.status] || TASK_CHIP_TONE.wait;
+    const struck = t.status === 'cancel' || t.status === 'closed' ? ' qa-task-chip--closed' : '';
+    const assignee = t.assigned_to_name ? `<span class="qa-task-chip-assignee">👤${escapeHtml(t.assigned_to_name)}</span>` : '';
+    const tip = `任务 #${t.task_id}【${tone.zh}】${t.name || ''}${t.assigned_to_name ? ' · 当前指派：' + t.assigned_to_name : ''}（点击预览）`;
+    return `<span class="qa-task-chip${struck}" style="background:${tone.bg}; color:${tone.fg}; border-color:${tone.bd};" title="${escapeHtml(tip)}"
+      onclick="event.preventDefault(); event.stopPropagation(); window.OmniQAPreview && window.OmniQAPreview.openTask(${t.task_id})">
+      ⚙#${t.task_id}<span class="qa-task-chip-title">${escapeHtml(t.name || '')}</span>${assignee}<span class="qa-task-chip-status">${tone.zh}</span></span>`;
+  };
+  const head = tasks.slice(0, MAX_INLINE).map(chip).join('');
+  const rest = tasks.slice(MAX_INLINE);
+  let restHtml = '';
+  if (rest.length) {
+    const moreId = `qaTaskMore_${domScope}_${reqId}`;
+    restHtml = `<span id="${moreId}" class="qa-task-chips-rest" style="display:none;">${rest.map(chip).join('')}</span>`
+      + `<span class="qa-task-chip qa-task-chip-more" title="展开/收起其余 ${rest.length} 个关联任务"
+          onclick="event.preventDefault(); event.stopPropagation(); const el=document.getElementById('${moreId}'); const show=el.style.display==='none'; el.style.display=show?'contents':'none'; this.firstChild.textContent=show?'收起':'+${rest.length}';"><span>+${rest.length}</span></span>`;
+  }
+  return `<div class="qa-task-chips">${head}${restHtml}</div>`;
+}
+
 // 跨大版本归集：Bug 挂在其他大版本下时标注来源（与工作台 mine.js 一致）
 function renderCrossMajorBadge(req, b) {
   const cross = b.major_version_id && req.major_version_id
@@ -143,13 +188,13 @@ export async function loadRetest() {
         const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
         const linkedBadge = b.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
         return `<div style="margin-top:4px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-          <span class="badge" style="background:#fef2f2; color:#dc2626; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${renderCrossMajorBadge(req, b)}${linkedBadge}
+          <span class="badge" style="background:#fef2f2; color:#dc2626; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${renderCrossMajorBadge(req, b)}${linkedBadge}${renderZentaoCheckBadge(b)}
           <label style="font-size:12px; color:#b91c1c; display:flex; align-items:center; gap:4px; margin:0;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
         </div>`;
       }).join('');
       const caseZtId = String(c.zentao_case_id || '').replace(/\D/g, '');
       return `<div style="margin-bottom: 10px; padding-left: 12px; border-left: 3px solid #cbd5e1;">
-        <div style="font-weight: bold; color: #475569;">🧪 用例 [${renderCaseLink(c)}]${renderPreviewBtn('testcase', caseZtId)}${c.auto_linked ? renderAutoLinkedBadge('自动归集用例') : ''}</div>
+        <div style="font-weight: bold; color: #475569;">🧪 用例 [${renderCaseLink(c)}]${renderPreviewBtn('testcase', caseZtId)}${c.auto_linked ? renderAutoLinkedBadge('自动归集用例') : ''}${renderZentaoCheckBadge(c)}</div>
         <div style="margin-top: 4px;">${bugs || '<span class="muted" style="font-size:12px;">✓ 完美通过，无关联Bug</span>'}</div>
       </div>`;
     }).join('');
@@ -160,7 +205,7 @@ export async function loadRetest() {
       const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
       const linkedBadge = b.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
       return `<div style="margin-bottom:6px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-      <span class="badge" style="background:#fff7ed; color:#ea580c; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${renderCrossMajorBadge(req, b)}${linkedBadge}
+      <span class="badge" style="background:#fff7ed; color:#ea580c; padding: 2px 6px;">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${renderCrossMajorBadge(req, b)}${linkedBadge}${renderZentaoCheckBadge(b)}
       <label style="font-size:12px; color:#b91c1c; display:flex; align-items:center; gap:4px; margin:0;"><input type="checkbox" ${b.is_retest_failed ? 'checked' : ''} onchange="toggleBugFail(${b.id}, this.checked)"> 标记未修好</label>
     </div>`;
     }).join('');
@@ -225,13 +270,14 @@ export async function loadRetest() {
     return `
       <details class="card retest-req-card" data-req-id="${req.id}" ${isCompleted ? '' : 'open'} ontoggle="window.scheduleWorkbenchViewportResize?.()" style="border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px; background: ${isCompleted ? '#f8fafc' : '#fff'}; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; list-style:none; display: flex; justify-content: space-between; align-items: center; border-bottom: ${isCompleted ? 'none' : '1px dashed #cbd5e1'}; padding-bottom: ${isCompleted ? '0' : '12px'}; margin-bottom: ${isCompleted ? '0' : '12px'};">
-          <div>
+          <div style="flex:1; min-width:0;">
             <span style="font-size: 16px; font-weight: bold; color: ${isCompleted ? '#94a3b8; text-decoration:line-through;' : '#0f172a'};">📄 ${reqIdHtml} ${req.title}</span>${ztStorySlot}${previewBtn}
             ${mode === 'all_pending' ? `<span class="badge" style="margin-left:8px; background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd;">🏷️${req.major_version_name || '未知版本'}</span>` : ''}
             <span class="badge" style="margin-left: 12px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;">👤 原测试人: ${req.owner || '未知'}</span>
             ${req.auto_linked_case_count > 0 ? renderAutoLinkedBadge(`自动归集用例 ${req.auto_linked_case_count}`) : ''}
             <span style="margin-left:8px;">${statusTag}</span>
             ${retestRecordsBar}
+            ${renderStoryTaskChips(req.story_tasks, 'retest', req.id)}
           </div>
           <div onclick="event.stopPropagation()"><button style="background:#16a34a;" onclick='setRetest(${req.id}, true, ${hasEvidence})'>✅通过</button>
             <button class="danger" onclick='setRetest(${req.id}, false, ${hasEvidence})'>❌打回</button>
