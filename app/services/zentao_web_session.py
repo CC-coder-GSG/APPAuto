@@ -136,13 +136,16 @@ def cancel_task_via_web(login: ZentaoWebLogin, task_id: int, *, comment: str | N
     return _task_action_via_web(login, task_id, action="cancel", status="cancel", comment=comment)
 
 
-# ── 工时记录（effort / taskestimate）───────────────────────────────────────────
-# REST（ipd4.3）没有工时记录端点，只能走网页表单：
-#   查看：GET  task-recordEstimate-{taskID}.json   → data.estimates
-#   提交：POST task-recordEstimate-{taskID}.html   → dates[i]/consumed[i]/left[i]/work[i]
-#   编辑：POST task-editEstimate-{effortID}.html   → dates|date/consumed/left/work
-# ⚠️ 表单字段名未对本部署抓包实测（协议按开源禅道建模），因此所有写操作都
-# 「提交 → 同会话回读校验」，未生效抛 ZentaoWebSessionError（编辑另备字段名变体重试），
+# ── 工时记录（effort 模块）────────────────────────────────────────────────────
+# REST（ipd4.3）没有工时记录端点，只能走网页表单。2026-07-17 对本部署实测：
+#   开源版的 task-recordEstimate 被 ACL 拦（denyType=nopriv），ipd 走 effort 模块——
+#   查看：GET  effort-createForObject-task-{taskID}.json → data.efforts（按 id 键的 dict）
+#   提交：POST effort-createForObject-task-{taskID}.html （zui2 批量表单，行字段
+#         id[i]/objectType[i]=task/objectID[i]/dates[i]/work[i]/consumed[i]；
+#         dates 支持补录任意日期；无 left 列，任务剩余工时不由此维护）
+#   编辑：POST effort-edit-{effortID}.html （字段 objectType/objectID/consumed/left/work；
+#         无日期字段 → 日期不可改，调用方需拦截改日期的请求）
+# 所有写操作都「提交 → 同会话回读校验」，未生效抛 ZentaoWebSessionError，
 # 由调用方决定兜底（如退回本地累计、完成时一次性提交）。
 
 
@@ -182,7 +185,7 @@ def _parse_page_data(text: str) -> dict:
 
 
 def _normalize_efforts(raw) -> list[dict]:
-    """estimates 字段（dict 按 id 键 / list 均可能）→ 统一的记录列表。"""
+    """efforts 字段（dict 按 id 键 / list 均可能）→ 统一的记录列表。"""
     items = list(raw.values()) if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
     out: list[dict] = []
     for it in items:
@@ -204,9 +207,12 @@ def _normalize_efforts(raw) -> list[dict]:
 
 
 def _fetch_efforts(client: httpx.Client, base: str, task_id: int) -> list[dict]:
-    resp = client.get(f"{base}/task-recordEstimate-{task_id}.json")
+    resp = client.get(f"{base}/effort-createForObject-task-{task_id}.json")
     data = _parse_page_data(resp.text)
-    return _normalize_efforts(data.get("estimates"))
+    if "efforts" not in data:
+        # denyPage（无权限）或版本差异：明确报错，调用方走兜底
+        raise ZentaoWebSessionError(f"禅道工时页面无 efforts 数据：{str({k: data.get(k) for k in ('title', 'denyType', 'module', 'method')})}")
+    return _normalize_efforts(data.get("efforts"))
 
 
 def list_task_efforts_via_web(login: ZentaoWebLogin, task_id: int) -> list[dict]:
@@ -221,12 +227,12 @@ def list_task_efforts_via_web(login: ZentaoWebLogin, task_id: int) -> list[dict]
 
 
 def record_task_efforts_via_web(login: ZentaoWebLogin, task_id: int, rows: list[dict]) -> list[dict]:
-    """提交工时记录（可多行、各行可不同日期）。
+    """提交工时记录（可多行、各行可不同日期，dates 支持补录历史日期）。
 
-    rows: [{"date": "YYYY-MM-DD", "consumed": float, "left": float, "work": str}]，
-    禅道会把 consumed 累加进任务总消耗、用最后一行的 left 更新任务剩余。
-    回读校验记录条数确实增加，未生效抛 ZentaoWebSessionError。
-    返回提交后的完整记录列表。
+    rows: [{"date": "YYYY-MM-DD", "consumed": float, "left": float, "work": str}]。
+    任务类型的日志「剩余 left」必填（缺了报"剩余不能为空"），禅道会把 consumed
+    累加进任务总消耗。以「回读记录条数确实增加」为准判定生效，未生效抛
+    ZentaoWebSessionError。返回提交后的完整记录列表。
     """
     rows = [r for r in rows if float(r.get("consumed") or 0.0) > 0]
     if not rows:
@@ -235,28 +241,30 @@ def record_task_efforts_via_web(login: ZentaoWebLogin, task_id: int, rows: list[
     client = _open_web_session(login)
     try:
         before = _fetch_efforts(client, base, task_id)
-        fields: dict[str, str] = {"uid": ""}
+        fields: dict[str, str] = {}
         for i, r in enumerate(rows, start=1):
             fields[f"id[{i}]"] = "0"
+            fields[f"objectType[{i}]"] = "task"
+            fields[f"objectID[{i}]"] = str(task_id)
             fields[f"dates[{i}]"] = str(r["date"])
+            fields[f"work[{i}]"] = str(r.get("work") or "")
             fields[f"consumed[{i}]"] = str(r["consumed"])
             fields[f"left[{i}]"] = str(r.get("left") if r.get("left") is not None else 0)
-            fields[f"work[{i}]"] = str(r.get("work") or "")
         resp = client.post(
-            f"{base}/task-recordEstimate-{task_id}.html",
+            f"{base}/effort-createForObject-task-{task_id}.html",
             files=_form(fields),
             headers={"X-Requested-With": "XMLHttpRequest", "X-Zui-Modal": "true"},
         )
-        try:
-            payload = _loads_lenient(resp.text)
-        except Exception:
-            raise ZentaoWebSessionError(f"禅道记录工时返回非 JSON：{(resp.text or '')[:200]}")
-        if not (isinstance(payload, dict) and payload.get("result") == "success"):
-            raise ZentaoWebSessionError(f"禅道记录工时未执行：{_fail_reason(payload)}")
+        # zui2 表单的成功响应格式有版本差异（result/load/messages），统一以回读为准
         after = _fetch_efforts(client, base, task_id)
         if len(after) < len(before) + len(rows):
+            try:
+                payload = _loads_lenient(resp.text)
+                reason = _fail_reason(payload)
+            except Exception:
+                reason = (resp.text or "")[:200]
             raise ZentaoWebSessionError(
-                f"禅道记录工时未生效：提交 {len(rows)} 条，记录数 {len(before)} → {len(after)}"
+                f"禅道记录工时未生效：提交 {len(rows)} 条，记录数 {len(before)} → {len(after)}；响应：{reason}"
             )
         return after
     finally:
@@ -274,33 +282,36 @@ def edit_task_effort_via_web(
     left: float,
     work: str = "",
 ) -> list[dict]:
-    """编辑一条工时记录。回读校验生效；字段名按「dates → date」两个变体依次尝试
-    （编辑表单字段名未实测，禅道版本间有差异）。返回编辑后的完整记录列表。"""
+    """编辑一条工时记录（日期/消耗小时/剩余/内容）。字段 2026-07-17 对 ipd4.3 实测：
+    date（必填，日期控件 JS 渲染、静态页抓不到）+ objectType/objectID/consumed/left/work。
+    回读校验日期与消耗确实变化，未生效抛 ZentaoWebSessionError。
+    返回编辑后的完整记录列表。"""
     base = login.base_url.rstrip("/")
     client = _open_web_session(login)
     try:
-        last_reason = ""
-        for date_field in ("dates", "date"):
-            fields = {date_field: date, "consumed": str(consumed), "left": str(left), "work": work, "uid": ""}
-            resp = client.post(
-                f"{base}/task-editEstimate-{effort_id}.html",
-                files=_form(fields),
-                headers={"X-Requested-With": "XMLHttpRequest", "X-Zui-Modal": "true"},
-            )
-            try:
-                payload = _loads_lenient(resp.text)
-            except Exception:
-                last_reason = f"返回非 JSON：{(resp.text or '')[:200]}"
-                continue
-            if not (isinstance(payload, dict) and payload.get("result") == "success"):
-                last_reason = _fail_reason(payload)
-                continue
-            after = _fetch_efforts(client, base, task_id)
-            hit = next((r for r in after if r["id"] == int(effort_id)), None)
-            if hit and hit["date"] == date[:10] and abs(hit["consumed"] - float(consumed)) < 0.005:
-                return after
-            last_reason = f"提交成功但记录未变化（当前：{hit}）"
-        raise ZentaoWebSessionError(f"禅道编辑工时未生效：{last_reason}")
+        fields = {
+            "date": str(date)[:10],
+            "objectType": "task",
+            "objectID": str(task_id),
+            "consumed": str(consumed),
+            "left": str(left),
+            "work": work,
+        }
+        resp = client.post(
+            f"{base}/effort-edit-{effort_id}.html",
+            files=_form(fields),
+            headers={"X-Requested-With": "XMLHttpRequest", "X-Zui-Modal": "true"},
+        )
+        after = _fetch_efforts(client, base, task_id)
+        hit = next((r for r in after if r["id"] == int(effort_id)), None)
+        if hit and hit["date"] == str(date)[:10] and abs(hit["consumed"] - float(consumed)) < 0.005:
+            return after
+        try:
+            payload = _loads_lenient(resp.text)
+            reason = _fail_reason(payload)
+        except Exception:
+            reason = (resp.text or "")[:200]
+        raise ZentaoWebSessionError(f"禅道编辑工时未生效（当前：{hit}）；响应：{reason}")
     finally:
         _logout_quietly(client, base)
         client.close()
