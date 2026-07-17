@@ -34,7 +34,7 @@ def test_merge_extra_hours_lumps_onto_target_day():
     assert zes.merge_extra_hours(rows, 0.0, date(2026, 7, 1)) == rows
 
 
-def test_submit_day_efforts_declining_left(monkeypatch):
+def test_submit_day_efforts_declining_left_never_zero(monkeypatch):
     sent = {}
 
     def fake_record(login, task_id, rows):
@@ -48,9 +48,18 @@ def test_submit_day_efforts_declining_left(monkeypatch):
         left_before=10.0, note="备注",
     )
     assert total == 12.83
-    assert [r["left"] for r in sent["rows"]] == [6.5, 0.0, 0.0]  # 递减、不为负
+    # left 递减但地板 0.1：left=0 会让禅道把任务自动置为已完成（且不写完成时间/完成人）
+    assert [r["left"] for r in sent["rows"]] == [6.5, 0.1, 0.1]
     assert [r["date"] for r in sent["rows"]] == ["2026-06-29", "2026-06-30", "2026-07-01"]
     assert all(r["work"] == "备注" for r in sent["rows"])
+
+
+def test_submit_day_efforts_zero_left_before_floors(monkeypatch):
+    # 剩余本来就是 0 的任务：所有行 left 也必须给 0.1，绝不能触发自动完成
+    sent = {}
+    monkeypatch.setattr(zes, "record_task_efforts_via_web", lambda login, tid, rows: sent.setdefault("rows", rows))
+    zes.submit_day_efforts(_login(), 42, [(date(2026, 6, 29), 2.0)], left_before=0.0)
+    assert [r["left"] for r in sent["rows"]] == [0.1]
 
 
 def test_submit_day_efforts_skips_zero_rows(monkeypatch):

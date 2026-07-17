@@ -32,7 +32,13 @@ from app.services.zentao_system_client import (
     get_user_zentao_web_login,
 )
 from app.services.zentao_effort_service import AUTO_NOTE, merge_extra_hours, submit_day_efforts
-from app.services.zentao_web_session import ZentaoWebSessionError, pause_task_via_web
+from app.services.zentao_web_session import (
+    ZentaoWebSessionError,
+    finish_task_via_web,
+    pause_task_via_web,
+    restart_task_via_web,
+    start_task_via_web,
+)
 from app.utils import work_hours
 from app.utils.task_naming import ensure_test_prefix
 from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
@@ -483,42 +489,71 @@ class ZentaoTaskSyncService:
         out: dict,
         zh: str,
         restore_assignee: bool = True,
+        web_op=None,
     ) -> bool:
-        """对候选客户端（本人优先 → 系统账号兜底）执行 op(client)，回读校验任务状态。
+        """对候选账号执行 op(client)，回读校验任务状态。
+
+        账号顺序（2026-07-17 操作人归属修复）：本人 REST → 本人网页 cookie 会话
+        （web_op，传入时）→ 系统账号 REST → 系统账号网页会话。此前本人 token 间歇
+        失效时直接落到系统账号，禅道动作历史显示成系统账号操作（"陈文博开始了任务"）；
+        现在网页兜底保证操作人归属本人。
 
         禅道 ipd4.3 已知坑：本人 token 被当 guest 时 REST 返回 200 但不生效；
         网络超时时也可能「抛错但已生效」。因此无论 op 成败都回读，状态真切到
-        expected 才写缓存并返回成功，否则换下一个候选账号重试。全部未生效时
-        缓存按最后一次回读结果落，避免本地按钮状态与禅道漂移（此前表现为
-        「点开始后按钮要等后台同步才变暂停」）。
+        expected 才写缓存并返回成功，否则换下一级重试。全部未生效时缓存按最后
+        一次回读结果落，避免本地按钮状态与禅道漂移。
         """
         task_id = int(requirement.zentao_task_id)
         acting = get_user_zentao_client(acting_user.id, self.db) if acting_user is not None else None
         system = get_system_zentao_client(self.db)
-        candidates = [c for c in (acting, system) if c is not None]
-        if len(candidates) == 2 and candidates[0] is candidates[1]:
-            candidates = candidates[:1]
+        candidates: list[tuple[str, object]] = []
+        if acting is not None:
+            candidates.append(("self", acting))
+        if system is not None and system is not acting:
+            candidates.append(("system", system))
         if not candidates:
             out["errors"].append("找不到可用的禅道账号绑定")
             return False
+        web_logins: dict = {}
+        if web_op is not None:
+            web_logins["self"] = get_user_zentao_web_login(acting_user.id, self.db) if acting_user is not None else None
+            web_logins["system"] = get_system_zentao_web_login(self.db)
         last_err: Optional[Exception] = None
         actual = ""
-        for client in candidates:
+
+        def _readback(client) -> str:
+            try:
+                return str((client.get_task(task_id) or {}).get("status") or "").strip().lower()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("readback task %s after %s failed: %s", task_id, zh, exc)
+                return ""
+
+        def _succeed(client) -> bool:
+            requirement.zentao_task_status_cache = expected
+            if restore_assignee:
+                self._restore_assignee_if_changed(client, requirement)
+            return True
+
+        for label, client in candidates:
             try:
                 op(client)
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
-                logger.warning("%s task %s failed: %s", zh, task_id, exc)
-            try:
-                actual = str((client.get_task(task_id) or {}).get("status") or "").strip().lower()
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("readback task %s after %s failed: %s", task_id, zh, exc)
-                actual = ""
+                logger.warning("%s task %s via %s REST failed: %s", zh, task_id, label, exc)
+            actual = _readback(client)
             if actual == expected:
-                requirement.zentao_task_status_cache = expected
-                if restore_assignee:
-                    self._restore_assignee_if_changed(client, requirement)
-                return True
+                return _succeed(client)
+            # REST 未生效 → 同账号网页 cookie 会话兜底（操作人归属不变）
+            web = web_logins.get(label)
+            if web_op is not None and web is not None:
+                try:
+                    web_op(web)
+                except Exception as exc:  # noqa: BLE001
+                    last_err = exc
+                    logger.warning("%s task %s via %s web session failed: %s", zh, task_id, label, exc)
+                actual = _readback(client)
+                if actual == expected:
+                    return _succeed(client)
         if actual:
             requirement.zentao_task_status_cache = actual
         detail = f"：{last_err}" if last_err else "（禅道返回成功但状态未切换）"
@@ -554,8 +589,15 @@ class ZentaoTaskSyncService:
                 else:
                     client.start_task(task_id, real_started=_fmt_dt(now), left=left, assigned_to=assignee)
 
+            def _web_op(web):
+                # 网页表单的 consumed 有当前消耗预填值，restart 传 None 沿用即可
+                if paused:
+                    restart_task_via_web(web, task_id, left=left, assigned_to=assignee)
+                else:
+                    start_task_via_web(web, task_id, left=left, real_started=_fmt_dt(now))
+
             self._operate_task_with_verify(
-                requirement, expected="doing", op=_op, acting_user=acting_user, out=out, zh="开始"
+                requirement, expected="doing", op=_op, acting_user=acting_user, out=out, zh="开始", web_op=_web_op
             )
         self.db.commit()
         out["ok"] = not out["errors"]
@@ -570,8 +612,19 @@ class ZentaoTaskSyncService:
 
         工时口径：暂停生效时把「本段开始→暂停」结算进 task_consumed_accum 并清空
         task_started_at，保证暂停到再次开始之间的时间不计工时。
+
+        ⚠️ 分段工时必须在暂停「之前」提交：禅道对 pause 状态任务记工时会把状态自动
+        置回 doing（2026-07-17 线上实证：暂停几秒后被"自动激活"，动作备注即工时记录
+        的 work 文案）。先在 doing 状态提交（不改状态），再执行暂停；提交成功后把
+        计时起点重置到当前时刻——暂停未生效时计时自然续跑、不会重复计入已提交段。
         """
         out: dict = {"ok": False, "errors": []}
+        now = local_now()
+        presubmitted = self._try_submit_requirement_efforts(requirement, acting_user, now)
+        if presubmitted is not None:
+            requirement.task_efforts_submitted = round(float(requirement.task_efforts_submitted or 0.0) + presubmitted, 2)
+            requirement.task_consumed_accum = 0.0
+            requirement.task_started_at = now
         if requirement.zentao_task_id:
             task_id = int(requirement.zentao_task_id)
             client = self._client_or_error(out, acting_user)
@@ -612,16 +665,11 @@ class ZentaoTaskSyncService:
                     detail = f"：{last_err}" if last_err else "（禅道返回成功但状态未切换）"
                     out["errors"].append(f"禅道暂停任务未生效{detail}")
         if not out["errors"]:
-            now = local_now()
-            # 工时口径（2026-07-17）：暂停时把本段按天拆分提交为禅道工时记录（工时
-            # 落到实际发生的日期）；无本人网页凭据/提交失败退回本地累计、完成时一次性提交。
-            submitted = self._try_submit_requirement_efforts(requirement, acting_user, now)
-            if submitted is None:
-                self._settle_consumed_segment(requirement, now)
+            if presubmitted is not None:
+                requirement.task_started_at = None  # 本段已在暂停前提交，暂停生效后停表
             else:
-                requirement.task_efforts_submitted = round(float(requirement.task_efforts_submitted or 0.0) + submitted, 2)
-                requirement.task_consumed_accum = 0.0
-                requirement.task_started_at = None
+                # 无本人网页凭据/提交失败 → 旧口径：本地累计，完成时一次性提交
+                self._settle_consumed_segment(requirement, now)
         self.db.commit()
         out["ok"] = not out["errors"]
         return out
@@ -640,7 +688,7 @@ class ZentaoTaskSyncService:
         requirement.task_started_at = None
 
     def _split_segment_by_day(self, started, ended) -> list[tuple[date, float]]:
-        """本段计时按天拆分 [(日期, 小时)]（工作日工作时段口径）。"""
+        """本段计时按天拆分 [(日期, 小时)]（工作日全天计、周末节假日跳过）。"""
         if not started or ended <= started:
             return []
         try:
@@ -740,10 +788,13 @@ class ZentaoTaskSyncService:
             def _op(client):
                 client.finish_task(task_id, current_consumed=consumed, finished_date=_fmt_dt(now))
 
+            def _web_op(web):
+                finish_task_via_web(web, task_id, current_consumed=consumed, finished_date=_fmt_dt(now))
+
             # 完成后禅道会把指派人转给任务创建者，属预期流转，不做指派校正
             self._operate_task_with_verify(
                 requirement, expected="done", op=_op, acting_user=acting_user, out=out, zh="完成",
-                restore_assignee=False,
+                restore_assignee=False, web_op=_web_op,
             )
         if not out["errors"]:
             # finish 的 currentConsumed 已随完成上报（禅道生成完成当天的工时记录）
@@ -777,8 +828,11 @@ class ZentaoTaskSyncService:
                 # restart 要求 consumed 必填、left>0
                 client.restart_task(task_id, consumed=consumed, left=left, assigned_to=(requirement.zentao_task_assigned_to or None))
 
+            def _web_op(web):
+                restart_task_via_web(web, task_id, left=left, assigned_to=(requirement.zentao_task_assigned_to or None))
+
             self._operate_task_with_verify(
-                requirement, expected="doing", op=_op, acting_user=acting_user, out=out, zh="重新激活"
+                requirement, expected="doing", op=_op, acting_user=acting_user, out=out, zh="重新激活", web_op=_web_op
             )
         self.db.commit()
         out["ok"] = not out["errors"]

@@ -22,7 +22,15 @@ from app.services.zentao_system_client import (
     get_user_zentao_web_login,
 )
 from app.services.zentao_effort_service import AUTO_NOTE, merge_extra_hours, submit_day_efforts
-from app.services.zentao_web_session import ZentaoWebSessionError, cancel_task_via_web, pause_task_via_web
+from app.services.zentao_web_session import (
+    ZentaoWebSessionError,
+    cancel_task_via_web,
+    close_task_via_web,
+    finish_task_via_web,
+    pause_task_via_web,
+    restart_task_via_web,
+    start_task_via_web,
+)
 from app.utils.task_naming import ensure_test_prefix
 from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
 
@@ -204,7 +212,11 @@ class ZentaoTaskMirrorService:
             row.est_started = _parse_date(t.get("estStarted"))
             row.deadline = _parse_date(t.get("deadline"))
             row.real_started = _parse_dt(t.get("realStarted"))
-            row.finished_date = _parse_dt(t.get("finishedDate"))
+            # 禅道 left=0 工时触发的自动完成不写 finishedDate → 任务仍是完成态时，
+            # 别用空值冲掉镜像里已兜底的完成时间（看板延期归列全靠它）
+            _fin = _parse_dt(t.get("finishedDate"))
+            if _fin is not None or str(t.get("status") or "").strip().lower() not in {"done", "closed"}:
+                row.finished_date = _fin
             row.synced_at = local_now()
             n += 1
         return n
@@ -586,48 +598,88 @@ class ZentaoTaskMirrorService:
         was_paused = (row.status or "").strip().lower() == "pause"
         finish_consumed = self._prepare_finish_consumed(row, current_user, op_now, explicit=consumed) if action == "finish" else 0.0
 
-        # 暂停/取消：REST 优先（ipd4.3 空 body 会被静默忽略，pause/cancel_task 已固定带 comment 字段）；
-        # REST 未生效（如 token 被当 guest 时 200 无效果）再回退网页 cookie 会话。
+        # ⚠️ 暂停的分段工时必须在暂停「之前」提交：禅道对 pause 状态任务记工时会把
+        # 状态自动置回 doing（2026-07-17 线上实证：暂停几秒后被"自动激活"，动作备注
+        # 即工时记录的 work 文案）。先在 doing 状态提交（不改状态），再执行暂停；
+        # 提交成功后把计时起点重置到当前时刻——暂停未生效时计时自然续跑、不会重复
+        # 计入已提交段；暂停生效后由下方簿记停表。
+        pause_presubmitted: Optional[float] = None
+        if action == "pause":
+            pause_presubmitted = self._try_submit_segment_efforts(row, current_user, op_now)
+            if pause_presubmitted is not None:
+                row.efforts_submitted = round(float(row.efforts_submitted or 0.0) + pause_presubmitted, 2)
+                row.consumed_accum = 0.0
+                row.local_started_at = op_now
+
+        # 生命周期动作统一「REST → 同账号网页 cookie 会话」两级尝试（2026-07-17 扩展到
+        # 全部动作）：本人 token 间歇性失效（过期刷新失败 / ipd4.3 被当 guest）时，此前
+        # start/finish/close 直接落到系统账号代操作，禅道动作历史显示成系统账号（"陈文博
+        # 开始了任务"）。现在先用本人网页会话兜底，保证操作人归属本人；系统账号只在
+        # 本人 REST+网页都不可用时才出场。
+        _LIFECYCLE = {"start", "pause", "finish", "close", "cancel", "reactivate"}
         web_logins = {}
-        if action in {"pause", "cancel"}:
+        if action in _LIFECYCLE:
             web_logins["self"] = get_user_zentao_web_login(current_user.id, self.db)
             web_logins["system"] = get_system_zentao_web_login(self.db)
 
         def _dispatch(label, cli):
-            if action == "start":
-                left = hours if (hours and hours > 0) else (row.left or row.estimate or 1.0)
-                if (row.status or "").strip().lower() == "pause":
-                    return cli.restart_task(task_id, consumed=(row.consumed or 0.0), left=left, assigned_to=original_account)
-                return cli.start_task(task_id, real_started=_fmt_now(), left=left, assigned_to=original_account)
-            if action in {"pause", "cancel"}:
-                rest_call = cli.pause_task if action == "pause" else cli.cancel_task
-                web_call = pause_task_via_web if action == "pause" else cancel_task_via_web
-                zh = "暂停" if action == "pause" else "取消"
-                resp = None
-                try:
-                    resp = rest_call(task_id, comment=comment)
-                    if str((cli.get_task(task_id) or {}).get("status") or "").strip().lower() == _expected:
-                        return resp
-                except Exception as exc:  # noqa: BLE001 — REST 失败/未生效都尝试网页会话
-                    logger.warning("%s via REST (%s) task %s failed: %s", action, label, task_id, exc)
-                web = web_logins.get(label)
-                if web is not None:
-                    return web_call(web, task_id, comment=comment)
-                if resp is not None:
-                    return resp  # 无网页凭据：交给外层校验判定未生效
-                raise ZentaoWebSessionError(f"REST {zh}失败且无网页登录凭据")
-            if action == "finish":
-                return cli.finish_task(task_id, current_consumed=finish_consumed, finished_date=_fmt_now())
-            if action == "reactivate":
-                left = hours if (hours and hours > 0) else (row.estimate or 1.0)
-                return cli.restart_task(task_id, consumed=(row.consumed or 0.0), left=left, assigned_to=original_account)
-            if action == "close":
-                return cli.close_task(task_id, comment=comment)
             if action == "set_time":
                 return cli.update_task(task_id, {"estimate": hours, "left": hours})
             if action == "assign":
                 return cli.reassign_task(task_id, assigned_to)
-            return None
+
+            resuming = (row.status or "").strip().lower() == "pause"
+            start_left = hours if (hours and hours > 0) else (row.left or row.estimate or 1.0)
+            react_left = hours if (hours and hours > 0) else (row.estimate or 1.0)
+
+            def _rest():
+                if action == "start":
+                    if resuming:
+                        return cli.restart_task(task_id, consumed=(row.consumed or 0.0), left=start_left, assigned_to=original_account)
+                    return cli.start_task(task_id, real_started=_fmt_now(), left=start_left, assigned_to=original_account)
+                if action == "pause":
+                    return cli.pause_task(task_id, comment=comment)
+                if action == "cancel":
+                    return cli.cancel_task(task_id, comment=comment)
+                if action == "finish":
+                    return cli.finish_task(task_id, current_consumed=finish_consumed, finished_date=_fmt_now())
+                if action == "reactivate":
+                    return cli.restart_task(task_id, consumed=(row.consumed or 0.0), left=react_left, assigned_to=original_account)
+                if action == "close":
+                    return cli.close_task(task_id, comment=comment)
+                return None
+
+            def _web(web):
+                if action == "start":
+                    if resuming:
+                        return restart_task_via_web(web, task_id, consumed=(row.consumed or 0.0), left=start_left, assigned_to=original_account, comment=comment)
+                    return start_task_via_web(web, task_id, left=start_left, real_started=_fmt_now(), comment=comment)
+                if action == "pause":
+                    return pause_task_via_web(web, task_id, comment=comment)
+                if action == "cancel":
+                    return cancel_task_via_web(web, task_id, comment=comment)
+                if action == "finish":
+                    return finish_task_via_web(web, task_id, current_consumed=finish_consumed, finished_date=_fmt_now(), comment=comment)
+                if action == "reactivate":
+                    return restart_task_via_web(web, task_id, consumed=(row.consumed or 0.0), left=react_left, assigned_to=original_account, comment=comment)
+                if action == "close":
+                    return close_task_via_web(web, task_id, comment=comment)
+                return None
+
+            zh = {"start": "开始", "pause": "暂停", "finish": "完成", "close": "关闭", "cancel": "取消", "reactivate": "重新激活"}.get(action, action)
+            resp = None
+            try:
+                resp = _rest()
+                if str((cli.get_task(task_id) or {}).get("status") or "").strip().lower() == _expected:
+                    return resp
+            except Exception as exc:  # noqa: BLE001 — REST 失败/未生效都尝试网页会话
+                logger.warning("%s via REST (%s) task %s failed: %s", action, label, task_id, exc)
+            web = web_logins.get(label)
+            if web is not None:
+                return _web(web)
+            if resp is not None:
+                return resp  # 无网页凭据：交给外层校验判定未生效
+            raise ZentaoWebSessionError(f"REST {zh}失败且无网页登录凭据")
 
         errors: list[str] = []
         used_client = None
@@ -670,7 +722,8 @@ class ZentaoTaskMirrorService:
 
         # 工时结算簿记（仅操作生效时）：
         # start（继续）保留累计、重置本段起点；start（全新）连累计一起清零；
-        # pause 按天拆分提交本段工时记录（失败退回本地累计）并停表；
+        # pause 的分段工时已在暂停前提交（防禅道对 pause 任务记工时自动激活），
+        # 此处仅停表，提交失败的退回本地累计；
         # reactivate 从零起算；finish 停表、未提交累计已随 currentConsumed 上报。
         if used_client is not None:
             if action == "start":
@@ -678,14 +731,11 @@ class ZentaoTaskMirrorService:
                     row.consumed_accum = 0.0
                 row.local_started_at = op_now
             elif action == "pause":
-                submitted = self._try_submit_segment_efforts(row, current_user, op_now)
-                if submitted is None:
+                if pause_presubmitted is not None:
+                    row.local_started_at = None  # 本段已在暂停前提交，暂停生效后停表
+                else:
                     # 无本人网页凭据/提交失败 → 旧口径：本地累计，完成时一次性提交
                     self._settle_local_segment(row, op_now)
-                else:
-                    row.efforts_submitted = round(float(row.efforts_submitted or 0.0) + submitted, 2)
-                    row.consumed_accum = 0.0
-                    row.local_started_at = None
             elif action == "reactivate":
                 row.consumed_accum = 0.0
                 row.local_started_at = op_now
@@ -693,6 +743,10 @@ class ZentaoTaskMirrorService:
                 row.efforts_submitted = round(float(row.efforts_submitted or 0.0) + finish_consumed, 2)
                 row.consumed_accum = 0.0
                 row.local_started_at = None
+                # 禅道某些路径的完成不写 finishedDate（如 left=0 工时触发的自动完成），
+                # 看板延期归列全靠它——回读拿不到就用操作时刻兜底
+                if not row.finished_date:
+                    row.finished_date = op_now
 
         # 兜底校正：操作生效后若禅道把指派人清空/改掉（系统账号代操作的已知副作用），改派回本人。
         client = used_client or candidates[0][1]
@@ -720,7 +774,7 @@ class ZentaoTaskMirrorService:
         return None
 
     def _auto_consumed_hours(self, row: ZentaoTaskMirror, now: datetime) -> float:
-        """自动工时 = 暂停结算累计 + 本段（起点→now，按工作日工作时段窗口）。"""
+        """自动工时 = 暂停结算累计 + 本段（起点→now，工作日全天计、周末节假日跳过）。"""
         total = float(row.consumed_accum or 0.0)
         started = self._local_segment_start(row)
         if started and now > started:
@@ -737,7 +791,7 @@ class ZentaoTaskMirrorService:
         row.local_started_at = None
 
     def _split_segment_by_day(self, started: Optional[datetime], ended: datetime) -> list[tuple[date, float]]:
-        """本段计时按天拆分 [(日期, 小时)]（工作日工作时段口径）。"""
+        """本段计时按天拆分 [(日期, 小时)]（工作日全天计、周末节假日跳过）。"""
         if not started or ended <= started:
             return []
         try:
@@ -748,7 +802,7 @@ class ZentaoTaskMirrorService:
 
     def _try_submit_segment_efforts(self, row: ZentaoTaskMirror, current_user: User, now: datetime) -> Optional[float]:
         """暂停：本段（+ 旧口径遗留的未提交累计，补录到今天）按天拆分提交为禅道
-        工时记录。成功返回提交的小时数（可为 0——本段没有落在工作时段内）；
+        工时记录。成功返回提交的小时数（可为 0——本段全落在周末/节假日）；
         无本人网页凭据或提交失败返回 None，调用方退回本地累计口径。
 
         ⚠️ 工时记录归属禅道当前登录人，只能用本人凭据，不回退系统账号。"""
@@ -854,7 +908,10 @@ class ZentaoTaskMirrorService:
         if t.get("realStarted") is not None:
             row.real_started = _parse_dt(t.get("realStarted"))
         if t.get("finishedDate") is not None:
-            row.finished_date = _parse_dt(t.get("finishedDate"))
+            _fin = _parse_dt(t.get("finishedDate"))
+            # 完成态任务的空 finishedDate（left=0 自动完成）不冲掉已兜底的完成时间
+            if _fin is not None or str(t.get("status") or "").strip().lower() not in {"done", "closed"}:
+                row.finished_date = _fin
         if t.get("deadline") is not None:
             row.deadline = _parse_date(t.get("deadline"))
         row.synced_at = local_now()

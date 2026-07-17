@@ -1042,12 +1042,18 @@ function renderZentaoBoardCard(t) {
     ? window.OmniQAUtils.renderPreviewBtn('task', t.task_id)
     : '';
   const actions = ztActionsHtml(t);
-  // 延期列的卡片标注截至看板日期已延期的天数
+  // 延期列的卡片标注截至看板日期已延期的天数；
+  // 逾期完成的任务在已完成/已关闭列同样带「已延期」标签（完成日与截止日对齐口径）
   let delayChip = '';
+  const finishedDayChip = dayOf(t.finished_date);
   if (t._boardCol === 'deferred' && t.deadline) {
     const boardDate = state.date || todayISO();
     const days = Math.max(1, Math.round((new Date(boardDate) - new Date(dayOf(t.deadline))) / 86400000));
     delayChip = `<span class="badge" style="background:#fef9c3; color:#a16207; border:1px solid #fde68a; font-size:11px;">⏰ 已延期 ${days} 天</span>`;
+  } else if ((t._boardCol === 'done' || t._boardCol === 'closed') && t.deadline && finishedDayChip && finishedDayChip > dayOf(t.deadline)) {
+    const days = Math.max(1, Math.round((new Date(finishedDayChip) - new Date(dayOf(t.deadline))) / 86400000));
+    delayChip = `<span class="badge" style="background:#fef9c3; color:#a16207; border:1px solid #fde68a; font-size:11px;"
+      title="截止 ${dayOf(t.deadline)}，实际 ${finishedDayChip} 完成">⏰ 已延期 ${days} 天完成</span>`;
   }
   return `
     <div data-task-card="zt-${t.task_id}" style="background:#fff; border:1px solid rgba(15,23,42,.08); border-left:3px solid ${meta.color}; border-radius:8px; padding:10px; box-shadow:0 1px 2px rgba(15,23,42,.04);">

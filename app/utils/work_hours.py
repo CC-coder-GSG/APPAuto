@@ -2,12 +2,12 @@
 
 两套口径（需求明确接受两者差异）：
   - 预计工时 estimate：工作日数 × 8h（用于分配时估算）。
-  - 实际工时 consumed：开始→完成之间，按每日工作时段窗口累加，单日上限 7.833h。
+  - 实际工时 consumed：开始→完成之间的自然流逝时间，仅按「工作日」过滤——
+    周末与节假日整天跳过，工作日内不再限制时段（2026-07-17 需求：原
+    09:00-11:50 / 13:30-18:30 工作时段窗口会漏掉加班时间，已移除）。
 
-工作时段窗口（公司规定）：
-    上午 09:00–11:50（170 分钟）
-    下午 13:30–18:30（300 分钟）
-    合计 470 分钟 = 7.8333… 小时/天
+⚠️ 移除时段窗口的直接后果：跨天不暂停的段会把夜间也计入（一个工作日最多
+计 24h）。暂停期不计工时的口径不变，靠及时点暂停控制。
 
 本模块为纯函数、不依赖 DB：节假日信息由调用方以 ``holiday_map`` 注入
 （``{date: is_off}``，is_off=True 放假 / False 调休补班）。未在 map 中的日期
@@ -15,20 +15,8 @@
 """
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from typing import Mapping, Optional
-
-# (start, end) 工作时段
-WORK_WINDOWS: list[tuple[time, time]] = [
-    (time(9, 0), time(11, 50)),
-    (time(13, 30), time(18, 30)),
-]
-
-# 每日工作分钟数（窗口口径）
-WORK_MINUTES_PER_DAY = sum(
-    (e.hour * 60 + e.minute) - (s.hour * 60 + s.minute) for s, e in WORK_WINDOWS
-)  # = 470
-WORK_HOURS_PER_DAY = WORK_MINUTES_PER_DAY / 60.0  # ≈ 7.8333
 
 # 预计工时口径：每个工作日按 8 小时算
 ESTIMATE_HOURS_PER_DAY = 8.0
@@ -81,16 +69,14 @@ def estimate_hours(
 
 
 def _overlap_minutes_in_day(day: date, start: datetime, end: datetime) -> int:
-    """计算 [start, end] 与某一天工作时段窗口的重叠分钟数。"""
-    total = 0
-    for ws, we in WORK_WINDOWS:
-        win_start = datetime.combine(day, ws)
-        win_end = datetime.combine(day, we)
-        lo = max(start, win_start)
-        hi = min(end, win_end)
-        if hi > lo:
-            total += int((hi - lo).total_seconds() // 60)
-    return total
+    """计算 [start, end] 与某一自然日（00:00 → 次日 00:00）的重叠分钟数。"""
+    day_start = datetime.combine(day, datetime.min.time())
+    day_end = day_start + timedelta(days=1)
+    lo = max(start, day_start)
+    hi = min(end, day_end)
+    if hi <= lo:
+        return 0
+    return int((hi - lo).total_seconds() // 60)
 
 
 def consumed_hours(
@@ -98,9 +84,10 @@ def consumed_hours(
     finished_at: datetime,
     holiday_map: Optional[Mapping[date, bool]] = None,
 ) -> float:
-    """实际工时：[started_at, finished_at] 落在工作日工作时段内的分钟累加。
+    """实际工时：[started_at, finished_at] 落在工作日内的自然分钟累加。
 
-    跨午休、跨天、跨周末/节假日均正确处理。finished<=started 返回 0。
+    周末/节假日整天跳过；工作日内不限时段（加班照计）。跨天正确处理。
+    finished<=started 返回 0。
     """
     if finished_at <= started_at:
         return 0.0
@@ -139,8 +126,6 @@ def consumed_hours_by_day(
 
 
 __all__ = [
-    "WORK_WINDOWS",
-    "WORK_HOURS_PER_DAY",
     "ESTIMATE_HOURS_PER_DAY",
     "is_workday",
     "working_days",

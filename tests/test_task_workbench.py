@@ -606,17 +606,18 @@ def test_pause_submits_day_split_efforts(db_session, monkeypatch):
 
     monkeypatch.setattr(tms, "submit_day_efforts", fake_submit)
 
-    # 周三 10:30 暂停：周一 3.5h + 周二 7.83h + 周三 1.5h 三行记录
+    # 周三 10:30 暂停：周一 9h + 周二 24h + 周三 10.5h 三行记录
+    # （2026-07-17 起取消工作时段窗口：工作日内自然时间全计、周末节假日跳过）
     monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 1, 10, 30))
     res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1001, action="pause", current_user=alice)
     assert res["ok"] is True
     assert submitted == [("alice", 1001, [
-        (date(2026, 6, 29), 3.5),
-        (date(2026, 6, 30), 7.83),
-        (date(2026, 7, 1), 1.5),
+        (date(2026, 6, 29), 9.0),
+        (date(2026, 6, 30), 24.0),
+        (date(2026, 7, 1), 10.5),
     ], 20.0)]
     assert row.consumed_accum == 0.0
-    assert row.efforts_submitted == 12.83
+    assert row.efforts_submitted == 43.5
     assert row.local_started_at is None
 
 
@@ -699,15 +700,15 @@ def test_finish_presubmits_prev_days_and_reports_today_only(db_session, monkeypa
         return round(sum(h for _, h in day_rows), 2)
 
     monkeypatch.setattr(tms, "submit_day_efforts", fake_submit)
-    # 周三 10:30 完成：周一 3.5 + 周二 7.83 预提交，finish 只带周三的 1.5
+    # 周三 10:30 完成：周一 9h + 周二 24h 预提交，finish 只带周三的 10.5h
     monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 1, 10, 30))
     res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1004, action="finish", current_user=alice)
     assert res["ok"] is True
-    assert submitted == [[(date(2026, 6, 29), 3.5), (date(2026, 6, 30), 7.83)]]
+    assert submitted == [[(date(2026, 6, 29), 9.0), (date(2026, 6, 30), 24.0)]]
     finish = next(c for c in client.calls if c[0] == "finish")
-    assert finish[2]["current_consumed"] == 1.5
+    assert finish[2]["current_consumed"] == 10.5
     assert row.consumed_accum == 0.0
-    assert row.efforts_submitted == round(11.33 + 1.5, 2)
+    assert row.efforts_submitted == round(33.0 + 10.5, 2)
     assert row.local_started_at is None
 
 
@@ -734,3 +735,226 @@ def test_finish_after_segments_submitted_uses_min_floor(db_session, monkeypatch)
     finish = next(c for c in client.calls if c[0] == "finish")
     # 不回退 real_started 起算（会重复计入），也不拿 left/estimate 兜底
     assert finish[2]["current_consumed"] == 0.1
+
+
+# ─── 操作人归属：本人 REST 失效 → 本人网页会话兜底（2026-07-17）──────────────
+
+
+def test_operate_start_falls_back_to_self_web_not_system(db_session, monkeypatch):
+    """本人 token 被当 guest（200 无效果）→ 先用本人网页会话开始，不落系统账号。"""
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    alice = _user(db_session, "alice_selfweb", account="alice")
+    _major(db_session, "V-TW-SW")
+    _mirror(db_session, 1101, alice.id, account="alice", status="wait")
+
+    class GuestStartClient(FakeClient):
+        def start_task(self, task_id, **kw):
+            self.calls.append(("start", task_id, kw))
+            # 200 但状态不变（guest 静默失败）
+            return {"message": "success"}
+
+    guest = GuestStartClient()
+    guest.set_task(1101, {"status": "wait", "assignedTo": {"account": "alice"}})
+    system = FakeClient()
+    system.set_task(1101, {"status": "wait", "assignedTo": {"account": "alice"}})
+    web_calls = []
+
+    def fake_web_start(login, task_id, *, left, real_started=None, comment=None):
+        web_calls.append((login.account, task_id, left))
+        guest.set_task(task_id, {"status": "doing", "assignedTo": {"account": "alice"}})
+        return {"result": "success"}
+
+    monkeypatch.setattr(tms, "get_user_zentao_client", lambda uid, db: guest)
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: system)
+    monkeypatch.setattr(
+        tms, "get_user_zentao_web_login",
+        lambda uid, db: ZentaoWebLogin(base_url="http://z", account="alice", password="p"),
+    )
+    monkeypatch.setattr(tms, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(tms, "start_task_via_web", fake_web_start)
+
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1101, action="start", current_user=alice)
+    assert res["ok"] is True
+    assert web_calls == [("alice", 1101, 1.0)]   # 本人网页会话完成了开始
+    assert system.calls == []                     # 系统账号完全没出场
+    row = db_session.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == 1101).first()
+    assert row.status == "doing"
+
+
+def test_operate_finish_falls_back_to_self_web(db_session, monkeypatch):
+    """完成同理：本人 REST 未生效 → 本人网页会话 finish，操作人保持本人。"""
+    from datetime import datetime
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    alice = _user(db_session, "alice_finweb", account="alice")
+    _major(db_session, "V-TW-FW")
+    row = _mirror(db_session, 1102, alice.id, account="alice", status="doing")
+    row.local_started_at = datetime(2026, 7, 1, 9, 0)
+    db_session.commit()
+
+    class GuestFinishClient(FakeClient):
+        def finish_task(self, task_id, **kw):
+            self.calls.append(("finish", task_id, kw))
+            return {"message": "success"}  # 200 但状态不变
+
+    guest = GuestFinishClient()
+    guest.set_task(1102, {"status": "doing", "assignedTo": {"account": "alice"}})
+    system = FakeClient()
+    web_calls = []
+
+    def fake_web_finish(login, task_id, *, current_consumed, finished_date=None, comment=None):
+        web_calls.append((login.account, task_id, current_consumed))
+        guest.set_task(task_id, {"status": "done", "assignedTo": {"account": "alice"}})
+        return {"result": "success"}
+
+    monkeypatch.setattr(tms, "get_user_zentao_client", lambda uid, db: guest)
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: system)
+    monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
+    monkeypatch.setattr(
+        tms, "get_user_zentao_web_login",
+        lambda uid, db: ZentaoWebLogin(base_url="http://z", account="alice", password="p"),
+    )
+    monkeypatch.setattr(tms, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(tms, "finish_task_via_web", fake_web_finish)
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 1, 11, 0))
+
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1102, action="finish", current_user=alice)
+    assert res["ok"] is True
+    assert web_calls == [("alice", 1102, 2.0)]  # 工时随网页 finish 上报
+    assert system.calls == []
+
+
+# ─── 暂停不被自动激活：工时必须在暂停之前提交（2026-07-17 线上问题）──────────
+
+
+def test_pause_submits_efforts_before_pausing(db_session, monkeypatch):
+    """禅道对 pause 任务记工时会自动激活回 doing → 分段提交必须发生在暂停之前。"""
+    from datetime import datetime
+
+    alice = _user(db_session, "alice_order", account="alice")
+    _major(db_session, "V-TW-ORD")
+    row = _mirror(db_session, 1201, alice.id, account="alice", status="doing")
+    row.local_started_at = datetime(2026, 7, 1, 9, 0)
+    db_session.commit()
+    seq = []
+
+    class SeqClient(FakeClient):
+        def pause_task(self, task_id, **kw):
+            seq.append("pause")
+            return super().pause_task(task_id, **kw)
+
+    client = SeqClient()
+    client.set_task(1201, {"status": "doing", "assignedTo": {"account": "alice"}})
+
+    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+        seq.append("submit")
+        return round(sum(h for _, h in day_rows), 2)
+
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
+    monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: _fake_login())
+    monkeypatch.setattr(tms, "submit_day_efforts", fake_submit)
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 1, 11, 0))
+
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1201, action="pause", current_user=alice)
+    assert res["ok"] is True
+    assert seq == ["submit", "pause"]   # 先记工时（doing 态，不改状态），后暂停
+    assert row.local_started_at is None
+    assert row.consumed_accum == 0.0
+    assert row.efforts_submitted == 2.0
+
+
+def test_pause_presubmit_keeps_clock_when_pause_ineffective(db_session, monkeypatch):
+    """工时已提交但暂停未生效：计时起点重置到暂停时刻续跑，已提交段不会重复计入。"""
+    from datetime import datetime
+
+    alice = _user(db_session, "alice_ord2", account="alice")
+    _major(db_session, "V-TW-ORD2")
+    row = _mirror(db_session, 1202, alice.id, account="alice", status="doing")
+    row.local_started_at = datetime(2026, 7, 1, 9, 0)
+    db_session.commit()
+
+    class NoopPauseClient(FakeClient):
+        def pause_task(self, task_id, **kw):
+            self.calls.append(("pause", task_id, kw))
+            return {"message": "success"}  # 200 但状态不变
+
+    client = NoopPauseClient()
+    client.set_task(1202, {"status": "doing", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
+    monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: _fake_login())
+    monkeypatch.setattr(tms, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(tms, "pause_task_via_web", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("web down")))
+    monkeypatch.setattr(tms, "submit_day_efforts",
+                        lambda login, task_id, day_rows, **kw: round(sum(h for _, h in day_rows), 2))
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 1, 11, 0))
+
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1202, action="pause", current_user=alice)
+    assert res["ok"] is False                                # 暂停未生效如实上报
+    assert row.efforts_submitted == 2.0                      # 工时已落禅道
+    assert row.consumed_accum == 0.0
+    assert row.local_started_at == datetime(2026, 7, 1, 11, 0)  # 新段起点=提交时刻，续跑不重复
+
+
+# ─── 完成时间兜底：禅道 left=0 自动完成不写 finishedDate（2026-07-17）────────
+
+
+def test_finish_backfills_finished_date_when_zentao_omits_it(db_session, monkeypatch):
+    """完成生效但禅道回读没有 finishedDate → 镜像用操作时刻兜底（看板延期归列依赖它）。"""
+    from datetime import datetime
+
+    alice = _user(db_session, "alice_fd", account="alice")
+    _major(db_session, "V-TW-FD")
+    row = _mirror(db_session, 1301, alice.id, account="alice", status="doing")
+    db_session.commit()
+
+    class NoFinishedDateClient(FakeClient):
+        def finish_task(self, task_id, **kw):
+            self.calls.append(("finish", task_id, kw))
+            # 禅道置为 done 但 finishedDate 缺失（left=0 自动完成的同款数据形态）
+            self._tasks[task_id] = {"status": "done", "assignedTo": {"account": "alice"}, "finishedDate": None}
+            return {"id": task_id}
+
+    client = NoFinishedDateClient()
+    client.set_task(1301, {"status": "doing", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 17, 18, 0))
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1301, action="finish", current_user=alice)
+    assert res["ok"] is True
+    assert row.finished_date == datetime(2026, 7, 17, 18, 0)
+
+
+def test_sync_keeps_finished_date_when_zentao_returns_empty(db_session, monkeypatch):
+    """后台同步：完成态任务 finishedDate 为空时不得冲掉镜像里已兜底的完成时间。"""
+    from datetime import datetime
+
+    alice = _user(db_session, "alice_keepfd", account="alice")
+    major = _major(db_session, "V-TW-KFD")
+    row = _mirror(db_session, 1302, alice.id, account="alice", status="done")
+    row.finished_date = datetime(2026, 7, 17, 18, 0)
+    db_session.commit()
+
+    class ListClient:
+        def __init__(self, tasks):
+            self.tasks = tasks
+
+        def list_execution_tasks(self, exec_id, limit=500):
+            return self.tasks
+
+    svc = ZentaoTaskMirrorService(db_session)
+    base_task = {
+        "id": 1302, "name": "任务1302", "status": "done", "parent": 0, "isParent": 0,
+        "assignedTo": {"account": "alice"},
+    }
+    n = svc._sync_execution(ListClient([{**base_task, "finishedDate": "0000-00-00 00:00:00"}]), major, {}, {})
+    assert n == 1
+    assert row.finished_date == datetime(2026, 7, 17, 18, 0)   # 空值没有冲掉兜底
+
+    # 禅道后来补上了真实完成时间 → 正常覆盖（本地化小时数依机器时区，不作精确断言）
+    svc._sync_execution(ListClient([{**base_task, "finishedDate": "2026-07-17T10:12:31Z"}]), major, {}, {})
+    assert row.finished_date is not None
+    assert row.finished_date != datetime(2026, 7, 17, 18, 0)
+    assert row.finished_date.second == 31

@@ -58,15 +58,20 @@ def submit_day_efforts(
     note: str = "",
 ) -> float:
     """把 [(日期, 小时)] 提交为禅道工时记录，left 按行递减（最后一行的 left 会被
-    禅道用作任务剩余工时）。返回提交的小时合计；失败抛 ZentaoWebSessionError。"""
+    禅道用作任务剩余工时）。返回提交的小时合计；失败抛 ZentaoWebSessionError。
+
+    ⚠️ left 绝不能递减到 0：禅道对 left=0 的工时记录会把任务自动标记「已完成」，
+    且这种自动完成不写 finishedDate/finishedBy（2026-07-17 线上实证，任务 #17499
+    暂停结算直接被完成、看板延期归列随之错乱）。地板值 0.1，真正的完成由
+    finish 动作显式提交（它会正确写完成时间与完成人）。"""
     rows = []
-    remaining = max(round(float(left_before or 0.0), 2), 0.0)
+    remaining = max(round(float(left_before or 0.0), 2), 0.1)
     total = 0.0
     for d, hours in day_rows:
         hours = round(float(hours), 2)
         if hours <= 0:
             continue
-        remaining = max(round(remaining - hours, 2), 0.0)
+        remaining = max(round(remaining - hours, 2), 0.1)
         total = round(total + hours, 2)
         rows.append({
             "date": d.isoformat(),

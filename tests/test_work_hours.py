@@ -3,18 +3,12 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from app.utils.work_hours import (
-    WORK_HOURS_PER_DAY,
     consumed_hours,
     consumed_hours_by_day,
     estimate_hours,
     is_workday,
     working_days,
 )
-
-
-def test_daily_window_total_is_7_83():
-    # 9:00-11:50 (170) + 13:30-18:30 (300) = 470 min = 7.8333h
-    assert round(WORK_HOURS_PER_DAY, 2) == 7.83
 
 
 def test_is_workday_weekend_vs_weekday():
@@ -53,39 +47,33 @@ def test_estimate_hours_min_one_day():
     assert estimate_hours(date(2026, 6, 27), date(2026, 6, 27)) == 8.0
 
 
-def test_consumed_full_workday():
+def test_consumed_full_day_no_window():
+    # 2026-07-17 起取消工作时段窗口：工作日内按自然时间计
     s = datetime(2026, 6, 29, 9, 0, 0)
     e = datetime(2026, 6, 29, 18, 30, 0)
-    # 全天工作时段 = 7.83h（中间午休 11:50-13:30 自动扣掉）
-    assert consumed_hours(s, e) == 7.83
+    assert consumed_hours(s, e) == 9.5
 
 
-def test_consumed_skips_lunch():
-    s = datetime(2026, 6, 29, 11, 0, 0)
-    e = datetime(2026, 6, 29, 14, 0, 0)
-    # 11:00-11:50 (50min) + 13:30-14:00 (30min) = 80min = 1.33h
-    assert consumed_hours(s, e) == 1.33
-
-
-def test_consumed_before_and_after_window_clamped():
-    s = datetime(2026, 6, 29, 7, 0, 0)   # 上班前
-    e = datetime(2026, 6, 29, 20, 0, 0)  # 下班后
-    assert consumed_hours(s, e) == 7.83
+def test_consumed_counts_lunch_and_overtime():
+    # 午休照计
+    assert consumed_hours(datetime(2026, 6, 29, 11, 0), datetime(2026, 6, 29, 14, 0)) == 3.0
+    # 加班（下班后 19:00-21:30）照计——取消窗口的核心诉求
+    assert consumed_hours(datetime(2026, 6, 29, 19, 0), datetime(2026, 6, 29, 21, 30)) == 2.5
 
 
 def test_consumed_spans_weekend():
     # Fri 7/3 17:30 → Mon 7/6 9:30
     s = datetime(2026, 7, 3, 17, 30, 0)
     e = datetime(2026, 7, 6, 9, 30, 0)
-    # Fri: 17:30-18:30 = 60min(1.0h); Sat/Sun skipped; Mon: 9:00-9:30 = 30min(0.5h)
-    assert consumed_hours(s, e) == 1.5
+    # Fri: 17:30-24:00 = 6.5h; Sat/Sun skipped; Mon: 0:00-9:30 = 9.5h
+    assert consumed_hours(s, e) == 16.0
 
 
 def test_consumed_spans_holiday():
     hmap = {date(2026, 7, 1): True}
-    s = datetime(2026, 6, 30, 18, 0, 0)  # Tue 18:00-18:30 = 30min
-    e = datetime(2026, 7, 2, 9, 30, 0)   # Thu 9:00-9:30 = 30min; Wed(7/1) holiday skipped
-    assert consumed_hours(s, e, hmap) == 1.0
+    s = datetime(2026, 6, 30, 18, 0, 0)  # Tue 18:00-24:00 = 6h
+    e = datetime(2026, 7, 2, 9, 30, 0)   # Thu 0:00-9:30 = 9.5h; Wed(7/1) holiday skipped
+    assert consumed_hours(s, e, hmap) == 15.5
 
 
 def test_consumed_non_positive_range():
@@ -98,14 +86,14 @@ def test_consumed_non_positive_range():
 
 
 def test_consumed_by_day_cross_days():
-    # Mon 15:00 → Wed 10:30：Mon 15:00-18:30=3.5h；Tue 全天 7.83h；Wed 9:00-10:30=1.5h
+    # Mon 15:00 → Wed 10:30：Mon 15:00-24:00=9h；Tue 全天 24h；Wed 0:00-10:30=10.5h
     s = datetime(2026, 6, 29, 15, 0, 0)
     e = datetime(2026, 7, 1, 10, 30, 0)
     rows = consumed_hours_by_day(s, e)
     assert rows == [
-        (date(2026, 6, 29), 3.5),
-        (date(2026, 6, 30), 7.83),
-        (date(2026, 7, 1), 1.5),
+        (date(2026, 6, 29), 9.0),
+        (date(2026, 6, 30), 24.0),
+        (date(2026, 7, 1), 10.5),
     ]
 
 
@@ -114,7 +102,7 @@ def test_consumed_by_day_skips_weekend_and_zero_days():
     s = datetime(2026, 7, 3, 17, 30, 0)
     e = datetime(2026, 7, 6, 9, 30, 0)
     rows = consumed_hours_by_day(s, e)
-    assert rows == [(date(2026, 7, 3), 1.0), (date(2026, 7, 6), 0.5)]
+    assert rows == [(date(2026, 7, 3), 6.5), (date(2026, 7, 6), 9.5)]
 
 
 def test_consumed_by_day_total_close_to_consumed_hours():

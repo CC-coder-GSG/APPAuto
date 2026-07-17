@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from dataclasses import dataclass
 
 import httpx
@@ -134,6 +135,118 @@ def pause_task_via_web(login: ZentaoWebLogin, task_id: int, *, comment: str | No
 def cancel_task_via_web(login: ZentaoWebLogin, task_id: int, *, comment: str | None = None) -> dict:
     """网页会话取消任务（status→cancel）。协议与暂停一致，仅动作与隐藏 status 不同。"""
     return _task_action_via_web(login, task_id, action="cancel", status="cancel", comment=comment)
+
+
+# ── 开始/继续/完成/关闭（2026-07-17：操作人归属修复）─────────────────────────
+# 本人 API token 间歇性失效（过期刷新失败 / ipd4.3 token 被当 guest）时，这些
+# 动作此前直接回退系统账号代操作 → 禅道动作历史显示成系统账号（如"陈文博开始
+# 了任务"）。补上与 pause/cancel 同套路的本人网页 cookie 会话兜底，保证操作人
+# 归属正确。协议要点：先 GET 动作表单页、把静态 input 默认值原样回传（模拟浏览
+# 器，兜住各动作不同的隐藏字段），再覆盖业务字段提交。
+
+_INPUT_TAG_RE = re.compile(r"<input\b[^>]*>", re.I)
+_ATTR_RE = re.compile(r"""([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+
+
+def _collect_form_defaults(html: str) -> dict[str, str]:
+    """静态表单 input 的 name→value（隐藏字段/预填值）。跳过按钮与未勾选的单/复选。"""
+    fields: dict[str, str] = {}
+    for tag in _INPUT_TAG_RE.findall(html or ""):
+        attrs = {m.group(1).lower(): (m.group(2) if m.group(2) is not None else m.group(3) or "") for m in _ATTR_RE.finditer(tag)}
+        name = attrs.get("name")
+        if not name:
+            continue
+        typ = (attrs.get("type") or "text").lower()
+        if typ in {"submit", "button", "file", "image", "reset"}:
+            continue
+        if typ in {"checkbox", "radio"} and "checked" not in tag.lower():
+            continue
+        fields.setdefault(name, attrs.get("value", ""))
+    return fields
+
+
+def _task_form_action_via_web(
+    login: ZentaoWebLogin,
+    task_id: int,
+    *,
+    action: str,
+    zh: str,
+    overrides: dict,
+    comment: str | None = None,
+) -> dict:
+    """通用任务动作表单提交：GET 表单页收集默认值 → 覆盖业务字段 → POST。"""
+    base = login.base_url.rstrip("/")
+    with httpx.Client(
+        timeout=_TIMEOUT,
+        follow_redirects=True,
+        headers={"User-Agent": _BROWSER_UA, "Referer": f"{base}/"},
+    ) as client:
+        _login(client, login)
+        page = client.get(f"{base}/task-{action}-{task_id}.html")
+        if "denyPage" in (page.text or "") or "访问受限" in (page.text or ""):
+            raise ZentaoWebSessionError(f"禅道{zh}表单页访问受限（账号 {login.account}）")
+        fields = _collect_form_defaults(page.text)
+        fields.setdefault("uid", "")
+        fields["comment"] = comment or ""
+        for k, v in overrides.items():
+            if v is not None:
+                fields[k] = str(v)
+        resp = client.post(
+            f"{base}/task-{action}-{task_id}.html",
+            files=_form(fields),
+            headers={"X-Requested-With": "XMLHttpRequest", "X-Zui-Modal": "true"},
+        )
+        try:
+            payload = _loads_lenient(resp.text)
+        except Exception:
+            raise ZentaoWebSessionError(f"禅道{zh}返回非 JSON：{(resp.text or '')[:200]}")
+        if not (isinstance(payload, dict) and payload.get("result") == "success"):
+            raise ZentaoWebSessionError(f"禅道{zh}未执行：{_fail_reason(payload)}")
+        try:
+            client.get(f"{base}/user-logout.html")
+        except Exception:  # noqa: BLE001
+            pass
+        return payload
+
+
+def start_task_via_web(
+    login: ZentaoWebLogin, task_id: int, *, left: float, real_started: str | None = None, comment: str | None = None
+) -> dict:
+    """网页会话开始任务（status→doing）。表单实测字段：consumed/left（realStarted 由
+    JS 日期控件渲染，显式覆盖）。"""
+    return _task_form_action_via_web(
+        login, task_id, action="start", zh="开始",
+        overrides={"left": left, "realStarted": real_started}, comment=comment,
+    )
+
+
+def restart_task_via_web(
+    login: ZentaoWebLogin, task_id: int, *, left: float, consumed: float | None = None,
+    assigned_to: str | None = None, comment: str | None = None,
+) -> dict:
+    """网页会话继续暂停/重新激活任务（status→doing）。表单实测字段：assignedTo/consumed/left；
+    consumed 传 None 时沿用表单预填的当前消耗值。"""
+    overrides: dict = {"consumed": consumed, "left": left}
+    if assigned_to:
+        overrides["assignedTo"] = assigned_to
+    return _task_form_action_via_web(login, task_id, action="restart", zh="继续", overrides=overrides, comment=comment)
+
+
+def finish_task_via_web(
+    login: ZentaoWebLogin, task_id: int, *, current_consumed: float,
+    finished_date: str | None = None, comment: str | None = None,
+) -> dict:
+    """网页会话完成任务（status→done）。表单实测字段：currentConsumed/realStarted（隐藏
+    预填，回传默认值即可；finishedDate 由 JS 渲染，显式覆盖）。"""
+    return _task_form_action_via_web(
+        login, task_id, action="finish", zh="完成",
+        overrides={"currentConsumed": current_consumed, "finishedDate": finished_date}, comment=comment,
+    )
+
+
+def close_task_via_web(login: ZentaoWebLogin, task_id: int, *, comment: str | None = None) -> dict:
+    """网页会话关闭任务（status→closed）。表单实测仅 uid + 评论。"""
+    return _task_form_action_via_web(login, task_id, action="close", zh="关闭", overrides={}, comment=comment)
 
 
 # ── 工时记录（effort 模块）────────────────────────────────────────────────────
@@ -322,6 +435,10 @@ __all__ = [
     "ZentaoWebSessionError",
     "pause_task_via_web",
     "cancel_task_via_web",
+    "start_task_via_web",
+    "restart_task_via_web",
+    "finish_task_via_web",
+    "close_task_via_web",
     "list_task_efforts_via_web",
     "record_task_efforts_via_web",
     "edit_task_effort_via_web",

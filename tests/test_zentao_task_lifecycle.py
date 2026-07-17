@@ -279,17 +279,17 @@ def test_req_pause_submits_day_split_efforts(db_session, monkeypatch, req):
     req.task_started_at = datetime(2026, 6, 29, 15, 0)  # 周一 15:00 开始
     req.zentao_task_status_cache = "doing"
     db_session.commit()
-    # 周三 10:30 暂停
+    # 周三 10:30 暂停（2026-07-17 起取消工作时段窗口：工作日自然时间全计）
     monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 1, 10, 30))
     res = ZentaoTaskSyncService(db_session).pause_requirement_task(req, acting_user=actor)
     assert res["ok"] is True
     assert submitted == [("tester", 777, [
-        (date(2026, 6, 29), 3.5),
-        (date(2026, 6, 30), 7.83),
-        (date(2026, 7, 1), 1.5),
+        (date(2026, 6, 29), 9.0),
+        (date(2026, 6, 30), 24.0),
+        (date(2026, 7, 1), 10.5),
     ])]
     assert req.task_consumed_accum == 0.0
-    assert req.task_efforts_submitted == 12.83
+    assert req.task_efforts_submitted == 43.5
     assert req.task_started_at is None
 
 
@@ -317,12 +317,12 @@ def test_req_finish_presubmits_prev_days_reports_today(db_session, monkeypatch, 
     monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 1, 10, 30))
     res = ZentaoTaskSyncService(db_session).finish_requirement_task(req, acting_user=actor)
     assert res["ok"] is True
-    assert submitted == [[(date(2026, 6, 29), 3.5), (date(2026, 6, 30), 7.83)]]
-    assert res["consumed"] == 1.5
+    assert submitted == [[(date(2026, 6, 29), 9.0), (date(2026, 6, 30), 24.0)]]
+    assert res["consumed"] == 10.5
     finish_call = next(c for c in client.calls if c[0] == "finish")
-    assert finish_call[2] == 1.5
+    assert finish_call[2] == 10.5
     assert req.task_consumed_accum == 0.0
-    assert req.task_efforts_submitted == round(11.33 + 1.5, 2)
+    assert req.task_efforts_submitted == round(33.0 + 10.5, 2)
 
 
 def test_req_finish_after_segments_submitted_uses_min_floor(db_session, monkeypatch, req):
@@ -353,3 +353,80 @@ def test_req_pause_without_login_falls_back_to_local_accum(db_session, monkeypat
     assert res["ok"] is True
     assert req.task_consumed_accum == 2.0
     assert req.task_efforts_submitted == 0.0
+
+
+# ─── 操作人归属：本人 REST 失效 → 本人网页会话兜底（2026-07-17）──────────────
+
+
+def test_req_start_falls_back_to_self_web_not_system(db_session, monkeypatch, req):
+    """需求任务开始：本人 token guest 失效 → 本人网页会话兜底，系统账号不出场。"""
+    from app.models import User, UserRole
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    actor = User(username="tester_sw", password_hash="x", role=UserRole.USER)
+    db_session.add(actor)
+    db_session.commit()
+    guest = FakeClient(effective=False)   # REST 200 但不生效
+    system = FakeClient()
+    web_calls = []
+
+    def fake_web_start(login, task_id, *, left, real_started=None, comment=None):
+        web_calls.append((login.account, task_id))
+        guest._task["status"] = "doing"   # 网页会话真正生效
+        return {"result": "success"}
+
+    monkeypatch.setattr(tss, "get_user_zentao_client", lambda uid, db: guest)
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: system)
+    monkeypatch.setattr(
+        tss, "get_user_zentao_web_login",
+        lambda uid, db: ZentaoWebLogin(base_url="http://z", account="tester", password="p"),
+    )
+    monkeypatch.setattr(tss, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(tss, "start_task_via_web", fake_web_start)
+
+    res = ZentaoTaskSyncService(db_session).start_requirement_task(req, acting_user=actor)
+    assert res["ok"] is True
+    assert web_calls == [("tester", 777)]
+    assert system.calls == []             # 不再由系统账号代开始
+    assert req.zentao_task_status_cache == "doing"
+
+
+def test_req_pause_submits_efforts_before_pausing(db_session, monkeypatch, req):
+    """需求链路同理：分段提交必须在暂停之前（防禅道对 pause 任务记工时自动激活）。"""
+    from app.models import User, UserRole
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    actor = User(username="tester_ord", password_hash="x", role=UserRole.USER)
+    db_session.add(actor)
+    db_session.commit()
+    seq = []
+
+    class SeqClient(FakeClient):
+        def pause_task(self, task_id, **kw):
+            seq.append("pause")
+            return super().pause_task(task_id, **kw)
+
+    client = SeqClient(status="doing")
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tss, "get_user_zentao_client", lambda uid, db: client)
+    monkeypatch.setattr(
+        tss, "get_user_zentao_web_login",
+        lambda uid, db: ZentaoWebLogin(base_url="http://z", account="tester", password="p"),
+    )
+
+    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+        seq.append("submit")
+        return round(sum(h for _, h in day_rows), 2)
+
+    monkeypatch.setattr(tss, "submit_day_efforts", fake_submit)
+    req.task_started_at = datetime(2026, 7, 1, 9, 0)
+    req.zentao_task_status_cache = "doing"
+    db_session.commit()
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 1, 11, 0))
+
+    res = ZentaoTaskSyncService(db_session).pause_requirement_task(req, acting_user=actor)
+    assert res["ok"] is True
+    assert seq == ["submit", "pause"]
+    assert req.task_started_at is None
+    assert req.task_consumed_accum == 0.0
+    assert req.task_efforts_submitted == 2.0
