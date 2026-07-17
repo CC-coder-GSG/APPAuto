@@ -21,6 +21,7 @@ from app.services.zentao_system_client import (
     get_user_zentao_client,
     get_user_zentao_web_login,
 )
+from app.services.zentao_effort_service import AUTO_NOTE, merge_extra_hours, submit_day_efforts
 from app.services.zentao_web_session import ZentaoWebSessionError, cancel_task_via_web, pause_task_via_web
 from app.utils.task_naming import ensure_test_prefix
 from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
@@ -578,9 +579,12 @@ class ZentaoTaskMirrorService:
         # 工时结算（暂停期不计工时）：操作前先固化时点与暂停态——dispatch 生效后
         # _refresh_one_task 会把 row.status 刷成新状态，之后就读不到操作前的状态了。
         # 只在 finish 时算自动工时：get_holiday_map 缺年份数据会联网补，别的操作不该付这个代价。
+        # finish 的工时口径（2026-07-17）：先把「今天之前」的段按天拆分提交为禅道工时
+        # 记录，finish 的 currentConsumed 只带今天这部分（禅道会为它生成完成当天的记录）；
+        # 无本人网页凭据/提交失败则退回一次性提交总累计。
         op_now = local_now()
         was_paused = (row.status or "").strip().lower() == "pause"
-        auto_consumed = self._auto_consumed_hours(row, op_now) if action == "finish" else 0.0
+        finish_consumed = self._prepare_finish_consumed(row, current_user, op_now, explicit=consumed) if action == "finish" else 0.0
 
         # 暂停/取消：REST 优先（ipd4.3 空 body 会被静默忽略，pause/cancel_task 已固定带 comment 字段）；
         # REST 未生效（如 token 被当 guest 时 200 无效果）再回退网页 cookie 会话。
@@ -613,9 +617,7 @@ class ZentaoTaskMirrorService:
                     return resp  # 无网页凭据：交给外层校验判定未生效
                 raise ZentaoWebSessionError(f"REST {zh}失败且无网页登录凭据")
             if action == "finish":
-                # 优先级：前端显式传入 > 按开始/暂停自动结算 > 剩余/预计工时兜底（禅道要求>0）
-                cur = consumed if (consumed and consumed > 0) else (auto_consumed if auto_consumed > 0 else (row.left or row.estimate or 1.0))
-                return cli.finish_task(task_id, current_consumed=cur, finished_date=_fmt_now())
+                return cli.finish_task(task_id, current_consumed=finish_consumed, finished_date=_fmt_now())
             if action == "reactivate":
                 left = hours if (hours and hours > 0) else (row.estimate or 1.0)
                 return cli.restart_task(task_id, consumed=(row.consumed or 0.0), left=left, assigned_to=original_account)
@@ -668,18 +670,28 @@ class ZentaoTaskMirrorService:
 
         # 工时结算簿记（仅操作生效时）：
         # start（继续）保留累计、重置本段起点；start（全新）连累计一起清零；
-        # pause 把本段结算进累计并停表；reactivate 从零起算；finish 停表。
+        # pause 按天拆分提交本段工时记录（失败退回本地累计）并停表；
+        # reactivate 从零起算；finish 停表、未提交累计已随 currentConsumed 上报。
         if used_client is not None:
             if action == "start":
                 if not was_paused:
                     row.consumed_accum = 0.0
                 row.local_started_at = op_now
             elif action == "pause":
-                self._settle_local_segment(row, op_now)
+                submitted = self._try_submit_segment_efforts(row, current_user, op_now)
+                if submitted is None:
+                    # 无本人网页凭据/提交失败 → 旧口径：本地累计，完成时一次性提交
+                    self._settle_local_segment(row, op_now)
+                else:
+                    row.efforts_submitted = round(float(row.efforts_submitted or 0.0) + submitted, 2)
+                    row.consumed_accum = 0.0
+                    row.local_started_at = None
             elif action == "reactivate":
                 row.consumed_accum = 0.0
                 row.local_started_at = op_now
             elif action == "finish":
+                row.efforts_submitted = round(float(row.efforts_submitted or 0.0) + finish_consumed, 2)
+                row.consumed_accum = 0.0
                 row.local_started_at = None
 
         # 兜底校正：操作生效后若禅道把指派人清空/改掉（系统账号代操作的已知副作用），改派回本人。
@@ -697,13 +709,13 @@ class ZentaoTaskMirrorService:
         return {"ok": not errors, "errors": errors, "task": self._serialize(row)}
 
     def _local_segment_start(self, row: ZentaoTaskMirror) -> Optional[datetime]:
-        """本段计时起点：平台记录的 local_started_at 优先；从未结算过（accum=0）
-        且没有本地起点时，回退禅道的实际开始时间 real_started（兼容在禅道网页
-        直接开始的任务）。已结算过则不回退——real_started 是首次开始，回退会把
-        已结算的时段重复计入。"""
+        """本段计时起点：平台记录的 local_started_at 优先；从未结算过（accum=0
+        且没分段提交过工时记录）且没有本地起点时，回退禅道的实际开始时间
+        real_started（兼容在禅道网页直接开始的任务）。已结算/已提交过则不回退——
+        real_started 是首次开始，回退会把已结算的时段重复计入。"""
         if row.local_started_at:
             return row.local_started_at
-        if not float(row.consumed_accum or 0.0):
+        if not float(row.consumed_accum or 0.0) and not float(row.efforts_submitted or 0.0):
             return row.real_started
         return None
 
@@ -720,9 +732,75 @@ class ZentaoTaskMirrorService:
         return round(total, 2)
 
     def _settle_local_segment(self, row: ZentaoTaskMirror, now: datetime) -> None:
-        """暂停：把「本段起点 → now」结算进 consumed_accum 并停表。"""
+        """暂停（兜底口径）：把「本段起点 → now」结算进 consumed_accum 并停表。"""
         row.consumed_accum = self._auto_consumed_hours(row, now)
         row.local_started_at = None
+
+    def _split_segment_by_day(self, started: Optional[datetime], ended: datetime) -> list[tuple[date, float]]:
+        """本段计时按天拆分 [(日期, 小时)]（工作日工作时段口径）。"""
+        if not started or ended <= started:
+            return []
+        try:
+            hmap = get_holiday_map(self.db, started.date(), ended.date())
+        except Exception:  # noqa: BLE001 — 节假日数据拉不到时按默认周末规则算
+            hmap = {}
+        return work_hours.consumed_hours_by_day(started, ended, hmap)
+
+    def _try_submit_segment_efforts(self, row: ZentaoTaskMirror, current_user: User, now: datetime) -> Optional[float]:
+        """暂停：本段（+ 旧口径遗留的未提交累计，补录到今天）按天拆分提交为禅道
+        工时记录。成功返回提交的小时数（可为 0——本段没有落在工作时段内）；
+        无本人网页凭据或提交失败返回 None，调用方退回本地累计口径。
+
+        ⚠️ 工时记录归属禅道当前登录人，只能用本人凭据，不回退系统账号。"""
+        day_rows = self._split_segment_by_day(self._local_segment_start(row), now)
+        day_rows = merge_extra_hours(day_rows, float(row.consumed_accum or 0.0), now.date())
+        if not day_rows:
+            return 0.0
+        login = get_user_zentao_web_login(current_user.id, self.db)
+        if login is None:
+            logger.info("task %s pause: no self web login, fall back to local accum", row.task_id)
+            return None
+        try:
+            return submit_day_efforts(login, row.task_id, day_rows, left_before=float(row.left or 0.0), note=AUTO_NOTE)
+        except Exception as exc:  # noqa: BLE001 — 提交失败退回本地累计，不阻塞暂停
+            logger.warning("task %s pause: submit efforts failed, fall back to local accum: %s", row.task_id, exc)
+            return None
+
+    def _prepare_finish_consumed(self, row: ZentaoTaskMirror, current_user: User, now: datetime, *, explicit: Optional[float]) -> float:
+        """完成时的 currentConsumed：优先把「今天之前」的段按天拆分提交为工时记录，
+        finish 只带今天的部分 + 未提交累计（禅道会为它生成完成当天的记录）；
+        无本人网页凭据/提交失败则退回一次性提交全部。禅道要求 >0，最小 0.1。"""
+        if explicit and explicit > 0:
+            return round(float(explicit), 2)
+        day_rows = self._split_segment_by_day(self._local_segment_start(row), now)
+        today = now.date()
+        prev_rows = [(d, h) for d, h in day_rows if d < today]
+        remainder = round(
+            sum(h for d, h in day_rows if d >= today) + float(row.consumed_accum or 0.0), 2
+        )
+        if prev_rows:
+            login = get_user_zentao_web_login(current_user.id, self.db)
+            if login is not None:
+                try:
+                    submitted = submit_day_efforts(
+                        login, row.task_id, prev_rows, left_before=float(row.left or 0.0), note=AUTO_NOTE
+                    )
+                    row.efforts_submitted = round(float(row.efforts_submitted or 0.0) + submitted, 2)
+                    # finish 失败时 remainder 留在 accum 里可重试；成功后簿记会清零
+                    row.consumed_accum = remainder
+                    row.local_started_at = None
+                    return max(remainder, 0.1)
+                except Exception as exc:  # noqa: BLE001 — 拆分提交失败退回一次性
+                    logger.warning("task %s finish: pre-submit efforts failed, fall back to lump sum: %s", row.task_id, exc)
+            total = round(remainder + sum(h for _, h in prev_rows), 2)
+        else:
+            total = remainder
+        if total > 0:
+            return max(total, 0.1)
+        if float(row.efforts_submitted or 0.0) > 0:
+            # 各段都已提交过工时记录 → 不能再拿剩余/预计工时兜底（会重复计入），给最小值
+            return 0.1
+        return round(float(row.left or row.estimate or 1.0), 2)
 
     def assignable_users(self, task_id: int) -> dict:
         """任务所在执行的可指派人列表（指派弹窗数据源，面向所有用户）。"""

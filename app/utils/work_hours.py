@@ -114,6 +114,30 @@ def consumed_hours(
     return round(total_minutes / 60.0, 2)
 
 
+def consumed_hours_by_day(
+    started_at: datetime,
+    finished_at: datetime,
+    holiday_map: Optional[Mapping[date, bool]] = None,
+) -> list[tuple[date, float]]:
+    """实际工时按天拆分：[(日期, 当日小时数)]，只含小时数>0 的工作日。
+
+    口径与 consumed_hours 一致（同一段区间两者合计相等，均按分钟取整后除 60、
+    保留 2 位小数）。用于分段提交禅道工时记录时把跨天时段落到实际发生的日期上。
+    """
+    if finished_at <= started_at:
+        return []
+    out: list[tuple[date, float]] = []
+    cur_day = started_at.date()
+    last_day = finished_at.date()
+    while cur_day <= last_day:
+        if is_workday(cur_day, holiday_map):
+            minutes = _overlap_minutes_in_day(cur_day, started_at, finished_at)
+            if minutes > 0:
+                out.append((cur_day, round(minutes / 60.0, 2)))
+        cur_day += timedelta(days=1)
+    return out
+
+
 __all__ = [
     "WORK_WINDOWS",
     "WORK_HOURS_PER_DAY",
@@ -122,4 +146,5 @@ __all__ = [
     "working_days",
     "estimate_hours",
     "consumed_hours",
+    "consumed_hours_by_day",
 ]

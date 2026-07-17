@@ -62,10 +62,15 @@ class ZentaoTaskMirror(Base):
 
     desc: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # 平台侧工时结算（独立任务开始/暂停/完成用；镜像同步不覆盖这两个字段）：
-    # local_started_at = 本段计时起点（暂停时清空）；consumed_accum = 暂停时结算的累计工时。
+    # 平台侧工时结算（独立任务开始/暂停/完成用；镜像同步不覆盖这几个字段）：
+    # local_started_at = 本段计时起点（暂停时清空）；
+    # consumed_accum = 尚未提交禅道的已结算工时（暂停时分段提交成功则清零，
+    #   提交失败/无本人网页凭据时退回旧口径在此累计、完成时一次性提交）；
+    # efforts_submitted = 平台已按段提交为禅道工时记录的小时合计（>0 说明该任务
+    #   走过分段提交，完成兜底时不得再拿 left/estimate 起算，否则重复计入）。
     local_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     consumed_accum: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    efforts_submitted: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False)
 

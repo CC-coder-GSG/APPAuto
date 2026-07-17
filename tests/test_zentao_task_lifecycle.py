@@ -247,3 +247,109 @@ def test_lifecycle_via_status_choke_point(db_session, monkeypatch, req):
     # 取消完成
     svc._mark_test_completed_transition(req, False)
     assert any(c[0] == "restart" for c in client.calls)
+
+
+# ─── 分段提交禅道工时记录（2026-07-17 工时口径升级）──────────────────────────
+
+
+def _fake_login():
+    from app.services.zentao_web_session import ZentaoWebLogin
+    return ZentaoWebLogin(base_url="http://z", account="tester", password="p")
+
+
+def test_req_pause_submits_day_split_efforts(db_session, monkeypatch, req):
+    """有本人网页凭据：暂停把本段按天拆分提交为工时记录，本地累计保持 0。"""
+    from datetime import date
+    from app.models import User, UserRole
+
+    actor = User(username="tester_eff", password_hash="x", role=UserRole.USER)
+    db_session.add(actor)
+    db_session.commit()
+    client = FakeClient(status="doing")
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tss, "get_user_zentao_client", lambda uid, db: client)
+    monkeypatch.setattr(tss, "get_user_zentao_web_login", lambda uid, db: _fake_login())
+    submitted = []
+
+    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+        submitted.append((login.account, task_id, day_rows))
+        return round(sum(h for _, h in day_rows), 2)
+
+    monkeypatch.setattr(tss, "submit_day_efforts", fake_submit)
+    req.task_started_at = datetime(2026, 6, 29, 15, 0)  # 周一 15:00 开始
+    req.zentao_task_status_cache = "doing"
+    db_session.commit()
+    # 周三 10:30 暂停
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 1, 10, 30))
+    res = ZentaoTaskSyncService(db_session).pause_requirement_task(req, acting_user=actor)
+    assert res["ok"] is True
+    assert submitted == [("tester", 777, [
+        (date(2026, 6, 29), 3.5),
+        (date(2026, 6, 30), 7.83),
+        (date(2026, 7, 1), 1.5),
+    ])]
+    assert req.task_consumed_accum == 0.0
+    assert req.task_efforts_submitted == 12.83
+    assert req.task_started_at is None
+
+
+def test_req_finish_presubmits_prev_days_reports_today(db_session, monkeypatch, req):
+    """完成：今天之前的段先按天提交，finish 只带今天的部分。"""
+    from datetime import date
+    from app.models import User, UserRole
+
+    actor = User(username="tester_fin", password_hash="x", role=UserRole.USER)
+    db_session.add(actor)
+    db_session.commit()
+    client = FakeClient(status="doing")
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tss, "get_user_zentao_client", lambda uid, db: client)
+    monkeypatch.setattr(tss, "get_user_zentao_web_login", lambda uid, db: _fake_login())
+    submitted = []
+
+    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+        submitted.append(day_rows)
+        return round(sum(h for _, h in day_rows), 2)
+
+    monkeypatch.setattr(tss, "submit_day_efforts", fake_submit)
+    req.task_started_at = datetime(2026, 6, 29, 15, 0)
+    db_session.commit()
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 1, 10, 30))
+    res = ZentaoTaskSyncService(db_session).finish_requirement_task(req, acting_user=actor)
+    assert res["ok"] is True
+    assert submitted == [[(date(2026, 6, 29), 3.5), (date(2026, 6, 30), 7.83)]]
+    assert res["consumed"] == 1.5
+    finish_call = next(c for c in client.calls if c[0] == "finish")
+    assert finish_call[2] == 1.5
+    assert req.task_consumed_accum == 0.0
+    assert req.task_efforts_submitted == round(11.33 + 1.5, 2)
+
+
+def test_req_finish_after_segments_submitted_uses_min_floor(db_session, monkeypatch, req):
+    """暂停时已分段提交过 → 暂停中直接完成给最小值 0.1，不再拿预计工时兜底。"""
+    client = FakeClient(status="pause")
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    req.task_started_at = None
+    req.task_consumed_accum = 0.0
+    req.task_efforts_submitted = 2.0
+    req.zentao_task_status_cache = "pause"
+    db_session.commit()
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 1, 15, 0))
+    res = ZentaoTaskSyncService(db_session).finish_requirement_task(req)
+    assert res["consumed"] == 0.1
+
+
+def test_req_pause_without_login_falls_back_to_local_accum(db_session, monkeypatch, req):
+    """无本人网页凭据：退回旧口径本地累计（原有行为不变）。"""
+    client = FakeClient(status="doing")
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tss, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(tss, "get_user_zentao_web_login", lambda uid, db: None)
+    req.task_started_at = datetime(2026, 6, 29, 9, 0)
+    req.zentao_task_status_cache = "doing"
+    db_session.commit()
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 6, 29, 11, 0))
+    res = ZentaoTaskSyncService(db_session).pause_requirement_task(req)
+    assert res["ok"] is True
+    assert req.task_consumed_accum == 2.0
+    assert req.task_efforts_submitted == 0.0

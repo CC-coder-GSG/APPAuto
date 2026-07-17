@@ -136,4 +136,182 @@ def cancel_task_via_web(login: ZentaoWebLogin, task_id: int, *, comment: str | N
     return _task_action_via_web(login, task_id, action="cancel", status="cancel", comment=comment)
 
 
-__all__ = ["ZentaoWebLogin", "ZentaoWebSessionError", "pause_task_via_web", "cancel_task_via_web"]
+# ── 工时记录（effort / taskestimate）───────────────────────────────────────────
+# REST（ipd4.3）没有工时记录端点，只能走网页表单：
+#   查看：GET  task-recordEstimate-{taskID}.json   → data.estimates
+#   提交：POST task-recordEstimate-{taskID}.html   → dates[i]/consumed[i]/left[i]/work[i]
+#   编辑：POST task-editEstimate-{effortID}.html   → dates|date/consumed/left/work
+# ⚠️ 表单字段名未对本部署抓包实测（协议按开源禅道建模），因此所有写操作都
+# 「提交 → 同会话回读校验」，未生效抛 ZentaoWebSessionError（编辑另备字段名变体重试），
+# 由调用方决定兜底（如退回本地累计、完成时一次性提交）。
+
+
+def _open_web_session(login: ZentaoWebLogin) -> httpx.Client:
+    """打开已登录的网页会话（调用方负责 close；登出失败不致命）。"""
+    client = httpx.Client(
+        timeout=_TIMEOUT,
+        follow_redirects=True,
+        headers={"User-Agent": _BROWSER_UA, "Referer": f"{login.base_url.rstrip('/')}/"},
+    )
+    try:
+        _login(client, login)
+    except Exception:
+        client.close()
+        raise
+    return client
+
+
+def _logout_quietly(client: httpx.Client, base: str) -> None:
+    try:
+        client.get(f"{base}/user-logout.html")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _parse_page_data(text: str) -> dict:
+    """禅道页面 .json 响应：{"status":"success","data":"<json字符串>"} → data dict。"""
+    payload = _loads_lenient(text)
+    if not (isinstance(payload, dict) and payload.get("status") == "success"):
+        raise ZentaoWebSessionError(f"禅道页面 JSON 状态异常：{str(payload)[:200]}")
+    data = payload.get("data")
+    if isinstance(data, str):
+        data = _loads_lenient(data)
+    if not isinstance(data, dict):
+        raise ZentaoWebSessionError("禅道页面 JSON 缺少 data")
+    return data
+
+
+def _normalize_efforts(raw) -> list[dict]:
+    """estimates 字段（dict 按 id 键 / list 均可能）→ 统一的记录列表。"""
+    items = list(raw.values()) if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
+    out: list[dict] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        try:
+            out.append({
+                "id": int(it.get("id") or 0),
+                "date": str(it.get("date") or "")[:10],
+                "consumed": float(it.get("consumed") or 0.0),
+                "left": float(it.get("left") or 0.0),
+                "account": str(it.get("account") or ""),
+                "work": str(it.get("work") or ""),
+            })
+        except (TypeError, ValueError):
+            continue
+    out.sort(key=lambda r: (r["date"], r["id"]))
+    return out
+
+
+def _fetch_efforts(client: httpx.Client, base: str, task_id: int) -> list[dict]:
+    resp = client.get(f"{base}/task-recordEstimate-{task_id}.json")
+    data = _parse_page_data(resp.text)
+    return _normalize_efforts(data.get("estimates"))
+
+
+def list_task_efforts_via_web(login: ZentaoWebLogin, task_id: int) -> list[dict]:
+    """查看任务的工时记录列表。失败抛 ZentaoWebSessionError。"""
+    base = login.base_url.rstrip("/")
+    client = _open_web_session(login)
+    try:
+        return _fetch_efforts(client, base, task_id)
+    finally:
+        _logout_quietly(client, base)
+        client.close()
+
+
+def record_task_efforts_via_web(login: ZentaoWebLogin, task_id: int, rows: list[dict]) -> list[dict]:
+    """提交工时记录（可多行、各行可不同日期）。
+
+    rows: [{"date": "YYYY-MM-DD", "consumed": float, "left": float, "work": str}]，
+    禅道会把 consumed 累加进任务总消耗、用最后一行的 left 更新任务剩余。
+    回读校验记录条数确实增加，未生效抛 ZentaoWebSessionError。
+    返回提交后的完整记录列表。
+    """
+    rows = [r for r in rows if float(r.get("consumed") or 0.0) > 0]
+    if not rows:
+        return []
+    base = login.base_url.rstrip("/")
+    client = _open_web_session(login)
+    try:
+        before = _fetch_efforts(client, base, task_id)
+        fields: dict[str, str] = {"uid": ""}
+        for i, r in enumerate(rows, start=1):
+            fields[f"id[{i}]"] = "0"
+            fields[f"dates[{i}]"] = str(r["date"])
+            fields[f"consumed[{i}]"] = str(r["consumed"])
+            fields[f"left[{i}]"] = str(r.get("left") if r.get("left") is not None else 0)
+            fields[f"work[{i}]"] = str(r.get("work") or "")
+        resp = client.post(
+            f"{base}/task-recordEstimate-{task_id}.html",
+            files=_form(fields),
+            headers={"X-Requested-With": "XMLHttpRequest", "X-Zui-Modal": "true"},
+        )
+        try:
+            payload = _loads_lenient(resp.text)
+        except Exception:
+            raise ZentaoWebSessionError(f"禅道记录工时返回非 JSON：{(resp.text or '')[:200]}")
+        if not (isinstance(payload, dict) and payload.get("result") == "success"):
+            raise ZentaoWebSessionError(f"禅道记录工时未执行：{_fail_reason(payload)}")
+        after = _fetch_efforts(client, base, task_id)
+        if len(after) < len(before) + len(rows):
+            raise ZentaoWebSessionError(
+                f"禅道记录工时未生效：提交 {len(rows)} 条，记录数 {len(before)} → {len(after)}"
+            )
+        return after
+    finally:
+        _logout_quietly(client, base)
+        client.close()
+
+
+def edit_task_effort_via_web(
+    login: ZentaoWebLogin,
+    task_id: int,
+    effort_id: int,
+    *,
+    date: str,
+    consumed: float,
+    left: float,
+    work: str = "",
+) -> list[dict]:
+    """编辑一条工时记录。回读校验生效；字段名按「dates → date」两个变体依次尝试
+    （编辑表单字段名未实测，禅道版本间有差异）。返回编辑后的完整记录列表。"""
+    base = login.base_url.rstrip("/")
+    client = _open_web_session(login)
+    try:
+        last_reason = ""
+        for date_field in ("dates", "date"):
+            fields = {date_field: date, "consumed": str(consumed), "left": str(left), "work": work, "uid": ""}
+            resp = client.post(
+                f"{base}/task-editEstimate-{effort_id}.html",
+                files=_form(fields),
+                headers={"X-Requested-With": "XMLHttpRequest", "X-Zui-Modal": "true"},
+            )
+            try:
+                payload = _loads_lenient(resp.text)
+            except Exception:
+                last_reason = f"返回非 JSON：{(resp.text or '')[:200]}"
+                continue
+            if not (isinstance(payload, dict) and payload.get("result") == "success"):
+                last_reason = _fail_reason(payload)
+                continue
+            after = _fetch_efforts(client, base, task_id)
+            hit = next((r for r in after if r["id"] == int(effort_id)), None)
+            if hit and hit["date"] == date[:10] and abs(hit["consumed"] - float(consumed)) < 0.005:
+                return after
+            last_reason = f"提交成功但记录未变化（当前：{hit}）"
+        raise ZentaoWebSessionError(f"禅道编辑工时未生效：{last_reason}")
+    finally:
+        _logout_quietly(client, base)
+        client.close()
+
+
+__all__ = [
+    "ZentaoWebLogin",
+    "ZentaoWebSessionError",
+    "pause_task_via_web",
+    "cancel_task_via_web",
+    "list_task_efforts_via_web",
+    "record_task_efforts_via_web",
+    "edit_task_effort_via_web",
+]

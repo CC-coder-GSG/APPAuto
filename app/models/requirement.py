@@ -53,9 +53,13 @@ class Requirement(Base):
     # 本地记录的开始/完成时刻（上海本地 naive），用于工时回算与展示。
     task_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     task_finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    # 暂停时结算的已耗工时累计（小时）。暂停期不计工时：pause 时把「本段开始→暂停」
-    # 结算进本字段并清空 task_started_at；完成时总工时 = 本字段 + 最后一段。
+    # 尚未提交禅道的已结算工时累计（小时）。暂停期不计工时：pause 时把「本段开始→暂停」
+    # 按天拆分提交为禅道工时记录（成功则本字段保持 0）；提交失败/无本人网页凭据时退回
+    # 旧口径结算进本字段、完成时一次性提交。
     task_consumed_accum: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    # 平台已按段提交为禅道工时记录的小时合计；>0 表示该任务走过分段提交，
+    # 完成兜底时不得再拿预计工时起算（会重复计入）。
+    task_efforts_submitted: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     # 禅道子任务状态缓存（wait/doing/done…），供测试台标签直接展示，免每次查禅道。
     zentao_task_status_cache: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     # 禅道子任务当前指派人账号缓存；用于「仅指派人本人可开始/完成禅道任务」的权限判定。

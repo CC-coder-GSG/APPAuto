@@ -31,6 +31,7 @@ from app.services.zentao_system_client import (
     get_user_zentao_client,
     get_user_zentao_web_login,
 )
+from app.services.zentao_effort_service import AUTO_NOTE, merge_extra_hours, submit_day_efforts
 from app.services.zentao_web_session import ZentaoWebSessionError, pause_task_via_web
 from app.utils import work_hours
 from app.utils.task_naming import ensure_test_prefix
@@ -611,13 +612,22 @@ class ZentaoTaskSyncService:
                     detail = f"：{last_err}" if last_err else "（禅道返回成功但状态未切换）"
                     out["errors"].append(f"禅道暂停任务未生效{detail}")
         if not out["errors"]:
-            self._settle_consumed_segment(requirement, local_now())
+            now = local_now()
+            # 工时口径（2026-07-17）：暂停时把本段按天拆分提交为禅道工时记录（工时
+            # 落到实际发生的日期）；无本人网页凭据/提交失败退回本地累计、完成时一次性提交。
+            submitted = self._try_submit_requirement_efforts(requirement, acting_user, now)
+            if submitted is None:
+                self._settle_consumed_segment(requirement, now)
+            else:
+                requirement.task_efforts_submitted = round(float(requirement.task_efforts_submitted or 0.0) + submitted, 2)
+                requirement.task_consumed_accum = 0.0
+                requirement.task_started_at = None
         self.db.commit()
         out["ok"] = not out["errors"]
         return out
 
     def _settle_consumed_segment(self, requirement: Requirement, now) -> None:
-        """把「本段开始 → now」的工时结算进 task_consumed_accum 并清空计时起点。"""
+        """兜底口径：把「本段开始 → now」的工时结算进 task_consumed_accum 并清空计时起点。"""
         started = requirement.task_started_at
         if not started:
             return
@@ -629,6 +639,88 @@ class ZentaoTaskSyncService:
         requirement.task_consumed_accum = round(float(requirement.task_consumed_accum or 0.0) + segment, 2)
         requirement.task_started_at = None
 
+    def _split_segment_by_day(self, started, ended) -> list[tuple[date, float]]:
+        """本段计时按天拆分 [(日期, 小时)]（工作日工作时段口径）。"""
+        if not started or ended <= started:
+            return []
+        try:
+            hmap = get_holiday_map(self.db, started.date(), ended.date())
+        except Exception:
+            hmap = {}
+        return work_hours.consumed_hours_by_day(started, ended, hmap)
+
+    def _task_left_hours(self, task_id: int, fallback: float) -> float:
+        """任务当前剩余工时（工时记录的 left 列递减起点），拉不到用 fallback。"""
+        client = get_system_zentao_client(self.db)
+        if client is None:
+            return fallback
+        try:
+            return float((client.get_task(task_id) or {}).get("left") or fallback)
+        except Exception:  # noqa: BLE001
+            return fallback
+
+    def _try_submit_requirement_efforts(self, requirement: Requirement, acting_user: Optional[User], now) -> Optional[float]:
+        """暂停：本段（+ 旧口径遗留的未提交累计，补录到今天）按天拆分提交为禅道
+        工时记录。成功返回提交小时数（可为 0）；没有任务/无本人网页凭据/提交失败
+        返回 None，调用方退回本地累计口径。
+
+        ⚠️ 工时记录归属禅道当前登录人，只能用本人凭据，不回退系统账号。"""
+        if not requirement.zentao_task_id:
+            return None
+        day_rows = self._split_segment_by_day(requirement.task_started_at, now)
+        day_rows = merge_extra_hours(day_rows, float(requirement.task_consumed_accum or 0.0), now.date())
+        if not day_rows:
+            return 0.0
+        login = get_user_zentao_web_login(acting_user.id, self.db) if acting_user is not None else None
+        if login is None:
+            logger.info("requirement %s pause: no self web login, fall back to local accum", requirement.id)
+            return None
+        task_id = int(requirement.zentao_task_id)
+        try:
+            return submit_day_efforts(
+                login, task_id, day_rows,
+                left_before=self._task_left_hours(task_id, requirement.estimated_test_hours or 0.0),
+                note=AUTO_NOTE,
+            )
+        except Exception as exc:  # noqa: BLE001 — 提交失败退回本地累计，不阻塞暂停
+            logger.warning("requirement %s pause: submit efforts failed, fall back to local accum: %s", requirement.id, exc)
+            return None
+
+    def _prepare_requirement_finish_consumed(self, requirement: Requirement, acting_user: Optional[User], now) -> float:
+        """完成时的 currentConsumed：优先把「今天之前」的段按天拆分提交为工时记录，
+        finish 只带今天的部分 + 未提交累计；无本人网页凭据/提交失败退回一次性提交
+        全部。禅道要求 >0，最小 0.1；从未计时且没分段提交过才拿预计工时兜底。"""
+        day_rows = self._split_segment_by_day(requirement.task_started_at, now)
+        today = now.date()
+        prev_rows = [(d, h) for d, h in day_rows if d < today]
+        remainder = round(
+            sum(h for d, h in day_rows if d >= today) + float(requirement.task_consumed_accum or 0.0), 2
+        )
+        if prev_rows and requirement.zentao_task_id and acting_user is not None:
+            login = get_user_zentao_web_login(acting_user.id, self.db)
+            if login is not None:
+                task_id = int(requirement.zentao_task_id)
+                try:
+                    submitted = submit_day_efforts(
+                        login, task_id, prev_rows,
+                        left_before=self._task_left_hours(task_id, requirement.estimated_test_hours or 0.0),
+                        note=AUTO_NOTE,
+                    )
+                    requirement.task_efforts_submitted = round(float(requirement.task_efforts_submitted or 0.0) + submitted, 2)
+                    # finish 未生效时 remainder 留在 accum 里可重试；生效后簿记清零
+                    requirement.task_consumed_accum = remainder
+                    requirement.task_started_at = None
+                    return max(remainder, 0.1)
+                except Exception as exc:  # noqa: BLE001 — 拆分提交失败退回一次性
+                    logger.warning("requirement %s finish: pre-submit efforts failed, fall back to lump sum: %s", requirement.id, exc)
+        total = round(remainder + sum(h for _, h in prev_rows), 2)
+        if total > 0:
+            return max(total, 0.1)
+        if float(requirement.task_efforts_submitted or 0.0) > 0:
+            # 各段都已提交过工时记录 → 不能再拿预计工时兜底（会重复计入），给最小值
+            return 0.1
+        return round(requirement.estimated_test_hours or 1.0, 2)
+
     def finish_requirement_task(self, requirement: Requirement, *, acting_user: Optional[User] = None) -> dict:
         """勾「测试完成」：算工时 → 禅道 finish，记录本地完成时刻。
 
@@ -638,18 +730,9 @@ class ZentaoTaskSyncService:
         out: dict = {"ok": False, "errors": [], "consumed": 0.0}
         now = local_now()
         requirement.task_finished_at = now
-        started = requirement.task_started_at
-        consumed = float(requirement.task_consumed_accum or 0.0)
-        if started:
-            try:
-                hmap = get_holiday_map(self.db, started.date(), now.date())
-            except Exception:
-                hmap = {}
-            consumed += work_hours.consumed_hours(started, now, hmap)
-        consumed = round(consumed, 2)
-        # 禅道要求 currentConsumed > 0
-        if consumed <= 0:
-            consumed = round(requirement.estimated_test_hours or 1.0, 2)
+        # 今天之前的段先按天拆分提交为工时记录，finish 只带今天的部分；
+        # 无本人网页凭据/提交失败则一次性提交全部（旧口径兜底）。
+        consumed = self._prepare_requirement_finish_consumed(requirement, acting_user, now)
         out["consumed"] = consumed
         if requirement.zentao_task_id:
             task_id = int(requirement.zentao_task_id)
@@ -662,6 +745,11 @@ class ZentaoTaskSyncService:
                 requirement, expected="done", op=_op, acting_user=acting_user, out=out, zh="完成",
                 restore_assignee=False,
             )
+        if not out["errors"]:
+            # finish 的 currentConsumed 已随完成上报（禅道生成完成当天的工时记录）
+            requirement.task_efforts_submitted = round(float(requirement.task_efforts_submitted or 0.0) + consumed, 2)
+            requirement.task_consumed_accum = 0.0
+            requirement.task_started_at = None
         self.db.commit()
         out["ok"] = not out["errors"]
         return out

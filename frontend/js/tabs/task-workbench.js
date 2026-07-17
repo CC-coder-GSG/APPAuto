@@ -59,6 +59,9 @@ function renderTaskActions(t) {
   // 指派（转派）面向所有用户开放：任何任务都可以指派给指定的人。
   const assignBtn = `<button class="secondary" style="padding:2px 10px; font-size:12px; color:#7c3aed; border-color:#ddd6fe;"
     onclick="event.stopPropagation(); openTaskAssign(${t.task_id})" title="把该任务指派给指定的人（所有人可用）">👤 指派</button>`;
+  // 工时记录（查看对所有人开放；本人的记录可在弹窗里修改）
+  const effortBtn = `<button class="secondary" style="padding:2px 10px; font-size:12px; color:#0f766e; border-color:#99f6e4;"
+    onclick="event.stopPropagation(); window.openTaskEffortModal(${t.task_id})" title="查看/修改该任务已提交的禅道工时记录">🕒 工时记录</button>`;
   const wrap = (parts) => `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>`;
   // 关联需求且该需求归属本人 → 跳转到需求工作台管理，不在此直接操作禅道。
   // 例外：任务已完成时，除跳转外也允许直接关闭（避免只为关闭再绕一圈）。
@@ -70,12 +73,13 @@ function renderTaskActions(t) {
       parts.push(`<button style="padding:2px 10px; font-size:12px; color:#b91c1c; border-color:#fca5a5;"
         onclick="event.stopPropagation(); taskWorkbenchOperate(${t.task_id}, 'close')">⛔ 关闭</button>`);
     }
+    parts.push(effortBtn);
     parts.push(assignBtn);
     return wrap(parts);
   }
-  // 不可操作：任务未指派给本人（且不是可跳转的自有需求）。指派仍开放。
+  // 不可操作：任务未指派给本人（且不是可跳转的自有需求）。查看工时/指派仍开放。
   if (!t.can_operate) {
-    return wrap([`<span class="muted" style="font-size:12px;">该任务未指派给你，无法操作</span>`, assignBtn]);
+    return wrap([`<span class="muted" style="font-size:12px;">该任务未指派给你，无法操作</span>`, effortBtn, assignBtn]);
   }
   const id = t.task_id;
   const status = t.status;
@@ -101,6 +105,7 @@ function renderTaskActions(t) {
       parts.push(btn('🚫 取消', 'cancel', '', 'color:#b91c1c; border-color:#fca5a5;'));
       parts.push(hint);
     }
+    parts.push(effortBtn);
     parts.push(assignBtn);
     return wrap(parts);
   }
@@ -114,6 +119,7 @@ function renderTaskActions(t) {
   if (isClosed) {
     parts.push(`<span class="muted" style="font-size:12px;">任务已关闭</span>`);
     parts.push(btn('♻ 重新激活', 'reactivate', '#0ea5e9'));
+    parts.push(effortBtn);
     parts.push(assignBtn);
     return wrap(parts);
   }
@@ -125,8 +131,9 @@ function renderTaskActions(t) {
   } else if (!isDone) {
     parts.push(btn('▶ 开始', 'start', '#16a34a'));
   }
-  // 设置工时
+  // 设置工时（预计）/ 工时记录（已消耗明细）
   parts.push(`<button class="secondary" style="padding:2px 10px; font-size:12px;" onclick="event.stopPropagation(); taskWorkbenchSetTime(${id})">🕒 设置工时</button>`);
+  parts.push(effortBtn);
   // 完成 / 重新激活
   if (isDone) {
     parts.push(`<button class="secondary" disabled style="padding:2px 10px; font-size:12px; opacity:.7;">✅ 已完成</button>`);

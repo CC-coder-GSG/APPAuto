@@ -109,6 +109,46 @@ def operate_my_task(
     )
 
 
+class EffortEditPayload(BaseModel):
+    date: str  # YYYY-MM-DD
+    consumed: float
+    work: Optional[str] = None
+
+
+@router.get("/tasks/{task_id}/efforts")
+def task_efforts(
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """任务的禅道工时记录列表（任务看板/任务工作台「工时记录」弹窗数据源）。
+
+    查看优先本人网页凭据、回退系统账号；是否可编辑按「记录人 == 本人禅道账号」标注。
+    """
+    from app.services.zentao_effort_service import list_efforts_for_user
+
+    return list_efforts_for_user(db, task_id, current_user)
+
+
+@router.put("/tasks/{task_id}/efforts/{effort_id}")
+def edit_task_effort(
+    task_id: int,
+    effort_id: int,
+    payload: EffortEditPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """修改一条工时记录（仅本人的记录；用本人网页凭据提交，保持工时归属）。"""
+    from app.services.zentao_effort_service import edit_effort_for_user
+
+    return edit_effort_for_user(
+        db, task_id, effort_id, current_user,
+        new_date=payload.date,
+        consumed=payload.consumed,
+        work=payload.work,
+    )
+
+
 @router.get("/tasks/{task_id}/assignable")
 def task_assignable_users(
     task_id: int,

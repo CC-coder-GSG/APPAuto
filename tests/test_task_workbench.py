@@ -573,3 +573,164 @@ def test_operate_task_set_time_validates(db_session, monkeypatch):
     with pytest.raises(HTTPException) as ei:
         svc.operate_task(task_id=401, action="set_time", current_user=alice, hours=0)
     assert ei.value.status_code == 400
+
+
+# ─── 分段提交禅道工时记录（2026-07-17 工时口径升级）──────────────────────────
+
+
+def _fake_login():
+    from app.services.zentao_web_session import ZentaoWebLogin
+    return ZentaoWebLogin(base_url="http://z", account="alice", password="p")
+
+
+def test_pause_submits_day_split_efforts(db_session, monkeypatch):
+    """有本人网页凭据：暂停把本段按天拆分提交为工时记录，本地累计保持 0。"""
+    from datetime import date, datetime
+
+    alice = _user(db_session, "alice_eff", account="alice")
+    _major(db_session, "V-TW-EFF")
+    row = _mirror(db_session, 1001, alice.id, account="alice", status="doing")
+    row.local_started_at = datetime(2026, 6, 29, 15, 0)  # 周一 15:00 开始
+    row.left = 20.0
+    db_session.commit()
+    client = FakeClient()
+    client.set_task(1001, {"status": "doing", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
+    monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: _fake_login())
+    submitted = []
+
+    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+        submitted.append((login.account, task_id, day_rows, left_before))
+        return round(sum(h for _, h in day_rows), 2)
+
+    monkeypatch.setattr(tms, "submit_day_efforts", fake_submit)
+
+    # 周三 10:30 暂停：周一 3.5h + 周二 7.83h + 周三 1.5h 三行记录
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 1, 10, 30))
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1001, action="pause", current_user=alice)
+    assert res["ok"] is True
+    assert submitted == [("alice", 1001, [
+        (date(2026, 6, 29), 3.5),
+        (date(2026, 6, 30), 7.83),
+        (date(2026, 7, 1), 1.5),
+    ], 20.0)]
+    assert row.consumed_accum == 0.0
+    assert row.efforts_submitted == 12.83
+    assert row.local_started_at is None
+
+
+def test_pause_merges_legacy_accum_into_today(db_session, monkeypatch):
+    """存量任务兼容：旧口径遗留的本地累计随首次暂停补录到今天。"""
+    from datetime import date, datetime
+
+    alice = _user(db_session, "alice_leg", account="alice")
+    _major(db_session, "V-TW-LEG")
+    row = _mirror(db_session, 1002, alice.id, account="alice", status="doing")
+    row.local_started_at = datetime(2026, 7, 1, 9, 0)
+    row.consumed_accum = 2.0  # 旧口径遗留
+    db_session.commit()
+    client = FakeClient()
+    client.set_task(1002, {"status": "doing", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
+    monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: _fake_login())
+    submitted = []
+
+    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+        submitted.append(day_rows)
+        return round(sum(h for _, h in day_rows), 2)
+
+    monkeypatch.setattr(tms, "submit_day_efforts", fake_submit)
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 1, 11, 0))
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1002, action="pause", current_user=alice)
+    assert res["ok"] is True
+    # 本段 2h + 遗留 2h 合并到今天一行
+    assert submitted == [[(date(2026, 7, 1), 4.0)]]
+    assert row.consumed_accum == 0.0
+    assert row.efforts_submitted == 4.0
+
+
+def test_pause_submit_failure_falls_back_to_local_accum(db_session, monkeypatch):
+    """提交失败：退回旧口径本地累计（完成时一次性提交），暂停本身不受影响。"""
+    from datetime import datetime
+
+    alice = _user(db_session, "alice_fbk", account="alice")
+    _major(db_session, "V-TW-FBK")
+    row = _mirror(db_session, 1003, alice.id, account="alice", status="doing")
+    row.local_started_at = datetime(2026, 6, 29, 9, 0)
+    db_session.commit()
+    client = FakeClient()
+    client.set_task(1003, {"status": "doing", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
+    monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: _fake_login())
+
+    def boom(*a, **kw):
+        raise RuntimeError("web down")
+
+    monkeypatch.setattr(tms, "submit_day_efforts", boom)
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 6, 29, 11, 0))
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1003, action="pause", current_user=alice)
+    assert res["ok"] is True
+    assert row.consumed_accum == 2.0
+    assert row.efforts_submitted == 0.0
+    assert row.local_started_at is None
+
+
+def test_finish_presubmits_prev_days_and_reports_today_only(db_session, monkeypatch):
+    """完成：今天之前的段先按天提交为工时记录，finish 只带今天的部分。"""
+    from datetime import date, datetime
+
+    alice = _user(db_session, "alice_fin", account="alice")
+    _major(db_session, "V-TW-FIN")
+    row = _mirror(db_session, 1004, alice.id, account="alice", status="doing")
+    row.local_started_at = datetime(2026, 6, 29, 15, 0)  # 周一 15:00
+    db_session.commit()
+    client = FakeClient()
+    client.set_task(1004, {"status": "doing", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
+    monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: _fake_login())
+    submitted = []
+
+    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+        submitted.append(day_rows)
+        return round(sum(h for _, h in day_rows), 2)
+
+    monkeypatch.setattr(tms, "submit_day_efforts", fake_submit)
+    # 周三 10:30 完成：周一 3.5 + 周二 7.83 预提交，finish 只带周三的 1.5
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 1, 10, 30))
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1004, action="finish", current_user=alice)
+    assert res["ok"] is True
+    assert submitted == [[(date(2026, 6, 29), 3.5), (date(2026, 6, 30), 7.83)]]
+    finish = next(c for c in client.calls if c[0] == "finish")
+    assert finish[2]["current_consumed"] == 1.5
+    assert row.consumed_accum == 0.0
+    assert row.efforts_submitted == round(11.33 + 1.5, 2)
+    assert row.local_started_at is None
+
+
+def test_finish_after_segments_submitted_uses_min_floor(db_session, monkeypatch):
+    """暂停时已分段提交过 → 暂停中直接完成不再拿剩余/预计工时兜底，给最小值 0.1。"""
+    from datetime import datetime
+
+    alice = _user(db_session, "alice_min", account="alice")
+    _major(db_session, "V-TW-MIN")
+    row = _mirror(db_session, 1005, alice.id, account="alice", status="pause")
+    row.left = 8.0
+    row.estimate = 8.0
+    row.real_started = datetime(2026, 6, 29, 9, 0)
+    row.consumed_accum = 0.0
+    row.efforts_submitted = 2.0  # 暂停时已提交过
+    db_session.commit()
+    client = FakeClient()
+    client.set_task(1005, {"status": "pause", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 1, 15, 0))
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1005, action="finish", current_user=alice)
+    assert res["ok"] is True
+    finish = next(c for c in client.calls if c[0] == "finish")
+    # 不回退 real_started 起算（会重复计入），也不拿 left/estimate 兜底
+    assert finish[2]["current_consumed"] == 0.1

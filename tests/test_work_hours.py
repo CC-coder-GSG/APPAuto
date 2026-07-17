@@ -5,6 +5,7 @@ from datetime import date, datetime
 from app.utils.work_hours import (
     WORK_HOURS_PER_DAY,
     consumed_hours,
+    consumed_hours_by_day,
     estimate_hours,
     is_workday,
     working_days,
@@ -91,3 +92,39 @@ def test_consumed_non_positive_range():
     s = datetime(2026, 6, 29, 10, 0, 0)
     assert consumed_hours(s, s) == 0.0
     assert consumed_hours(s, datetime(2026, 6, 29, 9, 0, 0)) == 0.0
+
+
+# ─── 按天拆分（分段提交禅道工时记录用）─────────────────────────────────────
+
+
+def test_consumed_by_day_cross_days():
+    # Mon 15:00 → Wed 10:30：Mon 15:00-18:30=3.5h；Tue 全天 7.83h；Wed 9:00-10:30=1.5h
+    s = datetime(2026, 6, 29, 15, 0, 0)
+    e = datetime(2026, 7, 1, 10, 30, 0)
+    rows = consumed_hours_by_day(s, e)
+    assert rows == [
+        (date(2026, 6, 29), 3.5),
+        (date(2026, 6, 30), 7.83),
+        (date(2026, 7, 1), 1.5),
+    ]
+
+
+def test_consumed_by_day_skips_weekend_and_zero_days():
+    # Fri 17:30 → Mon 9:30：周末两天没有行（不是 0 小时行）
+    s = datetime(2026, 7, 3, 17, 30, 0)
+    e = datetime(2026, 7, 6, 9, 30, 0)
+    rows = consumed_hours_by_day(s, e)
+    assert rows == [(date(2026, 7, 3), 1.0), (date(2026, 7, 6), 0.5)]
+
+
+def test_consumed_by_day_total_close_to_consumed_hours():
+    # 两个口径各自按天取整到分钟再除 60，合计与 consumed_hours 只差舍入误差
+    s = datetime(2026, 6, 29, 15, 0, 0)
+    e = datetime(2026, 7, 2, 11, 7, 0)
+    total_by_day = sum(h for _, h in consumed_hours_by_day(s, e))
+    assert abs(total_by_day - consumed_hours(s, e)) < 0.05
+
+
+def test_consumed_by_day_empty_when_non_positive():
+    s = datetime(2026, 6, 29, 10, 0, 0)
+    assert consumed_hours_by_day(s, s) == []

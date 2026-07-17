@@ -997,6 +997,9 @@ function ztActionsHtml(t) {
     }
   }
   if ((mine || isAdmin) && t.status === 'done') parts.push(btn('⛔ 关闭', 'close', 'background:#fff; color:#b91c1c; border:1px solid #fca5a5;'));
+  // 工时记录（查看对所有人开放；本人的记录可在弹窗里修改）
+  parts.push(`<button class="secondary" style="padding:2px 8px; font-size:11px; color:#0f766e; border:1px solid #99f6e4;"
+    onclick="event.stopPropagation(); window.openTaskEffortModal(${id})" title="查看/修改该任务已提交的禅道工时记录">🕒 工时</button>`);
   // 指派面向所有用户开放（复用任务工作台的指派弹窗，来源标记 board 以便回刷看板）
   parts.push(`<button class="secondary" style="padding:2px 8px; font-size:11px; color:#7c3aed; border:1px solid #ddd6fe;"
     onclick="event.stopPropagation(); window.OmniQATaskWorkbenchTab && window.OmniQATaskWorkbenchTab.openTaskAssign(${id}, 'board')">👤 指派</button>`);
