@@ -5,6 +5,8 @@ let retestSseBound = false;
 let retestPreflightPromise = null;
 let retestPreflightKey = '';
 let retestPreflightAt = 0;
+let retestPreflightHandled = null;
+let retestLoadSeq = 0;
 
 function getRetestMode() {
   return document.getElementById('retestDisplayMode')?.value || 'version';
@@ -72,15 +74,16 @@ function renderCrossMajorBadge(req, b) {
   return `<span title="该Bug记录在其他大版本下" style="background:#ede9fe; color:#6d28d9; padding:1px 5px; border-radius:4px; font-size:10px; font-weight:600; margin-left:4px;">🔀来自 ${escapeHtml(b.major_version_no)}</span>`;
 }
 
-async function preflightRetestData(softwareId) {
-  if (!softwareId) return;
+// Return the shared Promise so one sync only schedules one silent reload.
+function preflightRetestData(softwareId) {
+  if (!softwareId) return null;
   const key = String(softwareId);
   const now = Date.now();
   if (retestPreflightPromise && retestPreflightKey === key) {
     return retestPreflightPromise;
   }
   if (retestPreflightKey === key && now - retestPreflightAt < 30000) {
-    return;
+    return null;
   }
   retestPreflightKey = key;
   retestPreflightPromise = api('/workbench/preflight-refresh', {
@@ -92,14 +95,31 @@ async function preflightRetestData(softwareId) {
       include_testcases: true,
       force: false,
     },
-  }).then(() => {
+  }).then(async (resp) => {
     retestPreflightAt = Date.now();
+    try { return await resp.json(); } catch { return null; }
   }).catch((err) => {
     console.warn('retest preflight refresh failed', err);
+    return null;
   }).finally(() => {
     retestPreflightPromise = null;
   });
   return retestPreflightPromise;
+}
+
+// Start Zentao synchronization only after cached retest data has rendered.
+// Reload once in the background when the synchronization actually ran.
+function scheduleRetestPreflightBackgroundRefresh(softwareId) {
+  const p = preflightRetestData(softwareId);
+  if (!p || typeof p.then !== 'function' || p === retestPreflightHandled) return;
+  retestPreflightHandled = p;
+  p.then((res) => {
+    if (!res) return;
+    const synced = (part) => part && part.cached !== true && !part.error;
+    if (!synced(res.bugs) && !synced(res.testcases)) return;
+    if (window.isWorkbenchSubtabActive && !window.isWorkbenchSubtabActive('retest')) return;
+    loadRetest().catch((err) => console.warn('retest reload after preflight failed', err));
+  });
 }
 
 function syncRetestMinorOptionsByMode() {
@@ -167,20 +187,22 @@ export async function loadRetest() {
   }
 
   const sid = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
-  if (sid) {
-    await preflightRetestData(sid);
-  }
   let url = '/workbench/retest?mode=' + mode;
   if (mode === 'version' && majorId) url += '&major_version_id=' + majorId;
   if (sid) url += '&software_id=' + sid;
 
+  // Cache first: render local data before starting the background preflight.
+  // The sequence guard prevents an older request from replacing newer filters.
+  const seq = ++retestLoadSeq;
   const data = await (await api(url)).json();
+  if (seq !== retestLoadSeq) return;
   state.currentRetestData = data;
 
   const container = document.getElementById('retestCardsArea');
   if (!container) return;
   if (!data || data.length === 0) {
     container.innerHTML = '<div class="muted" style="padding: 20px; text-align: center; background: #f8fafc; border-radius: 8px;">🎉 当前筛选条件下没有需要您复测的需求</div>';
+    if (sid) scheduleRetestPreflightBackgroundRefresh(sid);
     return;
   }
 
@@ -350,6 +372,7 @@ export async function loadRetest() {
     });
   }
   window.OmniQAZentao?.hydrateContainer(container);
+  if (sid) scheduleRetestPreflightBackgroundRefresh(sid);
 }
 
 export async function setRetest(id, passed, activeProblemCount) {
