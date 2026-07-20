@@ -19,7 +19,7 @@ import { runGuardrails } from './guardrails.js?v=20260716-1';
 
 const OPTIONAL_TAB_MODULES = [
   { name: 'mine', path: './tabs/mine.js?v=20260720-1' },
-  { name: 'review-workbench', path: './tabs/review-workbench.js?v=20260720-1' },
+  { name: 'review-workbench', path: './tabs/review-workbench.js?v=20260720-2' },
   { name: 'task-workbench', path: './tabs/task-workbench.js?v=20260717-1' },
   { name: 'task-board', path: './tabs/task-board.js?v=20260717-2' },
   { name: 'feedback', path: './tabs/feedback.js?v=20260417-3' },

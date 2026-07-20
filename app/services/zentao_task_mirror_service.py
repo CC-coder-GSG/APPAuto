@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.models import User, Version, VersionType
 from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.services.holiday_service import get_holiday_map
+from app.services.sse_service import sse_publish
 from app.utils import work_hours
 from app.services.zentao_system_client import (
     get_system_zentao_client,
@@ -76,6 +77,18 @@ def _account_of(assigned_to) -> tuple[Optional[str], Optional[str]]:
     if assigned_to:
         return str(assigned_to), None
     return None, None
+
+
+def _response_confirms_status(response, expected: str) -> bool:
+    """Return whether a write response itself explicitly confirms a task status."""
+    if not isinstance(response, dict):
+        return False
+    candidates = (response, response.get("data"), response.get("task"))
+    return any(
+        isinstance(item, dict)
+        and str(item.get("status") or "").strip().lower() == expected
+        for item in candidates
+    )
 
 
 class ZentaoTaskMirrorService:
@@ -670,6 +683,11 @@ class ZentaoTaskMirrorService:
             resp = None
             try:
                 resp = _rest()
+                # finish carries incremental effort. A confirmed REST result
+                # must not be sent again through the web fallback just because
+                # the immediately following task read is temporarily stale.
+                if action == "finish" and _response_confirms_status(resp, _expected):
+                    return resp
                 if str((cli.get_task(task_id) or {}).get("status") or "").strip().lower() == _expected:
                     return resp
             except Exception as exc:  # noqa: BLE001 — REST 失败/未生效都尝试网页会话
@@ -695,12 +713,15 @@ class ZentaoTaskMirrorService:
                 logger.warning("operate task %s action=%s via %s failed: %s", task_id, action, label, exc)
                 continue
             self._refresh_one_task(cli, row)
+            response_confirmed = action == "finish" and _response_confirms_status(last_resp, _expected)
+            if response_confirmed:
+                row.status = _expected
             logger.info("operate task %s action=%s via %s resp=%r status=%s", task_id, action, label, last_resp, row.status)
             if action == "assign":
                 # 指派按回读的指派人校验（状态不变化）
                 took_effect = (row.assigned_to or "").strip().lower() == assigned_to.strip().lower()
             else:
-                took_effect = not _expected or (row.status or "").strip().lower() == _expected
+                took_effect = response_confirmed or not _expected or (row.status or "").strip().lower() == _expected
             if took_effect:
                 used_client = cli
                 break  # 生效（或无需校验）
@@ -760,7 +781,20 @@ class ZentaoTaskMirrorService:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("restore assignee task %s -> %s failed: %s", task_id, original_account, exc)
         self.db.commit()
-        return {"ok": not errors, "errors": errors, "task": self._serialize(row)}
+        task_data = self._serialize(row)
+        if used_client is not None:
+            sse_publish(
+                "zentao_task_changed",
+                {
+                    "task_id": task_id,
+                    "status": task_data.get("status"),
+                    "action": action,
+                    "source": "task_workbench",
+                    "task": task_data,
+                },
+                channels=["global"],
+            )
+        return {"ok": not errors, "errors": errors, "task": task_data}
 
     def _local_segment_start(self, row: ZentaoTaskMirror) -> Optional[datetime]:
         """本段计时起点：平台记录的 local_started_at 优先；从未结算过（accum=0

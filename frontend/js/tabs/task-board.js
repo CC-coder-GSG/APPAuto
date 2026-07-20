@@ -722,6 +722,11 @@ function bindSSE() {
   ['task_board_created', 'task_board_updated', 'task_board_status_changed', 'task_board_archived'].forEach((evt) => {
     window.OmniQASSE.subscribe(evt, handler);
   });
+  window.OmniQASSE.subscribe('zentao_task_changed', () => {
+    const tab = document.getElementById('tab-task-board');
+    if (!tab || tab.classList.contains('hidden')) return;
+    reloadZentaoFromMirror().catch(() => {});
+  });
   state.sseBound = true;
 }
 

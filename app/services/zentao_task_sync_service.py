@@ -24,7 +24,9 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.models import Requirement, User, Version
+from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.services.holiday_service import get_holiday_map
+from app.services.sse_service import sse_publish
 from app.services.zentao_system_client import (
     get_system_zentao_client,
     get_system_zentao_web_login,
@@ -94,6 +96,14 @@ def _task_status(t: dict) -> str:
     return str((t or {}).get("status") or "").strip().lower()
 
 
+def _response_confirms_status(response, expected: str) -> bool:
+    """Return whether a write response itself explicitly confirms a task status."""
+    if not isinstance(response, dict):
+        return False
+    candidates = (response, response.get("data"), response.get("task"))
+    return any(isinstance(item, dict) and _task_status(item) == expected for item in candidates)
+
+
 def _is_dead_task(t: Optional[dict]) -> bool:
     return _task_status(t) in _DEAD_TASK_STATUSES
 
@@ -101,6 +111,40 @@ def _is_dead_task(t: Optional[dict]) -> bool:
 class ZentaoTaskSyncService:
     def __init__(self, db: Session):
         self.db = db
+
+    def _update_task_mirror_status(self, requirement: Requirement, status: str) -> None:
+        """Keep the task-board mirror aligned after a confirmed requirement action."""
+        if not requirement.zentao_task_id:
+            return
+        row = (
+            self.db.query(ZentaoTaskMirror)
+            .filter(ZentaoTaskMirror.task_id == int(requirement.zentao_task_id))
+            .first()
+        )
+        if row is None:
+            return
+        row.status = status
+        row.synced_at = local_now()
+        if status == "doing" and row.real_started is None and requirement.task_started_at:
+            row.real_started = requirement.task_started_at
+        if status == "done" and requirement.task_finished_at:
+            row.finished_date = requirement.task_finished_at
+
+    @staticmethod
+    def _publish_task_change(requirement: Requirement, status: str, action: str) -> None:
+        if not requirement.zentao_task_id:
+            return
+        sse_publish(
+            "zentao_task_changed",
+            {
+                "task_id": int(requirement.zentao_task_id),
+                "requirement_id": requirement.id,
+                "status": status,
+                "action": action,
+                "source": "requirement_workbench",
+            },
+            channels=["global"],
+        )
 
     # ------------------------------------------------------------------
     # 用户 → 禅道账号
@@ -490,6 +534,7 @@ class ZentaoTaskSyncService:
         zh: str,
         restore_assignee: bool = True,
         web_op=None,
+        accept_response_status: bool = False,
     ) -> bool:
         """对候选账号执行 op(client)，回读校验任务状态。
 
@@ -530,16 +575,23 @@ class ZentaoTaskSyncService:
 
         def _succeed(client) -> bool:
             requirement.zentao_task_status_cache = expected
+            self._update_task_mirror_status(requirement, expected)
             if restore_assignee:
                 self._restore_assignee_if_changed(client, requirement)
             return True
 
         for label, client in candidates:
+            response = None
             try:
-                op(client)
+                response = op(client)
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
                 logger.warning("%s task %s via %s REST failed: %s", zh, task_id, label, exc)
+            # finish writes currentConsumed. When REST explicitly confirms the
+            # final status, an immediately stale GET must not trigger a second
+            # finish through the web fallback.
+            if accept_response_status and _response_confirms_status(response, expected):
+                return _succeed(client)
             actual = _readback(client)
             if actual == expected:
                 return _succeed(client)
@@ -601,6 +653,8 @@ class ZentaoTaskSyncService:
             )
         self.db.commit()
         out["ok"] = not out["errors"]
+        if out["ok"]:
+            self._publish_task_change(requirement, "doing", "start")
         return out
 
     def pause_requirement_task(self, requirement: Requirement, *, acting_user: Optional[User] = None, comment: Optional[str] = None) -> dict:
@@ -660,6 +714,7 @@ class ZentaoTaskSyncService:
                 # 回读校验：禅道 200 不代表生效（历史上曾静默失败）
                 if _paused():
                     requirement.zentao_task_status_cache = "pause"
+                    self._update_task_mirror_status(requirement, "pause")
                     self._restore_assignee_if_changed(client, requirement)
                 else:
                     detail = f"：{last_err}" if last_err else "（禅道返回成功但状态未切换）"
@@ -672,6 +727,8 @@ class ZentaoTaskSyncService:
                 self._settle_consumed_segment(requirement, now)
         self.db.commit()
         out["ok"] = not out["errors"]
+        if out["ok"]:
+            self._publish_task_change(requirement, "pause", "pause")
         return out
 
     def _settle_consumed_segment(self, requirement: Requirement, now) -> None:
@@ -786,7 +843,7 @@ class ZentaoTaskSyncService:
             task_id = int(requirement.zentao_task_id)
 
             def _op(client):
-                client.finish_task(task_id, current_consumed=consumed, finished_date=_fmt_dt(now))
+                return client.finish_task(task_id, current_consumed=consumed, finished_date=_fmt_dt(now))
 
             def _web_op(web):
                 finish_task_via_web(web, task_id, current_consumed=consumed, finished_date=_fmt_dt(now))
@@ -794,7 +851,7 @@ class ZentaoTaskSyncService:
             # 完成后禅道会把指派人转给任务创建者，属预期流转，不做指派校正
             self._operate_task_with_verify(
                 requirement, expected="done", op=_op, acting_user=acting_user, out=out, zh="完成",
-                restore_assignee=False, web_op=_web_op,
+                restore_assignee=False, web_op=_web_op, accept_response_status=True,
             )
         if not out["errors"]:
             # finish 的 currentConsumed 已随完成上报（禅道生成完成当天的工时记录）
@@ -803,6 +860,8 @@ class ZentaoTaskSyncService:
             requirement.task_started_at = None
         self.db.commit()
         out["ok"] = not out["errors"]
+        if out["ok"]:
+            self._publish_task_change(requirement, "done", "finish")
         return out
 
     def reactivate_requirement_task(self, requirement: Requirement, *, acting_user: Optional[User] = None) -> dict:
@@ -836,6 +895,8 @@ class ZentaoTaskSyncService:
             )
         self.db.commit()
         out["ok"] = not out["errors"]
+        if out["ok"]:
+            self._publish_task_change(requirement, "doing", "reactivate")
         return out
 
 

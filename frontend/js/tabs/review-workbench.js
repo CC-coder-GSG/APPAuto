@@ -76,7 +76,7 @@ function renderReviewStats() {
 function renderReviewCaseItem(c, reqId) {
   const caseZtId = String(c.zentao_case_id || '').replace(/\D/g, '');
   const metaBits = [
-    c.belongs ? `所属：${escapeHtml(c.belongs)}` : '',
+    c.belongs ? `产品/模块：${escapeHtml(c.belongs)}` : '',
     c.creator ? `创建人：${escapeHtml(c.creator)}` : '',
   ].filter(Boolean).join('　');
   return `

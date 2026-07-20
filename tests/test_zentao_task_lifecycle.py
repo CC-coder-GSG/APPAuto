@@ -77,6 +77,58 @@ def test_start_records_time_and_calls_zentao(db_session, monkeypatch, req):
     assert any(c[0] == "start" for c in client.calls)
 
 
+def test_requirement_actions_update_task_board_mirror_and_publish_events(db_session, monkeypatch, req):
+    """需求工作台操作成功后立即更新任务看板镜像，不等待后台定时同步。"""
+    from app.models.zentao_task_mirror import ZentaoTaskMirror
+
+    mirror = ZentaoTaskMirror(
+        task_id=777,
+        execution_id=1,
+        execution_name_cache="V1",
+        name="需求测试任务",
+        status="wait",
+    )
+    db_session.add(mirror)
+    db_session.commit()
+
+    client = FakeClient(status="wait")
+    events = []
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tss, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(
+        tss,
+        "sse_publish",
+        lambda event, payload, channels=None: events.append((event, payload, channels)),
+    )
+    svc = ZentaoTaskSyncService(db_session)
+
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 20, 9, 0))
+    assert svc.start_requirement_task(req, hours=4.0)["ok"] is True
+    assert mirror.status == "doing"
+    assert mirror.real_started == datetime(2026, 7, 20, 9, 0)
+
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 20, 10, 0))
+    assert svc.pause_requirement_task(req)["ok"] is True
+    assert mirror.status == "pause"
+
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 20, 11, 0))
+    assert svc.finish_requirement_task(req)["ok"] is True
+    assert mirror.status == "done"
+    assert mirror.finished_date == datetime(2026, 7, 20, 11, 0)
+
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 20, 12, 0))
+    assert svc.reactivate_requirement_task(req)["ok"] is True
+    assert mirror.status == "doing"
+
+    assert [(event, payload["status"], payload["action"]) for event, payload, _ in events] == [
+        ("zentao_task_changed", "doing", "start"),
+        ("zentao_task_changed", "pause", "pause"),
+        ("zentao_task_changed", "done", "finish"),
+        ("zentao_task_changed", "doing", "reactivate"),
+    ]
+    assert all(channels == ["global"] for _, _, channels in events)
+
+
 def test_finish_computes_consumed_from_worktime(db_session, monkeypatch, req):
     client = FakeClient()
     monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
@@ -94,6 +146,52 @@ def test_finish_computes_consumed_from_worktime(db_session, monkeypatch, req):
     assert req.zentao_task_status_cache == "done"
     finish_call = next(c for c in client.calls if c[0] == "finish")
     assert finish_call[2] == 2.0  # current_consumed
+
+
+def test_finish_does_not_repeat_when_rest_confirms_done_but_readback_is_stale(db_session, monkeypatch, req):
+    """REST 已确认完成时，旧状态回读不能再触发相同工时的网页 finish。"""
+    from app.models import User, UserRole
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    actor = User(username="tester_finish_once", password_hash="x", role=UserRole.USER)
+    db_session.add(actor)
+    db_session.commit()
+
+    class StaleReadbackFinishClient(FakeClient):
+        def finish_task(self, task_id, *, current_consumed, finished_date=None, assigned_to=None):
+            self.calls.append(("finish", task_id, current_consumed, finished_date))
+            return {"id": task_id, "status": "done"}  # 写响应成功，紧随其后的 GET 仍是 doing
+
+    client = StaleReadbackFinishClient(status="doing")
+    system = FakeClient(status="doing")
+    web_calls = []
+    monkeypatch.setattr(tss, "get_user_zentao_client", lambda uid, db: client)
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: system)
+    monkeypatch.setattr(
+        tss,
+        "get_user_zentao_web_login",
+        lambda uid, db: ZentaoWebLogin(base_url="http://z", account="tester", password="p"),
+    )
+    monkeypatch.setattr(tss, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(
+        tss,
+        "finish_task_via_web",
+        lambda *args, **kwargs: web_calls.append((args, kwargs)),
+    )
+    req.task_started_at = datetime(2026, 7, 20, 9, 0)
+    req.zentao_task_status_cache = "doing"
+    db_session.commit()
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 20, 11, 0))
+
+    res = ZentaoTaskSyncService(db_session).finish_requirement_task(req, acting_user=actor)
+
+    assert res["ok"] is True
+    assert [call for call in client.calls if call[0] == "finish"] == [
+        ("finish", 777, 2.0, "2026-07-20 11:00:00")
+    ]
+    assert web_calls == []
+    assert system.calls == []
+    assert req.zentao_task_status_cache == "done"
 
 
 def test_finish_falls_back_when_no_start(db_session, monkeypatch, req):

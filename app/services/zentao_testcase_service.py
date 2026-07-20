@@ -55,6 +55,14 @@ def _extract_name(value: Any) -> str | None:
     return text or None
 
 
+def _extract_reference_name(value: Any) -> str | None:
+    """Extract a display name from a Zentao relation without treating its ID as a name."""
+    text = _extract_name(value)
+    if not text or text.isdecimal():
+        return None
+    return text
+
+
 def _extract_account(value: Any) -> str | None:
     if isinstance(value, dict):
         text = str(value.get("account") or "").strip()
@@ -341,11 +349,11 @@ class ZentaoTestCaseService:
 
         module_raw = case.get("module")
         module_id = _coerce_int(module_raw)
-        module_name = _extract_name(module_raw)
+        module_name = _extract_reference_name(module_raw)
 
         product_raw = case.get("product")
         product_id = _coerce_int(product_raw)
-        product_name = _extract_name(product_raw)
+        product_name = _extract_reference_name(product_raw)
 
         story_raw = case.get("story")
         execution_raw = case.get("execution") or case.get("task")

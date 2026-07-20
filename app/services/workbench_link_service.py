@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Any
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import BugSourceType, BugTracking, Requirement, Version, VersionType, ZentaoTaskMirror, ZentaoTestCaseMirror
+from app.models import BugSourceType, BugTracking, Requirement, TestCase, Version, VersionType, ZentaoTaskMirror, ZentaoTestCaseMirror
 
 
 def _case_key(value: Any) -> str:
@@ -35,6 +35,61 @@ class WorkbenchLinkService:
     def __init__(self, db: Session):
         self.db = db
         self._major_names: dict[int, str] | None = None
+        self._product_names: dict[str, str] | None = None
+
+    @staticmethod
+    def _readable_reference_name(value: Any, reference_id: Any = None) -> str | None:
+        text = str(value or "").strip()
+        reference = str(reference_id or "").strip()
+        if not text or text.isdecimal() or (reference and text == reference):
+            return None
+        return text
+
+    def _product_name_map(self) -> dict[str, str]:
+        """Resolve historical product IDs from trustworthy local human-readable names."""
+        if self._product_names is not None:
+            return self._product_names
+
+        votes: dict[str, Counter[str]] = defaultdict(Counter)
+        for model in (TestCase, BugTracking, ZentaoTestCaseMirror):
+            rows = (
+                self.db.query(model.zentao_product_id, model.zentao_product_name, func.count())
+                .filter(model.zentao_product_id.isnot(None), model.zentao_product_name.isnot(None))
+                .group_by(model.zentao_product_id, model.zentao_product_name)
+                .all()
+            )
+            for product_id, product_name, count in rows:
+                readable = self._readable_reference_name(product_name, product_id)
+                key = str(product_id or "").strip()
+                if key and readable:
+                    votes[key][readable] += int(count or 0)
+
+        self._product_names = {
+            product_id: name_counts.most_common(1)[0][0]
+            for product_id, name_counts in votes.items()
+            if name_counts
+        }
+        return self._product_names
+
+    def _case_belongs_label(
+        self,
+        *,
+        product_id: Any = None,
+        product_name: Any = None,
+        module_id: Any = None,
+        module_name: Any = None,
+    ) -> str | None:
+        product_key = str(product_id or "").strip()
+        product_label = self._readable_reference_name(product_name, product_id)
+        if not product_label and product_key and product_key != "0":
+            product_label = self._product_name_map().get(product_key) or f"产品 #{product_key}"
+
+        module_key = str(module_id or "").strip()
+        module_label = self._readable_reference_name(module_name, module_id)
+        if not module_label and module_key and module_key != "0":
+            module_label = f"模块 #{module_key}"
+
+        return " / ".join(x for x in (product_label, module_label) if x) or None
 
     def minor_version_name_map(self) -> dict[int, str]:
         return {
@@ -222,7 +277,10 @@ class WorkbenchLinkService:
                         # 审查工作台条目展示：标题/创建人/所属
                         "title": local_case.zentao_case_title,
                         "creator": local_case.zentao_creator_name,
-                        "belongs": local_case.zentao_product_name,
+                        "belongs": self._case_belongs_label(
+                            product_id=local_case.zentao_product_id,
+                            product_name=local_case.zentao_product_name,
+                        ),
                     }
                 )
 
@@ -250,7 +308,12 @@ class WorkbenchLinkService:
                             "title": mirror.title,
                             "creator": None,  # 镜像未同步创建人；前端仅在有值时展示
 
-                            "belongs": " / ".join(x for x in [mirror.zentao_product_name, mirror.zentao_module_name] if x) or None,
+                            "belongs": self._case_belongs_label(
+                                product_id=mirror.zentao_product_id,
+                                product_name=mirror.zentao_product_name,
+                                module_id=mirror.zentao_module_id,
+                                module_name=mirror.zentao_module_name,
+                            ),
                         }
                     )
             result[req.id] = items

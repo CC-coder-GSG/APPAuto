@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from app.models import BugSourceType, BugTracking, Requirement, User, UserRole, Version, VersionType
+from app.models import BugSourceType, BugTracking, Requirement, TestCase as _TestCaseModel, User, UserRole, Version, VersionType
 from app.models.zentao_testcase_mirror import ZentaoTestCaseMirror
 from app.services.overall_test_service import OverallTestService
 from app.services.workbench_link_service import WorkbenchLinkService, _case_key
@@ -67,6 +67,28 @@ def test_prefixed_linked_case_id_matches_mirror(db_session):
     db_session.commit()
     view = WorkbenchLinkService(db_session).build_requirement_case_view([req], {})
     assert [b["bug_id"] for b in view[req.id][0]["bugs"]] == ["b#30001"]
+
+
+def test_numeric_case_belongs_uses_readable_product_name_and_labeled_module_id(db_session):
+    _, _, req = _seed(db_session)
+    mirror = db_session.query(ZentaoTestCaseMirror).filter_by(zentao_case_id="u#19712").one()
+    mirror.zentao_product_id = 310
+    mirror.zentao_product_name = "310"
+    mirror.zentao_module_id = 1107
+    mirror.zentao_module_name = "1107"
+    db_session.add(
+        _TestCaseModel(
+            requirement_id=req.id,
+            zentao_case_id="u#99999",
+            zentao_product_id="310",
+            zentao_product_name="WoSense App",
+        )
+    )
+    db_session.commit()
+
+    cases = WorkbenchLinkService(db_session).build_requirement_case_view([req], {})[req.id]
+    auto_case = next(case for case in cases if case["zentao_case_id"] == "u#19712")
+    assert auto_case["belongs"] == "WoSense App / 模块 #1107"
 
 
 def test_case_linked_bug_not_duplicated_in_free_bugs(db_session):

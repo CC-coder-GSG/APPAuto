@@ -828,6 +828,87 @@ def test_operate_finish_falls_back_to_self_web(db_session, monkeypatch):
 # ─── 暂停不被自动激活：工时必须在暂停之前提交（2026-07-17 线上问题）──────────
 
 
+def test_operate_finish_does_not_repeat_when_rest_confirms_done_but_readback_is_stale(db_session, monkeypatch):
+    """REST 已确认完成时，旧状态回读不能再触发相同工时的网页 finish。"""
+    from datetime import datetime
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    alice = _user(db_session, "alice_finish_once", account="alice")
+    _major(db_session, "V-TW-ONCE")
+    row = _mirror(db_session, 1103, alice.id, account="alice", status="doing")
+    row.local_started_at = datetime(2026, 7, 20, 9, 0)
+    db_session.commit()
+
+    class StaleReadbackFinishClient(FakeClient):
+        def finish_task(self, task_id, **kw):
+            self.calls.append(("finish", task_id, kw))
+            return {"id": task_id, "status": "done"}  # 写响应成功，紧随其后的 GET 仍是 doing
+
+    client = StaleReadbackFinishClient()
+    client.set_task(1103, {"status": "doing", "assignedTo": {"account": "alice"}})
+    system = FakeClient()
+    web_calls = []
+    monkeypatch.setattr(tms, "get_user_zentao_client", lambda uid, db: client)
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: system)
+    monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
+    monkeypatch.setattr(
+        tms,
+        "get_user_zentao_web_login",
+        lambda uid, db: ZentaoWebLogin(base_url="http://z", account="alice", password="p"),
+    )
+    monkeypatch.setattr(tms, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(
+        tms,
+        "finish_task_via_web",
+        lambda *args, **kwargs: web_calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 20, 11, 0))
+
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1103, action="finish", current_user=alice)
+
+    assert res["ok"] is True
+    assert client.calls == [
+        ("finish", 1103, {"current_consumed": 2.0, "finished_date": "2026-07-20 11:00:00"})
+    ]
+    assert web_calls == []
+    assert system.calls == []
+    assert row.status == "done"
+    assert row.efforts_submitted == 2.0
+
+
+def test_operate_task_publishes_task_board_refresh_event(db_session, monkeypatch):
+    """任务工作台操作提交镜像后通知已打开的任务看板刷新。"""
+    alice = _user(db_session, "alice_task_event", account="alice")
+    _major(db_session, "V-TW-EVENT")
+    row = _mirror(db_session, 1104, alice.id, account="alice", status="wait")
+    client = FakeClient()
+    client.set_task(1104, {"status": "wait", "assignedTo": {"account": "alice"}})
+    events = []
+    monkeypatch.setattr(tms, "get_user_zentao_client", lambda uid, db: client)
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: None)
+    monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: None)
+    monkeypatch.setattr(tms, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(
+        tms,
+        "sse_publish",
+        lambda event, payload, channels=None: events.append((event, payload, channels)),
+    )
+
+    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1104, action="start", current_user=alice)
+
+    assert res["ok"] is True
+    assert row.status == "doing"
+    assert len(events) == 1
+    event, payload, channels = events[0]
+    assert event == "zentao_task_changed"
+    assert payload["task_id"] == 1104
+    assert payload["status"] == "doing"
+    assert payload["action"] == "start"
+    assert payload["source"] == "task_workbench"
+    assert payload["task"]["status"] == "doing"
+    assert channels == ["global"]
+
+
 def test_pause_submits_efforts_before_pausing(db_session, monkeypatch):
     """禅道对 pause 任务记工时会自动激活回 doing → 分段提交必须发生在暂停之前。"""
     from datetime import datetime
