@@ -621,9 +621,6 @@ class RequirementService:
         if not req:
             raise HTTPException(status_code=404, detail="需求不存在")
 
-        if current_user.role != UserRole.ADMIN and req.owner_id != current_user.id:
-            raise HTTPException(status_code=403, detail="无权限修改该需求的测试要点")
-
         old_len = len((req.test_notes or "").strip())
         req.test_notes = (test_notes or "").strip() or None
         # 网页端富文本传 HTML；移动端等只传纯文本的调用方不带此参数，
@@ -641,6 +638,18 @@ class RequirementService:
             actor_id=current_user.id,
             target_id=str(req.id),
             detail=f"before_len={old_len},after_len={len((req.test_notes or '').strip())}",
+        )
+
+        # 测试要点是需求、审查、复测工作台共用的协作内容。广播变更后，
+        # 其他已打开工作台的用户可以立即刷新到同一份数据。
+        sse_publish(
+            "requirement_test_notes_updated",
+            {
+                "requirement_id": req.id,
+                "major_version_id": req.major_version_id,
+                "updated_by_id": current_user.id,
+            },
+            channels=["global"],
         )
 
         return {

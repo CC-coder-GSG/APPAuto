@@ -85,6 +85,9 @@ def test_review_workbench_returns_all_owners_and_reviews(db_session):
     major, req, case = _mk_req_with_case(db_session, owner, case_no="u#20100")
     # 另一个负责人的需求也应出现在审查工作台
     req2 = Requirement(zentao_req_id="r#9101", title="他人需求", major_version_id=major.id, owner_id=other.id)
+    req2.test_notes = "审查前共同确认边界场景"
+    req2.test_notes_html = "<b>审查前</b>共同确认边界场景"
+    req2.test_notes_updated_by_id = other.id
     db_session.add(req2)
     db_session.commit()
 
@@ -94,6 +97,10 @@ def test_review_workbench_returns_all_owners_and_reviews(db_session):
 
     rows = WorkbenchService(db_session).get_review_workbench(major_version_id=major.id)
     assert {r["zentao_req_id"] for r in rows} == {"r#9100", "r#9101"}
+    other_target = next(r for r in rows if r["zentao_req_id"] == "r#9101")
+    assert other_target["test_notes"] == "审查前共同确认边界场景"
+    assert other_target["test_notes_html"] == "<b>审查前</b>共同确认边界场景"
+    assert other_target["test_notes_updated_by_name"] == "other3"
     target = next(r for r in rows if r["zentao_req_id"] == "r#9100")
     assert target["owner_name"] == "owner3"
     case_view = target["test_cases"][0]

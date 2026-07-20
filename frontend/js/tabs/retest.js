@@ -443,6 +443,16 @@ function bindRetestSSE() {
     window.OmniQASSE.pulseBoundaryGlow(el, tone);
   });
 
+  // 测试要点与需求/审查工作台共用；其他用户修改后刷新只读参考内容。
+  window.OmniQASSE.subscribe('requirement_test_notes_updated', () => {
+    if (!window.isWorkbenchSubtabActive?.('retest')) return;
+    if (window._retestSSETestNotesTimer) clearTimeout(window._retestSSETestNotesTimer);
+    window._retestSSETestNotesTimer = setTimeout(() => {
+      window._retestSSETestNotesTimer = null;
+      loadRetest().catch(() => {});
+    }, 500);
+  });
+
   retestSseBound = true;
 }
 bindRetestSSE();

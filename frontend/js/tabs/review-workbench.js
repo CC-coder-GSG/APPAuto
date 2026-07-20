@@ -117,9 +117,7 @@ export function renderReviewCards() {
       ? `<span class="badge" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe;">禅道子任务 #${req.zentao_task_id}${taskZh ? '·' + taskZh : ''}</span>${renderPreviewBtn('task', req.zentao_task_id)}${req.zentao_task_assigned_to ? `<span class="badge" style="background:#f1f5f9; color:#475569;">任务指派：${escapeHtml(req.zentao_task_assigned_to)}</span>` : ''}`
       : '<span class="badge" style="background:#f1f5f9; color:#94a3b8;">未关联禅道任务</span>';
     const notesTag = `<span class="badge" style="background:${req.test_notes ? '#dcfce7' : '#f1f5f9'}; color:${req.test_notes ? '#166534' : '#64748b'}; border:1px solid ${req.test_notes ? '#bbf7d0' : '#e2e8f0'};">测试要点：${req.test_notes ? '已填写' : '未填写'}</span>`;
-    const notesBtn = req.test_notes
-      ? `<button class="secondary" style="padding:2px 8px; font-size:12px;" onclick="reviewShowTestNotes(${req.id})">查看测试要点</button>`
-      : '';
+    const notesBtn = `<button class="secondary" style="padding:2px 8px; font-size:12px;" onclick="reviewEditTestNotes(${req.id})">${req.test_notes ? '查看/编辑测试要点' : '填写测试要点'}</button>`;
     const caseHtml = (req.test_cases || []).map((c) => renderReviewCaseItem(c, req.id)).join('')
       || '<div class="muted" style="font-size:13px;">该需求暂无关联用例。</div>';
 
@@ -147,33 +145,26 @@ export function renderReviewCards() {
   }
 }
 
-// 测试要点只读弹窗（审查台不编辑要点，编辑仍在需求工作台）
-window.reviewShowTestNotes = (reqId) => {
-  const req = (reviewData || []).find((r) => r.id === reqId);
-  if (!req) return;
-  const meta = [req.test_notes_updated_by_name, req.test_notes_updated_at ? String(req.test_notes_updated_at).replace('T', ' ').slice(0, 16) : '']
-    .filter(Boolean).join(' · ');
-  const modal = document.getElementById('caseReviewModal');
-  if (window.caseReviewCloseModal && modal) window.caseReviewCloseModal();
-  // 复用审查弹窗容器展示只读要点：优先富文本版，旧纯文本数据降级 pre-wrap
-  const notesInner = req.test_notes_html
-    ? `<div class="qa-rich-view">${req.test_notes_html}</div>`
-    : `<div style="font-size:13px; color:#475569; white-space:pre-wrap;">${escapeHtml(req.test_notes || '')}</div>`;
-  const body = `
-    ${notesInner}
-    ${meta ? `<div class="muted" style="font-size:12px; margin-top:8px;">${escapeHtml(meta)}</div>` : ''}`;
-  if (window.OmniQACaseReviewOpenModal) {
-    window.OmniQACaseReviewOpenModal(`📝 测试要点 · ${escapeHtml(req.zentao_req_id || '')}`, body);
-  } else {
-    alert(req.test_notes || '');
+// 审查工作台复用需求工作台的富文本编辑器；两边保存到同一需求字段。
+window.reviewEditTestNotes = (reqId) => {
+  const req = (reviewData || []).find((r) => Number(r.id) === Number(reqId));
+  if (!req) {
+    window.showMessage && window.showMessage('需求不存在', 'error');
+    return;
   }
+  const openEditor = window.OmniQAMineTab?.openReqTestNotesEditor;
+  if (typeof openEditor !== 'function') {
+    window.showMessage && window.showMessage('测试要点编辑器加载失败，请刷新页面后重试', 'error');
+    return;
+  }
+  openEditor(req, loadReviewWorkbench);
 };
 
 function bindReviewWorkbenchSSE() {
   if (reviewSseBound) return;
   if (!window.OmniQASSE?.subscribe) return;
   // 新需求/新用例同步进来时，若审查台在前台则静默刷新
-  ['workbench_requirement_created', 'workbench_testcase_created'].forEach((ev) => {
+  ['workbench_requirement_created', 'workbench_testcase_created', 'requirement_test_notes_updated'].forEach((ev) => {
     window.OmniQASSE.subscribe(ev, () => {
       if (!window.isWorkbenchSubtabActive?.('review')) return;
       if (window._reviewSSETimer) clearTimeout(window._reviewSSETimer);

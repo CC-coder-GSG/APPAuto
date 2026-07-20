@@ -20,6 +20,7 @@ const modalState = {
 
 const notesModalState = {
   reqId: null,
+  afterSave: null,
 };
 
 const bugResultModalState = {
@@ -357,6 +358,7 @@ export function closeReqTestNotesModal() {
   const modal = document.getElementById('mineReqNotesModal');
   if (modal) closeModal(modal);
   notesModalState.reqId = null;
+  notesModalState.afterSave = null;
 }
 
 // ── 测试要点富文本编辑 ──────────────────────────────────────
@@ -469,8 +471,7 @@ export function toggleReqNotesMaximize() {
   if (btn) btn.innerText = maxed ? '⤡ 还原' : '⤢ 放大';
 }
 
-export function openReqTestNotesModal(reqId) {
-  const req = getRequirementById(reqId);
+export function openReqTestNotesEditor(req, afterSave = null) {
   if (!req) {
     window.showMessage && window.showMessage('需求不存在', 'error');
     return;
@@ -481,7 +482,8 @@ export function openReqTestNotesModal(reqId) {
   const metaEl = document.getElementById('mineReqNotesMeta');
   if (!modal || !titleEl || !editor || !metaEl) return;
 
-  notesModalState.reqId = reqId;
+  notesModalState.reqId = Number(req.id);
+  notesModalState.afterSave = typeof afterSave === 'function' ? afterSave : null;
   notesSavedRange = null;
   titleEl.innerText = `需求测试要点 - ${req.zentao_req_id} ${req.title}`;
   editor.innerHTML = req.test_notes_html || (req.test_notes ? plainNotesToHtml(req.test_notes) : '');
@@ -496,6 +498,10 @@ export function openReqTestNotesModal(reqId) {
 
   bindNotesEditorTools();
   openModal(modal);
+}
+
+export function openReqTestNotesModal(reqId) {
+  openReqTestNotesEditor(getRequirementById(reqId));
 }
 
 export async function saveReqTestNotes() {
@@ -517,8 +523,10 @@ export async function saveReqTestNotes() {
       body: { test_notes: text || null, test_notes_html: blank ? null : html },
     });
     window.showMessage && window.showMessage('测试要点保存成功', 'success');
+    const afterSave = notesModalState.afterSave;
     closeReqTestNotesModal();
-    await loadMyWorkbench();
+    if (afterSave) await afterSave();
+    else await loadMyWorkbench();
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '保存测试要点失败', 'error');
   }
@@ -1155,6 +1163,17 @@ function bindMineSSE() {
     if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'teal');
   });
 
+  // 测试要点可由审查工作台中的任意用户协作修改；需求工作台在前台时
+  // 自动刷新，避免继续展示其他用户修改前的内容。
+  window.OmniQASSE.subscribe('requirement_test_notes_updated', () => {
+    if (!window.isWorkbenchSubtabActive?.('demand')) return;
+    if (window._mineSSETestNotesTimer) clearTimeout(window._mineSSETestNotesTimer);
+    window._mineSSETestNotesTimer = setTimeout(() => {
+      window._mineSSETestNotesTimer = null;
+      loadMyWorkbench().catch(() => {});
+    }, 500);
+  });
+
   // 新 bug（执行阶段挂载到需求）：在需求卡片上显示琥珀色流光，不进主角标
   window.OmniQASSE.subscribe('bug_created', ({ payload }) => {
     const reqId = Number(payload?.requirement_id || 0);
@@ -1449,6 +1468,7 @@ window.OmniQAMineTab = {
   confirmMineTestExecutionModal,
   closeMineTestExecutionModal,
   openReqTestNotesModal,
+  openReqTestNotesEditor,
   closeReqTestNotesModal,
   saveReqTestNotes,
   toggleReqNotesMaximize,
@@ -1457,5 +1477,4 @@ window.OmniQAMineTab = {
   confirmBugResultModal,
   toggleBugResultCloseComment,
 };
-
 

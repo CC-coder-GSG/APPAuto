@@ -1495,7 +1495,7 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
 .case-review-history-link { font-size: 12px !important; color: var(--w-ink-faint, #94a3b8) !important; text-decoration: none; }
 .case-review-history-link:hover { color: var(--w-accent, #6366f1) !important; }
 
-/* ── 需求测试要点：富文本编辑弹窗（mine）+ 只读展示（retest/review） ── */
+/* ── 需求测试要点：富文本编辑弹窗（需求/审查）+ 只读展示（复测） ── */
 .qa-notes-dialog {
   width: min(760px, 94vw); max-height: 92vh; display: flex; flex-direction: column;
   background: var(--w-surface, #fff); border-radius: 12px;

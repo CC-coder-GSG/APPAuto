@@ -302,7 +302,7 @@ def test_update_test_notes_admin_allowed(db_session):
     assert req.test_notes_updated_by_id == admin.id
 
 
-def test_update_test_notes_forbidden_for_other_user(db_session):
+def test_update_test_notes_other_user_allowed_for_review_collaboration(db_session, monkeypatch):
     major = _create_major(db_session, "V4700")
     owner = _create_user(db_session, "owner_notes_3")
     other = _create_user(db_session, "other_notes_3")
@@ -310,12 +310,36 @@ def test_update_test_notes_forbidden_for_other_user(db_session):
     req.owner_id = owner.id
     db_session.commit()
 
+    published = []
+    monkeypatch.setattr(
+        "app.services.requirement_service.sse_publish",
+        lambda event, payload, channels=None: published.append((event, payload, channels)),
+    )
+
     service = RequirementService(db_session)
-    try:
-        service.update_test_notes(req.id, "无权限用户尝试修改", other)
-        assert False, "expected HTTPException"
-    except Exception as exc:
-        assert getattr(exc, "status_code", None) == 403
+    result = service.update_test_notes(
+        req.id,
+        "协作补充边界场景",
+        other,
+        test_notes_html="<b>协作补充</b>边界场景",
+    )
+    db_session.refresh(req)
+
+    assert result["message"] == "测试要点保存成功"
+    assert req.test_notes == "协作补充边界场景"
+    assert req.test_notes_html == "<b>协作补充</b>边界场景"
+    assert req.test_notes_updated_by_id == other.id
+    assert published == [
+        (
+            "requirement_test_notes_updated",
+            {
+                "requirement_id": req.id,
+                "major_version_id": major.id,
+                "updated_by_id": other.id,
+            },
+            ["global"],
+        )
+    ]
 
 
 def test_list_requirements_contains_test_notes_fields(db_session):
