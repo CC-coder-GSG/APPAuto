@@ -502,10 +502,7 @@ function restoreNotesSelection() {
   }
 }
 
-function insertNotesChecklistItem() {
-  const ed = document.getElementById('mineReqNotesEditor');
-  if (!ed) return;
-  restoreNotesSelection();
+function createNotesChecklistItem(label = '') {
   const item = document.createElement('div');
   item.className = 'qa-notes-check-item';
   const checkbox = document.createElement('input');
@@ -515,8 +512,28 @@ function insertNotesChecklistItem() {
   checkbox.setAttribute('aria-label', '任务状态');
   const text = document.createElement('span');
   text.className = 'qa-notes-check-text';
-  text.textContent = '待办事项';
+  if (label) text.textContent = label;
+  else text.appendChild(document.createElement('br'));
   item.append(checkbox, text);
+  return { item, text };
+}
+
+function focusNotesChecklistText(text, selectAll = false) {
+  const range = document.createRange();
+  range.selectNodeContents(text);
+  if (!selectAll) range.collapse(true);
+  const selection = document.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  notesSavedRange = range.cloneRange();
+  text.scrollIntoView({ block: 'nearest' });
+}
+
+function insertNotesChecklistItem() {
+  const ed = document.getElementById('mineReqNotesEditor');
+  if (!ed) return;
+  restoreNotesSelection();
+  const { item, text } = createNotesChecklistItem('待办事项');
 
   // 勾选项始终作为编辑器的一级独立行插入，避免嵌套进上一个 flex 文本节点。
   const range = notesSavedRange && ed.contains(notesSavedRange.startContainer) ? notesSavedRange : null;
@@ -534,12 +551,43 @@ function insertNotesChecklistItem() {
   }
 
   // 插入后选中占位文字，用户可直接输入任务内容。
-  const textRange = document.createRange();
-  textRange.selectNodeContents(text);
+  focusNotesChecklistText(text, true);
+}
+
+function handleNotesChecklistEnter(event, editor) {
+  // 空格保留为文本输入；Enter 新建下一条，Shift+Enter 才在当前条目内换行。
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
   const selection = document.getSelection();
-  selection.removeAllRanges();
-  selection.addRange(textRange);
-  notesSavedRange = textRange.cloneRange();
+  if (!selection?.rangeCount) return;
+  const anchor = selection.anchorNode?.nodeType === Node.ELEMENT_NODE
+    ? selection.anchorNode
+    : selection.anchorNode?.parentElement;
+  const currentItem = anchor?.closest?.('.qa-notes-check-item');
+  if (!currentItem || currentItem.parentElement !== editor) return;
+
+  event.preventDefault();
+  const currentText = currentItem.querySelector(':scope > .qa-notes-check-text');
+  const hasText = (currentText?.innerText || currentText?.textContent || '')
+    .replace(/\u200b/g, '')
+    .trim();
+
+  // 在空条目上再按一次 Enter，退出清单并回到普通文本行。
+  if (!hasText) {
+    const line = document.createElement('div');
+    line.appendChild(document.createElement('br'));
+    currentItem.replaceWith(line);
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    notesSavedRange = range.cloneRange();
+    return;
+  }
+
+  const { item, text } = createNotesChecklistItem();
+  currentItem.after(item);
+  focusNotesChecklistText(text);
 }
 
 async function uploadAndInsertNotesImage(file) {
@@ -618,6 +666,9 @@ function bindNotesEditorTools() {
 
   const ed = document.getElementById('mineReqNotesEditor');
   if (ed) {
+    ed.addEventListener('keydown', (event) => {
+      handleNotesChecklistEnter(event, ed);
+    });
     ed.addEventListener('change', (event) => {
       syncNotesCheckboxState(event.target);
     });
