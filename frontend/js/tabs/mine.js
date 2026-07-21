@@ -355,6 +355,7 @@ export function closeMineTestExecutionModal() {
 }
 
 export function closeReqTestNotesModal() {
+  clearNotesImageSelection();
   const modal = document.getElementById('mineReqNotesModal');
   if (modal) closeModal(modal);
   notesModalState.reqId = null;
@@ -383,6 +384,87 @@ function syncNotesCheckboxState(checkbox) {
 
 function normalizeNotesCheckboxes(editor) {
   editor?.querySelectorAll('input.qa-notes-check[type="checkbox"]').forEach(syncNotesCheckboxState);
+  // 兼容首版勾选项在每行后写入的空 div：仅清理两个勾选项之间的旧占位行。
+  editor?.querySelectorAll('.qa-notes-check-item').forEach((item) => {
+    const spacer = item.nextElementSibling;
+    if (
+      spacer?.matches('div')
+      && !spacer.textContent.trim()
+      && !spacer.querySelector('img, input')
+      && spacer.nextElementSibling?.classList.contains('qa-notes-check-item')
+    ) {
+      spacer.remove();
+    }
+  });
+}
+
+let notesSelectedImage = null;
+let notesImageResizer = null;
+
+function normalizeNotesImages(editor) {
+  editor?.querySelectorAll('img').forEach((img) => {
+    img.classList.add('qa-notes-resizable-image');
+    img.style.maxWidth = '100%';
+    img.style.height = 'auto';
+  });
+}
+
+function updateNotesImageResizer() {
+  if (!notesSelectedImage?.isConnected || !notesImageResizer) return;
+  const rect = notesSelectedImage.getBoundingClientRect();
+  notesImageResizer.style.left = `${rect.left}px`;
+  notesImageResizer.style.top = `${rect.top}px`;
+  notesImageResizer.style.width = `${rect.width}px`;
+  notesImageResizer.style.height = `${rect.height}px`;
+}
+
+function clearNotesImageSelection() {
+  notesSelectedImage = null;
+  notesImageResizer?.classList.add('hidden');
+}
+
+function ensureNotesImageResizer() {
+  if (notesImageResizer) return notesImageResizer;
+  const resizer = document.createElement('div');
+  resizer.className = 'qa-notes-image-resizer hidden';
+  resizer.innerHTML = '<span class="qa-notes-image-resize-handle" title="拖动缩放图片"></span>';
+  document.body.appendChild(resizer);
+
+  resizer.querySelector('.qa-notes-image-resize-handle').addEventListener('pointerdown', (event) => {
+    if (!notesSelectedImage) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const editor = document.getElementById('mineReqNotesEditor');
+    const image = notesSelectedImage;
+    const startX = event.clientX;
+    const startWidth = image.getBoundingClientRect().width;
+    const maxWidth = Math.max(80, (editor?.clientWidth || startWidth) - 28);
+
+    const onMove = (moveEvent) => {
+      const width = Math.min(maxWidth, Math.max(80, startWidth + moveEvent.clientX - startX));
+      image.style.width = `${Math.round(width)}px`;
+      image.style.height = 'auto';
+      updateNotesImageResizer();
+    };
+    const onEnd = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onEnd);
+      document.removeEventListener('pointercancel', onEnd);
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onEnd);
+    document.addEventListener('pointercancel', onEnd);
+  });
+
+  notesImageResizer = resizer;
+  return resizer;
+}
+
+function selectNotesImage(image) {
+  if (!image) return;
+  notesSelectedImage = image;
+  ensureNotesImageResizer().classList.remove('hidden');
+  updateNotesImageResizer();
 }
 
 // innerText 不会包含 input 的勾选状态。导出纯文本时显式替换为 [ ] / [x]，
@@ -424,23 +506,40 @@ function insertNotesChecklistItem() {
   const ed = document.getElementById('mineReqNotesEditor');
   if (!ed) return;
   restoreNotesSelection();
-  const marker = `qa-notes-check-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  document.execCommand(
-    'insertHTML',
-    false,
-    `<div class="qa-notes-check-item"><input type="checkbox" class="qa-notes-check" contenteditable="false" aria-label="任务状态"><span class="qa-notes-check-text" data-new-check="${marker}">待办事项</span></div><div><br></div>`,
-  );
+  const item = document.createElement('div');
+  item.className = 'qa-notes-check-item';
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.className = 'qa-notes-check';
+  checkbox.setAttribute('contenteditable', 'false');
+  checkbox.setAttribute('aria-label', '任务状态');
+  const text = document.createElement('span');
+  text.className = 'qa-notes-check-text';
+  text.textContent = '待办事项';
+  item.append(checkbox, text);
+
+  // 勾选项始终作为编辑器的一级独立行插入，避免嵌套进上一个 flex 文本节点。
+  const range = notesSavedRange && ed.contains(notesSavedRange.startContainer) ? notesSavedRange : null;
+  if (range?.startContainer === ed) {
+    ed.insertBefore(item, ed.childNodes[range.startOffset] || null);
+  } else if (range) {
+    let topLevel = range.startContainer.nodeType === Node.ELEMENT_NODE
+      ? range.startContainer
+      : range.startContainer.parentNode;
+    while (topLevel?.parentNode && topLevel.parentNode !== ed) topLevel = topLevel.parentNode;
+    if (topLevel?.parentNode === ed) topLevel.after(item);
+    else ed.appendChild(item);
+  } else {
+    ed.appendChild(item);
+  }
 
   // 插入后选中占位文字，用户可直接输入任务内容。
-  const text = ed.querySelector(`[data-new-check="${marker}"]`);
-  if (!text) return;
-  text.removeAttribute('data-new-check');
-  const range = document.createRange();
-  range.selectNodeContents(text);
+  const textRange = document.createRange();
+  textRange.selectNodeContents(text);
   const selection = document.getSelection();
   selection.removeAllRanges();
-  selection.addRange(range);
-  notesSavedRange = range.cloneRange();
+  selection.addRange(textRange);
+  notesSavedRange = textRange.cloneRange();
 }
 
 async function uploadAndInsertNotesImage(file) {
@@ -451,7 +550,15 @@ async function uploadAndInsertNotesImage(file) {
     const data = await resp.json();
     if (data && data.url) {
       restoreNotesSelection();
-      document.execCommand('insertHTML', false, `<img src="${data.url}" style="max-width:100%;">`);
+      const marker = `qa-notes-image-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      document.execCommand('insertHTML', false, `<img src="${data.url}" data-new-notes-image="${marker}" style="max-width:100%;height:auto;">`);
+      const editor = document.getElementById('mineReqNotesEditor');
+      const image = editor?.querySelector(`[data-new-notes-image="${marker}"]`);
+      if (image) {
+        image.removeAttribute('data-new-notes-image');
+        normalizeNotesImages(editor);
+        selectNotesImage(image);
+      }
     }
   } catch (err) { window.showMessage && window.showMessage(err.message || '图片上传失败', 'error'); }
 }
@@ -522,6 +629,22 @@ function bindNotesEditorTools() {
       event.preventDefault();
       for (const it of imgs) { const f = it.getAsFile(); if (f) await uploadAndInsertNotesImage(f); }
     });
+    ed.addEventListener('click', (event) => {
+      const image = event.target.closest?.('img');
+      if (image && ed.contains(image)) selectNotesImage(image);
+      else clearNotesImageSelection();
+    });
+    ed.addEventListener('dblclick', (event) => {
+      const image = event.target.closest?.('img');
+      if (!image || !ed.contains(image)) return;
+      event.preventDefault();
+      image.style.removeProperty('width');
+      image.removeAttribute('width');
+      image.style.height = 'auto';
+      selectNotesImage(image);
+    });
+    ed.addEventListener('scroll', updateNotesImageResizer, { passive: true });
+    window.addEventListener('resize', updateNotesImageResizer);
   }
 }
 
@@ -531,6 +654,7 @@ export function toggleReqNotesMaximize() {
   if (!dialog) return;
   const maxed = dialog.classList.toggle('qa-notes-dialog--max');
   if (btn) btn.innerText = maxed ? '⤡ 还原' : '⤢ 放大';
+  requestAnimationFrame(updateNotesImageResizer);
 }
 
 export function openReqTestNotesEditor(req, afterSave = null) {
@@ -550,6 +674,8 @@ export function openReqTestNotesEditor(req, afterSave = null) {
   titleEl.innerText = `需求测试要点 - ${req.zentao_req_id} ${req.title}`;
   editor.innerHTML = req.test_notes_html || (req.test_notes ? plainNotesToHtml(req.test_notes) : '');
   normalizeNotesCheckboxes(editor);
+  normalizeNotesImages(editor);
+  clearNotesImageSelection();
 
   if (req.test_notes_updated_at || req.test_notes_updated_by_name) {
     const t = req.test_notes_updated_at ? new Date(req.test_notes_updated_at).toLocaleString() : '未知时间';
@@ -575,6 +701,8 @@ export async function saveReqTestNotes() {
   }
   const editor = document.getElementById('mineReqNotesEditor');
   normalizeNotesCheckboxes(editor);
+  normalizeNotesImages(editor);
+  clearNotesImageSelection();
   const html = (editor?.innerHTML || '').trim();
   const blank = isBlankNotesHtml(html);
   // 纯文本降级版：图片占位标注，避免"仅贴图"的要点在纯文本侧显示为空/未填写

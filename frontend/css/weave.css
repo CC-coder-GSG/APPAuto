@@ -1534,17 +1534,33 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
 .qa-notes-dialog--max .qa-notes-editor { min-height: 0; }
 .qa-notes-editor:focus { border-color: var(--w-accent, #6366f1); box-shadow: 0 0 0 3px var(--primary-ring, rgba(99, 102, 241, .18)); }
 .qa-notes-editor:empty::before { content: attr(data-placeholder); color: var(--w-ink-faint, #94a3b8); }
-.qa-notes-editor img { max-width: 100%; border-radius: 6px; }
+.qa-notes-editor { position: relative; }
+.qa-notes-editor img {
+  max-width: 100%; height: auto; border-radius: 6px; display: block;
+  cursor: nwse-resize; user-select: none;
+}
+.qa-notes-image-resizer {
+  position: fixed; z-index: 10020; box-sizing: border-box; pointer-events: none;
+  border: 2px solid var(--w-accent, #6366f1); border-radius: 6px;
+}
+.qa-notes-image-resizer.hidden { display: none !important; }
+.qa-notes-image-resize-handle {
+  position: absolute; right: -7px; bottom: -7px; width: 12px; height: 12px;
+  box-sizing: border-box; border: 2px solid #fff; border-radius: 3px;
+  background: var(--w-accent, #6366f1); box-shadow: 0 1px 4px rgba(15, 23, 42, .28);
+  cursor: nwse-resize; pointer-events: auto; touch-action: none;
+}
 .qa-notes-check-item {
-  display: flex; align-items: flex-start; gap: 7px; min-height: 24px;
-  padding: 1px 3px; border-radius: 6px;
+  display: flex; align-items: center; gap: 7px; min-height: 24px;
+  padding: 0 3px; margin: 0; border-radius: 6px; line-height: 1.55;
 }
 .qa-notes-check-item:hover { background: var(--w-accent-soft, #eef0f8); }
 .qa-notes-check {
-  width: 16px !important; height: 16px !important; margin: 4px 0 0 !important;
-  top: 0 !important; flex: 0 0 auto; accent-color: var(--w-accent, #6366f1);
+  position: static !important; width: 16px !important; height: 16px !important;
+  margin: 0 !important; top: auto !important; flex: 0 0 auto;
+  accent-color: var(--w-accent, #6366f1);
 }
-.qa-notes-check-text { min-width: 1em; flex: 1 1 auto; }
+.qa-notes-check-text { min-width: 1em; flex: 1 1 auto; line-height: 1.55; }
 .qa-notes-check-item.is-checked .qa-notes-check-text {
   color: var(--w-ink-faint, #94a3b8); text-decoration: line-through;
 }
