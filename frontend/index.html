@@ -4,12 +4,12 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20260716-2">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20260721-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20260720-2"></script>
+  <script type="module" src="/static/js/app.js?v=20260721-1"></script>
   <script src="/static/js/weave-motion.js?v=20260703-1" defer></script>
   <style>
     /* Header layout */
@@ -733,12 +733,13 @@
           </select>
           <button type="button" data-cmd="bold" title="加粗"><b>B</b></button>
           <button type="button" data-cmd="underline" title="下划线"><u>U</u></button>
+          <button type="button" id="mineReqNotesChecklistBtn" title="插入可勾选的任务项">☑ 勾选项</button>
           <label class="qa-notes-colorwrap" title="文字颜色"><span>A</span><input type="color" id="mineReqNotesColor" value="#dc2626"></label>
           <button type="button" id="mineReqNotesImageBtn" title="插入图片（也可直接 Ctrl+V 粘贴截图）">🖼 图片</button>
           <button type="button" data-cmd="removeFormat" title="清除所选文字的格式">⌫ 清除格式</button>
           <input type="file" id="mineReqNotesImageInput" accept="image/*" style="display:none;">
         </div>
-        <div id="mineReqNotesEditor" class="qa-notes-editor" contenteditable="true" data-placeholder="建议记录：核心测试目标 / 重点场景 / 边界条件 / 风险点 / 依赖条件 / 外场设备环境注意事项。支持字号、加粗、下划线、颜色，可直接粘贴图片。"></div>
+        <div id="mineReqNotesEditor" class="qa-notes-editor" contenteditable="true" data-placeholder="建议记录：核心测试目标 / 重点场景 / 边界条件 / 风险点 / 依赖条件 / 外场设备环境注意事项。支持勾选项、字号、加粗、下划线、颜色，可直接粘贴图片。"></div>
         <div class="row" style="justify-content: flex-end; gap: 8px; margin-top:12px;">
           <button class="secondary" onclick="closeReqTestNotesModal()">取消</button>
           <button onclick="saveReqTestNotes()">保存</button>
@@ -3619,6 +3620,4 @@ init().catch(err=>showMessage(err.message,'error'));
 </script>
 </body>
 </html>
-
-
 

@@ -302,6 +302,34 @@ def test_update_test_notes_admin_allowed(db_session):
     assert req.test_notes_updated_by_id == admin.id
 
 
+def test_update_test_notes_preserves_rich_text_checkbox_state(db_session):
+    major = _create_major(db_session, "V4650")
+    owner = _create_user(db_session, "owner_notes_checkbox")
+    req = _create_requirement(db_session, major.id, "r#4651")
+    req.owner_id = owner.id
+    db_session.commit()
+
+    checkbox_html = (
+        '<div class="qa-notes-check-item is-checked">'
+        '<input type="checkbox" class="qa-notes-check" checked contenteditable="false">'
+        '<span class="qa-notes-check-text">登录流程验证</span></div>'
+        '<div class="qa-notes-check-item">'
+        '<input type="checkbox" class="qa-notes-check" contenteditable="false">'
+        '<span class="qa-notes-check-text">异常输入验证</span></div>'
+    )
+    result = RequirementService(db_session).update_test_notes(
+        req.id,
+        "[x] 登录流程验证\n[ ] 异常输入验证",
+        owner,
+        test_notes_html=checkbox_html,
+    )
+    db_session.refresh(req)
+
+    assert req.test_notes == "[x] 登录流程验证\n[ ] 异常输入验证"
+    assert req.test_notes_html == checkbox_html
+    assert result["test_notes_html"] == checkbox_html
+
+
 def test_update_test_notes_other_user_allowed_for_review_collaboration(db_session, monkeypatch):
     major = _create_major(db_session, "V4700")
     owner = _create_user(db_session, "owner_notes_3")

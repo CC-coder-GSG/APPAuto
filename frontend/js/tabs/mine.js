@@ -375,6 +375,37 @@ function isBlankNotesHtml(html) {
   return !t.trim();
 }
 
+function syncNotesCheckboxState(checkbox) {
+  if (!checkbox?.matches?.('input.qa-notes-check[type="checkbox"]')) return;
+  checkbox.toggleAttribute('checked', checkbox.checked);
+  checkbox.closest('.qa-notes-check-item')?.classList.toggle('is-checked', checkbox.checked);
+}
+
+function normalizeNotesCheckboxes(editor) {
+  editor?.querySelectorAll('input.qa-notes-check[type="checkbox"]').forEach(syncNotesCheckboxState);
+}
+
+// innerText 不会包含 input 的勾选状态。导出纯文本时显式替换为 [ ] / [x]，
+// 让移动端、报表等纯文本消费方也能看出每个任务项的完成状态。
+function notesEditorToPlainText(editor) {
+  if (!editor) return '';
+  const clone = editor.cloneNode(true);
+  clone.removeAttribute('id');
+  clone.removeAttribute('contenteditable');
+  clone.querySelectorAll('input.qa-notes-check[type="checkbox"]').forEach((checkbox) => {
+    const checked = checkbox.checked || checkbox.hasAttribute('checked');
+    checkbox.replaceWith(document.createTextNode(checked ? '[x] ' : '[ ] '));
+  });
+  clone.setAttribute('aria-hidden', 'true');
+  clone.style.cssText = 'position:fixed;left:-10000px;top:0;width:760px;opacity:0;pointer-events:none;';
+  document.body.appendChild(clone);
+  try {
+    return (clone.innerText || '').replace(/ /g, ' ').trim();
+  } finally {
+    clone.remove();
+  }
+}
+
 // 工具条操作（字号下拉/颜色选择器）会让编辑器失焦丢选区，这里持续记录
 // 编辑器内的最后选区，应用格式前先恢复。
 let notesSavedRange = null;
@@ -387,6 +418,29 @@ function restoreNotesSelection() {
     sel.removeAllRanges();
     sel.addRange(notesSavedRange);
   }
+}
+
+function insertNotesChecklistItem() {
+  const ed = document.getElementById('mineReqNotesEditor');
+  if (!ed) return;
+  restoreNotesSelection();
+  const marker = `qa-notes-check-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  document.execCommand(
+    'insertHTML',
+    false,
+    `<div class="qa-notes-check-item"><input type="checkbox" class="qa-notes-check" contenteditable="false" aria-label="任务状态"><span class="qa-notes-check-text" data-new-check="${marker}">待办事项</span></div><div><br></div>`,
+  );
+
+  // 插入后选中占位文字，用户可直接输入任务内容。
+  const text = ed.querySelector(`[data-new-check="${marker}"]`);
+  if (!text) return;
+  text.removeAttribute('data-new-check');
+  const range = document.createRange();
+  range.selectNodeContents(text);
+  const selection = document.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  notesSavedRange = range.cloneRange();
 }
 
 async function uploadAndInsertNotesImage(file) {
@@ -439,6 +493,11 @@ function bindNotesEditorTools() {
     });
   }
 
+  const checklistBtn = document.getElementById('mineReqNotesChecklistBtn');
+  if (checklistBtn) {
+    checklistBtn.addEventListener('click', insertNotesChecklistItem);
+  }
+
   const imgBtn = document.getElementById('mineReqNotesImageBtn');
   const imgInput = document.getElementById('mineReqNotesImageInput');
   if (imgBtn && imgInput) {
@@ -452,6 +511,9 @@ function bindNotesEditorTools() {
 
   const ed = document.getElementById('mineReqNotesEditor');
   if (ed) {
+    ed.addEventListener('change', (event) => {
+      syncNotesCheckboxState(event.target);
+    });
     ed.addEventListener('paste', async (event) => {
       const cd = event.clipboardData;
       if (!cd) return;
@@ -487,6 +549,7 @@ export function openReqTestNotesEditor(req, afterSave = null) {
   notesSavedRange = null;
   titleEl.innerText = `需求测试要点 - ${req.zentao_req_id} ${req.title}`;
   editor.innerHTML = req.test_notes_html || (req.test_notes ? plainNotesToHtml(req.test_notes) : '');
+  normalizeNotesCheckboxes(editor);
 
   if (req.test_notes_updated_at || req.test_notes_updated_by_name) {
     const t = req.test_notes_updated_at ? new Date(req.test_notes_updated_at).toLocaleString() : '未知时间';
@@ -511,10 +574,11 @@ export async function saveReqTestNotes() {
     return;
   }
   const editor = document.getElementById('mineReqNotesEditor');
+  normalizeNotesCheckboxes(editor);
   const html = (editor?.innerHTML || '').trim();
   const blank = isBlankNotesHtml(html);
   // 纯文本降级版：图片占位标注，避免"仅贴图"的要点在纯文本侧显示为空/未填写
-  let text = blank ? '' : (editor?.innerText || '').replace(/ /g, ' ').trim();
+  let text = blank ? '' : notesEditorToPlainText(editor);
   if (!blank && !text) text = '[图片要点，请在网页端查看]';
   try {
     await api(`/requirements/${reqId}/test-notes`, {
@@ -1477,4 +1541,3 @@ window.OmniQAMineTab = {
   confirmBugResultModal,
   toggleBugResultCloseComment,
 };
-

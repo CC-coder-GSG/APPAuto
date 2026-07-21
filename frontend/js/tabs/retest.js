@@ -364,6 +364,10 @@ export async function loadRetest() {
         </div>
       </details>`;
   }).join('');
+  // 复测台仅展示原测试人的要点；禁用勾选项，避免产生“已修改但未保存”的错觉。
+  container.querySelectorAll('.qa-rich-view input.qa-notes-check[type="checkbox"]').forEach((checkbox) => {
+    checkbox.disabled = true;
+  });
   window.scheduleWorkbenchViewportResize?.();
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
     window.OmniQASSE.releaseAttention?.();

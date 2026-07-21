@@ -1535,9 +1535,24 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
 .qa-notes-editor:focus { border-color: var(--w-accent, #6366f1); box-shadow: 0 0 0 3px var(--primary-ring, rgba(99, 102, 241, .18)); }
 .qa-notes-editor:empty::before { content: attr(data-placeholder); color: var(--w-ink-faint, #94a3b8); }
 .qa-notes-editor img { max-width: 100%; border-radius: 6px; }
+.qa-notes-check-item {
+  display: flex; align-items: flex-start; gap: 7px; min-height: 24px;
+  padding: 1px 3px; border-radius: 6px;
+}
+.qa-notes-check-item:hover { background: var(--w-accent-soft, #eef0f8); }
+.qa-notes-check {
+  width: 16px !important; height: 16px !important; margin: 4px 0 0 !important;
+  top: 0 !important; flex: 0 0 auto; accent-color: var(--w-accent, #6366f1);
+}
+.qa-notes-check-text { min-width: 1em; flex: 1 1 auto; }
+.qa-notes-check-item.is-checked .qa-notes-check-text {
+  color: var(--w-ink-faint, #94a3b8); text-decoration: line-through;
+}
 /* 只读富文本块：复测工作台原测试人要点 / 审查台查看 */
 .qa-rich-view { font-size: 13px; color: #475569; line-height: 1.7; word-break: break-word; }
 .qa-rich-view img { max-width: 100%; max-height: 320px; border-radius: 6px; display: block; margin: 4px 0; }
+.qa-rich-view .qa-notes-check-item:hover { background: transparent; }
+.qa-rich-view .qa-notes-check:disabled { opacity: 1; cursor: default; }
 
 /* ── 需求 story 关联禅道任务标签（需求/复测工作台标题旁） ── */
 .qa-task-chips {
