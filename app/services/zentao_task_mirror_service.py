@@ -703,7 +703,12 @@ class ZentaoTaskMirrorService:
         used_client = None
         last_resp = None
         last_err = None
+        confirmed_task = None
+        last_actual_status = ""
+        last_actual_assigned = ""
         for label, cli in candidates:
+            current_actual_status = ""
+            current_actual_assigned = ""
             try:
                 last_resp = _dispatch(label, cli)
             except HTTPException:
@@ -712,18 +717,31 @@ class ZentaoTaskMirrorService:
                 last_err = exc
                 logger.warning("operate task %s action=%s via %s failed: %s", task_id, action, label, exc)
                 continue
-            self._refresh_one_task(cli, row)
+            # 回读在确认前必须是只读的。旧实现直接刷新 row，导致操作未生效时也会
+            # 把回读到的其他状态提交进本地镜像，前端随后刷新就像本地操作成功了一样。
+            fresh = self._fetch_one_task(cli, row.task_id)
+            if fresh:
+                current_actual_status = str(fresh.get("status") or "").strip().lower()
+                current_actual_assigned, _ = _account_of(fresh.get("assignedTo"))
+                last_actual_status = current_actual_status
+                last_actual_assigned = current_actual_assigned
             response_confirmed = action == "finish" and _response_confirms_status(last_resp, _expected)
-            if response_confirmed:
-                row.status = _expected
-            logger.info("operate task %s action=%s via %s resp=%r status=%s", task_id, action, label, last_resp, row.status)
+            logger.info(
+                "operate task %s action=%s via %s resp=%r status=%s",
+                task_id,
+                action,
+                label,
+                last_resp,
+                current_actual_status or "unknown",
+            )
             if action == "assign":
                 # 指派按回读的指派人校验（状态不变化）
-                took_effect = (row.assigned_to or "").strip().lower() == assigned_to.strip().lower()
+                took_effect = (current_actual_assigned or "").strip().lower() == assigned_to.strip().lower()
             else:
-                took_effect = response_confirmed or not _expected or (row.status or "").strip().lower() == _expected
+                took_effect = response_confirmed or not _expected or current_actual_status == _expected
             if took_effect:
                 used_client = cli
+                confirmed_task = fresh
                 break  # 生效（或无需校验）
             # 200 但未生效 → 试下一个候选账号
             last_err = None
@@ -732,14 +750,21 @@ class ZentaoTaskMirrorService:
                 errors.append(str(last_err))
             elif action == "assign":
                 errors.append(
-                    f"禅道未生效：任务当前指派人为「{row.assigned_to or '空'}」（期望「{assigned_to}」）。"
+                    f"禅道未生效：任务当前指派人为「{last_actual_assigned or '空'}」（期望「{assigned_to}」）。"
                     f"禅道返回：{str(last_resp)[:200]}"
                 )
             else:
                 errors.append(
-                    f"禅道未生效：任务当前状态为「{row.status or '未知'}」（期望「{_expected}」）。"
+                    f"禅道未生效：任务当前状态为「{last_actual_status or '未知'}」（期望「{_expected}」）。"
                     f"禅道返回：{str(last_resp)[:200]}"
                 )
+
+        # 只有禅道已确认达到目标状态，才把远端快照写入本地镜像。
+        if used_client is not None:
+            if confirmed_task:
+                self._apply_task_data(row, confirmed_task)
+            if action == "finish" and _response_confirms_status(last_resp, _expected):
+                row.status = _expected
 
         # 工时结算簿记（仅操作生效时）：
         # start（继续）保留累计、重置本段起点；start（全新）连累计一起清零；
@@ -912,14 +937,17 @@ class ZentaoTaskMirrorService:
             "users": [{"account": acc, "realname": name} for acc, name in users.items()],
         }
 
-    def _refresh_one_task(self, client, row: ZentaoTaskMirror) -> Optional[dict]:
+    def _fetch_one_task(self, client, task_id: int) -> Optional[dict]:
         try:
-            t = client.get_task(row.task_id) or {}
+            t = client.get_task(task_id) or {}
         except Exception as exc:  # noqa: BLE001
-            logger.warning("refresh one task %s failed: %s", row.task_id, exc)
+            logger.warning("fetch one task %s failed: %s", task_id, exc)
             return None
         if not isinstance(t, dict) or not t:
             return None
+        return t
+
+    def _apply_task_data(self, row: ZentaoTaskMirror, t: dict) -> None:
         account, realname = _account_of(t.get("assignedTo"))
         by_account, by_name = self._build_user_maps()
         if t.get("status") is not None:
@@ -949,6 +977,12 @@ class ZentaoTaskMirrorService:
         if t.get("deadline") is not None:
             row.deadline = _parse_date(t.get("deadline"))
         row.synced_at = local_now()
+
+    def _refresh_one_task(self, client, row: ZentaoTaskMirror) -> Optional[dict]:
+        t = self._fetch_one_task(client, row.task_id)
+        if not t:
+            return None
+        self._apply_task_data(row, t)
         return t
 
     @staticmethod

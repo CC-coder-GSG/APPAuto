@@ -909,6 +909,52 @@ def test_operate_task_publishes_task_board_refresh_event(db_session, monkeypatch
     assert channels == ["global"]
 
 
+@pytest.mark.parametrize(
+    ("action", "local_status", "remote_status"),
+    [("start", "wait", "pause"), ("pause", "doing", "wait")],
+)
+def test_failed_start_or_pause_does_not_change_local_state(
+    db_session, monkeypatch, action, local_status, remote_status
+):
+    """禅道未切到目标状态时，回读只用于校验，不能反向改写本地镜像。"""
+    from datetime import datetime
+
+    alice = _user(db_session, f"alice_failed_{action}", account="alice")
+    _major(db_session, f"V-TW-FAILED-{action}")
+    task_id = 1190 if action == "start" else 1191
+    row = _mirror(db_session, task_id, alice.id, account="alice", status=local_status)
+    before_started = datetime(2026, 7, 1, 9, 0)
+    row.local_started_at = before_started
+    row.consumed_accum = 5.0
+    db_session.commit()
+
+    class IneffectiveClient(FakeClient):
+        def start_task(self, task_id, **kw):
+            self.calls.append(("start", task_id, kw))
+            return {"message": "success"}
+
+        def pause_task(self, task_id, **kw):
+            self.calls.append(("pause", task_id, kw))
+            return {"message": "success"}
+
+    client = IneffectiveClient()
+    client.set_task(task_id, {"status": remote_status, "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_user_zentao_client", lambda uid, db: client)
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: None)
+    monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: None)
+    monkeypatch.setattr(tms, "get_system_zentao_web_login", lambda db: None)
+
+    res = ZentaoTaskMirrorService(db_session).operate_task(
+        task_id=task_id, action=action, current_user=alice
+    )
+
+    assert res["ok"] is False
+    assert row.status == local_status
+    assert row.local_started_at == before_started
+    assert row.consumed_accum == 5.0
+    assert res["task"]["status"] == local_status
+
+
 def test_pause_submits_efforts_before_pausing(db_session, monkeypatch):
     """禅道对 pause 任务记工时会自动激活回 doing → 分段提交必须发生在暂停之前。"""
     from datetime import datetime

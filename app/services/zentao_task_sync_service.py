@@ -545,8 +545,8 @@ class ZentaoTaskSyncService:
 
         禅道 ipd4.3 已知坑：本人 token 被当 guest 时 REST 返回 200 但不生效；
         网络超时时也可能「抛错但已生效」。因此无论 op 成败都回读，状态真切到
-        expected 才写缓存并返回成功，否则换下一级重试。全部未生效时缓存按最后
-        一次回读结果落，避免本地按钮状态与禅道漂移。
+        expected 才写缓存并返回成功，否则换下一级重试。全部未生效时不改本地
+        状态；后续由正常同步任务刷新，避免一次失败操作反而推动本地状态变化。
         """
         task_id = int(requirement.zentao_task_id)
         acting = get_user_zentao_client(acting_user.id, self.db) if acting_user is not None else None
@@ -606,8 +606,6 @@ class ZentaoTaskSyncService:
                 actual = _readback(client)
                 if actual == expected:
                     return _succeed(client)
-        if actual:
-            requirement.zentao_task_status_cache = actual
         detail = f"：{last_err}" if last_err else "（禅道返回成功但状态未切换）"
         out["errors"].append(f"禅道{zh}任务未生效{detail}")
         return False
@@ -621,9 +619,7 @@ class ZentaoTaskSyncService:
         out: dict = {"ok": False, "errors": []}
         now = local_now()
         paused = str(requirement.zentao_task_status_cache or "").strip().lower() == "pause"
-        if not paused:
-            requirement.task_consumed_accum = 0.0
-        requirement.task_started_at = now
+        confirmed = not requirement.zentao_task_id
         left = hours if hours is not None else (requirement.estimated_test_hours or 4.0)
         if requirement.zentao_task_id:
             task_id = int(requirement.zentao_task_id)
@@ -648,9 +644,15 @@ class ZentaoTaskSyncService:
                 else:
                     start_task_via_web(web, task_id, left=left, real_started=_fmt_dt(now))
 
-            self._operate_task_with_verify(
+            confirmed = self._operate_task_with_verify(
                 requirement, expected="doing", op=_op, acting_user=acting_user, out=out, zh="开始", web_op=_web_op
             )
+        if confirmed:
+            if not paused:
+                requirement.task_consumed_accum = 0.0
+            requirement.task_started_at = now
+            # _operate_task_with_verify 先确认远端状态；计时字段写入后再补齐镜像时间。
+            self._update_task_mirror_status(requirement, "doing")
         self.db.commit()
         out["ok"] = not out["errors"]
         if out["ok"]:
@@ -834,7 +836,7 @@ class ZentaoTaskSyncService:
         """
         out: dict = {"ok": False, "errors": [], "consumed": 0.0}
         now = local_now()
-        requirement.task_finished_at = now
+        confirmed = not requirement.zentao_task_id
         # 今天之前的段先按天拆分提交为工时记录，finish 只带今天的部分；
         # 无本人网页凭据/提交失败则一次性提交全部（旧口径兜底）。
         consumed = self._prepare_requirement_finish_consumed(requirement, acting_user, now)
@@ -849,15 +851,17 @@ class ZentaoTaskSyncService:
                 finish_task_via_web(web, task_id, current_consumed=consumed, finished_date=_fmt_dt(now))
 
             # 完成后禅道会把指派人转给任务创建者，属预期流转，不做指派校正
-            self._operate_task_with_verify(
+            confirmed = self._operate_task_with_verify(
                 requirement, expected="done", op=_op, acting_user=acting_user, out=out, zh="完成",
                 restore_assignee=False, web_op=_web_op, accept_response_status=True,
             )
-        if not out["errors"]:
+        if confirmed:
+            requirement.task_finished_at = now
             # finish 的 currentConsumed 已随完成上报（禅道生成完成当天的工时记录）
             requirement.task_efforts_submitted = round(float(requirement.task_efforts_submitted or 0.0) + consumed, 2)
             requirement.task_consumed_accum = 0.0
             requirement.task_started_at = None
+            self._update_task_mirror_status(requirement, "done")
         self.db.commit()
         out["ok"] = not out["errors"]
         if out["ok"]:
@@ -871,9 +875,8 @@ class ZentaoTaskSyncService:
         增量，会累加到禅道已有总耗时上；本地保留旧值会导致再次完成时重复上报）。
         """
         out: dict = {"ok": False, "errors": []}
-        requirement.task_finished_at = None
-        requirement.task_started_at = local_now()
-        requirement.task_consumed_accum = 0.0
+        now = local_now()
+        confirmed = not requirement.zentao_task_id
         left = requirement.estimated_test_hours or 4.0
         if requirement.zentao_task_id:
             task_id = int(requirement.zentao_task_id)
@@ -890,9 +893,14 @@ class ZentaoTaskSyncService:
             def _web_op(web):
                 restart_task_via_web(web, task_id, left=left, assigned_to=(requirement.zentao_task_assigned_to or None))
 
-            self._operate_task_with_verify(
+            confirmed = self._operate_task_with_verify(
                 requirement, expected="doing", op=_op, acting_user=acting_user, out=out, zh="重新激活", web_op=_web_op
             )
+        if confirmed:
+            requirement.task_finished_at = None
+            requirement.task_started_at = now
+            requirement.task_consumed_accum = 0.0
+            self._update_task_mirror_status(requirement, "doing")
         self.db.commit()
         out["ok"] = not out["errors"]
         if out["ok"]:

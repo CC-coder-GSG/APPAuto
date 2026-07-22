@@ -308,13 +308,21 @@ def test_start_guest_token_falls_back_to_system_client(db_session, monkeypatch, 
 
 
 def test_start_all_candidates_ineffective_reports_and_keeps_truth(db_session, monkeypatch, req):
-    """所有候选都未生效 → errors 上报、缓存按回读落真实状态（不误标 doing）。"""
-    client = FakeClient(effective=False)
+    """所有候选都未生效 → errors 上报，状态与计时均保持操作前值。"""
+    before_started = datetime(2026, 7, 1, 8, 0)
+    req.zentao_task_status_cache = "wait"
+    req.task_consumed_accum = 5.0
+    req.task_started_at = before_started
+    db_session.commit()
+    # 回读甚至出现了与目标无关的 pause，也不能由这次失败的 start 写入本地。
+    client = FakeClient(effective=False, status="pause")
     monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
     res = ZentaoTaskSyncService(db_session).start_requirement_task(req)
     assert res["ok"] is False
     assert any("未生效" in e for e in res["errors"])
     assert req.zentao_task_status_cache == "wait"
+    assert req.task_consumed_accum == 5.0
+    assert req.task_started_at == before_started
 
 
 def test_start_rest_raises_but_actually_applied(db_session, monkeypatch, req):
