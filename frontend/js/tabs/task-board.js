@@ -5,7 +5,7 @@ const STATUS_META = {
   todo:         { label: '待处理', color: '#475569', bg: '#f1f5f9', border: '#cbd5e1' },
   in_progress:  { label: '进行中', color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
   done:         { label: '已完成', color: '#15803d', bg: '#f0fdf4', border: '#bbf7d0' },
-  closed:       { label: '已关闭', color: '#64748b', bg: '#f8fafc', border: '#e2e8f0' },
+  done_unclosed:{ label: '已完成但未关闭', color: '#047857', bg: '#ecfdf5', border: '#a7f3d0' },
   deferred:     { label: '延期',   color: '#a16207', bg: '#fefce8', border: '#fde68a' },
 };
 
@@ -16,9 +16,9 @@ const PRIORITY_META = {
   urgent: { label: '紧急', bg: '#fee2e2', color: '#991b1b' },
 };
 
-// 2026-07-07：阻塞列删除（用不上），新增已关闭列（禅道 closed/cancel 任务归入）。
+// 「已完成但未关闭」是禅道任务补充列：done 任务可与普通日期归类列重复展示，closed 后退出。
 // 平台侧遗留的 blocked 任务并入进行中列展示，避免消失。
-const STATUS_ORDER = ['todo', 'in_progress', 'done', 'closed', 'deferred'];
+const STATUS_ORDER = ['todo', 'in_progress', 'done', 'done_unclosed', 'deferred'];
 
 const state = {
   date: null,
@@ -101,9 +101,9 @@ function buildQuery() {
   const assignee = document.getElementById('taskBoardAssigneeFilter')?.value;
   if (assignee) params.set('assignee_id', String(assignee));
   const status = document.getElementById('taskBoardStatusFilter')?.value;
-  // closed 是禅道任务专属列，平台任务无此状态（后端是 SAEnum，传了会报错）；
-  // 筛选已关闭时平台侧改为「不可能匹配」在 render 里置空。
-  if (status && status !== 'closed') params.set('status', status);
+  // done_unclosed 是禅道任务补充列，平台任务无此状态（后端是 SAEnum，传了会报错）；
+  // 筛选该列时平台侧改为「不可能匹配」在 render 里置空。
+  if (status && status !== 'done_unclosed') params.set('status', status);
   const mine = document.getElementById('taskBoardMineOnly')?.checked;
   if (mine) params.set('mine', 'true');
   const archived = document.getElementById('taskBoardShowArchived')?.checked;
@@ -135,9 +135,9 @@ function render(data) {
   const createBtn = document.getElementById('taskBoardCreateBtn');
   if (createBtn) createBtn.classList.toggle('hidden', !state.canManage);
 
-  // 筛选「已关闭」时平台任务不可能匹配（平台无 closed 状态），列与汇总置空
+  // 筛选「已完成但未关闭」时平台任务不可能匹配（平台无该状态），列与汇总置空
   const statusFilter = document.getElementById('taskBoardStatusFilter')?.value;
-  const effective = statusFilter === 'closed' ? { ...data, columns: {}, summary: {} } : data;
+  const effective = statusFilter === 'done_unclosed' ? { ...data, columns: {}, summary: {} } : data;
 
   const zt = zentaoForBoard();
   renderSummary(effective, zt);
@@ -150,7 +150,15 @@ function renderSummary(data, ztItems = []) {
   const wrap = document.getElementById('taskBoardSummary');
   if (!wrap) return;
   const s = data.summary || {};
-  const ztCount = { total: ztItems.length, todo: 0, in_progress: 0, done: 0, closed: 0, deferred: 0 };
+  // 补充列允许重复展示，但「今日任务」总数仍只统计普通日期归类，避免同一任务重复累计。
+  const ztCount = {
+    total: ztItems.filter((t) => !t._supplemental).length,
+    todo: 0,
+    in_progress: 0,
+    done: 0,
+    done_unclosed: 0,
+    deferred: 0,
+  };
   ztItems.forEach((t) => {
     const k = t._boardCol || ZT_BOARD_MAP[t.status];
     if (k && k in ztCount) ztCount[k] += 1;
@@ -161,7 +169,7 @@ function renderSummary(data, ztItems = []) {
     // 平台侧遗留 blocked 任务并入进行中统计
     { key: 'in_progress', label: '进行中', value: (s.in_progress || 0) + (s.blocked || 0), bg: STATUS_META.in_progress.bg, color: STATUS_META.in_progress.color },
     { key: 'done', label: '已完成', value: s.done || 0, bg: STATUS_META.done.bg, color: STATUS_META.done.color },
-    { key: 'closed', label: '已关闭', value: 0, bg: STATUS_META.closed.bg, color: STATUS_META.closed.color },
+    { key: 'done_unclosed', label: '已完成但未关闭', value: 0, bg: STATUS_META.done_unclosed.bg, color: STATUS_META.done_unclosed.color },
     { key: 'deferred', label: '延期', value: s.deferred || 0, bg: STATUS_META.deferred.bg, color: STATUS_META.deferred.color },
   ];
   wrap.innerHTML = cards.map((c) => {
@@ -740,8 +748,9 @@ const ZT_STATUS_META = {
   closed: { label: '已关闭', bg: '#f1f5f9', color: '#94a3b8' },
 };
 
-// 禅道状态 → 看板分栏（阻塞列已删除：暂停归入进行中；已关闭/已取消进「已关闭」列）
-const ZT_BOARD_MAP = { wait: 'todo', doing: 'in_progress', pause: 'in_progress', done: 'done', closed: 'closed', cancel: 'closed' };
+// 禅道状态 → 普通看板分栏（暂停归入进行中；关闭/取消任务不进入普通列）。
+// done 任务还会由 zentaoForBoard 复制到「已完成但未关闭」补充列。
+const ZT_BOARD_MAP = { wait: 'todo', doing: 'in_progress', pause: 'in_progress', done: 'done' };
 
 // 按看板日期推导禅道任务归列（延期与历史回看都在这里算）：
 // - 未完成(wait/doing/pause)且看板日期已过截止 → 「延期」列，此后每天持续出现直到完成；
@@ -797,11 +806,25 @@ function zentaoForBoard() {
   const mineOnly = document.getElementById('taskBoardMineOnly')?.checked;
   const out = [];
   state.zentao.forEach((t) => {
+    const assigneeMatched = !assignee || Number(assignee) === Number(t.assignee_user_id || 0);
+    const mineMatched = !mineOnly || ztIsMine(t);
+
+    // 补充列不受看板日期限制：任务只要在禅道处于 done，就持续展示到被关闭为止。
+    // 无状态筛选时允许它与普通日期归类列重复；显式筛选该列时只展示补充项。
+    if (
+      t.status === 'done'
+      && assigneeMatched
+      && mineMatched
+      && (!statusFilter || statusFilter === 'done_unclosed')
+    ) {
+      out.push({ ...t, _boardCol: 'done_unclosed', _supplemental: true });
+    }
+    if (statusFilter === 'done_unclosed') return;
+
     const col = ztColumnForDate(t, date);
     if (!col) return;
     if (statusFilter && col !== statusFilter) return;
-    if (assignee && Number(assignee) !== Number(t.assignee_user_id || 0)) return;
-    if (mineOnly && !ztIsMine(t)) return;
+    if (!assigneeMatched || !mineMatched) return;
     const start = t.est_started || t.deadline;
     const end = t.deadline || t.est_started;
     const deadline = dayOf(t.deadline);
@@ -914,7 +937,8 @@ function zentaoForMonth() {
   const statusFilter = document.getElementById('taskBoardStatusFilter')?.value;
   const mineOnly = document.getElementById('taskBoardMineOnly')?.checked;
   return state.zentao.filter((t) => {
-    if (statusFilter && ZT_BOARD_MAP[t.status] !== statusFilter) return false;
+    if (statusFilter === 'done_unclosed' && t.status !== 'done') return false;
+    if (statusFilter && statusFilter !== 'done_unclosed' && ZT_BOARD_MAP[t.status] !== statusFilter) return false;
     if (assignee && Number(assignee) !== Number(t.assignee_user_id || 0)) return false;
     if (mineOnly && !ztIsMine(t)) return false;
     return true;
@@ -1055,7 +1079,7 @@ function renderZentaoBoardCard(t) {
     const boardDate = state.date || todayISO();
     const days = Math.max(1, Math.round((new Date(boardDate) - new Date(dayOf(t.deadline))) / 86400000));
     delayChip = `<span class="badge" style="background:#fef9c3; color:#a16207; border:1px solid #fde68a; font-size:11px;">⏰ 已延期 ${days} 天</span>`;
-  } else if ((t._boardCol === 'done' || t._boardCol === 'closed') && t.deadline && finishedDayChip && finishedDayChip > dayOf(t.deadline)) {
+  } else if ((t._boardCol === 'done' || t._boardCol === 'done_unclosed') && t.deadline && finishedDayChip && finishedDayChip > dayOf(t.deadline)) {
     const days = Math.max(1, Math.round((new Date(finishedDayChip) - new Date(dayOf(t.deadline))) / 86400000));
     delayChip = `<span class="badge" style="background:#fef9c3; color:#a16207; border:1px solid #fde68a; font-size:11px;"
       title="截止 ${dayOf(t.deadline)}，实际 ${finishedDayChip} 完成">⏰ 已延期 ${days} 天完成</span>`;
