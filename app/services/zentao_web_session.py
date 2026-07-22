@@ -258,6 +258,8 @@ def close_task_via_web(login: ZentaoWebLogin, task_id: int, *, comment: str | No
 #         dates 支持补录任意日期；无 left 列，任务剩余工时不由此维护）
 #   编辑：POST effort-edit-{effortID}.html （字段 objectType/objectID/consumed/left/work；
 #         无日期字段 → 日期不可改，调用方需拦截改日期的请求）
+#   删除：优先走官方 task-deleteWorkhour-{effortID}-yes.html（yes 用于确认删除最后一条
+#         工时）；IPD effort 模块兼容 effort-delete-{effortID}.html。
 # 所有写操作都「提交 → 同会话回读校验」，未生效抛 ZentaoWebSessionError，
 # 由调用方决定兜底（如退回本地累计、完成时一次性提交）。
 
@@ -430,6 +432,53 @@ def edit_task_effort_via_web(
         client.close()
 
 
+def delete_task_effort_via_web(
+    login: ZentaoWebLogin,
+    task_id: int,
+    effort_id: int,
+) -> list[dict]:
+    """删除一条工时记录，并以禅道回读结果作为唯一成功依据。
+
+    官方 task-deleteWorkhour 在删除任务最后一条工时时会要求二次确认，因此直接带
+    confirm=yes；部分 IPD 版本把工时操作迁到了 effort 模块，官方路由未生效时再尝试
+    effort-delete。两个路由都只操作同一个 effort_id。目标记录回读后仍存在则抛错，
+    调用方绝不能把它当作删除成功。
+    """
+    base = login.base_url.rstrip("/")
+    client = _open_web_session(login)
+    try:
+        before = _fetch_efforts(client, base, task_id)
+        if not any(r["id"] == int(effort_id) for r in before):
+            return before
+
+        urls = [
+            f"{base}/task-deleteWorkhour-{effort_id}-yes.html",
+            f"{base}/effort-delete-{effort_id}.html",
+        ]
+        reasons: list[str] = []
+        for url in urls:
+            resp = client.get(
+                url,
+                headers={"X-Requested-With": "XMLHttpRequest", "X-Zui-Modal": "true"},
+            )
+            after = _fetch_efforts(client, base, task_id)
+            if not any(r["id"] == int(effort_id) for r in after):
+                return after
+            try:
+                payload = _loads_lenient(resp.text)
+                reason = _fail_reason(payload)
+            except Exception:
+                reason = (resp.text or "")[:200]
+            reasons.append(f"{url.rsplit('/', 1)[-1]}：{reason or '记录仍存在'}")
+
+        raise ZentaoWebSessionError(
+            f"禅道删除工时未生效，记录 #{effort_id} 回读后仍存在；" + "；".join(reasons)
+        )
+    finally:
+        _logout_quietly(client, base)
+        client.close()
+
+
 __all__ = [
     "ZentaoWebLogin",
     "ZentaoWebSessionError",
@@ -442,4 +491,5 @@ __all__ = [
     "list_task_efforts_via_web",
     "record_task_efforts_via_web",
     "edit_task_effort_via_web",
+    "delete_task_effort_via_web",
 ]

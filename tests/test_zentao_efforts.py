@@ -8,7 +8,8 @@ from fastapi import HTTPException
 
 from app.models import User, UserRole
 import app.services.zentao_effort_service as zes
-from app.services.zentao_web_session import ZentaoWebLogin
+import app.services.zentao_web_session as zws
+from app.services.zentao_web_session import ZentaoWebLogin, ZentaoWebSessionError
 
 
 def _login(account="alice"):
@@ -133,3 +134,114 @@ def test_edit_effort_happy_path(db_session, monkeypatch):
     assert res["ok"] is True
     assert edited == {"task_id": 42, "effort_id": 9, "date": "2026-06-30", "consumed": 1.5, "left": 4.0, "work": "旧"}
     assert res["efforts"][0]["can_edit"] is True
+
+
+def test_delete_effort_rejects_others_record(db_session, monkeypatch):
+    alice = _user(db_session, username="alice_delete_403")
+    monkeypatch.setattr(zes, "get_user_zentao_web_login", lambda uid, db: _login())
+    monkeypatch.setattr(zes, "list_task_efforts_via_web", lambda login, tid: [
+        {"id": 9, "date": "2026-06-29", "consumed": 2.0, "left": 4.0, "account": "bob", "work": ""},
+    ])
+    with pytest.raises(HTTPException) as ei:
+        zes.delete_effort_for_user(db_session, 42, 9, alice)
+    assert ei.value.status_code == 403
+
+
+def test_delete_effort_requires_self_login(db_session, monkeypatch):
+    alice = _user(db_session, username="alice_delete_nologin")
+    monkeypatch.setattr(zes, "get_user_zentao_web_login", lambda uid, db: None)
+    with pytest.raises(HTTPException) as ei:
+        zes.delete_effort_for_user(db_session, 42, 9, alice)
+    assert ei.value.status_code == 400
+
+
+def test_delete_effort_happy_path_requires_remote_absence(db_session, monkeypatch):
+    alice = _user(db_session, username="alice_delete")
+    original = {"id": 9, "date": "2026-06-29", "consumed": 2.0, "left": 4.0, "account": "alice", "work": "旧"}
+    remaining = {"id": 10, "date": "2026-06-30", "consumed": 1.0, "left": 3.0, "account": "alice", "work": "保留"}
+    monkeypatch.setattr(zes, "get_user_zentao_web_login", lambda uid, db: _login())
+    monkeypatch.setattr(zes, "list_task_efforts_via_web", lambda login, tid: [dict(original), dict(remaining)])
+    deleted = {}
+
+    def fake_delete(login, task_id, effort_id):
+        deleted.update(task_id=task_id, effort_id=effort_id)
+        return [dict(remaining)]
+
+    monkeypatch.setattr(zes, "delete_task_effort_via_web", fake_delete)
+    res = zes.delete_effort_for_user(db_session, 42, 9, alice)
+    assert res["ok"] is True
+    assert deleted == {"task_id": 42, "effort_id": 9}
+    assert [e["id"] for e in res["efforts"]] == [10]
+    assert res["efforts"][0]["can_edit"] is True
+
+
+def test_delete_effort_remote_failure_is_not_success(db_session, monkeypatch):
+    alice = _user(db_session, username="alice_delete_fail")
+    row = {"id": 9, "date": "2026-06-29", "consumed": 2.0, "left": 4.0, "account": "alice", "work": "旧"}
+    monkeypatch.setattr(zes, "get_user_zentao_web_login", lambda uid, db: _login())
+    monkeypatch.setattr(zes, "list_task_efforts_via_web", lambda login, tid: [dict(row)])
+    monkeypatch.setattr(
+        zes,
+        "delete_task_effort_via_web",
+        lambda *args: (_ for _ in ()).throw(ZentaoWebSessionError("回读后仍存在")),
+    )
+    with pytest.raises(HTTPException) as ei:
+        zes.delete_effort_for_user(db_session, 42, 9, alice)
+    assert ei.value.status_code == 502
+    assert "禅道未确认删除" in ei.value.detail
+
+
+def test_delete_effort_via_web_uses_confirm_and_verifies_absence(monkeypatch):
+    class Resp:
+        text = '{"result":"success"}'
+
+    class Client:
+        deleted = False
+        urls = []
+
+        def get(self, url, **kwargs):
+            self.urls.append(url)
+            if "task-deleteWorkhour-9-yes.html" in url:
+                self.deleted = True
+            return Resp()
+
+        def close(self):
+            pass
+
+    client = Client()
+    row = {"id": 9, "date": "2026-06-29", "consumed": 2.0, "left": 4.0, "account": "alice", "work": "旧"}
+    monkeypatch.setattr(zws, "_open_web_session", lambda login: client)
+    monkeypatch.setattr(zws, "_logout_quietly", lambda *args: None)
+    monkeypatch.setattr(zws, "_fetch_efforts", lambda c, base, tid: [] if c.deleted else [dict(row)])
+
+    efforts = zws.delete_task_effort_via_web(_login(), 42, 9)
+    assert efforts == []
+    assert client.urls == ["http://z/task-deleteWorkhour-9-yes.html"]
+
+
+def test_delete_effort_via_web_fails_when_all_routes_leave_record(monkeypatch):
+    class Resp:
+        text = '{"result":"fail","message":"无权限"}'
+
+    class Client:
+        urls = []
+
+        def get(self, url, **kwargs):
+            self.urls.append(url)
+            return Resp()
+
+        def close(self):
+            pass
+
+    client = Client()
+    row = {"id": 9, "date": "2026-06-29", "consumed": 2.0, "left": 4.0, "account": "alice", "work": "旧"}
+    monkeypatch.setattr(zws, "_open_web_session", lambda login: client)
+    monkeypatch.setattr(zws, "_logout_quietly", lambda *args: None)
+    monkeypatch.setattr(zws, "_fetch_efforts", lambda *args: [dict(row)])
+
+    with pytest.raises(ZentaoWebSessionError, match="回读后仍存在"):
+        zws.delete_task_effort_via_web(_login(), 42, 9)
+    assert client.urls == [
+        "http://z/task-deleteWorkhour-9-yes.html",
+        "http://z/effort-delete-9.html",
+    ]

@@ -27,6 +27,7 @@ from app.services.zentao_system_client import (
 )
 from app.services.zentao_web_session import (
     ZentaoWebSessionError,
+    delete_task_effort_via_web,
     edit_task_effort_via_web,
     list_task_efforts_via_web,
     record_task_efforts_via_web,
@@ -165,10 +166,45 @@ def edit_effort_for_user(
     return {"ok": True, "efforts": efforts, "can_edit_any": True}
 
 
+def delete_effort_for_user(
+    db: Session,
+    task_id: int,
+    effort_id: int,
+    current_user: User,
+) -> dict:
+    """删除本人的一条工时记录；禅道回读确认记录消失后才返回成功。"""
+    from fastapi import HTTPException
+
+    login = get_user_zentao_web_login(current_user.id, db)
+    if login is None:
+        raise HTTPException(status_code=400, detail="未绑定禅道网页登录凭据，无法删除工时记录（必须以本人身份同步禅道）")
+    my_account = (current_user.zentao_account or "").strip().lower()
+    try:
+        efforts = list_task_efforts_via_web(login, task_id)
+    except ZentaoWebSessionError as exc:
+        raise HTTPException(status_code=502, detail=f"拉取工时记录失败：{exc}")
+    row = next((e for e in efforts if e["id"] == int(effort_id)), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="工时记录不存在（可能已被删除）")
+    if (row.get("account") or "").strip().lower() != my_account:
+        raise HTTPException(status_code=403, detail="只能删除本人的工时记录")
+    try:
+        efforts = delete_task_effort_via_web(login, task_id, effort_id)
+    except ZentaoWebSessionError as exc:
+        raise HTTPException(status_code=502, detail=f"删除工时记录失败，禅道未确认删除：{exc}")
+    if any(e["id"] == int(effort_id) for e in efforts):
+        # 双重保护：底层本应已拦截，服务层仍不允许把残留记录当作成功。
+        raise HTTPException(status_code=502, detail="删除工时记录失败：禅道回读后记录仍然存在")
+    for e in efforts:
+        e["can_edit"] = (e.get("account") or "").strip().lower() == my_account
+    return {"ok": True, "efforts": efforts, "can_edit_any": True}
+
+
 __all__ = [
     "AUTO_NOTE",
     "merge_extra_hours",
     "submit_day_efforts",
     "list_efforts_for_user",
     "edit_effort_for_user",
+    "delete_effort_for_user",
 ]

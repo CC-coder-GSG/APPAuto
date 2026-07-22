@@ -149,6 +149,19 @@ def edit_task_effort(
     )
 
 
+@router.delete("/tasks/{task_id}/efforts/{effort_id}")
+def delete_task_effort(
+    task_id: int,
+    effort_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """删除一条本人工时；仅在禅道回读确认记录消失后返回成功。"""
+    from app.services.zentao_effort_service import delete_effort_for_user
+
+    return delete_effort_for_user(db, task_id, effort_id, current_user)
+
+
 @router.get("/tasks/{task_id}/assignable")
 def task_assignable_users(
     task_id: int,

@@ -59,9 +59,9 @@ function renderTaskActions(t) {
   // 指派（转派）面向所有用户开放：任何任务都可以指派给指定的人。
   const assignBtn = `<button class="secondary" style="padding:2px 10px; font-size:12px; color:#7c3aed; border-color:#ddd6fe;"
     onclick="event.stopPropagation(); openTaskAssign(${t.task_id})" title="把该任务指派给指定的人（所有人可用）">👤 指派</button>`;
-  // 工时记录（查看对所有人开放；本人的记录可在弹窗里修改）
+  // 工时记录（查看对所有人开放；本人的记录可在弹窗里修改或删除）
   const effortBtn = `<button class="secondary" style="padding:2px 10px; font-size:12px; color:#0f766e; border-color:#99f6e4;"
-    onclick="event.stopPropagation(); window.openTaskEffortModal(${t.task_id})" title="查看/修改该任务已提交的禅道工时记录">🕒 工时记录</button>`;
+    onclick="event.stopPropagation(); window.openTaskEffortModal(${t.task_id})" title="查看、修改或删除该任务已提交的禅道工时记录">🕒 工时记录</button>`;
   const wrap = (parts) => `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>`;
   // 关联需求且该需求归属本人 → 跳转到需求工作台管理，不在此直接操作禅道。
   // 例外：任务已完成时，除跳转外也允许直接关闭（避免只为关闭再绕一圈）。
