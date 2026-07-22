@@ -232,6 +232,11 @@ class WorkbenchService:
                 "zentao_task_status": r.zentao_task_status_cache,
                 "task_started_at": r.task_started_at.isoformat() if r.task_started_at else None,
                 "estimated_test_hours": r.estimated_test_hours,
+                "task_has_time_tracking": bool(
+                    r.task_started_at
+                    or float(r.task_consumed_accum or 0.0) > 0
+                    or float(r.task_efforts_submitted or 0.0) > 0
+                ),
                 # 子任务指派人账号 + 是否指派给当前用户（前端据此决定是否显示
                 # 开始/预计用时、以及勾选完成时是否联动禅道完成任务）。
                 "zentao_task_assigned_to": r.zentao_task_assigned_to,

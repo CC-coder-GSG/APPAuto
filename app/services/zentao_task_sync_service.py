@@ -21,6 +21,7 @@ import logging
 from datetime import date, datetime
 from typing import Optional
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models import Requirement, User, Version
@@ -743,6 +744,8 @@ class ZentaoTaskSyncService:
         except Exception:
             hmap = {}
         segment = work_hours.consumed_hours(started, now, hmap)
+        if segment <= 0:
+            segment = 0.1
         requirement.task_consumed_accum = round(float(requirement.task_consumed_accum or 0.0) + segment, 2)
         requirement.task_started_at = None
 
@@ -774,7 +777,10 @@ class ZentaoTaskSyncService:
         ⚠️ 工时记录归属禅道当前登录人，只能用本人凭据，不回退系统账号。"""
         if not requirement.zentao_task_id:
             return None
-        day_rows = self._split_segment_by_day(requirement.task_started_at, now)
+        started = requirement.task_started_at
+        day_rows = self._split_segment_by_day(started, now)
+        if started and not day_rows:
+            day_rows = [(now.date(), 0.1)]
         day_rows = merge_extra_hours(day_rows, float(requirement.task_consumed_accum or 0.0), now.date())
         if not day_rows:
             return 0.0
@@ -793,11 +799,22 @@ class ZentaoTaskSyncService:
             logger.warning("requirement %s pause: submit efforts failed, fall back to local accum: %s", requirement.id, exc)
             return None
 
-    def _prepare_requirement_finish_consumed(self, requirement: Requirement, acting_user: Optional[User], now) -> float:
+    def _prepare_requirement_finish_consumed(
+        self,
+        requirement: Requirement,
+        acting_user: Optional[User],
+        now,
+        *,
+        explicit: Optional[float] = None,
+    ) -> float:
         """完成时的 currentConsumed：优先把「今天之前」的段按天拆分提交为工时记录，
         finish 只带今天的部分 + 未提交累计；无本人网页凭据/提交失败退回一次性提交
-        全部。禅道要求 >0，最小 0.1；从未计时且没分段提交过才拿预计工时兜底。"""
-        day_rows = self._split_segment_by_day(requirement.task_started_at, now)
+        全部。禅道要求 >0，已计时但不足一分钟按 0.1；完全没有计时依据时要求
+        调用方提供人工确认的实际工时。"""
+        if explicit is not None:
+            return round(float(explicit), 2)
+        started = requirement.task_started_at
+        day_rows = self._split_segment_by_day(started, now)
         today = now.date()
         prev_rows = [(d, h) for d, h in day_rows if d < today]
         remainder = round(
@@ -826,9 +843,20 @@ class ZentaoTaskSyncService:
         if float(requirement.task_efforts_submitted or 0.0) > 0:
             # 各段都已提交过工时记录 → 不能再拿预计工时兜底（会重复计入），给最小值
             return 0.1
-        return round(requirement.estimated_test_hours or 1.0, 2)
+        if started is not None:
+            return 0.1
+        raise HTTPException(
+            status_code=400,
+            detail="未检测到平台计时记录，请确认实际工时后再完成任务",
+        )
 
-    def finish_requirement_task(self, requirement: Requirement, *, acting_user: Optional[User] = None) -> dict:
+    def finish_requirement_task(
+        self,
+        requirement: Requirement,
+        *,
+        acting_user: Optional[User] = None,
+        consumed: Optional[float] = None,
+    ) -> dict:
         """勾「测试完成」：算工时 → 禅道 finish，记录本地完成时刻。
 
         总工时 = 暂停时结算的累计（task_consumed_accum）+ 最后一段（开始→完成）；
@@ -837,18 +865,22 @@ class ZentaoTaskSyncService:
         out: dict = {"ok": False, "errors": [], "consumed": 0.0}
         now = local_now()
         confirmed = not requirement.zentao_task_id
+        if consumed is not None and (consumed <= 0 or consumed > 999):
+            raise HTTPException(status_code=400, detail="实际工时需在 0~999 小时之间")
         # 今天之前的段先按天拆分提交为工时记录，finish 只带今天的部分；
         # 无本人网页凭据/提交失败则一次性提交全部（旧口径兜底）。
-        consumed = self._prepare_requirement_finish_consumed(requirement, acting_user, now)
-        out["consumed"] = consumed
+        consumed_hours = self._prepare_requirement_finish_consumed(
+            requirement, acting_user, now, explicit=consumed
+        )
+        out["consumed"] = consumed_hours
         if requirement.zentao_task_id:
             task_id = int(requirement.zentao_task_id)
 
             def _op(client):
-                return client.finish_task(task_id, current_consumed=consumed, finished_date=_fmt_dt(now))
+                return client.finish_task(task_id, current_consumed=consumed_hours, finished_date=_fmt_dt(now))
 
             def _web_op(web):
-                finish_task_via_web(web, task_id, current_consumed=consumed, finished_date=_fmt_dt(now))
+                finish_task_via_web(web, task_id, current_consumed=consumed_hours, finished_date=_fmt_dt(now))
 
             # 完成后禅道会把指派人转给任务创建者，属预期流转，不做指派校正
             confirmed = self._operate_task_with_verify(
@@ -858,7 +890,9 @@ class ZentaoTaskSyncService:
         if confirmed:
             requirement.task_finished_at = now
             # finish 的 currentConsumed 已随完成上报（禅道生成完成当天的工时记录）
-            requirement.task_efforts_submitted = round(float(requirement.task_efforts_submitted or 0.0) + consumed, 2)
+            requirement.task_efforts_submitted = round(
+                float(requirement.task_efforts_submitted or 0.0) + consumed_hours, 2
+            )
             requirement.task_consumed_accum = 0.0
             requirement.task_started_at = None
             self._update_task_mirror_status(requirement, "done")

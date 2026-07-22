@@ -417,7 +417,13 @@ class RequirementService:
             "conflict_count": conflict_count,
         }
 
-    def _mark_test_completed_transition(self, requirement: Requirement, test_completed: bool, acting_user: User | None = None) -> None:
+    def _mark_test_completed_transition(
+        self,
+        requirement: Requirement,
+        test_completed: bool,
+        acting_user: User | None = None,
+        task_consumed_hours: float | None = None,
+    ) -> None:
         """
         Set test_completed plus its timestamp anchor.
 
@@ -427,20 +433,37 @@ class RequirementService:
         back to the legacy "no candidates" behavior.
         """
         was_completed = bool(requirement.test_completed)
-        requirement.test_completed = bool(test_completed)
         if test_completed and not was_completed:
+            # 先完成禅道工时校验/同步；缺少计时依据时会要求前端补充实际工时，
+            # 此时不能提前把本地需求标成已完成。
+            self._sync_zentao_task_on_test_completed(
+                requirement,
+                finished=True,
+                acting_user=acting_user,
+                consumed=task_consumed_hours,
+            )
+            requirement.test_completed = True
             requirement.test_completed_at = local_now()
-            self._sync_zentao_task_on_test_completed(requirement, finished=True, acting_user=acting_user)
         elif not test_completed and was_completed:
+            requirement.test_completed = False
             requirement.test_completed_at = None
             self._sync_zentao_task_on_test_completed(requirement, finished=False, acting_user=acting_user)
+        else:
+            requirement.test_completed = bool(test_completed)
 
-    def _sync_zentao_task_on_test_completed(self, requirement: Requirement, *, finished: bool, acting_user: User | None = None) -> None:
+    def _sync_zentao_task_on_test_completed(
+        self,
+        requirement: Requirement,
+        *,
+        finished: bool,
+        acting_user: User | None = None,
+        consumed: float | None = None,
+    ) -> None:
         """测试完成勾选/取消 → 禅道子任务 完成 / 重新激活。
 
         仅在该需求绑定了禅道子任务、且操作者是子任务指派人时才联动禅道；否则只保留
-        本地记录（对应「非指派人勾选完成只做本地记录」）。任何异常都吞掉，不影响本地
-        状态流转（禅道为辅，本地为主）。
+        本地记录（对应「非指派人勾选完成只做本地记录」）。禅道通信异常不影响本地
+        状态流转；工时参数/缺少计时依据等校验异常会返回前端要求用户处理。
         """
         if not self._may_drive_zentao_task(requirement, acting_user):
             return
@@ -448,9 +471,12 @@ class RequirementService:
             from app.services.zentao_task_sync_service import ZentaoTaskSyncService
             svc = ZentaoTaskSyncService(self.db)
             if finished:
-                svc.finish_requirement_task(requirement, acting_user=acting_user)
+                svc.finish_requirement_task(requirement, acting_user=acting_user, consumed=consumed)
             else:
                 svc.reactivate_requirement_task(requirement, acting_user=acting_user)
+        except HTTPException:
+            # 参数/计时校验必须反馈给前端，不能按普通禅道同步异常吞掉。
+            raise
         except Exception as exc:  # noqa: BLE001 — 禅道侧失败不阻断本地
             import logging
             logging.getLogger(__name__).warning(
@@ -861,6 +887,7 @@ class RequirementService:
         current_user: User,
         case_completed: bool | None = None,
         test_completed: bool | None = None,
+        task_consumed_hours: float | None = None,
     ) -> dict:
         requirement = self.db.query(Requirement).filter(Requirement.id == requirement_id).first()
         if not requirement:
@@ -871,7 +898,12 @@ class RequirementService:
         if case_completed is not None:
             requirement.case_completed = case_completed
         if test_completed is not None:
-            self._mark_test_completed_transition(requirement, test_completed, acting_user=current_user)
+            self._mark_test_completed_transition(
+                requirement,
+                test_completed,
+                acting_user=current_user,
+                task_consumed_hours=task_consumed_hours,
+            )
 
         self.recalculate_requirement_status(requirement, actor_id=current_user.id)
         self.db.commit()
@@ -910,12 +942,23 @@ class RequirementService:
         )
         return {"message": "Cases updated", "case_ids": case_ids}
 
-    def update_test_execution_completion(self, requirement_id: int, test_completed: bool, actor_id: int | None = None) -> Requirement:
+    def update_test_execution_completion(
+        self,
+        requirement_id: int,
+        test_completed: bool,
+        actor_id: int | None = None,
+        task_consumed_hours: float | None = None,
+    ) -> Requirement:
         requirement = self.db.query(Requirement).filter(Requirement.id == requirement_id).first()
         if not requirement:
             raise HTTPException(status_code=404, detail="Requirement not found")
         acting_user = self.db.query(User).filter(User.id == actor_id).first() if actor_id else None
-        self._mark_test_completed_transition(requirement, test_completed, acting_user=acting_user)
+        self._mark_test_completed_transition(
+            requirement,
+            test_completed,
+            acting_user=acting_user,
+            task_consumed_hours=task_consumed_hours,
+        )
         self.recalculate_requirement_status(requirement, actor_id=actor_id)
         self.db.commit()
         audit(
@@ -1011,6 +1054,7 @@ class RequirementService:
         notes: str | None,
         test_completed: bool,
         actor_id: int | None = None,
+        task_consumed_hours: float | None = None,
     ) -> dict:
         allowed_result_status = {e.value for e in TestResultStatus}
         requirement = self.db.query(Requirement).filter(Requirement.id == requirement_id).first()
@@ -1046,7 +1090,12 @@ class RequirementService:
         execution.executed_by_id = actor_id
         execution.executed_at = local_now()
         acting_user = self.db.query(User).filter(User.id == actor_id).first() if actor_id else None
-        self._mark_test_completed_transition(requirement, test_completed, acting_user=acting_user)
+        self._mark_test_completed_transition(
+            requirement,
+            test_completed,
+            acting_user=acting_user,
+            task_consumed_hours=task_consumed_hours,
+        )
         self.recalculate_requirement_status(requirement, actor_id=actor_id)
         self.db.commit()
         self.db.refresh(execution)

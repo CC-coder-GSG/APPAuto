@@ -1045,10 +1045,27 @@ export async function reloadZentaoFromMirror() {
 export async function ztOperate(taskId, action) {
   const confirmText = { finish: '确认将该任务标记为完成？', close: '确认关闭该任务？' }[action];
   if (confirmText && !window.confirm(confirmText)) return;
+  let consumed;
+  if (action === 'finish') {
+    const task = state.zentao.find((item) => Number(item.task_id) === Number(taskId));
+    if (task && !task.has_time_tracking) {
+      const suggested = Number(task.suggested_consumed_hours || task.left || task.estimate || 1);
+      const input = window.prompt(
+        '未检测到该任务的计时记录，请输入本次实际工时（小时）：',
+        String(suggested),
+      );
+      if (input === null) return;
+      consumed = Number(input);
+      if (!Number.isFinite(consumed) || consumed <= 0 || consumed > 999) {
+        window.showMessage && window.showMessage('实际工时需在 0~999 小时之间', 'error');
+        return;
+      }
+    }
+  }
   showLoading('正在同步禅道，请稍候…');
   try {
     const res = await (await api(`/workbench/tasks/${taskId}/operate`, {
-      method: 'POST', body: { action },
+      method: 'POST', body: { action, ...(consumed !== undefined ? { consumed } : {}) },
     })).json();
     if (res.ok) window.showMessage && window.showMessage('操作已同步禅道', 'success');
     else window.showMessage && window.showMessage('禅道操作有异常：' + (res.errors || []).join('；'), 'error');

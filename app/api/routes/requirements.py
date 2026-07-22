@@ -66,6 +66,7 @@ class LinkMajorPayload(BaseModel):
 class ReqStatusUpdatePayload(BaseModel):
     case_completed: Optional[bool] = None
     test_completed: Optional[bool] = None
+    task_consumed_hours: Optional[float] = Field(default=None, gt=0, le=999)
 
 
 class CaseUpdatePayload(BaseModel):
@@ -587,6 +588,7 @@ def patch_requirement_status(
         current_user,
         case_completed=payload.case_completed,
         test_completed=payload.test_completed,
+        task_consumed_hours=payload.task_consumed_hours,
     )
 
 

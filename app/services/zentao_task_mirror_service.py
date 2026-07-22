@@ -598,6 +598,8 @@ class ZentaoTaskMirrorService:
 
         if action == "set_time" and (hours is None or hours <= 0 or hours > 999):
             raise HTTPException(status_code=400, detail="工时需在 0~999 小时之间")
+        if action == "finish" and consumed is not None and (consumed <= 0 or consumed > 999):
+            raise HTTPException(status_code=400, detail="实际工时需在 0~999 小时之间")
 
         _expected = {"start": "doing", "pause": "pause", "reactivate": "doing", "finish": "done", "close": "closed", "cancel": "cancel"}.get(action)
 
@@ -846,7 +848,11 @@ class ZentaoTaskMirrorService:
 
     def _settle_local_segment(self, row: ZentaoTaskMirror, now: datetime) -> None:
         """暂停（兜底口径）：把「本段起点 → now」结算进 consumed_accum 并停表。"""
-        row.consumed_accum = self._auto_consumed_hours(row, now)
+        started = self._local_segment_start(row)
+        settled = self._auto_consumed_hours(row, now)
+        # 已真实开始但不足一分钟（或落在非工作日）时保留最小计时标记，避免完成时
+        # 被误判成“从未计时”并回退预计工时。
+        row.consumed_accum = max(settled, 0.1) if started else settled
         row.local_started_at = None
 
     def _split_segment_by_day(self, started: Optional[datetime], ended: datetime) -> list[tuple[date, float]]:
@@ -865,7 +871,10 @@ class ZentaoTaskMirrorService:
         无本人网页凭据或提交失败返回 None，调用方退回本地累计口径。
 
         ⚠️ 工时记录归属禅道当前登录人，只能用本人凭据，不回退系统账号。"""
-        day_rows = self._split_segment_by_day(self._local_segment_start(row), now)
+        started = self._local_segment_start(row)
+        day_rows = self._split_segment_by_day(started, now)
+        if started and not day_rows:
+            day_rows = [(now.date(), 0.1)]
         day_rows = merge_extra_hours(day_rows, float(row.consumed_accum or 0.0), now.date())
         if not day_rows:
             return 0.0
@@ -883,9 +892,10 @@ class ZentaoTaskMirrorService:
         """完成时的 currentConsumed：优先把「今天之前」的段按天拆分提交为工时记录，
         finish 只带今天的部分 + 未提交累计（禅道会为它生成完成当天的记录）；
         无本人网页凭据/提交失败则退回一次性提交全部。禅道要求 >0，最小 0.1。"""
-        if explicit and explicit > 0:
+        if explicit is not None:
             return round(float(explicit), 2)
-        day_rows = self._split_segment_by_day(self._local_segment_start(row), now)
+        started = self._local_segment_start(row)
+        day_rows = self._split_segment_by_day(started, now)
         today = now.date()
         prev_rows = [(d, h) for d, h in day_rows if d < today]
         remainder = round(
@@ -913,7 +923,14 @@ class ZentaoTaskMirrorService:
         if float(row.efforts_submitted or 0.0) > 0:
             # 各段都已提交过工时记录 → 不能再拿剩余/预计工时兜底（会重复计入），给最小值
             return 0.1
-        return round(float(row.left or row.estimate or 1.0), 2)
+        if started is not None:
+            # 已计时但不足一分钟/当日不计工时：禅道要求完成工时 >0，按最小值提交。
+            return 0.1
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=400,
+            detail="未检测到平台计时记录，请确认实际工时后再完成任务",
+        )
 
     def assignable_users(self, task_id: int) -> dict:
         """任务所在执行的可指派人列表（指派弹窗数据源，面向所有用户）。"""
@@ -1011,6 +1028,13 @@ class ZentaoTaskMirrorService:
             "real_started": r.real_started.isoformat() if r.real_started else None,
             "finished_date": r.finished_date.isoformat() if r.finished_date else None,
             "synced_at": r.synced_at.isoformat() if r.synced_at else None,
+            "has_time_tracking": bool(
+                r.local_started_at
+                or r.real_started
+                or float(r.consumed_accum or 0.0) > 0
+                or float(r.efforts_submitted or 0.0) > 0
+            ),
+            "suggested_consumed_hours": round(float(r.left or r.estimate or 1.0), 2),
         }
 
 

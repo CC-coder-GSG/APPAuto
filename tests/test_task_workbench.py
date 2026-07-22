@@ -366,6 +366,63 @@ def test_operate_finish_auto_consumed_from_zentao_real_started(db_session, monke
     assert finish[2]["current_consumed"] == 2.0  # 9:00→11:00 工作时段内 2h
 
 
+def test_operate_finish_short_timer_uses_minimum_not_estimate(db_session, monkeypatch):
+    """开始后不足一分钟完成：使用禅道最小工时 0.1，不能回退预计/剩余工时。"""
+    from datetime import datetime
+
+    alice = _user(db_session, "alice_short_timer", account="alice")
+    _major(db_session, "V-TW-SHORT")
+    row = _mirror(db_session, 903, alice.id, account="alice", status="wait")
+    row.left = 4.0
+    row.estimate = 4.0
+    db_session.commit()
+    client = FakeClient()
+    client.set_task(903, {"status": "wait", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
+
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 20, 10, 0, 0))
+    assert ZentaoTaskMirrorService(db_session).operate_task(
+        task_id=903, action="start", current_user=alice
+    )["ok"] is True
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 20, 10, 0, 30))
+    assert ZentaoTaskMirrorService(db_session).operate_task(
+        task_id=903, action="finish", current_user=alice
+    )["ok"] is True
+
+    finish = next(call for call in client.calls if call[0] == "finish")
+    assert finish[2]["current_consumed"] == 0.1
+
+
+def test_operate_finish_without_timer_requires_explicit_consumed(db_session, monkeypatch):
+    """完全没有计时依据时不再静默使用预计工时，必须由前端确认实际工时。"""
+    alice = _user(db_session, "alice_manual_effort", account="alice")
+    _major(db_session, "V-TW-MANUAL")
+    row = _mirror(db_session, 904, alice.id, account="alice", status="doing")
+    row.left = 4.0
+    row.estimate = 4.0
+    db_session.commit()
+    client = FakeClient()
+    client.set_task(904, {"status": "doing", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+
+    with pytest.raises(HTTPException) as exc:
+        ZentaoTaskMirrorService(db_session).operate_task(
+            task_id=904, action="finish", current_user=alice
+        )
+    assert exc.value.status_code == 400
+    assert "实际工时" in exc.value.detail
+    assert row.status == "doing"
+    assert not any(call[0] == "finish" for call in client.calls)
+
+    result = ZentaoTaskMirrorService(db_session).operate_task(
+        task_id=904, action="finish", current_user=alice, consumed=0.75
+    )
+    assert result["ok"] is True
+    finish = next(call for call in client.calls if call[0] == "finish")
+    assert finish[2]["current_consumed"] == 0.75
+
+
 def test_operate_start_preserves_assignee_via_reassign(db_session, monkeypatch):
     # 模拟禅道 start 后把指派人清空 → 兜底应改派回原指派人
     alice = _user(db_session, "alice_keep", account="alice")
@@ -1049,7 +1106,9 @@ def test_finish_backfills_finished_date_when_zentao_omits_it(db_session, monkeyp
     monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
     monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
     monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 17, 18, 0))
-    res = ZentaoTaskMirrorService(db_session).operate_task(task_id=1301, action="finish", current_user=alice)
+    res = ZentaoTaskMirrorService(db_session).operate_task(
+        task_id=1301, action="finish", current_user=alice, consumed=0.5
+    )
     assert res["ok"] is True
     assert row.finished_date == datetime(2026, 7, 17, 18, 0)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
+from fastapi import HTTPException
 
 from app.models import Requirement, Version, VersionType
 import app.services.zentao_task_sync_service as tss
@@ -194,15 +195,37 @@ def test_finish_does_not_repeat_when_rest_confirms_done_but_readback_is_stale(db
     assert req.zentao_task_status_cache == "done"
 
 
-def test_finish_falls_back_when_no_start(db_session, monkeypatch, req):
+def test_finish_without_timer_requires_confirmed_consumed(db_session, monkeypatch, req):
     client = FakeClient()
     monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
     req.task_started_at = None
     db_session.commit()
     svc = ZentaoTaskSyncService(db_session)
-    res = svc.finish_requirement_task(req)
-    # 无开始时间 → consumed 兜底用 estimated_test_hours(4)
-    assert res["consumed"] == 4.0
+    with pytest.raises(HTTPException) as exc:
+        svc.finish_requirement_task(req)
+    assert exc.value.status_code == 400
+    assert "实际工时" in exc.value.detail
+    assert not any(call[0] == "finish" for call in client.calls)
+
+    res = svc.finish_requirement_task(req, consumed=0.75)
+    assert res["ok"] is True
+    assert res["consumed"] == 0.75
+
+
+def test_finish_short_timed_requirement_uses_minimum_not_estimate(db_session, monkeypatch, req):
+    client = FakeClient(status="doing")
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    req.task_started_at = datetime(2026, 7, 20, 10, 0, 0)
+    req.zentao_task_status_cache = "doing"
+    db_session.commit()
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 20, 10, 0, 30))
+
+    res = ZentaoTaskSyncService(db_session).finish_requirement_task(req)
+
+    assert res["ok"] is True
+    assert res["consumed"] == 0.1
+    finish_call = next(call for call in client.calls if call[0] == "finish")
+    assert finish_call[2] == 0.1
 
 
 def test_reactivate_calls_restart(db_session, monkeypatch, req):
@@ -347,8 +370,13 @@ def test_lifecycle_via_status_choke_point(db_session, monkeypatch, req):
     client = FakeClient()
     monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
     svc = RequirementService(db_session)
-    # 勾选完成
-    svc._mark_test_completed_transition(req, True)
+    # 没有计时依据时先要求人工确认，且不得提前改本地完成状态。
+    with pytest.raises(HTTPException):
+        svc._mark_test_completed_transition(req, True)
+    assert req.test_completed is False
+    assert not any(c[0] == "finish" for c in client.calls)
+    # 提供人工确认工时后勾选完成
+    svc._mark_test_completed_transition(req, True, task_consumed_hours=0.5)
     assert any(c[0] == "finish" for c in client.calls)
     # 取消完成
     svc._mark_test_completed_transition(req, False)
@@ -459,6 +487,24 @@ def test_req_pause_without_login_falls_back_to_local_accum(db_session, monkeypat
     assert res["ok"] is True
     assert req.task_consumed_accum == 2.0
     assert req.task_efforts_submitted == 0.0
+
+
+def test_req_short_pause_preserves_minimum_tracking(db_session, monkeypatch, req):
+    """不足一分钟即暂停且无法直提工时时，保留 0.1 小时，后续完成不误判为未计时。"""
+    client = FakeClient(status="doing")
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tss, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(tss, "get_user_zentao_web_login", lambda uid, db: None)
+    req.task_started_at = datetime(2026, 7, 20, 10, 0, 0)
+    req.zentao_task_status_cache = "doing"
+    db_session.commit()
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 20, 10, 0, 30))
+
+    result = ZentaoTaskSyncService(db_session).pause_requirement_task(req)
+
+    assert result["ok"] is True
+    assert req.task_consumed_accum == 0.1
+    assert req.task_started_at is None
 
 
 # ─── 操作人归属：本人 REST 失效 → 本人网页会话兜底（2026-07-17）──────────────

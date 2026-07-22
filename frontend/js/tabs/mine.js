@@ -895,6 +895,22 @@ export async function submitTestExecution(reqId, payload) {
   });
 }
 
+function promptRequirementTaskConsumed(req) {
+  if (!req?.zentao_task_id || !req.task_assigned_to_me || req.task_has_time_tracking) return undefined;
+  const suggested = Number(req.estimated_test_hours || 1);
+  const input = window.prompt(
+    '未检测到该禅道任务的计时记录，请输入本次实际测试工时（小时）：',
+    String(suggested),
+  );
+  if (input === null) return null;
+  const consumed = Number(input);
+  if (!Number.isFinite(consumed) || consumed <= 0 || consumed > 999) {
+    window.showMessage && window.showMessage('实际工时需在 0~999 小时之间', 'error');
+    return null;
+  }
+  return consumed;
+}
+
 export async function confirmMineTestExecutionModal() {
   const reqId = Number(modalState.reqId || 0);
   if (!reqId) {
@@ -908,6 +924,9 @@ export async function confirmMineTestExecutionModal() {
     window.showMessage && window.showMessage('请先选择当前复测发包（小版本）', 'error');
     return;
   }
+  const req = getRequirementById(reqId);
+  const taskConsumedHours = promptRequirementTaskConsumed(req);
+  if (taskConsumedHours === null) return;
 
   const pageMinorSel = document.getElementById('mineMinorSelect');
   if (pageMinorSel) pageMinorSel.value = String(minorId);
@@ -919,6 +938,7 @@ export async function confirmMineTestExecutionModal() {
       result_status: resultStatus,
       test_completed: true,
       notes,
+      ...(taskConsumedHours !== undefined ? { task_consumed_hours: taskConsumedHours } : {}),
     });
     const modal = document.getElementById('mineTestExecModal');
     if (modal) closeModal(modal);
@@ -1490,12 +1510,21 @@ export async function setReqStatus(reqId, key, checked) {
         return;
       }
     }
+    let taskConsumedHours;
+    if (key === 'test_completed' && checked) {
+      taskConsumedHours = promptRequirementTaskConsumed(getRequirementById(reqId));
+      if (taskConsumedHours === null) {
+        await loadMyWorkbench();
+        return;
+      }
+    }
     if (key === 'test_completed') {
       showLoading(`正在${checked ? '标记测试完成' : '取消测试完成'}并同步禅道，请稍候…`);
       loadingShown = true;
     }
     const payload = {};
     payload[key] = checked;
+    if (taskConsumedHours !== undefined) payload.task_consumed_hours = taskConsumedHours;
     await api(`/requirements/${reqId}/status`, { method: 'PATCH', headers: window.H, body: payload });
     msg = loadingShown ? '需求状态已更新，已同步禅道' : '需求状态已更新';
     if (!loadingShown) window.showMessage && window.showMessage(msg, msgType);

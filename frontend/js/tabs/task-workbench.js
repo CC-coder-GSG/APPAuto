@@ -422,13 +422,30 @@ export async function taskWorkbenchOperate(taskId, action) {
     reactivate: '确认重新激活该任务？',
   }[action];
   if (confirmText && !window.confirm(confirmText)) return;
+  let consumed;
+  if (action === 'finish') {
+    const task = taskWorkbenchData.find((item) => Number(item.task_id) === Number(taskId));
+    if (task && !task.has_time_tracking) {
+      const suggested = Number(task.suggested_consumed_hours || task.left || task.estimate || 1);
+      const input = window.prompt(
+        '未检测到该任务的计时记录，请输入本次实际工时（小时）：',
+        String(suggested),
+      );
+      if (input === null) return;
+      consumed = Number(input);
+      if (!Number.isFinite(consumed) || consumed <= 0 || consumed > 999) {
+        window.showMessage && window.showMessage('实际工时需在 0~999 小时之间', 'error');
+        return;
+      }
+    }
+  }
   // 加载条挂到任务列表重载完成、提示放在重载之后：条消失时界面已与禅道一致。
   showLoading('正在同步禅道，请稍候…');
   let msg = '操作已同步禅道';
   let msgType = 'success';
   try {
     const res = await (await api(`/workbench/tasks/${taskId}/operate`, {
-      method: 'POST', headers: window.H, body: ({ action }),
+      method: 'POST', headers: window.H, body: ({ action, ...(consumed !== undefined ? { consumed } : {}) }),
     })).json();
     if (!res.ok) {
       msg = '禅道操作有异常：' + (res.errors || []).join('；');

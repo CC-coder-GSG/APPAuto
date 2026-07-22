@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
@@ -20,6 +20,7 @@ class TestExecutionPayload(BaseModel):
     result_status: TestResultStatus = TestResultStatus.PASSED
     test_completed: bool
     notes: Optional[str] = None
+    task_consumed_hours: Optional[float] = Field(default=None, gt=0, le=999)
 
 
 @router.put("/requirements/{requirement_id}/test-execution")
@@ -39,4 +40,5 @@ def upsert_test_execution(
         notes=payload.notes,
         test_completed=payload.test_completed,
         actor_id=current_user.id,
+        task_consumed_hours=payload.task_consumed_hours,
     )
