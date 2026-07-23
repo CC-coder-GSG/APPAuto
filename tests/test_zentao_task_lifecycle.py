@@ -582,3 +582,63 @@ def test_req_pause_submits_efforts_before_pausing(db_session, monkeypatch, req):
     assert req.task_started_at is None
     assert req.task_consumed_accum == 0.0
     assert req.task_efforts_submitted == 2.0
+
+
+def test_req_pause_401_after_web_success_is_verified_by_system_client(db_session, monkeypatch, req):
+    """A broken user REST token must not hide a successful web pause or invite a retry."""
+    from app.models import User, UserRole
+    from app.models.zentao_task_mirror import ZentaoTaskMirror
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    actor = User(username="pause_401", password_hash="x", role=UserRole.USER)
+    db_session.add(actor)
+    mirror = ZentaoTaskMirror(task_id=777, execution_id=1, name="task", status="doing")
+    db_session.add(mirror)
+    req.task_started_at = datetime(2026, 7, 21, 9, 0)
+    req.zentao_task_status_cache = "doing"
+    db_session.commit()
+
+    class UnauthorizedClient:
+        def get_task(self, task_id):
+            raise RuntimeError("401 Unauthorized")
+
+        def pause_task(self, task_id, **kwargs):
+            raise RuntimeError("401 Unauthorized")
+
+    broken = UnauthorizedClient()
+    system = FakeClient(status="doing")
+    web_calls = []
+    submitted = []
+
+    def fake_web_pause(login, task_id, *, comment=None):
+        web_calls.append((login.account, task_id))
+        system._task["status"] = "pause"
+        return {"result": "success"}
+
+    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+        submitted.append(day_rows)
+        return round(sum(hours for _, hours in day_rows), 2)
+
+    monkeypatch.setattr(tss, "get_user_zentao_client", lambda uid, db: broken)
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: system)
+    monkeypatch.setattr(
+        tss,
+        "get_user_zentao_web_login",
+        lambda uid, db: ZentaoWebLogin(base_url="http://z", account="pause_401", password="p"),
+    )
+    monkeypatch.setattr(tss, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(tss, "pause_task_via_web", fake_web_pause)
+    monkeypatch.setattr(tss, "submit_day_efforts", fake_submit)
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 7, 21, 11, 0))
+
+    result = ZentaoTaskSyncService(db_session).pause_requirement_task(req, acting_user=actor)
+
+    assert result["ok"] is True
+    assert result["errors"] == []
+    assert len(submitted) == 1
+    assert web_calls == [("pause_401", 777)]
+    assert not any(call[0] == "pause" for call in system.calls)
+    assert req.zentao_task_status_cache == "pause"
+    assert mirror.status == "pause"
+    assert mirror.efforts_submitted == req.task_efforts_submitted
+    assert mirror.local_started_at is None

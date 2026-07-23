@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import User, Version, VersionType
+from app.models import Requirement, User, Version, VersionType
 from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.services.holiday_service import get_holiday_map
 from app.services.sse_service import sse_publish
@@ -94,6 +94,37 @@ def _response_confirms_status(response, expected: str) -> bool:
 class ZentaoTaskMirrorService:
     def __init__(self, db: Session):
         self.db = db
+
+    def _linked_requirement(self, task_id: int) -> Optional[Requirement]:
+        return (
+            self.db.query(Requirement)
+            .filter(Requirement.zentao_task_id == int(task_id))
+            .first()
+        )
+
+    @staticmethod
+    def _hydrate_tracking_from_requirement(row: ZentaoTaskMirror, requirement: Optional[Requirement]) -> None:
+        """Use one clock/effort ledger for linked tasks in both UI views."""
+        if requirement is None:
+            return
+        row.local_started_at = requirement.task_started_at
+        row.consumed_accum = float(requirement.task_consumed_accum or 0.0)
+        row.efforts_submitted = float(requirement.task_efforts_submitted or 0.0)
+
+    @staticmethod
+    def _sync_requirement_from_mirror(row: ZentaoTaskMirror, requirement: Optional[Requirement]) -> None:
+        if requirement is None:
+            return
+        requirement.zentao_task_status_cache = row.status
+        requirement.zentao_task_assigned_to = row.assigned_to
+        requirement.task_started_at = row.local_started_at
+        requirement.task_consumed_accum = float(row.consumed_accum or 0.0)
+        requirement.task_efforts_submitted = float(row.efforts_submitted or 0.0)
+        status = str(row.status or "").strip().lower()
+        if status == "done":
+            requirement.task_finished_at = row.finished_date
+        elif status == "doing":
+            requirement.task_finished_at = None
 
     def _build_user_maps(self) -> tuple[dict[str, int], dict[str, int]]:
         """返回 (禅道账号→user_id, 真实姓名→user_id)。多数用户没设 zentao_account，
@@ -535,6 +566,8 @@ class ZentaoTaskMirrorService:
         row = self.db.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == task_id).first()
         if not row:
             raise HTTPException(status_code=404, detail="任务不存在或未同步")
+        linked_requirement = self._linked_requirement(task_id)
+        self._hydrate_tracking_from_requirement(row, linked_requirement)
         if action == "assign":
             assigned_to = (assigned_to or "").strip()
             if not assigned_to:
@@ -611,6 +644,46 @@ class ZentaoTaskMirrorService:
         # 无本人网页凭据/提交失败则退回一次性提交总累计。
         op_now = local_now()
         was_paused = (row.status or "").strip().lower() == "pause"
+
+        # Idempotency boundary before any effort submission. A previous action
+        # can be effective in Zentao while the caller only sees a 401/stale GET.
+        # In that case reconcile both local views and do not write the action or
+        # the running effort segment a second time.
+        if _expected:
+            for _, candidate in candidates:
+                current = self._fetch_one_task(candidate, task_id)
+                if not current:
+                    continue
+                current_status = str(current.get("status") or "").strip().lower()
+                if current_status == _expected:
+                    self._apply_task_data(row, current)
+                    if action == "pause":
+                        row.consumed_accum = self._auto_consumed_hours(row, op_now)
+                        row.local_started_at = None
+                    elif action in {"start", "reactivate"} and row.local_started_at is None:
+                        row.local_started_at = row.real_started or op_now
+                    elif action in {"finish", "close", "cancel"}:
+                        row.local_started_at = None
+                        if action == "finish" and not row.finished_date:
+                            row.finished_date = op_now
+                    self._sync_requirement_from_mirror(row, linked_requirement)
+                    self.db.commit()
+                    task_data = self._serialize(row)
+                    sse_publish(
+                        "zentao_task_changed",
+                        {
+                            "task_id": task_id,
+                            "status": task_data.get("status"),
+                            "action": action,
+                            "source": "task_workbench",
+                            "task": task_data,
+                        },
+                        channels=["global"],
+                    )
+                    return {"ok": True, "errors": [], "task": task_data, "idempotent": True}
+                # A successful read is authoritative; no need to ask a second
+                # account before performing the requested transition.
+                break
         finish_consumed = self._prepare_finish_consumed(row, current_user, op_now, explicit=consumed) if action == "finish" else 0.0
 
         # ⚠️ 暂停的分段工时必须在暂停「之前」提交：禅道对 pause 状态任务记工时会把
@@ -711,6 +784,17 @@ class ZentaoTaskMirrorService:
         for label, cli in candidates:
             current_actual_status = ""
             current_actual_assigned = ""
+            # The preceding account/web fallback may have completed the write
+            # even if its response raised. Check before another account repeats
+            # the same lifecycle action.
+            if _expected:
+                already = self._fetch_one_task(cli, row.task_id)
+                already_status = str((already or {}).get("status") or "").strip().lower()
+                if already_status == _expected:
+                    used_client = cli
+                    confirmed_task = already
+                    last_actual_status = already_status
+                    break
             try:
                 last_resp = _dispatch(label, cli)
             except HTTPException:
@@ -807,6 +891,7 @@ class ZentaoTaskMirrorService:
                     self._refresh_one_task(client, row)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("restore assignee task %s -> %s failed: %s", task_id, original_account, exc)
+        self._sync_requirement_from_mirror(row, linked_requirement)
         self.db.commit()
         task_data = self._serialize(row)
         if used_client is not None:

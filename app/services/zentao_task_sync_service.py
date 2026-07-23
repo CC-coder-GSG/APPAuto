@@ -126,6 +126,12 @@ class ZentaoTaskSyncService:
             return
         row.status = status
         row.synced_at = local_now()
+        # The requirement workbench and task board are two views of the same
+        # Zentao task. Keep lifecycle bookkeeping aligned too; otherwise a
+        # stale board row can submit the same running segment a second time.
+        row.local_started_at = requirement.task_started_at
+        row.consumed_accum = float(requirement.task_consumed_accum or 0.0)
+        row.efforts_submitted = float(requirement.task_efforts_submitted or 0.0)
         if status == "doing" and row.real_started is None and requirement.task_started_at:
             row.real_started = requirement.task_started_at
         if status == "done" and requirement.task_finished_at:
@@ -583,6 +589,12 @@ class ZentaoTaskSyncService:
 
         for label, client in candidates:
             response = None
+            # A previous attempt may have reached Zentao even if its response
+            # or immediate readback failed (notably after a 401). Do not repeat
+            # the lifecycle write when this candidate already sees the target.
+            actual = _readback(client)
+            if actual == expected:
+                return _succeed(client)
             try:
                 response = op(client)
             except Exception as exc:  # noqa: BLE001
@@ -677,6 +689,38 @@ class ZentaoTaskSyncService:
         """
         out: dict = {"ok": False, "errors": []}
         now = local_now()
+        # Pause is idempotent across both UI entry points.  Check Zentao before
+        # creating effort rows: the previous request may already have paused
+        # the task even though its response/readback ended with a 401.
+        if requirement.zentao_task_id:
+            task_id = int(requirement.zentao_task_id)
+            acting = get_user_zentao_client(acting_user.id, self.db) if acting_user is not None else None
+            system = get_system_zentao_client(self.db)
+            precheck_clients = []
+            if acting is not None:
+                precheck_clients.append(acting)
+            if system is not None and system is not acting:
+                precheck_clients.append(system)
+            for candidate in precheck_clients:
+                try:
+                    current_status = str((candidate.get_task(task_id) or {}).get("status") or "").strip().lower()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("precheck pause task %s failed: %s", task_id, exc)
+                    continue
+                if current_status == "pause":
+                    requirement.zentao_task_status_cache = "pause"
+                    # Reconcile a stale local clock without another external
+                    # effort. Do not force 0.1h: an earlier attempt may have
+                    # reset this clock only milliseconds ago after submitting.
+                    self._settle_consumed_segment(requirement, now, minimum=False)
+                    self._update_task_mirror_status(requirement, "pause")
+                    self._restore_assignee_if_changed(candidate, requirement)
+                    self.db.commit()
+                    out["ok"] = True
+                    self._publish_task_change(requirement, "pause", "pause")
+                    return out
+                if current_status:
+                    break
         presubmitted = self._try_submit_requirement_efforts(requirement, acting_user, now)
         if presubmitted is not None:
             requirement.task_efforts_submitted = round(float(requirement.task_efforts_submitted or 0.0) + presubmitted, 2)
@@ -687,13 +731,19 @@ class ZentaoTaskSyncService:
             client = self._client_or_error(out, acting_user)
             if client:
                 last_err: Optional[Exception] = None
+                verify_clients = [client]
+                system_verify = get_system_zentao_client(self.db)
+                if system_verify is not None and system_verify is not client:
+                    verify_clients.append(system_verify)
 
                 def _paused() -> bool:
-                    try:
-                        return str((client.get_task(task_id) or {}).get("status") or "").strip().lower() == "pause"
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning("verify pause task %s failed: %s", task_id, exc)
-                        return False
+                    for verify_client in verify_clients:
+                        try:
+                            if str((verify_client.get_task(task_id) or {}).get("status") or "").strip().lower() == "pause":
+                                return True
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("verify pause task %s failed: %s", task_id, exc)
+                    return False
 
                 try:
                     client.pause_task(task_id, comment=comment)
@@ -728,13 +778,16 @@ class ZentaoTaskSyncService:
             else:
                 # 无本人网页凭据/提交失败 → 旧口径：本地累计，完成时一次性提交
                 self._settle_consumed_segment(requirement, now)
+            # The verification helper updates the visible mirror status before
+            # these fields are finalized; copy the finalized tracking state too.
+            self._update_task_mirror_status(requirement, "pause")
         self.db.commit()
         out["ok"] = not out["errors"]
         if out["ok"]:
             self._publish_task_change(requirement, "pause", "pause")
         return out
 
-    def _settle_consumed_segment(self, requirement: Requirement, now) -> None:
+    def _settle_consumed_segment(self, requirement: Requirement, now, *, minimum: bool = True) -> None:
         """兜底口径：把「本段开始 → now」的工时结算进 task_consumed_accum 并清空计时起点。"""
         started = requirement.task_started_at
         if not started:
@@ -744,7 +797,7 @@ class ZentaoTaskSyncService:
         except Exception:
             hmap = {}
         segment = work_hours.consumed_hours(started, now, hmap)
-        if segment <= 0:
+        if segment <= 0 and minimum:
             segment = 0.1
         requirement.task_consumed_accum = round(float(requirement.task_consumed_accum or 0.0) + segment, 2)
         requirement.task_started_at = None

@@ -1082,6 +1082,46 @@ def test_pause_presubmit_keeps_clock_when_pause_ineffective(db_session, monkeypa
     assert row.local_started_at == datetime(2026, 7, 1, 11, 0)  # 新段起点=提交时刻，续跑不重复
 
 
+def test_stale_board_pause_is_idempotent_and_syncs_linked_requirement(db_session, monkeypatch):
+    """If Zentao is already paused, a stale board button must not add effort or pause again."""
+    from datetime import datetime
+
+    alice = _user(db_session, "alice_pause_idem", account="alice")
+    major = _major(db_session, "V-TW-IDEM")
+    req = _req(db_session, major.id, "r#idem", task_id=1203, owner_id=alice.id)
+    row = _mirror(db_session, 1203, alice.id, account="alice", status="doing")
+    req.zentao_task_status_cache = "doing"
+    req.task_started_at = datetime(2026, 7, 21, 11, 0)
+    req.task_efforts_submitted = 2.0
+    row.real_started = datetime(2026, 7, 21, 9, 0)
+    db_session.commit()
+
+    client = FakeClient()
+    client.set_task(1203, {"status": "pause", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_user_zentao_client", lambda uid, db: client)
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 21, 11, 0))
+    monkeypatch.setattr(
+        tms,
+        "submit_day_efforts",
+        lambda *args, **kwargs: pytest.fail("idempotent pause must not submit effort"),
+    )
+
+    result = ZentaoTaskMirrorService(db_session).operate_task(
+        task_id=1203, action="pause", current_user=alice
+    )
+
+    assert result["ok"] is True
+    assert result["idempotent"] is True
+    assert not any(call[0] == "pause" for call in client.calls)
+    assert row.status == "pause"
+    assert row.efforts_submitted == 2.0
+    assert row.local_started_at is None
+    assert req.zentao_task_status_cache == "pause"
+    assert req.task_efforts_submitted == 2.0
+    assert req.task_started_at is None
+
+
 # ─── 完成时间兜底：禅道 left=0 自动完成不写 finishedDate（2026-07-17）────────
 
 
