@@ -383,6 +383,32 @@ def test_lifecycle_via_status_choke_point(db_session, monkeypatch, req):
     assert any(c[0] == "restart" for c in client.calls)
 
 
+def test_cancel_test_completed_keeps_local_done_when_zentao_reactivate_fails(
+    db_session,
+    monkeypatch,
+    req,
+):
+    """禅道未激活时不得先取消本地完成态，避免任务看板与需求工作台分叉。"""
+    from app.services.requirement_service import RequirementService
+
+    req.test_completed = True
+    db_session.commit()
+    monkeypatch.setattr(
+        ZentaoTaskSyncService,
+        "reactivate_requirement_task",
+        lambda self, requirement, **kwargs: {
+            "ok": False,
+            "errors": ["禅道重新激活任务未生效"],
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        RequirementService(db_session)._mark_test_completed_transition(req, False)
+
+    assert exc_info.value.status_code == 502
+    assert req.test_completed is True
+
+
 # ─── 分段提交禅道工时记录（2026-07-17 工时口径升级）──────────────────────────
 
 

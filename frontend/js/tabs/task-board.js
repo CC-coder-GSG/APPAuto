@@ -782,7 +782,10 @@ function myUserId() {
 
 function ztIsMine(t) {
   const me = myUserId();
-  return me > 0 && Number(t.assignee_user_id || 0) === me;
+  const mappedToMe = me > 0 && Number(t.assignee_user_id || 0) === me;
+  const myAccount = String(window.currentUser?.zentao_account || '').trim().toLowerCase();
+  const taskAccount = String(t.assigned_to || '').trim().toLowerCase();
+  return mappedToMe || (!!myAccount && myAccount === taskAccount);
 }
 
 async function fetchZentaoTasks(opts = {}) {
@@ -1004,8 +1007,8 @@ function renderMonthView() {
   `;
 }
 
-// 禅道任务操作按钮（看板卡片与底部面板共用）：像任务工作台那样开始/暂停/完成/关闭。
-// 开始/暂停/完成仅指派人本人；关闭已完成任务额外放开给管理员
+// 禅道任务操作按钮（看板卡片与底部面板共用）：像任务工作台那样开始/暂停/完成/关闭/重新激活。
+// 开始/暂停/完成/重新激活仅指派人本人；关闭已完成任务额外放开给管理员
 // （与后端 /workbench/tasks/{id}/operate 权限一致）。
 function ztActionsHtml(t) {
   const mine = ztIsMine(t);
@@ -1023,6 +1026,9 @@ function ztActionsHtml(t) {
     if (t.status === 'pause') {
       parts.push(btn('▶ 继续', 'start', 'background:#16a34a;'));
       parts.push(btn('✅ 完成', 'finish', 'background:#0d9488;'));
+    }
+    if (t.status === 'done' || t.status === 'closed' || t.status === 'cancel') {
+      parts.push(btn('♻ 重新激活', 'reactivate', 'background:#0ea5e9;'));
     }
   }
   if ((mine || isAdmin) && t.status === 'done') parts.push(btn('⛔ 关闭', 'close', 'background:#fff; color:#b91c1c; border:1px solid #fca5a5;'));
@@ -1043,7 +1049,11 @@ export async function reloadZentaoFromMirror() {
 }
 
 export async function ztOperate(taskId, action) {
-  const confirmText = { finish: '确认将该任务标记为完成？', close: '确认关闭该任务？' }[action];
+  const confirmText = {
+    finish: '确认将该任务标记为完成？',
+    close: '确认关闭该任务？',
+    reactivate: '确认重新激活该任务？已登记工时会保留，并从当前时刻开始新的计时段。',
+  }[action];
   if (confirmText && !window.confirm(confirmText)) return;
   let consumed;
   if (action === 'finish') {
@@ -1067,7 +1077,12 @@ export async function ztOperate(taskId, action) {
     const res = await (await api(`/workbench/tasks/${taskId}/operate`, {
       method: 'POST', body: { action, ...(consumed !== undefined ? { consumed } : {}) },
     })).json();
-    if (res.ok) window.showMessage && window.showMessage('操作已同步禅道', 'success');
+    if (res.ok) {
+      const successText = action === 'reactivate'
+        ? '任务已重新激活，状态已同步禅道和各工作台'
+        : '操作已同步禅道';
+      window.showMessage && window.showMessage(successText, 'success');
+    }
     else window.showMessage && window.showMessage('禅道操作有异常：' + (res.errors || []).join('；'), 'error');
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '操作失败', 'error');

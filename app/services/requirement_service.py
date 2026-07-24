@@ -445,11 +445,54 @@ class RequirementService:
             requirement.test_completed = True
             requirement.test_completed_at = local_now()
         elif not test_completed and was_completed:
-            requirement.test_completed = False
-            requirement.test_completed_at = None
+            # 先确认禅道任务已经重新激活，再落本地未完成状态，避免两个系统分叉。
             self._sync_zentao_task_on_test_completed(requirement, finished=False, acting_user=acting_user)
+            self.reopen_after_task_reactivation(requirement, actor_id=getattr(acting_user, "id", None))
         else:
             requirement.test_completed = bool(test_completed)
+
+    def reopen_after_task_reactivation(
+        self,
+        requirement: Requirement,
+        *,
+        actor_id: int | None = None,
+    ) -> bool:
+        """把已完成需求恢复为待测试，并清理依赖于该完成节点的复测结论。"""
+        changed = bool(requirement.test_completed or requirement.retest_completed)
+        requirement.test_completed = False
+        requirement.test_completed_at = None
+        requirement.retest_completed = False
+        requirement.retest_passed = None
+        requirement.retested_by_id = None
+        requirement.retested_at = None
+        requirement.retest_minor_version_id = None
+        self.recalculate_requirement_status(requirement, actor_id=actor_id)
+        return changed
+
+    @staticmethod
+    def _publish_completion_status(requirement: Requirement) -> None:
+        """完成态提交后通知所有工作台读取同一份最新数据。"""
+        sse_publish(
+            "retest_requirement_status_changed",
+            {
+                "requirement_id": requirement.id,
+                "test_completed": bool(requirement.test_completed),
+                "retest_completed": bool(requirement.retest_completed),
+                "retest_passed": requirement.retest_passed,
+                "status": (
+                    requirement.status.value
+                    if hasattr(requirement.status, "value")
+                    else str(requirement.status)
+                ),
+                "owner_id": requirement.owner_id,
+                "source": "requirement_workbench",
+            },
+            channels=(
+                ["global", f"user:{requirement.owner_id}"]
+                if requirement.owner_id
+                else ["global"]
+            ),
+        )
 
     def _sync_zentao_task_on_test_completed(
         self,
@@ -462,8 +505,8 @@ class RequirementService:
         """测试完成勾选/取消 → 禅道子任务 完成 / 重新激活。
 
         仅在该需求绑定了禅道子任务、且操作者是子任务指派人时才联动禅道；否则只保留
-        本地记录（对应「非指派人勾选完成只做本地记录」）。禅道通信异常不影响本地
-        状态流转；工时参数/缺少计时依据等校验异常会返回前端要求用户处理。
+        本地记录（对应「非指派人勾选完成只做本地记录」）。需要联动禅道时，通信或
+        状态校验失败不落本地状态，避免各工作台和禅道分叉。
         """
         if not self._may_drive_zentao_task(requirement, acting_user):
             return
@@ -471,18 +514,25 @@ class RequirementService:
             from app.services.zentao_task_sync_service import ZentaoTaskSyncService
             svc = ZentaoTaskSyncService(self.db)
             if finished:
-                svc.finish_requirement_task(requirement, acting_user=acting_user, consumed=consumed)
+                result = svc.finish_requirement_task(requirement, acting_user=acting_user, consumed=consumed)
             else:
-                svc.reactivate_requirement_task(requirement, acting_user=acting_user)
+                result = svc.reactivate_requirement_task(requirement, acting_user=acting_user)
+            if not result.get("ok"):
+                errors = [str(item) for item in (result.get("errors") or []) if item]
+                raise HTTPException(
+                    status_code=502,
+                    detail="；".join(errors) or "禅道任务状态未切换",
+                )
         except HTTPException:
-            # 参数/计时校验必须反馈给前端，不能按普通禅道同步异常吞掉。
+            # 参数、计时和禅道状态校验必须反馈给前端，不能静默制造双状态。
             raise
-        except Exception as exc:  # noqa: BLE001 — 禅道侧失败不阻断本地
+        except Exception as exc:  # noqa: BLE001
             import logging
             logging.getLogger(__name__).warning(
                 "zentao task sync on test_completed=%s req=%s failed: %s",
                 finished, requirement.id, exc,
             )
+            raise HTTPException(status_code=502, detail=f"禅道任务同步失败：{exc}") from exc
 
     def recalculate_requirement_status(self, requirement: Requirement, actor_id: int | None = None) -> Requirement:
         old_status_obj = requirement.status
@@ -907,6 +957,8 @@ class RequirementService:
 
         self.recalculate_requirement_status(requirement, actor_id=current_user.id)
         self.db.commit()
+        if test_completed is not None:
+            self._publish_completion_status(requirement)
         audit(
             self.db,
             action="requirement.patch_status",
@@ -969,16 +1021,7 @@ class RequirementService:
             target_id=str(requirement.id),
             detail=f"test_completed={test_completed}",
         )
-        sse_publish(
-            "retest_requirement_status_changed",
-            {
-                "requirement_id": requirement.id,
-                "test_completed": requirement.test_completed,
-                "status": requirement.status.value if hasattr(requirement.status, "value") else str(requirement.status),
-                "owner_id": requirement.owner_id,
-            },
-            channels=["global", f"user:{requirement.owner_id}"] if requirement.owner_id else ["global"],
-        )
+        self._publish_completion_status(requirement)
         if test_completed:
             sse_publish(
                 "retest_requirement_created",
@@ -1098,6 +1141,7 @@ class RequirementService:
         )
         self.recalculate_requirement_status(requirement, actor_id=actor_id)
         self.db.commit()
+        self._publish_completion_status(requirement)
         self.db.refresh(execution)
         audit(
             self.db,

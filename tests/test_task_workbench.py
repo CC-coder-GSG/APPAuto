@@ -307,6 +307,80 @@ def test_operate_task_pause_then_resume(db_session, monkeypatch):
     assert row.status == "doing"
 
 
+@pytest.mark.parametrize("initial_status", ["done", "closed"])
+def test_reactivate_linked_completed_task_syncs_requirement_and_keeps_effort_ledger(
+    db_session,
+    monkeypatch,
+    initial_status,
+):
+    """任务看板重新激活后，禅道/镜像/需求工作台共用状态和原工时账本。"""
+    from datetime import datetime
+
+    alice = _user(db_session, f"alice_reactivate_{initial_status}", account="alice")
+    major = _major(db_session, f"V-REACT-{initial_status}")
+    req = _req(
+        db_session,
+        major.id,
+        f"r#react-{initial_status}",
+        task_id=7771 if initial_status == "done" else 7772,
+        owner_id=alice.id,
+    )
+    req.case_completed = True
+    req.test_completed = True
+    req.retest_completed = True
+    req.retest_passed = True
+    req.status = RequirementStatus.RETEST_DONE
+    req.task_efforts_submitted = 2.5
+    task_id = int(req.zentao_task_id)
+    row = _mirror(db_session, task_id, alice.id, account="alice", status=initial_status)
+    row.consumed = 2.5
+    row.efforts_submitted = 2.5
+    db_session.commit()
+
+    now = datetime(2026, 7, 24, 10, 30)
+    client = FakeClient()
+    client.set_task(
+        task_id,
+        {
+            "status": initial_status,
+            "assignedTo": {"account": "alice"},
+            "consumed": 2.5,
+        },
+    )
+    events = []
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tms, "local_now", lambda: now)
+    monkeypatch.setattr(
+        tms,
+        "sse_publish",
+        lambda event, payload, channels=None: events.append((event, payload, channels)),
+    )
+
+    result = ZentaoTaskMirrorService(db_session).operate_task(
+        task_id=task_id,
+        action="reactivate",
+        current_user=alice,
+    )
+
+    assert result["ok"] is True
+    assert any(call[0] == "restart" for call in client.calls)
+    assert row.status == "doing"
+    assert row.local_started_at == now
+    assert row.consumed_accum == 0.0
+    assert row.efforts_submitted == 2.5
+    assert req.zentao_task_status_cache == "doing"
+    assert req.task_started_at == now
+    assert req.task_efforts_submitted == 2.5
+    assert req.test_completed is False
+    assert req.retest_completed is False
+    assert req.retest_passed is None
+    assert req.status == RequirementStatus.CASE_DONE
+    task_event = next(payload for event, payload, _ in events if event == "zentao_task_changed")
+    assert task_event["requirement_id"] == req.id
+    reopen_event = next(payload for event, payload, _ in events if event == "retest_requirement_status_changed")
+    assert reopen_event["test_completed"] is False
+
+
 def test_operate_hours_settlement_excludes_pause(db_session, monkeypatch):
     """独立任务工时自动结算：暂停结算本段并停表，继续重新起算，
     完成上报「累计 + 最后一段」，暂停期不计入。"""

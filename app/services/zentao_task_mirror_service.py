@@ -126,6 +126,47 @@ class ZentaoTaskMirrorService:
         elif status == "doing":
             requirement.task_finished_at = None
 
+    def _sync_requirement_reactivated(
+        self,
+        requirement: Optional[Requirement],
+        *,
+        actor_id: Optional[int],
+    ) -> bool:
+        """重新激活关联任务时，同时重新打开需求工作台中的完成态。"""
+        if requirement is None or not (requirement.test_completed or requirement.retest_completed):
+            return False
+        from app.services.requirement_service import RequirementService
+
+        RequirementService(self.db).reopen_after_task_reactivation(
+            requirement,
+            actor_id=actor_id,
+        )
+        return True
+
+    @staticmethod
+    def _publish_requirement_reactivated(requirement: Optional[Requirement]) -> None:
+        if requirement is None:
+            return
+        sse_publish(
+            "retest_requirement_status_changed",
+            {
+                "requirement_id": requirement.id,
+                "test_completed": bool(requirement.test_completed),
+                "status": (
+                    requirement.status.value
+                    if hasattr(requirement.status, "value")
+                    else str(requirement.status)
+                ),
+                "owner_id": requirement.owner_id,
+                "source": "task_reactivate",
+            },
+            channels=(
+                ["global", f"user:{requirement.owner_id}"]
+                if requirement.owner_id
+                else ["global"]
+            ),
+        )
+
     def _build_user_maps(self) -> tuple[dict[str, int], dict[str, int]]:
         """返回 (禅道账号→user_id, 真实姓名→user_id)。多数用户没设 zentao_account，
         故同时按真实姓名兜底映射，保证任务看板 scope=mine 能匹配到本人。"""
@@ -667,6 +708,14 @@ class ZentaoTaskMirrorService:
                         if action == "finish" and not row.finished_date:
                             row.finished_date = op_now
                     self._sync_requirement_from_mirror(row, linked_requirement)
+                    requirement_reactivated = (
+                        self._sync_requirement_reactivated(
+                            linked_requirement,
+                            actor_id=current_user.id,
+                        )
+                        if action == "reactivate"
+                        else False
+                    )
                     self.db.commit()
                     task_data = self._serialize(row)
                     sse_publish(
@@ -676,10 +725,13 @@ class ZentaoTaskMirrorService:
                             "status": task_data.get("status"),
                             "action": action,
                             "source": "task_workbench",
+                            "requirement_id": linked_requirement.id if linked_requirement else None,
                             "task": task_data,
                         },
                         channels=["global"],
                     )
+                    if requirement_reactivated:
+                        self._publish_requirement_reactivated(linked_requirement)
                     return {"ok": True, "errors": [], "task": task_data, "idempotent": True}
                 # A successful read is authoritative; no need to ask a second
                 # account before performing the requested transition.
@@ -892,6 +944,14 @@ class ZentaoTaskMirrorService:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("restore assignee task %s -> %s failed: %s", task_id, original_account, exc)
         self._sync_requirement_from_mirror(row, linked_requirement)
+        requirement_reactivated = (
+            self._sync_requirement_reactivated(
+                linked_requirement,
+                actor_id=current_user.id,
+            )
+            if used_client is not None and action == "reactivate"
+            else False
+        )
         self.db.commit()
         task_data = self._serialize(row)
         if used_client is not None:
@@ -902,10 +962,13 @@ class ZentaoTaskMirrorService:
                     "status": task_data.get("status"),
                     "action": action,
                     "source": "task_workbench",
+                    "requirement_id": linked_requirement.id if linked_requirement else None,
                     "task": task_data,
                 },
                 channels=["global"],
             )
+            if requirement_reactivated:
+                self._publish_requirement_reactivated(linked_requirement)
         return {"ok": not errors, "errors": errors, "task": task_data}
 
     def _local_segment_start(self, row: ZentaoTaskMirror) -> Optional[datetime]:

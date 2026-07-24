@@ -1437,6 +1437,36 @@ function bindMineSSE() {
     }, 500);
   });
 
+  // 任务看板/任务工作台执行开始、完成或重新激活后，需求工作台同步刷新
+  // 禅道状态标签；重新激活关联任务时也会同步取消「测试完成」。
+  window.OmniQASSE.subscribe('zentao_task_changed', ({ payload }) => {
+    if (!payload?.task_id || !window.isWorkbenchSubtabActive?.('demand')) return;
+    if (window._mineSSETaskTimer) clearTimeout(window._mineSSETaskTimer);
+    window._mineSSETaskTimer = setTimeout(() => {
+      window._mineSSETaskTimer = null;
+      loadMyWorkbench().catch(() => {});
+    }, 400);
+  });
+  window.OmniQASSE.subscribe('final_test_requirement_status_changed', ({ payload }) => {
+    const myId = Number(state.currentUser?.id || window.currentUser?.id || 0);
+    if (payload?.user_id && myId && Number(payload.user_id) !== myId) return;
+    if (!window.isWorkbenchSubtabActive?.('demand')) return;
+    if (window._mineSSEFinalTestTimer) clearTimeout(window._mineSSEFinalTestTimer);
+    window._mineSSEFinalTestTimer = setTimeout(() => {
+      window._mineSSEFinalTestTimer = null;
+      loadMyWorkbench().catch(() => {});
+    }, 400);
+  });
+  window.OmniQASSE.subscribe('retest_requirement_status_changed', ({ payload }) => {
+    if (!Object.prototype.hasOwnProperty.call(payload || {}, 'test_completed')) return;
+    if (!window.isWorkbenchSubtabActive?.('demand')) return;
+    if (window._mineSSECompletionTimer) clearTimeout(window._mineSSECompletionTimer);
+    window._mineSSECompletionTimer = setTimeout(() => {
+      window._mineSSECompletionTimer = null;
+      loadMyWorkbench().catch(() => {});
+    }, 400);
+  });
+
   // 新 bug（执行阶段挂载到需求）：在需求卡片上显示琥珀色流光，不进主角标
   window.OmniQASSE.subscribe('bug_created', ({ payload }) => {
     const reqId = Number(payload?.requirement_id || 0);

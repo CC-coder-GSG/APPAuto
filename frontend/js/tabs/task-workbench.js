@@ -73,6 +73,11 @@ function renderTaskActions(t) {
       parts.push(`<button style="padding:2px 10px; font-size:12px; color:#b91c1c; border-color:#fca5a5;"
         onclick="event.stopPropagation(); taskWorkbenchOperate(${t.task_id}, 'close')">⛔ 关闭</button>`);
     }
+    if (t.assigned_to_me && (t.status === 'done' || t.status === 'closed' || t.status === 'cancel')) {
+      parts.push(`<button style="padding:2px 10px; font-size:12px; background:#0ea5e9;"
+        onclick="event.stopPropagation(); taskWorkbenchOperate(${t.task_id}, 'reactivate')"
+        title="重新激活任务，并同步取消需求工作台的测试完成状态">♻ 重新激活</button>`);
+    }
     parts.push(effortBtn);
     parts.push(assignBtn);
     return wrap(parts);
@@ -623,3 +628,19 @@ window.OmniQATaskWorkbenchTab = {
   closeTaskAssignModal,
   confirmTaskAssign,
 };
+
+let taskWorkbenchSseBound = false;
+function bindTaskWorkbenchSSE() {
+  if (taskWorkbenchSseBound || !window.OmniQASSE?.subscribe) return;
+  window.OmniQASSE.subscribe('zentao_task_changed', () => {
+    if (!window.isWorkbenchSubtabActive?.('task')) return;
+    if (window._taskWorkbenchSSERefreshTimer) clearTimeout(window._taskWorkbenchSSERefreshTimer);
+    window._taskWorkbenchSSERefreshTimer = setTimeout(() => {
+      window._taskWorkbenchSSERefreshTimer = null;
+      loadTaskWorkbench().catch(() => {});
+    }, 400);
+  });
+  taskWorkbenchSseBound = true;
+}
+bindTaskWorkbenchSSE();
+setTimeout(bindTaskWorkbenchSSE, 3000);

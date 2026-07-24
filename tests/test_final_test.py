@@ -207,6 +207,42 @@ def test_final_test_finish_only_for_task_assignee(db_session, monkeypatch):
     assert calls == [r.id]
 
 
+def test_final_test_cancel_keeps_record_done_when_zentao_reactivate_fails(db_session, monkeypatch):
+    major = _major(db_session, "V9013")
+    admin = _user(db_session, "ft_admin13", role=UserRole.ADMIN)
+    assignee = _user(db_session, "ft_assignee13")
+    assignee.zentao_account = "acc13"
+    req = _req(db_session, major.id, "r#9713", owner_id=assignee.id)
+    req.zentao_task_id = 1300
+    req.zentao_task_assigned_to = "acc13"
+    db_session.commit()
+    FinalTestService(db_session).toggle(major.id, True, admin)
+    record = FinalTestRecord(
+        requirement_id=req.id,
+        user_id=assignee.id,
+        test_completed=True,
+    )
+    db_session.add(record)
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.services.zentao_task_sync_service.ZentaoTaskSyncService.reactivate_requirement_task",
+        lambda self, requirement, **kwargs: {
+            "ok": False,
+            "errors": ["禅道重新激活任务未生效"],
+        },
+    )
+
+    import pytest
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc_info:
+        FinalTestService(db_session).upsert_record(req.id, assignee, test_completed=False)
+
+    assert exc_info.value.status_code == 502
+    db_session.refresh(record)
+    assert record.test_completed is True
+
+
 def test_start_task_blocked_for_non_assignee(db_session):
     """开始任务：即便是负责人，若不是子任务指派人也被拒绝（仅指派人可开始）。"""
     import pytest

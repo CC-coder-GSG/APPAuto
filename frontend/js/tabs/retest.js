@@ -463,6 +463,15 @@ function bindRetestSSE() {
   window.OmniQASSE.subscribe('retest_requirement_status_changed', ({ payload }) => {
     const reqId = Number(payload?.requirement_id || 0);
     if (!reqId) return;
+    if (payload?.test_completed === false) {
+      if (window._retestSSEReopenTimer) clearTimeout(window._retestSSEReopenTimer);
+      window._retestSSEReopenTimer = setTimeout(() => {
+        window._retestSSEReopenTimer = null;
+        if (!window.isWorkbenchSubtabActive?.('retest')) return;
+        loadRetest().catch(() => {});
+      }, 400);
+      return;
+    }
     const el = document.querySelector(`.retest-req-card[data-req-id='${reqId}']`);
     if (!el) return;
     // 通过 → 明快绿；不通过 → 深邃紫
