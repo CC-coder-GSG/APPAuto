@@ -276,6 +276,41 @@ def test_sync_tasks_status_for_major_updates_cache_and_assignee(db_session, monk
     assert out["updated"] == 1
 
 
+def test_sync_tasks_status_derives_changed_from_left_and_finish_fact(
+    db_session,
+    monkeypatch,
+    setup,
+):
+    setup["r1"].zentao_task_id = 701
+    setup["r1"].zentao_task_status_cache = "wait"
+    db_session.commit()
+    completed = [{
+        "id": 701,
+        "type": "test",
+        "story": 6706,
+        "parent": 9000,
+        "status": "changed",
+        "left": 0,
+        "finishedDate": "2026-07-24 17:19:11",
+        "assignedTo": {"account": "alice"},
+    }]
+    client = FakeClient(existing_tasks=completed)
+    _patch_client(monkeypatch, client)
+
+    ZentaoTaskSyncService(db_session).sync_tasks_status_for_major(setup["major"].id)
+    db_session.refresh(setup["r1"])
+    assert setup["r1"].zentao_task_status_cache == "done"
+
+    # restart 后禅道仍保留旧 finishedDate，但 left>0，必须恢复为活动态。
+    client._existing_tasks = [{
+        **completed[0],
+        "left": 3,
+    }]
+    ZentaoTaskSyncService(db_session).sync_tasks_status_for_major(setup["major"].id)
+    db_session.refresh(setup["r1"])
+    assert setup["r1"].zentao_task_status_cache == "changed"
+
+
 def test_unassigned_when_no_account_match(db_session, monkeypatch, setup):
     # 可指派列表里没有 bob 的姓名/账号 → 列入 unassigned
     client = FakeClient(assignable={"alice": "爱丽丝"})

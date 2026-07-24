@@ -391,7 +391,9 @@ def test_reactivate_changed_status_syncs_all_views_without_fallback(
     class ChangedRestartClient(FakeClient):
         def restart_task(self, task_id, **kw):
             self.calls.append(("restart", task_id, kw))
-            self._tasks.setdefault(task_id, {}).update({"status": "changed"})
+            self._tasks.setdefault(task_id, {}).update(
+                {"status": "changed", "left": kw.get("left")}
+            )
             return {"id": task_id, "status": "changed"}
 
     alice = _user(db_session, "alice_changed", account="alice")
@@ -443,6 +445,77 @@ def test_reactivate_changed_status_syncs_all_views_without_fallback(
     assert req.task_started_at == now
     assert req.test_completed is False
     assert req.status == RequirementStatus.CASE_DONE
+
+
+def test_finish_changed_status_syncs_done_without_duplicate_effort(
+    db_session,
+    monkeypatch,
+):
+    """看板完成任务后状态仍为 changed 时，完成事实应归一为 done 且只写一条工时。"""
+    from datetime import datetime
+
+    class ChangedFinishClient(FakeClient):
+        def finish_task(self, task_id, **kw):
+            self.calls.append(("finish", task_id, kw))
+            task = self._tasks.setdefault(task_id, {})
+            task.update(
+                {
+                    "status": "changed",
+                    "left": 0,
+                    "finishedDate": kw.get("finished_date"),
+                    "consumed": float(task.get("consumed") or 0.0)
+                    + float(kw.get("current_consumed") or 0.0),
+                }
+            )
+            return {"id": task_id, "status": "changed"}
+
+    alice = _user(db_session, "alice_finish_changed", account="alice")
+    _major(db_session, "V-FINISH-CHANGED")
+    row = _mirror(db_session, 7799, alice.id, account="alice", status="changed")
+    row.left = 3.0
+    row.local_started_at = datetime(2026, 7, 24, 16, 0)
+    db_session.commit()
+
+    acting = ChangedFinishClient()
+    acting.set_task(
+        7799,
+        {
+            "status": "changed",
+            "left": 3.0,
+            "assignedTo": {"account": "alice"},
+            "consumed": 6.0,
+            "finishedDate": "2026-07-06 18:45:02",
+        },
+    )
+    system = FakeClient()
+    system.set_task(7799, {"status": "changed", "left": 3.0})
+    web_calls = []
+    monkeypatch.setattr(tms, "get_user_zentao_client", lambda uid, db: acting)
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: system)
+    monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: object())
+    monkeypatch.setattr(tms, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(
+        tms,
+        "finish_task_via_web",
+        lambda *args, **kwargs: web_calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 7, 24, 17, 0))
+    monkeypatch.setattr(tms, "get_holiday_map", lambda db, a, b: {})
+
+    result = ZentaoTaskMirrorService(db_session).operate_task(
+        task_id=7799,
+        action="finish",
+        current_user=alice,
+    )
+
+    assert result["ok"] is True
+    assert [call[0] for call in acting.calls].count("finish") == 1
+    assert web_calls == []
+    assert system.calls == []
+    assert row.status == "done"
+    assert row.left == 0
+    assert row.local_started_at is None
+    assert row.finished_date == datetime(2026, 7, 24, 17, 0)
 
 
 def test_operate_hours_settlement_excludes_pause(db_session, monkeypatch):

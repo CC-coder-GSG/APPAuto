@@ -22,6 +22,7 @@ from app.services.zentao_system_client import (
     get_user_zentao_client,
     get_user_zentao_web_login,
 )
+from app.services.zentao_task_status import effective_task_status
 from app.services.zentao_effort_service import AUTO_NOTE, merge_extra_hours, submit_day_efforts
 from app.services.zentao_web_session import (
     ZentaoWebSessionError,
@@ -86,7 +87,7 @@ def _response_confirms_status(response, expected: str) -> bool:
     candidates = (response, response.get("data"), response.get("task"))
     return any(
         isinstance(item, dict)
-        and str(item.get("status") or "").strip().lower() == expected
+        and effective_task_status(item) == expected
         for item in candidates
     )
 
@@ -276,7 +277,7 @@ class ZentaoTaskMirrorService:
             row.is_parent = 1 if _coerce_int(t.get("isParent")) else 0
             row.name = str(t.get("name") or "")[:255]
             row.type = t.get("type")
-            row.status = t.get("status")
+            row.status = effective_task_status(t)
             row.pri = _coerce_int(t.get("pri"))
             row.story = _coerce_int(t.get("story"))
             row.assigned_to = account
@@ -682,8 +683,13 @@ class ZentaoTaskMirrorService:
             # 该状态表示任务已经重新打开，业务上与 doing 一样是活动态。
             _accepted_statuses.add("changed")
 
-        def _status_matches(status: str) -> bool:
-            return str(status or "").strip().lower() in _accepted_statuses
+        def _status_matches(task_or_status) -> bool:
+            status = (
+                effective_task_status(task_or_status)
+                if isinstance(task_or_status, dict)
+                else str(task_or_status or "").strip().lower()
+            )
+            return status in _accepted_statuses
 
         # 工时结算（暂停期不计工时）：操作前先固化时点与暂停态——dispatch 生效后
         # _refresh_one_task 会把 row.status 刷成新状态，之后就读不到操作前的状态了。
@@ -703,7 +709,7 @@ class ZentaoTaskMirrorService:
                 current = self._fetch_one_task(candidate, task_id)
                 if not current:
                     continue
-                current_status = str(current.get("status") or "").strip().lower()
+                current_status = effective_task_status(current)
                 if _status_matches(current_status):
                     self._apply_task_data(row, current)
                     if action == "pause":
@@ -826,7 +832,7 @@ class ZentaoTaskMirrorService:
                 # the immediately following task read is temporarily stale.
                 if action == "finish" and _response_confirms_status(resp, _expected):
                     return resp
-                if _status_matches((cli.get_task(task_id) or {}).get("status")):
+                if _status_matches(cli.get_task(task_id) or {}):
                     return resp
             except Exception as exc:  # noqa: BLE001 — REST 失败/未生效都尝试网页会话
                 logger.warning("%s via REST (%s) task %s failed: %s", action, label, task_id, exc)
@@ -852,7 +858,7 @@ class ZentaoTaskMirrorService:
             # the same lifecycle action.
             if _expected:
                 already = self._fetch_one_task(cli, row.task_id)
-                already_status = str((already or {}).get("status") or "").strip().lower()
+                already_status = effective_task_status(already)
                 if _status_matches(already_status):
                     used_client = cli
                     confirmed_task = already
@@ -870,7 +876,7 @@ class ZentaoTaskMirrorService:
             # 把回读到的其他状态提交进本地镜像，前端随后刷新就像本地操作成功了一样。
             fresh = self._fetch_one_task(cli, row.task_id)
             if fresh:
-                current_actual_status = str(fresh.get("status") or "").strip().lower()
+                current_actual_status = effective_task_status(fresh)
                 current_actual_assigned, _ = _account_of(fresh.get("assignedTo"))
                 last_actual_status = current_actual_status
                 last_actual_assigned = current_actual_assigned
@@ -1128,7 +1134,7 @@ class ZentaoTaskMirrorService:
         account, realname = _account_of(t.get("assignedTo"))
         by_account, by_name = self._build_user_maps()
         if t.get("status") is not None:
-            row.status = t.get("status")
+            row.status = effective_task_status(t)
         if account:
             row.assigned_to = account
             row.assigned_to_realname = realname or row.assigned_to_realname

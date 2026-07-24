@@ -253,12 +253,14 @@ def test_reactivate_accepts_changed_and_never_repeats_restart(db_session, monkey
         def restart_task(self, task_id, *, consumed, left, assigned_to=None):
             self.calls.append(("restart", task_id, consumed, left))
             self._apply("changed")
+            self._task["left"] = left
             return {"id": task_id, "status": self._task["status"]}
 
     actor = User(username="changed_actor", password_hash="x", role=UserRole.USER)
     db_session.add(actor)
     db_session.commit()
-    acting = ChangedRestartClient(status="done")
+    acting = ChangedRestartClient(status="changed")
+    acting._task.update({"left": 0, "finishedDate": "2026-07-24 17:19:11"})
     system = FakeClient(status="done")
     web_calls = []
     monkeypatch.setattr(tss, "get_user_zentao_client", lambda uid, db: acting)
@@ -287,6 +289,68 @@ def test_reactivate_accepts_changed_and_never_repeats_restart(db_session, monkey
     assert req.zentao_task_status_cache == "changed"
     assert req.task_started_at is not None
     assert req.task_consumed_accum == 0.0
+
+
+def test_finish_accepts_completed_changed_and_never_repeats_effort(
+    db_session,
+    monkeypatch,
+    req,
+):
+    """ipd4.3 完成后仍返回 changed：left=0 + finishedDate 应确认完成并停止所有兜底。"""
+    from app.models import User, UserRole
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    class ChangedFinishClient(FakeClient):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self._task.update({"left": 3.0, "finishedDate": None})
+
+        def finish_task(self, task_id, *, current_consumed, finished_date=None, assigned_to=None):
+            self.calls.append(("finish", task_id, current_consumed, finished_date))
+            self._task.update(
+                {
+                    "status": "changed",
+                    "left": 0,
+                    "finishedDate": finished_date,
+                    "consumed": float(self._task.get("consumed") or 0.0) + current_consumed,
+                }
+            )
+            return {"id": task_id, "status": "changed"}
+
+    actor = User(username="changed_finish_actor", password_hash="x", role=UserRole.USER)
+    db_session.add(actor)
+    db_session.commit()
+    acting = ChangedFinishClient(status="changed")
+    system = FakeClient(status="changed")
+    web_calls = []
+    monkeypatch.setattr(tss, "get_user_zentao_client", lambda uid, db: acting)
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: system)
+    monkeypatch.setattr(
+        tss,
+        "get_user_zentao_web_login",
+        lambda uid, db: ZentaoWebLogin(base_url="http://z", account="tester", password="p"),
+    )
+    monkeypatch.setattr(tss, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(
+        tss,
+        "finish_task_via_web",
+        lambda *args, **kwargs: web_calls.append((args, kwargs)),
+    )
+
+    result = ZentaoTaskSyncService(db_session).finish_requirement_task(
+        req,
+        acting_user=actor,
+        consumed=0.1,
+    )
+
+    assert result["ok"] is True
+    assert [call[0] for call in acting.calls].count("finish") == 1
+    assert web_calls == []
+    assert system.calls == []
+    assert req.zentao_task_status_cache == "done"
+    assert req.task_finished_at is not None
+    assert req.task_started_at is None
+    assert req.task_efforts_submitted == 0.1
 
 
 # ─── 工时结算：暂停期不计工时 ────────────────────────────────────────────

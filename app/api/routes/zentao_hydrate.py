@@ -51,6 +51,7 @@ from app.services.zentao_normalizer import (
     normalize_story_detail,
     normalize_testcase_detail,
 )
+from app.services.zentao_task_status import effective_task_status
 
 # Rewrite Zentao file URLs inside rich-text HTML to the local /zentao/files/{id}
 # proxy so the browser can load them without a direct Zentao session. Mirrors
@@ -318,7 +319,7 @@ def get_task_detail(
         "id": raw.get("id"),
         "name": raw.get("name"),
         "type": raw.get("type"),
-        "status": raw.get("status"),
+        "status": effective_task_status(raw),
         "pri": raw.get("pri"),
         "story": raw.get("story"),
         "story_title": raw.get("storyTitle"),

@@ -34,6 +34,7 @@ from app.services.zentao_system_client import (
     get_user_zentao_client,
     get_user_zentao_web_login,
 )
+from app.services.zentao_task_status import effective_task_status, raw_task_status
 from app.services.zentao_effort_service import AUTO_NOTE, merge_extra_hours, submit_day_efforts
 from app.services.zentao_web_session import (
     ZentaoWebSessionError,
@@ -94,7 +95,7 @@ _DEAD_TASK_STATUSES = {"cancel", "closed"}
 
 
 def _task_status(t: dict) -> str:
-    return str((t or {}).get("status") or "").strip().lower()
+    return raw_task_status(t)
 
 
 def _response_confirms_status(response, expected: str) -> bool:
@@ -102,7 +103,10 @@ def _response_confirms_status(response, expected: str) -> bool:
     if not isinstance(response, dict):
         return False
     candidates = (response, response.get("data"), response.get("task"))
-    return any(isinstance(item, dict) and _task_status(item) == expected for item in candidates)
+    return any(
+        isinstance(item, dict) and effective_task_status(item) == expected
+        for item in candidates
+    )
 
 
 def _is_dead_task(t: Optional[dict]) -> bool:
@@ -485,7 +489,7 @@ class ZentaoTaskSyncService:
             t = by_id.get(int(req.zentao_task_id))
             if not t:
                 continue
-            status = _task_status(t) or None
+            status = effective_task_status(t) or None
             acc = _task_account(t)
             if status and req.zentao_task_status_cache != status:
                 req.zentao_task_status_cache = status
@@ -585,7 +589,7 @@ class ZentaoTaskSyncService:
 
         def _readback(client) -> str:
             try:
-                return str((client.get_task(task_id) or {}).get("status") or "").strip().lower()
+                return effective_task_status(client.get_task(task_id) or {})
             except Exception as exc:  # noqa: BLE001
                 logger.warning("readback task %s after %s failed: %s", task_id, zh, exc)
                 return ""
@@ -714,7 +718,7 @@ class ZentaoTaskSyncService:
                 precheck_clients.append(system)
             for candidate in precheck_clients:
                 try:
-                    current_status = str((candidate.get_task(task_id) or {}).get("status") or "").strip().lower()
+                    current_status = effective_task_status(candidate.get_task(task_id) or {})
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("precheck pause task %s failed: %s", task_id, exc)
                     continue
