@@ -8,7 +8,7 @@ import { renderCaseReviewControls } from '../components/case-review.js?v=2026071
 let reviewData = [];
 let reviewSseBound = false;
 
-const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
+const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', changed: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
 
 export async function loadReviewWorkbench() {
   const majorId = Number(document.getElementById('reviewMajorSelect')?.value || 0);

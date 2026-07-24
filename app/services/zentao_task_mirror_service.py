@@ -123,7 +123,7 @@ class ZentaoTaskMirrorService:
         status = str(row.status or "").strip().lower()
         if status == "done":
             requirement.task_finished_at = row.finished_date
-        elif status == "doing":
+        elif status in {"doing", "changed"}:
             requirement.task_finished_at = None
 
     def _sync_requirement_reactivated(
@@ -676,6 +676,14 @@ class ZentaoTaskMirrorService:
             raise HTTPException(status_code=400, detail="实际工时需在 0~999 小时之间")
 
         _expected = {"start": "doing", "pause": "pause", "reactivate": "doing", "finish": "done", "close": "closed", "cancel": "cancel"}.get(action)
+        _accepted_statuses = {_expected} if _expected else set()
+        if action == "reactivate":
+            # 禅道 ipd4.3 对已完成任务执行 restart 后会返回 changed；
+            # 该状态表示任务已经重新打开，业务上与 doing 一样是活动态。
+            _accepted_statuses.add("changed")
+
+        def _status_matches(status: str) -> bool:
+            return str(status or "").strip().lower() in _accepted_statuses
 
         # 工时结算（暂停期不计工时）：操作前先固化时点与暂停态——dispatch 生效后
         # _refresh_one_task 会把 row.status 刷成新状态，之后就读不到操作前的状态了。
@@ -696,12 +704,15 @@ class ZentaoTaskMirrorService:
                 if not current:
                     continue
                 current_status = str(current.get("status") or "").strip().lower()
-                if current_status == _expected:
+                if _status_matches(current_status):
                     self._apply_task_data(row, current)
                     if action == "pause":
                         row.consumed_accum = self._auto_consumed_hours(row, op_now)
                         row.local_started_at = None
-                    elif action in {"start", "reactivate"} and row.local_started_at is None:
+                    elif action == "reactivate":
+                        row.consumed_accum = 0.0
+                        row.local_started_at = op_now
+                    elif action == "start" and row.local_started_at is None:
                         row.local_started_at = row.real_started or op_now
                     elif action in {"finish", "close", "cancel"}:
                         row.local_started_at = None
@@ -815,7 +826,7 @@ class ZentaoTaskMirrorService:
                 # the immediately following task read is temporarily stale.
                 if action == "finish" and _response_confirms_status(resp, _expected):
                     return resp
-                if str((cli.get_task(task_id) or {}).get("status") or "").strip().lower() == _expected:
+                if _status_matches((cli.get_task(task_id) or {}).get("status")):
                     return resp
             except Exception as exc:  # noqa: BLE001 — REST 失败/未生效都尝试网页会话
                 logger.warning("%s via REST (%s) task %s failed: %s", action, label, task_id, exc)
@@ -842,7 +853,7 @@ class ZentaoTaskMirrorService:
             if _expected:
                 already = self._fetch_one_task(cli, row.task_id)
                 already_status = str((already or {}).get("status") or "").strip().lower()
-                if already_status == _expected:
+                if _status_matches(already_status):
                     used_client = cli
                     confirmed_task = already
                     last_actual_status = already_status
@@ -876,7 +887,7 @@ class ZentaoTaskMirrorService:
                 # 指派按回读的指派人校验（状态不变化）
                 took_effect = (current_actual_assigned or "").strip().lower() == assigned_to.strip().lower()
             else:
-                took_effect = response_confirmed or not _expected or current_actual_status == _expected
+                took_effect = response_confirmed or not _expected or _status_matches(current_actual_status)
             if took_effect:
                 used_client = cli
                 confirmed_task = fresh
@@ -893,7 +904,8 @@ class ZentaoTaskMirrorService:
                 )
             else:
                 errors.append(
-                    f"禅道未生效：任务当前状态为「{last_actual_status or '未知'}」（期望「{_expected}」）。"
+                    f"禅道未生效：任务当前状态为「{last_actual_status or '未知'}」"
+                    f"（期望「{' / '.join(sorted(_accepted_statuses))}」）。"
                     f"禅道返回：{str(last_resp)[:200]}"
                 )
 

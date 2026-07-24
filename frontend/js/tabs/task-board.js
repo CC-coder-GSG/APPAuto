@@ -742,6 +742,7 @@ function bindSSE() {
 const ZT_STATUS_META = {
   wait:   { label: '未开始', bg: '#f1f5f9', color: '#475569' },
   doing:  { label: '进行中', bg: '#eff6ff', color: '#1d4ed8' },
+  changed:{ label: '进行中', bg: '#eff6ff', color: '#1d4ed8' },
   done:   { label: '已完成', bg: '#f0fdf4', color: '#15803d' },
   pause:  { label: '已暂停', bg: '#fefce8', color: '#a16207' },
   cancel: { label: '已取消', bg: '#f1f5f9', color: '#94a3b8' },
@@ -750,7 +751,7 @@ const ZT_STATUS_META = {
 
 // 禅道状态 → 普通看板分栏（暂停归入进行中；关闭/取消任务不进入普通列）。
 // done 任务还会由 zentaoForBoard 复制到「已完成但未关闭」补充列。
-const ZT_BOARD_MAP = { wait: 'todo', doing: 'in_progress', pause: 'in_progress', done: 'done' };
+const ZT_BOARD_MAP = { wait: 'todo', doing: 'in_progress', changed: 'in_progress', pause: 'in_progress', done: 'done' };
 
 // 按看板日期推导禅道任务归列（延期与历史回看都在这里算）：
 // - 未完成(wait/doing/pause)且看板日期已过截止 → 「延期」列，此后每天持续出现直到完成；
@@ -1019,7 +1020,7 @@ function ztActionsHtml(t) {
   const parts = [];
   if (mine) {
     if (t.status === 'wait') parts.push(btn('▶ 开始', 'start', 'background:#16a34a;'));
-    if (t.status === 'doing') {
+    if (t.status === 'doing' || t.status === 'changed') {
       parts.push(btn('⏸ 暂停', 'pause', 'background:#d97706;'));
       parts.push(btn('✅ 完成', 'finish', 'background:#0d9488;'));
     }

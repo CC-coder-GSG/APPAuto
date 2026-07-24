@@ -468,7 +468,7 @@ function openTestcase(id) {
 }
 
 // ─── Task renderer ──────────────────────────────────────────────────────────
-const _TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
+const _TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', changed: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
 
 function _renderTask(data) {
   const { meta } = _setHeader('task', data);

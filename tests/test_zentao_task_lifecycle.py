@@ -244,6 +244,51 @@ def test_reactivate_calls_restart(db_session, monkeypatch, req):
     assert req.task_consumed_accum == 0.0
 
 
+def test_reactivate_accepts_changed_and_never_repeats_restart(db_session, monkeypatch, req):
+    """ipd4.3 激活已完成任务后返回 changed：应视为成功且不能走网页/系统账号重复激活。"""
+    from app.models import User, UserRole
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    class ChangedRestartClient(FakeClient):
+        def restart_task(self, task_id, *, consumed, left, assigned_to=None):
+            self.calls.append(("restart", task_id, consumed, left))
+            self._apply("changed")
+            return {"id": task_id, "status": self._task["status"]}
+
+    actor = User(username="changed_actor", password_hash="x", role=UserRole.USER)
+    db_session.add(actor)
+    db_session.commit()
+    acting = ChangedRestartClient(status="done")
+    system = FakeClient(status="done")
+    web_calls = []
+    monkeypatch.setattr(tss, "get_user_zentao_client", lambda uid, db: acting)
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: system)
+    monkeypatch.setattr(
+        tss,
+        "get_user_zentao_web_login",
+        lambda uid, db: ZentaoWebLogin(base_url="http://z", account="tester", password="p"),
+    )
+    monkeypatch.setattr(tss, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(
+        tss,
+        "restart_task_via_web",
+        lambda *args, **kwargs: web_calls.append((args, kwargs)),
+    )
+
+    svc = ZentaoTaskSyncService(db_session)
+    first = svc.reactivate_requirement_task(req, acting_user=actor)
+    second = svc.reactivate_requirement_task(req, acting_user=actor)
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert [call[0] for call in acting.calls].count("restart") == 1
+    assert web_calls == []
+    assert system.calls == []
+    assert req.zentao_task_status_cache == "changed"
+    assert req.task_started_at is not None
+    assert req.task_consumed_accum == 0.0
+
+
 # ─── 工时结算：暂停期不计工时 ────────────────────────────────────────────
 
 def test_pause_settles_segment_and_stops_clock(db_session, monkeypatch, req):

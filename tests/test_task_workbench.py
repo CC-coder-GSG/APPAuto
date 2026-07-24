@@ -381,6 +381,70 @@ def test_reactivate_linked_completed_task_syncs_requirement_and_keeps_effort_led
     assert reopen_event["test_completed"] is False
 
 
+def test_reactivate_changed_status_syncs_all_views_without_fallback(
+    db_session,
+    monkeypatch,
+):
+    """看板重新激活返回 changed 时，镜像和需求工作台都成功打开且只提交一次 restart。"""
+    from datetime import datetime
+
+    class ChangedRestartClient(FakeClient):
+        def restart_task(self, task_id, **kw):
+            self.calls.append(("restart", task_id, kw))
+            self._tasks.setdefault(task_id, {}).update({"status": "changed"})
+            return {"id": task_id, "status": "changed"}
+
+    alice = _user(db_session, "alice_changed", account="alice")
+    major = _major(db_session, "V-REACT-CHANGED")
+    req = _req(
+        db_session,
+        major.id,
+        "r#react-changed",
+        task_id=7788,
+        owner_id=alice.id,
+    )
+    req.case_completed = True
+    req.test_completed = True
+    req.status = RequirementStatus.TEST_DONE
+    req.task_efforts_submitted = 6.0
+    row = _mirror(db_session, 7788, alice.id, account="alice", status="done")
+    row.consumed = 6.0
+    row.efforts_submitted = 6.0
+    db_session.commit()
+
+    now = datetime(2026, 7, 24, 16, 45)
+    acting = ChangedRestartClient()
+    acting.set_task(
+        7788,
+        {"status": "done", "assignedTo": {"account": "alice"}, "consumed": 6.0},
+    )
+    system = FakeClient()
+    system.set_task(7788, {"status": "done", "assignedTo": {"account": "alice"}})
+    monkeypatch.setattr(tms, "get_user_zentao_client", lambda uid, db: acting)
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: system)
+    monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: None)
+    monkeypatch.setattr(tms, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(tms, "local_now", lambda: now)
+
+    result = ZentaoTaskMirrorService(db_session).operate_task(
+        task_id=7788,
+        action="reactivate",
+        current_user=alice,
+    )
+
+    assert result["ok"] is True
+    assert [call[0] for call in acting.calls].count("restart") == 1
+    assert system.calls == []
+    assert row.status == "changed"
+    assert row.local_started_at == now
+    assert row.consumed_accum == 0.0
+    assert row.efforts_submitted == 6.0
+    assert req.zentao_task_status_cache == "changed"
+    assert req.task_started_at == now
+    assert req.test_completed is False
+    assert req.status == RequirementStatus.CASE_DONE
+
+
 def test_operate_hours_settlement_excludes_pause(db_session, monkeypatch):
     """独立任务工时自动结算：暂停结算本段并停表，继续重新起算，
     完成上报「累计 + 最后一段」，暂停期不计入。"""

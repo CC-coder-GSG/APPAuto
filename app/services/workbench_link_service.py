@@ -448,7 +448,7 @@ class WorkbenchLinkService:
         return result, auto_linked_story_bug_map
 
     # 任务状态展示优先级：进行中 > 未开始 > 已暂停 > 已完成 > 取消/关闭
-    _TASK_STATUS_ORDER = {"doing": 0, "wait": 1, "pause": 2, "done": 3, "cancel": 4, "closed": 5}
+    _TASK_STATUS_ORDER = {"doing": 0, "changed": 0, "wait": 1, "pause": 2, "done": 3, "cancel": 4, "closed": 5}
 
     def build_story_task_map(self, reqs: list[Requirement]) -> dict[int, list[dict[str, Any]]]:
         """需求 → 禅道 story 关联任务列表（来自任务镜像，含当前指派人）。

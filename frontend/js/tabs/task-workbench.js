@@ -18,13 +18,14 @@ let hideClosed = false;
 // 批量关闭：勾选的任务 id。
 const selectedTaskIds = new Set();
 
-const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
+const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', changed: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
 
 function taskMatchesFilter(t) {
   const s = String(t.status || '');
   if (hideClosed && statusFilter !== 'closed' && (s === 'closed' || s === 'cancel')) return false;
   if (statusFilter === 'all') return true;
   if (statusFilter === 'closed') return s === 'closed' || s === 'cancel';
+  if (statusFilter === 'doing') return s === 'doing' || s === 'changed';
   return s === statusFilter;
 }
 
@@ -118,7 +119,7 @@ function renderTaskActions(t) {
   // 可操作：独立任务，或需求归属他人的衍生任务（本人是任务指派人）。
   const isDone = status === 'done';
   const isClosed = status === 'closed' || status === 'cancel';
-  const isDoing = status === 'doing';
+  const isDoing = status === 'doing' || status === 'changed';
   const isPaused = status === 'pause';
   const parts = [];
   if (isClosed) {

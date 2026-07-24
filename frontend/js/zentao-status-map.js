@@ -9,6 +9,7 @@ export const ZENTAO_STATUS_MAP = {
   changing: '变更中',
   wait: '待处理',
   doing: '进行中',
+  changed: '进行中',
   developing: '开发完成',
   testing: '测试中',
   tested: '测试完成',

@@ -31,6 +31,7 @@ function renderZentaoCheckBadge(item) {
 // story 关联禅道任务标签（与 mine.js 一致）：最多平铺 3 个，其余折叠 +N
 const TASK_CHIP_TONE = {
   doing: { zh: '进行中', bg: '#eff6ff', fg: '#1d4ed8', bd: '#bfdbfe' },
+  changed: { zh: '进行中', bg: '#eff6ff', fg: '#1d4ed8', bd: '#bfdbfe' },
   wait: { zh: '未开始', bg: '#f8fafc', fg: '#475569', bd: '#e2e8f0' },
   pause: { zh: '已暂停', bg: '#fffbeb', fg: '#b45309', bd: '#fde68a' },
   done: { zh: '已完成', bg: '#f0fdf4', fg: '#15803d', bd: '#bbf7d0' },

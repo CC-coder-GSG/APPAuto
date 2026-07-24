@@ -86,6 +86,7 @@ function renderZentaoCheckBadge(item) {
 // 其余折叠进「+N」，点击展开/收起；点任务标签打开禅道任务预览。
 const TASK_CHIP_TONE = {
   doing: { zh: '进行中', bg: '#eff6ff', fg: '#1d4ed8', bd: '#bfdbfe' },
+  changed: { zh: '进行中', bg: '#eff6ff', fg: '#1d4ed8', bd: '#bfdbfe' },
   wait: { zh: '未开始', bg: '#f8fafc', fg: '#475569', bd: '#e2e8f0' },
   pause: { zh: '已暂停', bg: '#fffbeb', fg: '#b45309', bd: '#fde68a' },
   done: { zh: '已完成', bg: '#f0fdf4', fg: '#15803d', bd: '#bbf7d0' },
@@ -1226,7 +1227,7 @@ export async function loadMyWorkbench() {
   renderMineCards();
 }
 
-const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
+const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', changed: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
 
 // 「开始」按钮（放在用例/测试勾选框之前）。仅在关联了禅道任务时显示，并按任务状态切换：
 //   wait（已关联未开始）→ 可点「开始」
@@ -1240,7 +1241,7 @@ function renderTaskStartControl(req) {
   if (status === 'done' || req.test_completed) {
     return `<button class="secondary" disabled style="padding:2px 10px; font-size:12px; opacity:.7;">✅ 任务已完成</button>`;
   }
-  if (status === 'doing') {
+  if (status === 'doing' || status === 'changed') {
     // 进行中：可暂停（禅道同步暂停）。
     return `<button style="padding:2px 10px; font-size:12px; background:#d97706;" onclick="pauseReqTask(${req.id})" title="暂停任务，禅道子任务同步暂停">⏸ 暂停</button>`;
   }

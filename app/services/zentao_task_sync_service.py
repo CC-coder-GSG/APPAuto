@@ -132,7 +132,7 @@ class ZentaoTaskSyncService:
         row.local_started_at = requirement.task_started_at
         row.consumed_accum = float(requirement.task_consumed_accum or 0.0)
         row.efforts_submitted = float(requirement.task_efforts_submitted or 0.0)
-        if status == "doing" and row.real_started is None and requirement.task_started_at:
+        if status in {"doing", "changed"} and row.real_started is None and requirement.task_started_at:
             row.real_started = requirement.task_started_at
         if status == "done" and requirement.task_finished_at:
             row.finished_date = requirement.task_finished_at
@@ -535,6 +535,7 @@ class ZentaoTaskSyncService:
         requirement: Requirement,
         *,
         expected: str,
+        accepted_statuses: Optional[set[str]] = None,
         op,
         acting_user: Optional[User],
         out: dict,
@@ -572,6 +573,15 @@ class ZentaoTaskSyncService:
             web_logins["system"] = get_system_zentao_web_login(self.db)
         last_err: Optional[Exception] = None
         actual = ""
+        accepted = {
+            str(status or "").strip().lower()
+            for status in (accepted_statuses or {expected})
+            if str(status or "").strip()
+        }
+        accepted.add(str(expected or "").strip().lower())
+
+        def _matches(status: str) -> bool:
+            return str(status or "").strip().lower() in accepted
 
         def _readback(client) -> str:
             try:
@@ -580,9 +590,10 @@ class ZentaoTaskSyncService:
                 logger.warning("readback task %s after %s failed: %s", task_id, zh, exc)
                 return ""
 
-        def _succeed(client) -> bool:
-            requirement.zentao_task_status_cache = expected
-            self._update_task_mirror_status(requirement, expected)
+        def _succeed(client, actual_status: str = "") -> bool:
+            confirmed_status = str(actual_status or expected).strip().lower()
+            requirement.zentao_task_status_cache = confirmed_status
+            self._update_task_mirror_status(requirement, confirmed_status)
             if restore_assignee:
                 self._restore_assignee_if_changed(client, requirement)
             return True
@@ -593,8 +604,8 @@ class ZentaoTaskSyncService:
             # or immediate readback failed (notably after a 401). Do not repeat
             # the lifecycle write when this candidate already sees the target.
             actual = _readback(client)
-            if actual == expected:
-                return _succeed(client)
+            if _matches(actual):
+                return _succeed(client, actual)
             try:
                 response = op(client)
             except Exception as exc:  # noqa: BLE001
@@ -606,8 +617,8 @@ class ZentaoTaskSyncService:
             if accept_response_status and _response_confirms_status(response, expected):
                 return _succeed(client)
             actual = _readback(client)
-            if actual == expected:
-                return _succeed(client)
+            if _matches(actual):
+                return _succeed(client, actual)
             # REST 未生效 → 同账号网页 cookie 会话兜底（操作人归属不变）
             web = web_logins.get(label)
             if web_op is not None and web is not None:
@@ -617,8 +628,8 @@ class ZentaoTaskSyncService:
                     last_err = exc
                     logger.warning("%s task %s via %s web session failed: %s", zh, task_id, label, exc)
                 actual = _readback(client)
-                if actual == expected:
-                    return _succeed(client)
+                if _matches(actual):
+                    return _succeed(client, actual)
         detail = f"：{last_err}" if last_err else "（禅道返回成功但状态未切换）"
         out["errors"].append(f"禅道{zh}任务未生效{detail}")
         return False
@@ -981,17 +992,26 @@ class ZentaoTaskSyncService:
                 restart_task_via_web(web, task_id, left=left, assigned_to=(requirement.zentao_task_assigned_to or None))
 
             confirmed = self._operate_task_with_verify(
-                requirement, expected="doing", op=_op, acting_user=acting_user, out=out, zh="重新激活", web_op=_web_op
+                requirement,
+                expected="doing",
+                accepted_statuses={"doing", "changed"},
+                op=_op,
+                acting_user=acting_user,
+                out=out,
+                zh="重新激活",
+                web_op=_web_op,
             )
         if confirmed:
             requirement.task_finished_at = None
             requirement.task_started_at = now
             requirement.task_consumed_accum = 0.0
-            self._update_task_mirror_status(requirement, "doing")
+            active_status = str(requirement.zentao_task_status_cache or "doing").strip().lower()
+            self._update_task_mirror_status(requirement, active_status)
         self.db.commit()
         out["ok"] = not out["errors"]
         if out["ok"]:
-            self._publish_task_change(requirement, "doing", "reactivate")
+            active_status = str(requirement.zentao_task_status_cache or "doing").strip().lower()
+            self._publish_task_change(requirement, active_status, "reactivate")
         return out
 
 
