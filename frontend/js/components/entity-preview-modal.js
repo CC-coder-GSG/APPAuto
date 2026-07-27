@@ -474,6 +474,7 @@ function _renderTask(data) {
   const { meta } = _setHeader('task', data);
   const body = document.getElementById('entityPreviewBody');
   const statusZh = _TASK_STATUS_ZH[data.status] || data.status || '';
+  const isCompleted = data.status === 'done' || data.status === 'closed';
   const bits = [];
   // 父/子任务标识
   if (data.is_parent) {
@@ -503,6 +504,7 @@ function _renderTask(data) {
         ${row('预计开始', data.est_started)}
         ${row('截止日期', data.deadline)}
         ${row('实际开始', _fmtDate(data.real_started))}
+        ${row('完成者', isCompleted ? (data.finished_by || '禅道未记录') : '')}
         ${row('完成时间', _fmtDate(data.finished_date))}
       </table>
     </div>

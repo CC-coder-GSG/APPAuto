@@ -289,10 +289,10 @@ def get_task_detail(
             return {"error": "not_found", "message": f"禅道中找不到任务 #{task_id}"}
         return {"error": "fetch_failed", "message": "拉取禅道任务详情失败"}
 
-    def _acc(v):
+    def _acc(v, realname=None):
         if isinstance(v, dict):
-            return v.get("realname") or v.get("account") or ""
-        return str(v or "")
+            return v.get("realname") or realname or v.get("account") or ""
+        return str(realname or v or "")
 
     def _local(v):
         dt = parse_external_datetime_to_local_naive(v) if v else None
@@ -326,7 +326,8 @@ def get_task_detail(
         "parent": parent_id or None,
         "is_parent": is_parent,
         "parent_name": parent_name,
-        "assigned_to": _acc(raw.get("assignedTo")),
+        "assigned_to": _acc(raw.get("assignedTo"), raw.get("assignedToRealName")),
+        "finished_by": _acc(raw.get("finishedBy"), raw.get("finishedByRealName")),
         "estimate": raw.get("estimate"),
         "consumed": raw.get("consumed"),
         "left": raw.get("left"),
