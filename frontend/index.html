@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20260721-2">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20260728-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
@@ -2406,15 +2406,25 @@ async function switchWorkbenchSubtab(name, options={}){
   if(target==='demand') window.OmniQAFeatureTreeTab?.refreshWorkbenchEntry?.();
 }
 window.switchWorkbenchSubtab = switchWorkbenchSubtab;
-// 工作台子导航吸顶：滚动越过头部后固定在 tabs 栏下方，压缩高度节省版面（样式见 weave.css）
+// 工作台子导航吸顶：固定在 tabs 栏下方。判断使用正常文档流位置，
+// 避免吸顶样式反过来影响 getBoundingClientRect() 而在临界点反复切换。
 (function initWorkbenchStickyHeader(){
   const header=document.querySelector('#tab-mine .workbench-shell-header');
   if(!header) return;
   const appHeader=document.querySelector('.app-header');
+  const tabs=document.getElementById('tabs');
   function stickyTopPx(){
-    if(!appHeader || !appHeader.offsetHeight) return 8;
-    const headerTop=parseFloat(getComputedStyle(appHeader).top)||0;
-    return Math.round(headerTop+appHeader.offsetHeight+6);
+    const appHeaderTop=appHeader ? (parseFloat(getComputedStyle(appHeader).top)||0) : 0;
+    const appHeaderBottom=appHeader ? appHeaderTop+appHeader.offsetHeight : 0;
+    if(!tabs || !tabs.offsetHeight) return Math.round(appHeaderBottom+6)||8;
+    const tabsTop=parseFloat(getComputedStyle(tabs).top);
+    const tabsBottom=(Number.isFinite(tabsTop) ? tabsTop : appHeaderBottom)+tabs.offsetHeight;
+    return Math.round(Math.max(appHeaderBottom, tabsBottom)+6);
+  }
+  function normalFlowTop(element){
+    let top=0;
+    for(let node=element; node; node=node.offsetParent) top+=node.offsetTop;
+    return top;
   }
   let pending=false;
   function apply(){
@@ -2422,7 +2432,7 @@ window.switchWorkbenchSubtab = switchWorkbenchSubtab;
     if(!header.offsetHeight){ header.classList.remove('is-stuck'); return; }
     const top=stickyTopPx();
     header.style.setProperty('--workbench-header-top', `${top}px`);
-    header.classList.toggle('is-stuck', header.getBoundingClientRect().top<=top+1);
+    header.classList.toggle('is-stuck', window.scrollY>=normalFlowTop(header)-top);
   }
   function schedule(){ if(!pending){ pending=true; requestAnimationFrame(apply); } }
   window.addEventListener('scroll', schedule, {passive:true});
