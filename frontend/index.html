@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20260728-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20260728-2">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
@@ -2406,20 +2406,29 @@ async function switchWorkbenchSubtab(name, options={}){
   if(target==='demand') window.OmniQAFeatureTreeTab?.refreshWorkbenchEntry?.();
 }
 window.switchWorkbenchSubtab = switchWorkbenchSubtab;
-// 工作台子导航吸顶：固定在 tabs 栏下方。判断使用正常文档流位置，
-// 避免吸顶样式反过来影响 getBoundingClientRect() 而在临界点反复切换。
+// 工作台子导航吸顶：桌面端 tabs 是左侧整屏导航，不能把其高度计入 top；
+// 吸顶压缩造成的高度差用 margin-bottom 等量补回，避免临界点布局抖动。
 (function initWorkbenchStickyHeader(){
   const header=document.querySelector('#tab-mine .workbench-shell-header');
   if(!header) return;
   const appHeader=document.querySelector('.app-header');
   const tabs=document.getElementById('tabs');
+  const narrowLayout=window.matchMedia('(max-width: 900px)');
   function stickyTopPx(){
     const appHeaderTop=appHeader ? (parseFloat(getComputedStyle(appHeader).top)||0) : 0;
     const appHeaderBottom=appHeader ? appHeaderTop+appHeader.offsetHeight : 0;
-    if(!tabs || !tabs.offsetHeight) return Math.round(appHeaderBottom+6)||8;
+    // ≥901px 时 #tabs 是左侧 fixed rail，高度接近整个视口，与纵向吸顶偏移无关。
+    if(!narrowLayout.matches || !tabs || !tabs.offsetHeight){
+      return Math.round(appHeaderBottom+6)||8;
+    }
+    // 窄屏下 #tabs 才是顶部横向导航，需要排在它的实际底边之后。
     const tabsTop=parseFloat(getComputedStyle(tabs).top);
     const tabsBottom=(Number.isFinite(tabsTop) ? tabsTop : appHeaderBottom)+tabs.offsetHeight;
     return Math.round(Math.max(appHeaderBottom, tabsBottom)+6);
+  }
+  function clearStuckState(){
+    header.classList.remove('is-stuck');
+    header.style.removeProperty('margin-bottom');
   }
   function normalFlowTop(element){
     let top=0;
@@ -2427,16 +2436,55 @@ window.switchWorkbenchSubtab = switchWorkbenchSubtab;
     return top;
   }
   let pending=false;
+  let geometryDirty=true;
+  let normalTop=0;
+  let expandedHeight=0;
+  function measureNormalGeometry(){
+    clearStuckState();
+    const rect=header.getBoundingClientRect();
+    normalTop=normalFlowTop(header);
+    expandedHeight=rect.height;
+    geometryDirty=false;
+  }
+  function applyStuckState(){
+    if(header.classList.contains('is-stuck')) return;
+    header.classList.add('is-stuck');
+    const compactHeight=header.getBoundingClientRect().height;
+    // 保持后续内容的文档流位置不变，防止浏览器滚动锚定把临界点来回推过阈值。
+    header.style.marginBottom=`${Math.max(0, expandedHeight-compactHeight)}px`;
+  }
   function apply(){
     pending=false;
-    if(!header.offsetHeight){ header.classList.remove('is-stuck'); return; }
+    if(!header.offsetHeight){
+      clearStuckState();
+      geometryDirty=true;
+      return;
+    }
     const top=stickyTopPx();
     header.style.setProperty('--workbench-header-top', `${top}px`);
-    header.classList.toggle('is-stuck', window.scrollY>=normalFlowTop(header)-top);
+    if(geometryDirty) measureNormalGeometry();
+    if(!header.classList.contains('is-stuck')){
+      const rect=header.getBoundingClientRect();
+      normalTop=normalFlowTop(header);
+      expandedHeight=rect.height;
+    }
+    if(window.scrollY>=Math.max(0, normalTop-top)) applyStuckState();
+    else clearStuckState();
   }
   function schedule(){ if(!pending){ pending=true; requestAnimationFrame(apply); } }
   window.addEventListener('scroll', schedule, {passive:true});
-  window.addEventListener('resize', schedule);
+  window.addEventListener('resize', ()=>{ geometryDirty=true; schedule(); });
+  window.addEventListener('load', ()=>{ geometryDirty=true; schedule(); });
+  if(window.ResizeObserver){
+    new ResizeObserver(()=>{
+      if(!header.classList.contains('is-stuck')){ geometryDirty=true; schedule(); }
+    }).observe(header);
+  }
+  const mineSection=document.getElementById('tab-mine');
+  if(mineSection && window.MutationObserver){
+    new MutationObserver(()=>{ geometryDirty=true; schedule(); })
+      .observe(mineSection, {attributes:true, attributeFilter:['class']});
+  }
   schedule();
 })();
 function applyTabVisibility(){

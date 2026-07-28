@@ -1274,9 +1274,8 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
 }
 
 /* ── 工作台子导航吸顶 ─────────────────────────────────────
-   滚动越过头部后 .workbench-shell-header 固定在 tabs 栏下方；
-   吸顶前后保持完全相同的几何尺寸，避免滚动临界点发生布局反馈抖动。
-   top 由 index.html 的 initWorkbenchStickyHeader 按顶部栏和 tabs 实际高度写入。 */
+   滚动越过头部后固定在顶部栏下方，并恢复为紧凑的常驻操作条；
+   JS 会用 margin-bottom 补偿压缩的高度差，避免临界点布局反馈抖动。 */
 .workbench-shell-header {
   position: sticky;
   top: var(--workbench-header-top, 116px);
@@ -1289,11 +1288,19 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
     border-color var(--w-fast) ease;
 }
 .workbench-shell-header.is-stuck {
+  align-items: center;
   background: color-mix(in srgb, var(--w-canvas) 82%, transparent);
   backdrop-filter: saturate(160%) blur(14px);
   -webkit-backdrop-filter: saturate(160%) blur(14px);
   border-color: var(--w-hairline);
   box-shadow: 0 10px 24px rgba(28, 25, 23, 0.07);
+}
+.workbench-shell-header.is-stuck h2 { font-size: 15px !important; }
+.workbench-shell-header.is-stuck .muted { display: none; }
+.workbench-shell-header.is-stuck .workbench-subnav { gap: 6px; }
+.workbench-shell-header.is-stuck .workbench-subnav button {
+  padding: 4px 12px !important;
+  font-size: 12.5px !important;
 }
 
 /* 复制节点选择态：顶部横幅 + 画布"可选"光标 */
