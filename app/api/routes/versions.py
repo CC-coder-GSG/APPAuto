@@ -52,15 +52,16 @@ def create_version(payload: VersionCreatePayload, _: object = Depends(get_curren
         exists = db.query(Version).filter(
             Version.version_type == VersionType.MAJOR,
             Version.version_no == version_no,
+            Version.software_id == resolved_software_id,
         ).first()
         if exists:
             raise HTTPException(status_code=400, detail=f'大版本重复：{version_no} 已存在')
     else:
-        # 唯一约束是 (version_no, version_type) 全局，必须做全局判重；
-        # 否则手动新增的小版本号若与禅道同步进来的其他父下同名，会 IntegrityError → 500。
+        # 同一个软件内版本号唯一；不同软件允许复用常见版本号。
         exists = db.query(Version).filter(
             Version.version_type == VersionType.MINOR,
             Version.version_no == version_no,
+            Version.software_id == resolved_software_id,
         ).first()
         if exists:
             parent_no = exists.parent.version_no if exists.parent else None
@@ -122,6 +123,7 @@ def update_version(version_id: int, payload: VersionCreatePayload, current_user=
             Version.id != version_id,
             Version.version_type == VersionType.MAJOR,
             Version.version_no == version_no,
+            Version.software_id == resolved_software_id,
         ).first()
         if exists:
             raise HTTPException(status_code=400, detail=f'大版本重复：{version_no} 已存在')
@@ -130,6 +132,7 @@ def update_version(version_id: int, payload: VersionCreatePayload, current_user=
             Version.id != version_id,
             Version.version_type == VersionType.MINOR,
             Version.version_no == version_no,
+            Version.software_id == resolved_software_id,
         ).first()
         if exists:
             parent_no = exists.parent.version_no if exists.parent else None

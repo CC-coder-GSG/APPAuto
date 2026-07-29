@@ -13,7 +13,17 @@ from app.utils.time_utils import local_now
 
 class Version(Base):
     __tablename__ = "versions"
-    __table_args__ = (UniqueConstraint("version_no", "version_type", name="uq_version_no_type"),)
+    # Version numbers are only unique inside one software product.  Different
+    # products commonly reuse names such as V1.0, and every product needs its
+    # own unclassified bucket for Zentao bugs that have no execution/build.
+    __table_args__ = (
+        UniqueConstraint(
+            "software_id",
+            "version_no",
+            "version_type",
+            name="uq_version_software_no_type",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     version_no: Mapped[str] = mapped_column(String(30), nullable=False, index=True)

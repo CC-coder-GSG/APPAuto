@@ -24,6 +24,8 @@ class SoftwareFromZentaoPayload(BaseModel):
     name: str
     zentao_project_id: int
     zentao_project_name: Optional[str] = None
+    zentao_product_id: Optional[int] = None
+    zentao_product_name: Optional[str] = None
     sync_minor: bool = True
 
 
@@ -73,8 +75,8 @@ async def create_software_from_zentao(
     合并入口：新建软件 + 锚定禅道项目 + 立即同步版本。
 
     一步完成「数据管理」里原本拆成三步的流程（建软件 → 选禅道项目 → 开始同步）。
-    选中的禅道项目 id 会作为软件的 ``zentao_product_id`` 锚点存下来，后续同步/对账
-    可直接复用，不必每次手填。
+    禅道项目 ID 只用于同步执行/构建；Bug 同步所需的产品 ID 会从项目执行详情
+    的 ``products`` 字段解析，不能把项目 ID 当作产品 ID 保存。
     """
     ensure_admin(current_user)
     name = (payload.name or "").strip()
@@ -88,8 +90,8 @@ async def create_software_from_zentao(
 
     item = SoftwareProduct(
         name=name,
-        zentao_product_id=payload.zentao_project_id,
-        zentao_product_name_cache=(payload.zentao_project_name or "").strip() or None,
+        zentao_product_id=payload.zentao_product_id,
+        zentao_product_name_cache=(payload.zentao_product_name or "").strip() or None,
     )
     db.add(item)
     db.commit()
@@ -103,6 +105,40 @@ async def create_software_from_zentao(
         sync_minor=payload.sync_minor,
     )
 
+    resolved_products = result.zentao_products
+    selected_product = None
+    if payload.zentao_product_id:
+        selected_product = next(
+            (
+                product
+                for product in resolved_products
+                if int(product.get("id") or 0) == payload.zentao_product_id
+            ),
+            {
+                "id": payload.zentao_product_id,
+                "name": (payload.zentao_product_name or "").strip(),
+            },
+        )
+    elif len(resolved_products) == 1:
+        selected_product = resolved_products[0]
+    elif resolved_products:
+        selected_product = next(
+            (
+                product
+                for product in resolved_products
+                if str(product.get("name") or "").strip().casefold() == name.casefold()
+            ),
+            None,
+        )
+
+    if selected_product:
+        item.zentao_product_id = int(selected_product["id"])
+        item.zentao_product_name_cache = (
+            str(selected_product.get("name") or "").strip() or name
+        )
+        db.commit()
+        db.refresh(item)
+
     return {
         "software": _serialize(item),
         "sync": {
@@ -111,6 +147,7 @@ async def create_software_from_zentao(
             "created_minor": result.created_minor,
             "updated_minor": result.updated_minor,
             "skipped": result.skipped,
+            "zentao_products": resolved_products,
             "summary": (
                 f"大版本 +{len(result.created_major)} 更新{len(result.updated_major)}，"
                 f"子版本 +{len(result.created_minor)} 更新{len(result.updated_minor)}"

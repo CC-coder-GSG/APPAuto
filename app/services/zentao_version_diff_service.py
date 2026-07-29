@@ -247,12 +247,17 @@ def apply_version_diff(db: Session, major_version_id: int, actions: list[dict]) 
                 continue
             version_no = normalize_version_name(name) or name
 
-            # 全局去重（uq_version_no_type）：同名 minor 已存在就把它搬到当前 major 下。
+            # 软件内去重：同名 minor 已存在就把它搬到当前 major 下；
+            # 其他软件的同名版本互不影响。
             # 用户从某个 major 的对账页点了"补到本地"，意图就是要这条 build 在这个 major 下，
             # 必须真正改 parent_id，否则下次刷新对账还是显示"本地无"。
             existing = (
                 db.query(Version)
-                .filter(Version.version_no == version_no, Version.version_type == VersionType.MINOR)
+                .filter(
+                    Version.version_no == version_no,
+                    Version.version_type == VersionType.MINOR,
+                    Version.software_id == major.software_id,
+                )
                 .first()
             )
             if existing:

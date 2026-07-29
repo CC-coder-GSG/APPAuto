@@ -9,8 +9,14 @@ sync_all_zentao_bugs_by_software 一进线程池就 AttributeError → 前端
 """
 from __future__ import annotations
 
+import pytest
+from fastapi import HTTPException
+from sqlalchemy import text
+
+from app.db.seed import UNCLASSIFIED_MAJOR_VERSION_NO
 from app.models import SoftwareProduct, User, UserRole, Version, VersionType
 from app.services.overall_test_service import OverallTestService
+from app.services.zentao_client_service import ZentaoAPIError
 
 
 class _FakeZentaoClient:
@@ -21,7 +27,15 @@ class _FakeZentaoClient:
 def test_sync_all_zentao_bugs_pipeline_end_to_end(db_session, monkeypatch):
     user = User(username="fullsync_user", password_hash="x", role=UserRole.ADMIN)
     software = SoftwareProduct(name="FullSync 产品", zentao_product_id=15)
-    db_session.add_all([user, software])
+    other_software = SoftwareProduct(name="Other product", zentao_product_id=99)
+    db_session.add_all([user, software, other_software])
+    db_session.flush()
+    other_unclassified = Version(
+        version_no=UNCLASSIFIED_MAJOR_VERSION_NO,
+        version_type=VersionType.MAJOR,
+        software_id=other_software.id,
+    )
+    db_session.add(other_unclassified)
     db_session.commit()
 
     svc = OverallTestService(db_session)
@@ -53,6 +67,16 @@ def test_sync_all_zentao_bugs_pipeline_end_to_end(db_session, monkeypatch):
     assert result["created"] == 1
     # 无 openedBuild/execution/affectedVersion → 落入未归类大版本
     assert result["unclassified"] == 1
+    current_unclassified = (
+        db_session.query(Version)
+        .filter(
+            Version.software_id == software.id,
+            Version.version_no == UNCLASSIFIED_MAJOR_VERSION_NO,
+            Version.version_type == VersionType.MAJOR,
+        )
+        .one()
+    )
+    assert current_unclassified.id != other_unclassified.id
 
     # 再跑一次应命中 upsert 更新分支，且锁已正确释放（不会 409）
     result2 = svc.sync_all_zentao_bugs_by_software(
@@ -60,6 +84,36 @@ def test_sync_all_zentao_bugs_pipeline_end_to_end(db_session, monkeypatch):
     )
     assert result2["created"] == 0
     assert result2["remote_total"] == 1
+
+
+def test_sync_all_reports_product_fetch_failure_and_releases_lock(db_session, monkeypatch):
+    user = User(username="failed_fullsync", password_hash="x", role=UserRole.ADMIN)
+    software = SoftwareProduct(name="Failed FullSync", zentao_product_id=311)
+    db_session.add_all([user, software])
+    db_session.commit()
+    svc = OverallTestService(db_session)
+    monkeypatch.setattr(
+        svc,
+        "_get_zentao_client_ctx",
+        lambda user_id: (_FakeZentaoClient(), "http://z/zentao"),
+    )
+
+    def _fail(*args, **kwargs):
+        raise ZentaoAPIError(500, "fatal")
+
+    monkeypatch.setattr(svc, "_fetch_bug_collection", _fail)
+    with pytest.raises(HTTPException) as exc_info:
+        svc.sync_all_zentao_bugs_by_software(
+            software_id=software.id,
+            current_user=user,
+            force=True,
+        )
+
+    assert exc_info.value.status_code == 502
+    assert db_session.execute(
+        text("SELECT COUNT(*) FROM sync_locks WHERE key = :key"),
+        {"key": f"bug_full:{software.id}"},
+    ).scalar_one() == 0
 
 
 def test_extract_build_names_from_list_api_string(db_session):

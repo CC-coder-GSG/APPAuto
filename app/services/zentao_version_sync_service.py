@@ -75,6 +75,7 @@ class VersionSyncResult:
     created_minor: list[str] = field(default_factory=list)
     updated_minor: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    zentao_products: list[dict] = field(default_factory=list)
 
 
 class ZentaoVersionSyncService:
@@ -139,6 +140,12 @@ class ZentaoVersionSyncService:
         except Exception as exc:
             logger.warning('sync_versions: fetch executions failed: %s', exc)
             return result
+
+        result.zentao_products = await asyncio.to_thread(
+            self._resolve_products_from_executions,
+            client,
+            executions,
+        )
 
         # ── Step 2: upsert major versions ─────────────────────────────────
         exec_id_to_major: dict[int, Version] = {}
@@ -296,7 +303,12 @@ class ZentaoVersionSyncService:
     # Upsert helpers
     # ------------------------------------------------------------------
 
-    def _find_pending(self, version_type: VersionType, version_no: str) -> Version | None:
+    def _find_pending(
+        self,
+        version_type: VersionType,
+        version_no: str,
+        software_id: int,
+    ) -> Version | None:
         """
         Session autoflush=False，两个 coroutine 在同一次 sync 里 add 同名 Version 时
         互相看不见对方的 pending insert，commit 时撞唯一约束。这里扫一遍 session.new
@@ -307,6 +319,7 @@ class ZentaoVersionSyncService:
                 isinstance(obj, Version)
                 and obj.version_type == version_type
                 and obj.version_no == version_no
+                and obj.software_id == software_id
             ):
                 return obj
         return None
@@ -320,7 +333,7 @@ class ZentaoVersionSyncService:
         result: VersionSyncResult,
     ) -> Version | None:
         # 0. Pending insert in this session (autoflush=False guard)
-        v = self._find_pending(VersionType.MAJOR, version_no)
+        v = self._find_pending(VersionType.MAJOR, version_no, software_id)
 
         # 1. Precise match by Zentao execution ID
         if v is None:
@@ -340,18 +353,6 @@ class ZentaoVersionSyncService:
                 .filter(
                     Version.version_no == version_no,
                     Version.software_id == software_id,
-                    Version.version_type == VersionType.MAJOR,
-                )
-                .first()
-            )
-
-        # 3. Global fallback: match by version_no + version_type only, to avoid
-        #    IntegrityError when the same name exists under a different software_id.
-        if v is None:
-            v = (
-                self.db.query(Version)
-                .filter(
-                    Version.version_no == version_no,
                     Version.version_type == VersionType.MAJOR,
                 )
                 .first()
@@ -384,7 +385,7 @@ class ZentaoVersionSyncService:
         result: VersionSyncResult,
     ) -> Version | None:
         # 0. Pending insert in this session (autoflush=False guard)
-        v = self._find_pending(VersionType.MINOR, version_no)
+        v = self._find_pending(VersionType.MINOR, version_no, software_id)
 
         # 1. Precise match by Zentao build ID
         if v is None:
@@ -409,17 +410,15 @@ class ZentaoVersionSyncService:
                 .first()
             )
 
-        # 3. Global fallback: match by version_no + version_type only.
-        #    The UniqueConstraint is on (version_no, version_type), so if a minor
-        #    version with the same name already exists under a different parent,
-        #    inserting a duplicate would raise IntegrityError.  Find it and link
-        #    the zentao_build_id instead of creating a conflicting row.
+        # 3. Software fallback: a build may move between executions inside one
+        #    software, but a same-named build in another software is unrelated.
         if v is None:
             v = (
                 self.db.query(Version)
                 .filter(
                     Version.version_no == version_no,
                     Version.version_type == VersionType.MINOR,
+                    Version.software_id == software_id,
                 )
                 .first()
             )
@@ -446,6 +445,7 @@ class ZentaoVersionSyncService:
                     .filter(
                         Version.version_no == version_no,
                         Version.version_type == VersionType.MINOR,
+                        Version.software_id == software_id,
                         Version.id != v.id,
                     )
                     .first()
@@ -483,6 +483,53 @@ class ZentaoVersionSyncService:
         self.db.add(v)
         result.created_minor.append(version_no)
         return v
+
+    @staticmethod
+    def _resolve_products_from_executions(
+        client: ZentaoClient,
+        executions: list[dict],
+    ) -> list[dict]:
+        """
+        Resolve a project's real product IDs from execution details.
+
+        The Zentao project payload only says ``product=single/multiple``; it
+        does not contain the product ID.  Execution details expose the linked
+        products as ``[{"id": ..., "name": ...}]``.
+        """
+        products: dict[int, dict] = {}
+        for execution in executions:
+            execution_id = execution.get("id")
+            if not execution_id:
+                continue
+            try:
+                detail = client.get(f"executions/{int(execution_id)}") or {}
+            except Exception as exc:
+                logger.debug(
+                    "sync_versions: resolve products from execution=%s failed: %s",
+                    execution_id,
+                    exc,
+                )
+                continue
+            raw_products = detail.get("products", []) if isinstance(detail, dict) else []
+            if isinstance(raw_products, dict):
+                raw_products = list(raw_products.values())
+            for raw in raw_products if isinstance(raw_products, list) else []:
+                if not isinstance(raw, dict):
+                    continue
+                try:
+                    product_id = int(raw.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                products[product_id] = {
+                    "id": product_id,
+                    "name": str(raw.get("name") or "").strip(),
+                }
+            if products:
+                # Every execution under a single-product project exposes the
+                # same product.  One successful detail is enough and avoids a
+                # request per historical execution.
+                break
+        return list(products.values())
 
     # ------------------------------------------------------------------
     # Internal

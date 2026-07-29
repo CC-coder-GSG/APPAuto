@@ -600,6 +600,7 @@ class OverallTestService:
 
             # Fetch bugs from every product (parallel).
             remote_bugs_by_product: dict[int, list[dict]] = {}
+            fetch_errors: dict[int, Exception] = {}
             with ThreadPoolExecutor(max_workers=_PRODUCT_FETCH_CONCURRENCY) as executor:
                 future_to_pid = {
                     executor.submit(self._fetch_product_bugs_with_retry, client, pid, current_user.id): pid
@@ -611,7 +612,14 @@ class OverallTestService:
                         remote_bugs_by_product[pid] = future.result() or []
                     except Exception as exc:
                         logger.warning("sync_all_zentao_bugs: product %s failed: %s", pid, exc)
-                        remote_bugs_by_product[pid] = []
+                        fetch_errors[pid] = exc
+
+            if fetch_errors:
+                failed_ids = ", ".join(str(pid) for pid in sorted(fetch_errors))
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"禅道产品 Bug 拉取失败（产品 {failed_ids}），本次同步未写入",
+                )
 
             total_raw = sum(len(v) for v in remote_bugs_by_product.values())
 
@@ -775,6 +783,7 @@ class OverallTestService:
                 raise HTTPException(status_code=400, detail="该软件下未找到禅道产品映射，请先配置 zentao_product_id")
 
             remote_bugs_by_product: dict[int, list[dict]] = {}
+            fetch_errors: dict[int, Exception] = {}
             with ThreadPoolExecutor(max_workers=min(_PRODUCT_FETCH_CONCURRENCY, max(1, len(product_ids)))) as executor:
                 future_to_pid = {
                     executor.submit(
@@ -793,7 +802,14 @@ class OverallTestService:
                         remote_bugs_by_product[pid] = future.result() or []
                     except Exception as exc:
                         logger.warning("sync_recent_zentao_bugs: product %s failed: %s", pid, exc)
-                        remote_bugs_by_product[pid] = []
+                        fetch_errors[pid] = exc
+
+            if fetch_errors:
+                failed_ids = ", ".join(str(pid) for pid in sorted(fetch_errors))
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"禅道产品 Bug 拉取失败（产品 {failed_ids}），本次同步未写入",
+                )
 
             total_raw = sum(len(rows) for rows in remote_bugs_by_product.values())
 
@@ -1034,6 +1050,15 @@ class OverallTestService:
                 client, f"products/{product_id}/bugs", limit=500, max_pages=50
             )
         except ZentaoAPIError as exc:
+            if exc.status_code >= 500:
+                logger.warning(
+                    "Zentao product %s full fetch returned %s; retrying once",
+                    product_id,
+                    exc.status_code,
+                )
+                return self._fetch_bug_collection(
+                    client, f"products/{product_id}/bugs", limit=500, max_pages=50
+                )
             if exc.status_code != 401:
                 raise
         invalidate_token(user_id, self.db)
@@ -1061,6 +1086,18 @@ class OverallTestService:
                 max_pages=max_pages,
             )
         except ZentaoAPIError as exc:
+            if exc.status_code >= 500:
+                logger.warning(
+                    "Zentao product %s recent fetch returned %s; retrying once",
+                    product_id,
+                    exc.status_code,
+                )
+                return self._fetch_recent_bug_collection(
+                    client,
+                    f"products/{product_id}/bugs",
+                    limit=limit,
+                    max_pages=max_pages,
+                )
             if exc.status_code != 401:
                 raise
         invalidate_token(user_id, self.db)

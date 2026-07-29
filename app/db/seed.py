@@ -67,7 +67,7 @@ def ensure_software_schema_compat(db: Session) -> None:
 
 
 def ensure_version_schema_compat(db: Session) -> None:
-    """Add final-test phase columns to historical `versions` tables."""
+    """Keep historical ``versions`` tables compatible with the current model."""
     rows = db.execute(text("PRAGMA table_info(versions)")).fetchall()
     cols = {r[1] for r in rows}
     if "final_test_enabled" not in cols:
@@ -76,6 +76,230 @@ def ensure_version_schema_compat(db: Session) -> None:
     if "final_test_started_at" not in cols:
         db.execute(text("ALTER TABLE versions ADD COLUMN final_test_started_at DATETIME"))
         db.commit()
+    _ensure_version_unique_per_software(db)
+
+
+def _ensure_version_unique_per_software(db: Session) -> None:
+    """
+    Replace the historical global ``(version_no, version_type)`` constraint.
+
+    SQLite cannot drop a table-level UNIQUE constraint in place, so preserve
+    the complete current table definition and data while rebuilding the table
+    with ``software_id`` included in the constraint.  Foreign keys are
+    disabled only on this dedicated raw connection for the duration of the
+    atomic rebuild.
+    """
+    table_sql_row = db.execute(
+        text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'versions'")
+    ).fetchone()
+    if not table_sql_row or not table_sql_row[0]:
+        return
+    table_sql = str(table_sql_row[0])
+    if "uq_version_software_no_type" in table_sql:
+        return
+    legacy_constraint = "CONSTRAINT uq_version_no_type UNIQUE (version_no, version_type)"
+    if legacy_constraint not in table_sql:
+        logger.warning("versions table has an unknown UNIQUE layout; skipping automatic rebuild")
+        return
+
+    index_rows = db.execute(
+        text(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'index' AND tbl_name = 'versions' AND sql IS NOT NULL"
+        )
+    ).fetchall()
+    index_sql = [str(row[0]) for row in index_rows if row[0]]
+    temp_table = "versions__software_unique"
+    create_sql = table_sql.replace(
+        "CREATE TABLE versions",
+        f"CREATE TABLE {temp_table}",
+        1,
+    ).replace(
+        legacy_constraint,
+        "CONSTRAINT uq_version_software_no_type "
+        "UNIQUE (software_id, version_no, version_type)",
+        1,
+    )
+
+    db.commit()
+    raw = db.get_bind().raw_connection()
+    try:
+        cursor = raw.cursor()
+        cursor.execute("PRAGMA foreign_keys = OFF")
+        cursor.execute(f"DROP TABLE IF EXISTS {temp_table}")
+        cursor.execute(create_sql)
+        cursor.execute(f"INSERT INTO {temp_table} SELECT * FROM versions")
+        cursor.execute("DROP TABLE versions")
+        cursor.execute(f"ALTER TABLE {temp_table} RENAME TO versions")
+        for statement in index_sql:
+            cursor.execute(statement)
+        raw.commit()
+        cursor.execute("PRAGMA foreign_keys = ON")
+    except Exception:
+        raw.rollback()
+        raise
+    finally:
+        try:
+            raw.cursor().execute("PRAGMA foreign_keys = ON")
+        except Exception:
+            logger.warning("Failed to restore SQLite foreign_keys after versions migration")
+        raw.close()
+    db.expire_all()
+    logger.info("Migrated versions UNIQUE constraint to software_id + version_no + version_type")
+
+
+def repair_software_product_mappings_from_bug_history(db: Session) -> int:
+    """
+    Repair project IDs accidentally stored as software-level product IDs.
+
+    Older ``/softwares/from-zentao`` code saved ``zentao_project_id`` into the
+    ``zentao_product_id`` field.  When a software's historical bugs identify
+    exactly one real Zentao product, that product is an unambiguous and safer
+    source of truth.
+    """
+    if not db.execute(text("PRAGMA table_info(bug_tracking)")).fetchall():
+        return 0
+    rows = db.execute(
+        text(
+            "SELECT v.software_id, b.zentao_product_id, "
+            "       MAX(NULLIF(TRIM(b.zentao_product_name), '')) AS product_name "
+            "FROM bug_tracking b "
+            "JOIN versions v ON v.id = b.major_version_id "
+            "WHERE v.software_id IS NOT NULL "
+            "  AND b.zentao_product_id IS NOT NULL "
+            "  AND TRIM(CAST(b.zentao_product_id AS TEXT)) <> '' "
+            "GROUP BY v.software_id, b.zentao_product_id"
+        )
+    ).fetchall()
+
+    by_software: dict[int, list[tuple[int, str | None]]] = {}
+    for software_id, raw_product_id, product_name in rows:
+        try:
+            product_id = int(raw_product_id)
+        except (TypeError, ValueError):
+            continue
+        by_software.setdefault(int(software_id), []).append((product_id, product_name))
+
+    repaired = 0
+    for software_id, candidates in by_software.items():
+        distinct = {product_id for product_id, _ in candidates}
+        if len(distinct) != 1:
+            continue
+        product_id = next(iter(distinct))
+        product_name = next(
+            (name for candidate_id, name in candidates if candidate_id == product_id and name),
+            None,
+        )
+        result = db.execute(
+            text(
+                "UPDATE software_products "
+                "SET zentao_product_id = :product_id, "
+                "    zentao_product_name_cache = COALESCE(:product_name, zentao_product_name_cache) "
+                "WHERE id = :software_id "
+                "  AND (zentao_product_id IS NULL OR zentao_product_id <> :product_id)"
+            ),
+            {
+                "software_id": software_id,
+                "product_id": product_id,
+                "product_name": product_name,
+            },
+        )
+        repaired += int(result.rowcount or 0)
+    if repaired:
+        db.commit()
+        logger.info("Repaired %s software Zentao product mapping(s) from bug history", repaired)
+    return repaired
+
+
+def ensure_requirement_foreign_key_compat(db: Session) -> int:
+    """
+    Repair foreign keys left pointing at the removed ``requirements_old``.
+
+    A historical SQLite migration renamed ``requirements`` before recreating
+    it.  Modern SQLite correctly propagated that rename into child-table
+    definitions, but the migration then dropped ``requirements_old``.  The
+    resulting child tables could still be read, while every new insert with
+    foreign-key enforcement enabled failed with "no such table:
+    main.requirements_old".
+    """
+    affected = db.execute(
+        text(
+            "SELECT name, sql FROM sqlite_master "
+            "WHERE type = 'table' AND sql LIKE '%requirements_old%'"
+        )
+    ).fetchall()
+    if not affected:
+        return 0
+
+    rebuilds: list[tuple[str, str, list[str]]] = []
+    for table_name, table_sql in affected:
+        name = str(table_name)
+        sql = str(table_sql)
+        temp_name = f"{name}__requirements_fk"
+        create_sql = sql.replace(
+            f"CREATE TABLE {name}",
+            f"CREATE TABLE {temp_name}",
+            1,
+        )
+        if create_sql == sql:
+            create_sql = sql.replace(
+                f'CREATE TABLE "{name}"',
+                f'CREATE TABLE "{temp_name}"',
+                1,
+            )
+        create_sql = create_sql.replace(
+            "REFERENCES requirements_old",
+            "REFERENCES requirements",
+        ).replace(
+            'REFERENCES "requirements_old"',
+            'REFERENCES "requirements"',
+        )
+        object_rows = db.execute(
+            text(
+                "SELECT sql FROM sqlite_master "
+                "WHERE tbl_name = :table_name "
+                "  AND type IN ('index', 'trigger') AND sql IS NOT NULL"
+            ),
+            {"table_name": name},
+        ).fetchall()
+        rebuilds.append(
+            (name, create_sql, [str(row[0]) for row in object_rows if row[0]])
+        )
+
+    db.commit()
+    raw = db.get_bind().raw_connection()
+    try:
+        cursor = raw.cursor()
+        cursor.execute("PRAGMA foreign_keys = OFF")
+        for table_name, create_sql, object_sql in rebuilds:
+            temp_name = f"{table_name}__requirements_fk"
+            cursor.execute(f'DROP TABLE IF EXISTS "{temp_name}"')
+            cursor.execute(create_sql)
+            cursor.execute(
+                f'INSERT INTO "{temp_name}" SELECT * FROM "{table_name}"'
+            )
+            cursor.execute(f'DROP TABLE "{table_name}"')
+            cursor.execute(
+                f'ALTER TABLE "{temp_name}" RENAME TO "{table_name}"'
+            )
+            for statement in object_sql:
+                cursor.execute(statement)
+        raw.commit()
+    except Exception:
+        raw.rollback()
+        raise
+    finally:
+        try:
+            raw.cursor().execute("PRAGMA foreign_keys = ON")
+        except Exception:
+            logger.warning("Failed to restore SQLite foreign_keys after FK repair")
+        raw.close()
+    db.expire_all()
+    logger.info(
+        "Repaired requirements_old foreign keys in %s table(s)",
+        len(rebuilds),
+    )
+    return len(rebuilds)
 
 
 def ensure_feature_tree_schema_compat(db: Session) -> None:

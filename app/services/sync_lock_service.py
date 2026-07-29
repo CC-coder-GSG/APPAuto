@@ -97,6 +97,12 @@ def acquire_sync_lock(db: Session, key: str, *, ttl_seconds: int = 600) -> bool:
 
 def release_sync_lock(db: Session, key: str) -> None:
     try:
+        # A sync failure (for example an IntegrityError during commit) leaves
+        # SQLAlchemy in "pending rollback" state.  DELETE cannot run in that
+        # state, which used to leave a lock row behind and turn the original
+        # error into repeated HTTP 409 "sync in progress" responses.
+        if not db.is_active:
+            db.rollback()
         db.execute(text("DELETE FROM sync_locks WHERE key = :key"), {"key": key})
         db.commit()
     except Exception:
