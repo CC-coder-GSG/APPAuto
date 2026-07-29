@@ -1235,12 +1235,13 @@ const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', changed: '进行
 //   done（测试完成）→「任务已完成」禁用
 function renderTaskStartControl(req) {
   if (!req.zentao_task_id) return '';
-  // 任务未指派给当前账号：不显示操作按钮（仅指派人本人可操作）。
-  if (!req.task_assigned_to_me) return '';
   const status = String(req.zentao_task_status || '').toLowerCase();
-  if (status === 'done' || req.test_completed) {
+  // 需求工作台的完成态优先于禅道完成后的指派流转。
+  if (status === 'done' || status === 'closed' || req.test_completed) {
     return `<button class="secondary" disabled style="padding:2px 10px; font-size:12px; opacity:.7;">✅ 任务已完成</button>`;
   }
+  // 任务未指派给当前账号：不显示操作按钮（仅指派人本人可操作）。
+  if (!req.task_assigned_to_me) return '';
   if (status === 'doing' || status === 'changed') {
     // 进行中：可暂停（禅道同步暂停）。
     return `<button style="padding:2px 10px; font-size:12px; background:#d97706;" onclick="pauseReqTask(${req.id})" title="暂停任务，禅道子任务同步暂停">⏸ 暂停</button>`;
@@ -1256,8 +1257,10 @@ function renderTaskStartControl(req) {
 // 非指派人只读展示子任务状态与指派人，避免误操作他人任务。
 function renderTaskMeta(req) {
   if (req.zentao_task_id) {
-    const zh = TASK_STATUS_ZH[req.zentao_task_status] || req.zentao_task_status || '';
-    const done = req.zentao_task_status === 'done';
+    const rawStatus = String(req.zentao_task_status || '').toLowerCase();
+    const effectiveStatus = req.test_completed ? 'done' : rawStatus;
+    const zh = TASK_STATUS_ZH[effectiveStatus] || effectiveStatus || '';
+    const done = effectiveStatus === 'done' || effectiveStatus === 'closed';
     const taskTag = `<span class="badge" style="background:${done ? '#dcfce7' : '#eff6ff'}; color:${done ? '#166534' : '#1d4ed8'}; border:1px solid ${done ? '#bbf7d0' : '#bfdbfe'};">禅道子任务 #${req.zentao_task_id}${zh ? '·' + zh : ''}</span>${renderPreviewBtn('task', req.zentao_task_id)}`;
     if (!req.task_assigned_to_me) {
       // 非指派人：隐藏预计用时输入，改为只读的指派人标签。

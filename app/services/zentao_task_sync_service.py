@@ -117,7 +117,14 @@ class ZentaoTaskSyncService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _update_task_mirror_status(self, requirement: Requirement, status: str) -> None:
+    def _update_task_mirror_status(
+        self,
+        requirement: Requirement,
+        status: str,
+        *,
+        assigned_to: Optional[str] = None,
+        assignee: Optional[User] = None,
+    ) -> None:
         """Keep the task-board mirror aligned after a confirmed requirement action."""
         if not requirement.zentao_task_id:
             return
@@ -129,6 +136,10 @@ class ZentaoTaskSyncService:
         if row is None:
             return
         row.status = status
+        if assigned_to is not None:
+            row.assigned_to = assigned_to or None
+            row.assignee_user_id = assignee.id if assignee is not None else None
+            row.assigned_to_realname = assignee.shown_name if assignee is not None else None
         row.synced_at = local_now()
         # The requirement workbench and task board are two views of the same
         # Zentao task. Keep lifecycle bookkeeping aligned too; otherwise a
@@ -178,6 +189,58 @@ class ZentaoTaskSyncService:
     # ------------------------------------------------------------------
     # 能力 A：分配 → 建/改派任务
     # ------------------------------------------------------------------
+
+    def resolve_requirement_owner_account(
+        self,
+        requirement: Requirement,
+        *,
+        acting_user: Optional[User] = None,
+    ) -> str:
+        """Resolve the requirement owner's Zentao account for reactivation."""
+        owner = requirement.owner
+        if owner is None and requirement.owner_id:
+            owner = self.db.query(User).filter(User.id == requirement.owner_id).first()
+        if owner is None:
+            raise HTTPException(status_code=400, detail="需求未设置负责人，无法重新指派禅道任务")
+
+        configured = (owner.zentao_account or "").strip()
+        if configured:
+            return configured
+
+        major = requirement.major_version
+        if major is None and requirement.major_version_id:
+            major = self.db.query(Version).filter(Version.id == requirement.major_version_id).first()
+        execution_id = getattr(major, "zentao_execution_id", None)
+        if execution_id:
+            acting = get_user_zentao_client(acting_user.id, self.db) if acting_user is not None else None
+            system = get_system_zentao_client(self.db)
+            clients = [client for client in (acting, system) if client is not None]
+            seen: set[int] = set()
+            for client in clients:
+                marker = id(client)
+                if marker in seen:
+                    continue
+                seen.add(marker)
+                try:
+                    account = self._resolve_account(
+                        owner,
+                        client.list_assignable_users(int(execution_id)) or {},
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "resolve requirement %s owner in execution %s failed: %s",
+                        requirement.id,
+                        execution_id,
+                        exc,
+                    )
+                    continue
+                if account:
+                    return account
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"需求负责人“{owner.shown_name}”未绑定禅道账号，无法重新指派任务",
+        )
 
     def create_tasks_for_assignment(
         self,
@@ -547,6 +610,8 @@ class ZentaoTaskSyncService:
         restore_assignee: bool = True,
         web_op=None,
         accept_response_status: bool = False,
+        desired_assignee: Optional[str] = None,
+        desired_assignee_user: Optional[User] = None,
     ) -> bool:
         """对候选账号执行 op(client)，回读校验任务状态。
 
@@ -577,6 +642,8 @@ class ZentaoTaskSyncService:
             web_logins["system"] = get_system_zentao_web_login(self.db)
         last_err: Optional[Exception] = None
         actual = ""
+        target_status_seen = False
+        last_assignee = ""
         accepted = {
             str(status or "").strip().lower()
             for status in (accepted_statuses or {expected})
@@ -594,11 +661,52 @@ class ZentaoTaskSyncService:
                 logger.warning("readback task %s after %s failed: %s", task_id, zh, exc)
                 return ""
 
+        def _ensure_desired_assignee(client) -> bool:
+            nonlocal last_err, last_assignee
+            want = (desired_assignee or "").strip()
+            if not want:
+                return True
+            try:
+                task = client.get_task(task_id) or {}
+                current = (_task_account(task) or "").strip()
+                last_assignee = current
+                if current.lower() == want.lower():
+                    requirement.zentao_task_assigned_to = want
+                    return True
+                client.reassign_task(task_id, want)
+                task = client.get_task(task_id) or {}
+                current = (_task_account(task) or "").strip()
+                last_assignee = current
+                if current.lower() != want.lower():
+                    return False
+                requirement.zentao_task_assigned_to = want
+                return True
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                logger.warning(
+                    "ensure task %s assignee %s after %s failed: %s",
+                    task_id,
+                    want,
+                    zh,
+                    exc,
+                )
+                return False
+
         def _succeed(client, actual_status: str = "") -> bool:
             confirmed_status = str(actual_status or expected).strip().lower()
             requirement.zentao_task_status_cache = confirmed_status
-            self._update_task_mirror_status(requirement, confirmed_status)
-            if restore_assignee:
+            if desired_assignee:
+                if not _ensure_desired_assignee(client):
+                    return False
+                self._update_task_mirror_status(
+                    requirement,
+                    confirmed_status,
+                    assigned_to=(desired_assignee or "").strip(),
+                    assignee=desired_assignee_user,
+                )
+            else:
+                self._update_task_mirror_status(requirement, confirmed_status)
+            if restore_assignee and not desired_assignee:
                 self._restore_assignee_if_changed(client, requirement)
             return True
 
@@ -609,7 +717,10 @@ class ZentaoTaskSyncService:
             # the lifecycle write when this candidate already sees the target.
             actual = _readback(client)
             if _matches(actual):
-                return _succeed(client, actual)
+                target_status_seen = True
+                if _succeed(client, actual):
+                    return True
+                continue
             try:
                 response = op(client)
             except Exception as exc:  # noqa: BLE001
@@ -622,7 +733,10 @@ class ZentaoTaskSyncService:
                 return _succeed(client)
             actual = _readback(client)
             if _matches(actual):
-                return _succeed(client, actual)
+                target_status_seen = True
+                if _succeed(client, actual):
+                    return True
+                continue
             # REST 未生效 → 同账号网页 cookie 会话兜底（操作人归属不变）
             web = web_logins.get(label)
             if web_op is not None and web is not None:
@@ -633,7 +747,17 @@ class ZentaoTaskSyncService:
                     logger.warning("%s task %s via %s web session failed: %s", zh, task_id, label, exc)
                 actual = _readback(client)
                 if _matches(actual):
-                    return _succeed(client, actual)
+                    target_status_seen = True
+                    if _succeed(client, actual):
+                        return True
+                    continue
+        if desired_assignee and target_status_seen:
+            detail = f"：{last_err}" if last_err else ""
+            current = f"（当前指派人：{last_assignee or '未知'}）"
+            out["errors"].append(
+                f"禅道{zh}任务已生效，但未能指派给需求负责人{current}{detail}"
+            )
+            return False
         detail = f"：{last_err}" if last_err else "（禅道返回成功但状态未切换）"
         out["errors"].append(f"禅道{zh}任务未生效{detail}")
         return False
@@ -970,7 +1094,14 @@ class ZentaoTaskSyncService:
             self._publish_task_change(requirement, "done", "finish")
         return out
 
-    def reactivate_requirement_task(self, requirement: Requirement, *, acting_user: Optional[User] = None) -> dict:
+    def reactivate_requirement_task(
+        self,
+        requirement: Requirement,
+        *,
+        acting_user: Optional[User] = None,
+        desired_assignee: Optional[str] = None,
+        desired_assignee_user: Optional[User] = None,
+    ) -> dict:
         """取消「测试完成」：禅道 restart（重新激活）。
 
         工时口径：重新激活后从零起算新计时段（禅道 finish 的 currentConsumed 是
@@ -982,18 +1113,36 @@ class ZentaoTaskSyncService:
         left = requirement.estimated_test_hours or 4.0
         if requirement.zentao_task_id:
             task_id = int(requirement.zentao_task_id)
+            wanted = (desired_assignee or "").strip()
 
             def _op(client):
                 consumed = 0.0
+                current_assignee = ""
                 try:
-                    consumed = float((client.get_task(task_id) or {}).get("consumed") or 0.0)
+                    task = client.get_task(task_id) or {}
+                    consumed = float(task.get("consumed") or 0.0)
+                    current_assignee = (_task_account(task) or "").strip()
                 except Exception:
                     consumed = 0.0
                 # restart 要求 consumed 必填、left>0
-                client.restart_task(task_id, consumed=consumed, left=left, assigned_to=(requirement.zentao_task_assigned_to or None))
+                if wanted:
+                    restart_assignee = wanted if current_assignee.lower() != wanted.lower() else None
+                else:
+                    restart_assignee = requirement.zentao_task_assigned_to or None
+                client.restart_task(
+                    task_id,
+                    consumed=consumed,
+                    left=left,
+                    assigned_to=restart_assignee,
+                )
 
             def _web_op(web):
-                restart_task_via_web(web, task_id, left=left, assigned_to=(requirement.zentao_task_assigned_to or None))
+                restart_task_via_web(
+                    web,
+                    task_id,
+                    left=left,
+                    assigned_to=wanted or (requirement.zentao_task_assigned_to or None),
+                )
 
             confirmed = self._operate_task_with_verify(
                 requirement,
@@ -1004,6 +1153,8 @@ class ZentaoTaskSyncService:
                 out=out,
                 zh="重新激活",
                 web_op=_web_op,
+                desired_assignee=wanted or None,
+                desired_assignee_user=desired_assignee_user,
             )
         if confirmed:
             requirement.task_finished_at = None

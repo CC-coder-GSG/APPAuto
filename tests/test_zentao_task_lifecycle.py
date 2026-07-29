@@ -54,6 +54,34 @@ class FakeClient:
         return self._task
 
 
+class AssignmentAwareClient(FakeClient):
+    def __init__(
+        self,
+        *,
+        status="done",
+        assigned_to="creator",
+        honor_restart_assignment=True,
+        reassign_effective=True,
+    ):
+        super().__init__(status=status)
+        self._task["assignedTo"] = assigned_to
+        self.honor_restart_assignment = honor_restart_assignment
+        self.reassign_effective = reassign_effective
+
+    def restart_task(self, task_id, *, consumed, left, assigned_to=None):
+        self.calls.append(("restart", task_id, consumed, left, assigned_to))
+        self._apply("doing")
+        if self.effective and self.honor_restart_assignment and assigned_to:
+            self._task["assignedTo"] = assigned_to
+        return {"id": task_id, "status": self._task["status"]}
+
+    def reassign_task(self, task_id, assigned_to):
+        self.calls.append(("reassign", task_id, assigned_to))
+        if self.reassign_effective:
+            self._task["assignedTo"] = assigned_to
+        return {"id": task_id}
+
+
 @pytest.fixture()
 def req(db_session, monkeypatch):
     monkeypatch.setattr(tss, "get_holiday_map", lambda db, a, b: {})
@@ -289,6 +317,189 @@ def test_reactivate_accepts_changed_and_never_repeats_restart(db_session, monkey
     assert req.zentao_task_status_cache == "changed"
     assert req.task_started_at is not None
     assert req.task_consumed_accum == 0.0
+
+
+def test_cancel_completion_reactivates_and_assigns_requirement_owner(
+    db_session,
+    monkeypatch,
+    req,
+):
+    from app.models import User, UserRole
+    from app.models.zentao_task_mirror import ZentaoTaskMirror
+    from app.services.requirement_service import RequirementService
+
+    owner = User(
+        username="requirement_owner",
+        password_hash="x",
+        role=UserRole.USER,
+        zentao_account="owner_acc",
+    )
+    db_session.add(owner)
+    db_session.flush()
+    req.owner_id = owner.id
+    req.test_completed = True
+    req.zentao_task_status_cache = "done"
+    req.zentao_task_assigned_to = "creator_acc"
+    mirror = ZentaoTaskMirror(
+        task_id=777,
+        execution_id=1,
+        execution_name_cache="V1",
+        name="requirement test",
+        status="done",
+        assigned_to="creator_acc",
+    )
+    db_session.add(mirror)
+    db_session.commit()
+
+    # Simulate a Zentao version that ignores assignedTo on restart. The
+    # service must then issue one explicit reassign and verify it.
+    client = AssignmentAwareClient(
+        status="done",
+        assigned_to="creator_acc",
+        honor_restart_assignment=False,
+    )
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tss, "get_system_zentao_web_login", lambda db: None)
+
+    RequirementService(db_session)._mark_test_completed_transition(
+        req,
+        False,
+        acting_user=owner,
+    )
+
+    assert req.test_completed is False
+    assert req.zentao_task_status_cache == "doing"
+    assert req.zentao_task_assigned_to == "owner_acc"
+    assert [call[0] for call in client.calls].count("restart") == 1
+    assert [call for call in client.calls if call[0] == "reassign"] == [
+        ("reassign", 777, "owner_acc")
+    ]
+    assert mirror.status == "doing"
+    assert mirror.assigned_to == "owner_acc"
+    assert mirror.assignee_user_id == owner.id
+    assert mirror.assigned_to_realname == owner.shown_name
+
+
+def test_cancel_completion_skips_reassign_when_owner_is_still_assignee(
+    db_session,
+    monkeypatch,
+    req,
+):
+    from app.models import User, UserRole
+    from app.services.requirement_service import RequirementService
+
+    owner = User(
+        username="same_owner",
+        password_hash="x",
+        role=UserRole.USER,
+        zentao_account="owner_acc",
+    )
+    db_session.add(owner)
+    db_session.flush()
+    req.owner_id = owner.id
+    req.test_completed = True
+    req.zentao_task_status_cache = "done"
+    req.zentao_task_assigned_to = "owner_acc"
+    db_session.commit()
+
+    client = AssignmentAwareClient(status="done", assigned_to="owner_acc")
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tss, "get_system_zentao_web_login", lambda db: None)
+
+    RequirementService(db_session)._mark_test_completed_transition(
+        req,
+        False,
+        acting_user=owner,
+    )
+
+    assert req.test_completed is False
+    restart = next(call for call in client.calls if call[0] == "restart")
+    assert restart[4] is None
+    assert not any(call[0] == "reassign" for call in client.calls)
+
+
+def test_cancel_completion_retries_only_assignment_after_partial_success(
+    db_session,
+    monkeypatch,
+    req,
+):
+    from app.models import User, UserRole
+    from app.services.requirement_service import RequirementService
+
+    owner = User(
+        username="retry_owner",
+        password_hash="x",
+        role=UserRole.USER,
+        zentao_account="owner_acc",
+    )
+    db_session.add(owner)
+    db_session.flush()
+    req.owner_id = owner.id
+    req.test_completed = True
+    req.zentao_task_status_cache = "done"
+    req.zentao_task_assigned_to = "creator_acc"
+    db_session.commit()
+
+    # The previous request already reactivated the remote task but did not
+    # finish assignment. This retry must not restart the active task again.
+    client = AssignmentAwareClient(status="doing", assigned_to="creator_acc")
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tss, "get_system_zentao_web_login", lambda db: None)
+
+    RequirementService(db_session)._mark_test_completed_transition(
+        req,
+        False,
+        acting_user=owner,
+    )
+
+    assert req.test_completed is False
+    assert not any(call[0] == "restart" for call in client.calls)
+    assert [call for call in client.calls if call[0] == "reassign"] == [
+        ("reassign", 777, "owner_acc")
+    ]
+
+
+def test_cancel_completion_keeps_local_done_until_owner_assignment_is_verified(
+    db_session,
+    monkeypatch,
+    req,
+):
+    from app.models import User, UserRole
+    from app.services.requirement_service import RequirementService
+
+    owner = User(
+        username="failed_assign_owner",
+        password_hash="x",
+        role=UserRole.USER,
+        zentao_account="owner_acc",
+    )
+    db_session.add(owner)
+    db_session.flush()
+    req.owner_id = owner.id
+    req.test_completed = True
+    req.zentao_task_status_cache = "done"
+    req.zentao_task_assigned_to = "creator_acc"
+    db_session.commit()
+
+    client = AssignmentAwareClient(
+        status="doing",
+        assigned_to="creator_acc",
+        reassign_effective=False,
+    )
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)
+    monkeypatch.setattr(tss, "get_system_zentao_web_login", lambda db: None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        RequirementService(db_session)._mark_test_completed_transition(
+            req,
+            False,
+            acting_user=owner,
+        )
+
+    assert exc_info.value.status_code == 502
+    assert req.test_completed is True
+    assert req.zentao_task_assigned_to == "creator_acc"
+    assert not any(call[0] == "restart" for call in client.calls)
 
 
 def test_finish_accepts_completed_changed_and_never_repeats_effort(

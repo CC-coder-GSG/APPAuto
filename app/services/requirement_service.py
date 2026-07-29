@@ -502,21 +502,42 @@ class RequirementService:
         acting_user: User | None = None,
         consumed: float | None = None,
     ) -> None:
-        """测试完成勾选/取消 → 禅道子任务 完成 / 重新激活。
+        """测试完成勾选/取消 → 禅道子任务完成/重新激活。
 
-        仅在该需求绑定了禅道子任务、且操作者是子任务指派人时才联动禅道；否则只保留
-        本地记录（对应「非指派人勾选完成只做本地记录」）。需要联动禅道时，通信或
-        状态校验失败不落本地状态，避免各工作台和禅道分叉。
+        勾选完成仍要求操作者是当前任务指派人；取消完成不受完成后的指派流转限制，
+        但必须确认任务已恢复为活动态并指派给需求负责人。任何远端校验失败都不修改
+        本地完成状态，避免需求工作台与禅道分叉。
         """
-        if not self._may_drive_zentao_task(requirement, acting_user):
+        if not requirement.zentao_task_id:
             return
         try:
             from app.services.zentao_task_sync_service import ZentaoTaskSyncService
             svc = ZentaoTaskSyncService(self.db)
             if finished:
+                if not self._may_drive_zentao_task(requirement, acting_user):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="禅道任务当前未指派给你，无法同步完成状态",
+                    )
                 result = svc.finish_requirement_task(requirement, acting_user=acting_user, consumed=consumed)
             else:
-                result = svc.reactivate_requirement_task(requirement, acting_user=acting_user)
+                owner_account = None
+                owner = requirement.owner
+                if owner is None and requirement.owner_id:
+                    owner = self.db.query(User).filter(User.id == requirement.owner_id).first()
+                # Legacy unowned rows retain the old behavior. Requirements
+                # reachable from the workbench normally always have an owner.
+                if requirement.owner_id:
+                    owner_account = svc.resolve_requirement_owner_account(
+                        requirement,
+                        acting_user=acting_user,
+                    )
+                result = svc.reactivate_requirement_task(
+                    requirement,
+                    acting_user=acting_user,
+                    desired_assignee=owner_account,
+                    desired_assignee_user=owner,
+                )
             if not result.get("ok"):
                 errors = [str(item) for item in (result.get("errors") or []) if item]
                 raise HTTPException(
