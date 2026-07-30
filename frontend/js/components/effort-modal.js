@@ -187,7 +187,8 @@ window.saveTaskEffortEdit = async function saveTaskEffortEdit(effortId) {
     ctx.efforts = res.efforts || [];
     ctx.editingId = null;
     renderRows();
-    window.showMessage && window.showMessage('工时记录已更新，已同步禅道', 'success');
+    const statusNote = res.status_restored ? '，任务状态已恢复为原状态' : '，任务状态保持不变';
+    window.showMessage && window.showMessage(`工时记录已更新，已同步禅道${statusNote}`, 'success');
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '修改失败', 'error');
   }

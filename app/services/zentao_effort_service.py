@@ -20,18 +20,27 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import User
+from app.models import Requirement, User
+from app.models.zentao_task_mirror import ZentaoTaskMirror
+from app.services.sse_service import sse_publish
 from app.services.zentao_system_client import (
+    get_system_zentao_client,
     get_system_zentao_web_login,
+    get_user_zentao_client,
     get_user_zentao_web_login,
 )
+from app.services.zentao_task_status import effective_task_status, raw_task_status
 from app.services.zentao_web_session import (
     ZentaoWebSessionError,
+    cancel_task_via_web,
+    close_task_via_web,
     delete_task_effort_via_web,
     edit_task_effort_via_web,
     list_task_efforts_via_web,
+    pause_task_via_web,
     record_task_efforts_via_web,
 )
+from app.utils.time_utils import local_now
 logger = logging.getLogger(__name__)
 
 # 平台自动结算的工时记录统一带此前缀，便于在禅道里区分手工记录
@@ -87,6 +96,125 @@ def submit_day_efforts(
 
 
 # ── 面向 API 的查看 / 编辑 ─────────────────────────────────────────────────────
+
+
+def _task_clients(db: Session, current_user: User) -> list:
+    """本人优先、系统账号兜底的去重任务客户端列表。"""
+    acting = get_user_zentao_client(current_user.id, db)
+    system = get_system_zentao_client(db)
+    clients = []
+    for client in (acting, system):
+        if client is not None and all(client is not item for item in clients):
+            clients.append(client)
+    return clients
+
+
+def _read_task_snapshot(clients: list, task_id: int) -> Optional[dict]:
+    """从任一可用 REST 客户端读取任务；读取失败时尝试下一账号。"""
+    for client in clients:
+        try:
+            task = client.get_task(task_id) or {}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("read task %s while protecting effort edit failed: %s", task_id, exc)
+            continue
+        if isinstance(task, dict) and effective_task_status(task):
+            return task
+    return None
+
+
+def _cached_task_snapshot(db: Session, task_id: int) -> Optional[dict]:
+    """REST 暂时不可读时，用两套本地状态缓存确定修改前状态。"""
+    mirror = db.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == task_id).first()
+    if mirror and (mirror.status or "").strip():
+        return {"status": mirror.status}
+    requirement = db.query(Requirement).filter(Requirement.zentao_task_id == task_id).first()
+    if requirement and (requirement.zentao_task_status_cache or "").strip():
+        return {"status": requirement.zentao_task_status_cache}
+    return None
+
+
+def _restore_task_status(
+    clients: list,
+    login,
+    task_id: int,
+    original_task: dict,
+) -> dict:
+    """恢复工时编辑前的任务状态并回读确认。"""
+    expected = effective_task_status(original_task)
+    raw_expected = raw_task_status(original_task) or expected
+    last_error: Optional[Exception] = None
+
+    # pause/cancel/closed 优先使用刚完成工时编辑的本人网页凭据恢复，保证禅道
+    # 动作人仍是本人；REST 账号只作为网页动作未生效时的兜底。
+    web_action = {
+        "pause": pause_task_via_web,
+        "cancel": cancel_task_via_web,
+        "closed": close_task_via_web,
+    }.get(expected)
+    if web_action is not None:
+        try:
+            web_action(login, task_id, comment="OmniQA 修改工时后恢复原任务状态")
+            verified = _read_task_snapshot(clients, task_id)
+            if verified is None or effective_task_status(verified) == expected:
+                return verified or {"status": raw_expected}
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            logger.warning("restore task %s status=%s via web failed: %s", task_id, expected, exc)
+
+    for client in clients:
+        try:
+            current = client.get_task(task_id) or {}
+            if effective_task_status(current) == expected:
+                return current
+            if expected == "pause":
+                client.pause_task(task_id, comment="OmniQA 修改工时后恢复原任务状态")
+            elif expected == "cancel":
+                client.cancel_task(task_id, comment="OmniQA 修改工时后恢复原任务状态")
+            elif expected == "closed":
+                client.close_task(task_id, comment="OmniQA 修改工时后恢复原任务状态")
+            else:
+                client.update_task(task_id, {"status": raw_expected})
+            current = client.get_task(task_id) or {}
+            if effective_task_status(current) == expected:
+                return current
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            logger.warning("restore task %s status=%s via REST failed: %s", task_id, expected, exc)
+
+    detail = f"：{last_error}" if last_error else ""
+    raise ZentaoWebSessionError(f"任务原状态“{expected}”恢复失败{detail}")
+
+
+def _sync_task_snapshot(db: Session, task_id: int, task: dict, *, action: str) -> None:
+    """同步最终状态/工时摘要到本地缓存，并通知已打开的工作台刷新。"""
+    status = effective_task_status(task)
+    mirror = db.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == task_id).first()
+    if mirror is not None:
+        if status:
+            mirror.status = status
+        for attr, key in (("estimate", "estimate"), ("consumed", "consumed"), ("left", "left")):
+            if task.get(key) is None:
+                continue
+            try:
+                setattr(mirror, attr, float(task[key]))
+            except (TypeError, ValueError):
+                pass
+        mirror.synced_at = local_now()
+    requirement = db.query(Requirement).filter(Requirement.zentao_task_id == task_id).first()
+    if requirement is not None and status:
+        requirement.zentao_task_status_cache = status
+    db.commit()
+    sse_publish(
+        "zentao_task_changed",
+        {
+            "task_id": task_id,
+            "status": status,
+            "action": action,
+            "source": "effort_modal",
+            "requirement_id": requirement.id if requirement is not None else None,
+        },
+        channels=["global"],
+    )
 
 
 def list_efforts_for_user(db: Session, task_id: int, current_user: User) -> dict:
@@ -149,6 +277,14 @@ def edit_effort_for_user(
         raise HTTPException(status_code=404, detail="工时记录不存在（可能已被删除）")
     if (row.get("account") or "").strip().lower() != my_account:
         raise HTTPException(status_code=403, detail="只能修改本人的工时记录")
+    clients = _task_clients(db, current_user)
+    original_task = _read_task_snapshot(clients, task_id) or _cached_task_snapshot(db, task_id)
+    if original_task is None or not effective_task_status(original_task):
+        raise HTTPException(
+            status_code=502,
+            detail="无法读取任务原状态，已取消修改工时，避免意外改变任务状态",
+        )
+    original_status = effective_task_status(original_task)
     try:
         efforts = edit_task_effort_via_web(
             login,
@@ -161,9 +297,27 @@ def edit_effort_for_user(
         )
     except ZentaoWebSessionError as exc:
         raise HTTPException(status_code=502, detail=f"修改工时记录失败：{exc}")
+    final_task = _read_task_snapshot(clients, task_id)
+    status_restored = False
+    if final_task is None or effective_task_status(final_task) != original_status:
+        try:
+            final_task = _restore_task_status(clients, login, task_id, original_task)
+            status_restored = True
+        except ZentaoWebSessionError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"工时记录已修改，但任务状态恢复失败：{exc}；请立即检查禅道任务状态",
+            )
+    _sync_task_snapshot(db, task_id, final_task or original_task, action="edit_effort")
     for e in efforts:
         e["can_edit"] = (e.get("account") or "").strip().lower() == my_account
-    return {"ok": True, "efforts": efforts, "can_edit_any": True}
+    return {
+        "ok": True,
+        "efforts": efforts,
+        "can_edit_any": True,
+        "task_status": original_status,
+        "status_restored": status_restored,
+    }
 
 
 def delete_effort_for_user(

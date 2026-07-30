@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.models import User, UserRole
+from app.models.zentao_task_mirror import ZentaoTaskMirror
 import app.services.zentao_effort_service as zes
 import app.services.zentao_web_session as zws
 from app.services.zentao_web_session import ZentaoWebLogin, ZentaoWebSessionError
@@ -119,7 +120,14 @@ def test_edit_effort_requires_self_login(db_session, monkeypatch):
 
 def test_edit_effort_happy_path(db_session, monkeypatch):
     alice = _user(db_session, username="alice_edit")
+    class StableTaskClient:
+        def get_task(self, task_id):
+            return {"id": task_id, "status": "doing", "consumed": 2.0, "left": 4.0}
+
     monkeypatch.setattr(zes, "get_user_zentao_web_login", lambda uid, db: _login())
+    monkeypatch.setattr(zes, "get_user_zentao_client", lambda uid, db: StableTaskClient())
+    monkeypatch.setattr(zes, "get_system_zentao_client", lambda db: None)
+    monkeypatch.setattr(zes, "sse_publish", lambda *args, **kwargs: None)
     monkeypatch.setattr(zes, "list_task_efforts_via_web", lambda login, tid: [
         {"id": 9, "date": "2026-06-29", "consumed": 2.0, "left": 4.0, "account": "alice", "work": "旧"},
     ])
@@ -134,6 +142,135 @@ def test_edit_effort_happy_path(db_session, monkeypatch):
     assert res["ok"] is True
     assert edited == {"task_id": 42, "effort_id": 9, "date": "2026-06-30", "consumed": 1.5, "left": 4.0, "work": "旧"}
     assert res["efforts"][0]["can_edit"] is True
+    assert res["task_status"] == "doing"
+    assert res["status_restored"] is False
+
+
+def test_edit_effort_restores_paused_task_status(db_session, monkeypatch):
+    """禅道编辑工时把 pause 自动激活为 doing 后，平台必须恢复 pause。"""
+    alice = _user(db_session, username="alice_edit_pause")
+    mirror = ZentaoTaskMirror(
+        task_id=42,
+        execution_id=1,
+        name="暂停任务",
+        status="pause",
+        consumed=2.0,
+        left=4.0,
+    )
+    db_session.add(mirror)
+    db_session.commit()
+
+    class ActivatingTaskClient:
+        status = "pause"
+        pause_calls = []
+
+        def get_task(self, task_id):
+            return {
+                "id": task_id,
+                "status": self.status,
+                "consumed": 1.5,
+                "left": 4.0,
+            }
+
+        def pause_task(self, task_id, *, comment=None):
+            self.pause_calls.append((task_id, comment))
+            self.status = "pause"
+            return {"id": task_id, "status": "pause"}
+
+    client = ActivatingTaskClient()
+    events = []
+    web_pause_calls = []
+    monkeypatch.setattr(zes, "get_user_zentao_web_login", lambda uid, db: _login())
+    monkeypatch.setattr(zes, "get_user_zentao_client", lambda uid, db: client)
+    monkeypatch.setattr(zes, "get_system_zentao_client", lambda db: None)
+    monkeypatch.setattr(zes, "list_task_efforts_via_web", lambda login, tid: [
+        {"id": 9, "date": "2026-06-29", "consumed": 2.0, "left": 4.0, "account": "alice", "work": "旧"},
+    ])
+
+    def fake_edit(login, task_id, effort_id, *, date, consumed, left, work):
+        client.status = "doing"  # 禅道已知副作用：暂停任务修改工时后自动激活
+        return [{"id": effort_id, "date": date, "consumed": consumed, "left": left, "account": "alice", "work": work}]
+
+    monkeypatch.setattr(zes, "edit_task_effort_via_web", fake_edit)
+    def fake_web_pause(login, task_id, *, comment=None):
+        web_pause_calls.append((login.account, task_id, comment))
+        client.status = "pause"
+        return {"result": "success"}
+
+    monkeypatch.setattr(zes, "pause_task_via_web", fake_web_pause)
+    monkeypatch.setattr(
+        zes,
+        "sse_publish",
+        lambda event, payload, channels=None: events.append((event, payload, channels)),
+    )
+
+    res = zes.edit_effort_for_user(
+        db_session,
+        42,
+        9,
+        alice,
+        new_date="2026-06-30",
+        consumed=1.5,
+    )
+
+    assert res["ok"] is True
+    assert res["task_status"] == "pause"
+    assert res["status_restored"] is True
+    assert client.status == "pause"
+    assert web_pause_calls == [("alice", 42, "OmniQA 修改工时后恢复原任务状态")]
+    assert client.pause_calls == []
+    db_session.refresh(mirror)
+    assert mirror.status == "pause"
+    assert mirror.consumed == 1.5
+    assert events[0][0] == "zentao_task_changed"
+    assert events[0][1]["action"] == "edit_effort"
+
+
+def test_edit_effort_reports_partial_failure_when_status_cannot_be_restored(db_session, monkeypatch):
+    """工时已改但暂停恢复失败时必须明确报错，不能把自动激活静默当成功。"""
+    alice = _user(db_session, username="alice_edit_restore_fail")
+
+    class UnrestorableTaskClient:
+        status = "pause"
+
+        def get_task(self, task_id):
+            return {"id": task_id, "status": self.status}
+
+        def pause_task(self, task_id, *, comment=None):
+            return {"id": task_id, "status": self.status}  # 200 但状态仍是 doing
+
+    client = UnrestorableTaskClient()
+    monkeypatch.setattr(zes, "get_user_zentao_web_login", lambda uid, db: _login())
+    monkeypatch.setattr(zes, "get_user_zentao_client", lambda uid, db: client)
+    monkeypatch.setattr(zes, "get_system_zentao_client", lambda db: None)
+    monkeypatch.setattr(zes, "list_task_efforts_via_web", lambda login, tid: [
+        {"id": 9, "date": "2026-06-29", "consumed": 2.0, "left": 4.0, "account": "alice", "work": "旧"},
+    ])
+
+    def fake_edit(*args, **kwargs):
+        client.status = "doing"
+        return [{"id": 9, "date": "2026-06-30", "consumed": 1.5, "left": 4.0, "account": "alice", "work": "旧"}]
+
+    monkeypatch.setattr(zes, "edit_task_effort_via_web", fake_edit)
+    monkeypatch.setattr(
+        zes,
+        "pause_task_via_web",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ZentaoWebSessionError("pause 未生效")),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        zes.edit_effort_for_user(
+            db_session,
+            42,
+            9,
+            alice,
+            new_date="2026-06-30",
+            consumed=1.5,
+        )
+
+    assert exc.value.status_code == 502
+    assert "工时记录已修改" in exc.value.detail
+    assert "任务状态恢复失败" in exc.value.detail
 
 
 def test_delete_effort_rejects_others_record(db_session, monkeypatch):
