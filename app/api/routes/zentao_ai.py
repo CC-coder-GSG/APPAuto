@@ -137,13 +137,27 @@ def _loads(value: str | None, default):
 
 def _hydrate(row: StoryAIResult) -> dict[str, Any]:
     """Convert ORM row into a dict suitable for StoryAIResultOut."""
+    raw_ai_result = _loads(row.raw_ai_result_json, None)
+    raw_test_cases = raw_ai_result.get("test_cases", []) if isinstance(raw_ai_result, dict) else []
+    test_cases = (
+        [item for item in raw_test_cases if isinstance(item, dict)]
+        if isinstance(raw_test_cases, list)
+        else []
+    )
+    raw_title = None
+    if isinstance(raw_ai_result, dict):
+        raw_title = (
+            raw_ai_result.get("title")
+            or raw_ai_result.get("story_title")
+            or raw_ai_result.get("storyTitle")
+        )
     return {
         "id": row.id,
         "batch_id": row.batch_id,
         "story_id": row.story_id,
         "execution_id": row.execution_id,
         "execution_name": row.execution_name,
-        "title": row.title,
+        "title": raw_title or row.title,
         "briefing": row.briefing,
         "module_name": row.module_name,
         "scene_name": row.scene_name,
@@ -155,8 +169,9 @@ def _hydrate(row: StoryAIResult) -> dict[str, Any]:
         "keywords": row.keywords,
         "risk_points": _loads(row.risk_points_json, []) if isinstance(_loads(row.risk_points_json, []), list) else [],
         "questions_to_confirm": _loads(row.questions_to_confirm_json, []) if isinstance(_loads(row.questions_to_confirm_json, []), list) else [],
+        "test_cases": test_cases,
         "testcase_template": row.testcase_template,
-        "raw_ai_result": _loads(row.raw_ai_result_json, None),
+        "raw_ai_result": raw_ai_result,
         "ai_status": row.ai_status,
         "ai_error_message": row.ai_error_message,
         "created_by": row.created_by,

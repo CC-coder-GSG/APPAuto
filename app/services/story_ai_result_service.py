@@ -212,7 +212,7 @@ def save_ai_results(
             )
             continue
 
-        row.title = _str_or_none(_first_present(item, "title")) or row.title
+        row.title = _str_or_none(_first_present(item, "title", "story_title", "storyTitle")) or row.title
         row.briefing = _str_or_none(_first_present(item, "briefing"))
         row.module_name = _str_or_none(_first_present(item, "module_name", "module"))
         row.scene_name = _str_or_none(_first_present(item, "scene_name", "scene"))

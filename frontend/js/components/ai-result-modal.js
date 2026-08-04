@@ -67,6 +67,68 @@ function renderSteps(steps) {
   `;
 }
 
+function getTestCases(data) {
+  if (Array.isArray(data?.test_cases)) return data.test_cases.filter((item) => item && typeof item === 'object');
+  const rawCases = data?.raw_ai_result?.test_cases;
+  return Array.isArray(rawCases) ? rawCases.filter((item) => item && typeof item === 'object') : [];
+}
+
+function buildCaseTemplate(testCase, index = 0) {
+  if (testCase?.testcase_template) return String(testCase.testcase_template);
+  const steps = Array.isArray(testCase?.steps) ? testCase.steps : [];
+  const stepLines = steps.map((item, stepIndex) => {
+    const step = typeof item === 'string' ? item : (item?.step ?? '');
+    const expected = typeof item === 'string' ? '' : (item?.expected ?? '');
+    return `${stepIndex + 1}. ${step}${expected ? `\n   预期：${expected}` : ''}`;
+  }).join('\n');
+  return [
+    `用例标题：${testCase?.title || `测试用例 ${index + 1}`}`,
+    testCase?.case_type ? `用例类型：${testCase.case_type}` : '',
+    testCase?.priority ? `优先级：${testCase.priority}` : '',
+    testCase?.precondition ? `前置条件：${testCase.precondition}` : '',
+    stepLines ? `测试步骤：\n${stepLines}` : '',
+    testCase?.keywords ? `关键词：${testCase.keywords}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+function renderTestCases(testCases) {
+  if (!testCases.length) return '';
+  return `
+    <div style="margin:18px 0 14px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <div style="font-weight:700; color:#0f172a;">测试用例 <span style="color:#64748b; font-weight:500;">（${testCases.length} 条）</span></div>
+        <span style="font-size:12px; color:#64748b;">点击标题展开或收起</span>
+      </div>
+      ${testCases.map((testCase, index) => {
+        const fields = [
+          ['类型', testCase.case_type],
+          ['优先级', testCase.priority],
+          ['关键词', testCase.keywords],
+        ].filter((item) => item[1]);
+        return `
+          <details ${index === 0 ? 'open' : ''} style="border:1px solid #dbe3ef; border-radius:8px; margin-bottom:8px; overflow:hidden; background:#fff;">
+            <summary style="cursor:pointer; padding:11px 14px; background:#f8fafc; color:#0f172a; font-weight:600; line-height:1.5;">
+              <span style="color:#64748b; margin-right:6px;">${index + 1}.</span>${escapeHtml(testCase.title || `测试用例 ${index + 1}`)}
+            </summary>
+            <div style="padding:14px; border-top:1px solid #e2e8f0;">
+              ${fields.length ? `<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:6px 12px; margin-bottom:12px;">
+                ${fields.map(([key, value]) => `<div><span style="color:#64748b;">${escapeHtml(key)}：</span>${escapeHtml(value)}</div>`).join('')}
+              </div>` : ''}
+              ${testCase.precondition ? `<div style="margin-bottom:12px;"><div style="font-weight:600; margin-bottom:4px;">前置条件</div>${renderParagraphs(testCase.precondition)}</div>` : ''}
+              <div style="margin-bottom:12px;"><div style="font-weight:600; margin-bottom:4px;">步骤 / 预期</div>${renderSteps(testCase.steps)}</div>
+              ${testCase.testcase_template ? `<div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <div style="font-weight:600;">用例模板</div>
+                  <button type="button" data-ai-copy-case="${index}" style="border:1px solid #cbd5e1; background:#fff; border-radius:6px; padding:2px 10px; cursor:pointer; font-size:12px;">复制本条</button>
+                </div>
+                <textarea readonly style="width:100%; min-height:130px; font-family:Consolas,Menlo,monospace; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">${escapeHtml(testCase.testcase_template)}</textarea>
+              </div>` : ''}
+            </div>
+          </details>`;
+      }).join('')}
+    </div>`;
+}
+
 function copyToClipboard(text) {
   if (!text) return;
   try {
@@ -88,6 +150,7 @@ function fallbackCopy(text) {
 }
 
 function buildStoryTemplate(data) {
+  const testCases = getTestCases(data);
   const steps = Array.isArray(data?.steps) ? data.steps : [];
   const stepLines = steps.map((s, i) => {
     const step = typeof s === 'string' ? s : (s?.step ?? '');
@@ -108,6 +171,7 @@ function buildStoryTemplate(data) {
     steps.length ? `\n【步骤】\n${stepLines}` : '',
     risks.length ? `\n【风险点】\n${risks.map((x) => `  - ${typeof x === 'string' ? x : JSON.stringify(x)}`).join('\n')}` : '',
     questions.length ? `\n【待确认问题】\n${questions.map((x) => `  - ${typeof x === 'string' ? x : JSON.stringify(x)}`).join('\n')}` : '',
+    testCases.length ? `\n【测试用例（${testCases.length} 条）】\n\n${testCases.map((item, index) => buildCaseTemplate(item, index)).join('\n\n--------------------\n\n')}` : '',
     data?.testcase_template ? `\n【用例模板】\n${data.testcase_template}` : '',
   ].filter(Boolean).join('\n');
 }
@@ -120,8 +184,9 @@ function render(data) {
 
   const statusLabel = mapZentaoStatus(data.ai_status);
   const statusColor = data.ai_status === 'success' ? '#166534' : data.ai_status === 'failed' ? '#b91c1c' : '#475569';
+  const testCases = getTestCases(data);
   title.innerHTML = `s#${data.story_id} ${escapeHtml(data.title || '')}`;
-  meta.innerHTML = `状态：<span style="color:${statusColor}; font-weight:600;">${escapeHtml(statusLabel)}</span> · 批次 ${escapeHtml(data.batch_id)} · 更新 ${escapeHtml(data.updated_at || '')}`;
+  meta.innerHTML = `状态：<span style="color:${statusColor}; font-weight:600;">${escapeHtml(statusLabel)}</span>${testCases.length ? ` · 用例 ${testCases.length} 条` : ''} · 批次 ${escapeHtml(data.batch_id)} · 更新 ${escapeHtml(data.updated_at || '')}`;
 
   if (data.ai_status !== 'success') {
     body.innerHTML = `
@@ -150,15 +215,17 @@ function render(data) {
       ${renderParagraphs(data.briefing)}
     </div>
 
-    ${data.precondition ? `<div style="margin-bottom:14px;">
+    ${!testCases.length && data.precondition ? `<div style="margin-bottom:14px;">
       <div style="font-weight:600; color:#0f172a; margin-bottom:4px;">前置条件</div>
       ${renderParagraphs(data.precondition)}
     </div>` : ''}
 
-    <div style="margin-bottom:14px;">
+    ${!testCases.length ? `<div style="margin-bottom:14px;">
       <div style="font-weight:600; color:#0f172a; margin-bottom:4px;">步骤 / 预期</div>
       ${renderSteps(data.steps)}
-    </div>
+    </div>` : ''}
+
+    ${renderTestCases(testCases)}
 
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:14px;">
       <div>
@@ -171,7 +238,7 @@ function render(data) {
       </div>
     </div>
 
-    ${data.testcase_template ? `<div style="margin-bottom:14px;">
+    ${!testCases.length && data.testcase_template ? `<div style="margin-bottom:14px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
         <div style="font-weight:600; color:#0f172a;">用例模板</div>
         <button type="button" data-ai-copy="template" style="border:1px solid #cbd5e1; background:#fff; border-radius:6px; padding:2px 10px; cursor:pointer; font-size:12px;">复制</button>
@@ -180,7 +247,7 @@ function render(data) {
     </div>` : ''}
 
     <div style="display:flex; gap:8px; justify-content:flex-end; border-top:1px solid #e2e8f0; padding-top:12px;">
-      <button type="button" data-ai-copy="zentao" style="border:1px solid #2563eb; background:#2563eb; color:#fff; border-radius:6px; padding:6px 14px; cursor:pointer;">复制禅道模板</button>
+      <button type="button" data-ai-copy="zentao" style="border:1px solid #2563eb; background:#2563eb; color:#fff; border-radius:6px; padding:6px 14px; cursor:pointer;">${testCases.length ? '复制全部用例' : '复制禅道模板'}</button>
     </div>
   `;
 
@@ -189,6 +256,12 @@ function render(data) {
       const kind = btn.getAttribute('data-ai-copy');
       if (kind === 'template') copyToClipboard(data.testcase_template || '');
       else if (kind === 'zentao') copyToClipboard(template);
+    });
+  });
+  body.querySelectorAll('[data-ai-copy-case]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const index = Number(btn.getAttribute('data-ai-copy-case'));
+      if (Number.isInteger(index) && testCases[index]) copyToClipboard(buildCaseTemplate(testCases[index], index));
     });
   });
 

@@ -65,6 +65,7 @@ class StoryAIResultOut(BaseModel):
     keywords: str | None = None
     risk_points: list[Any] = Field(default_factory=list)
     questions_to_confirm: list[Any] = Field(default_factory=list)
+    test_cases: list[dict[str, Any]] = Field(default_factory=list)
     testcase_template: str | None = None
     raw_ai_result: Any = None
 

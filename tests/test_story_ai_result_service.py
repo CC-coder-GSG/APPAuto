@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 
+from app.api.routes.zentao_ai import _hydrate
 from app.models import StoryAIResult
+from app.schemas.zentao_ai import StoryAIResultOut
 from app.services import story_ai_result_service
 
 
@@ -109,6 +111,54 @@ def test_save_ai_results_accepts_top_level_wrapper_list_payload(db_session):
     assert row.ai_status == "success"
     assert row.briefing == "顶层数组包装 execution/results 也应入库"
     assert row.module_name == "注册与激活"
+
+
+def test_save_ai_results_preserves_new_nested_test_cases_and_story_title(db_session):
+    row = _seed_pending(db_session, batch_id="batch_test_cases", story_id=6939, title="old title")
+    test_cases = [
+        {
+            "title": "高程控制默认关闭",
+            "case_type": "功能测试",
+            "priority": "中",
+            "precondition": "已打开偏移设置面板",
+            "steps": [{"step": "查看开关", "expected": "开关处于关闭状态"}],
+            "keywords": "高程控制；默认关闭",
+            "testcase_template": "用例标题：高程控制默认关闭",
+        },
+        {
+            "title": "切换高程控制方式",
+            "case_type": "功能测试",
+            "priority": "高",
+            "steps": [{"step": "切换方式", "expected": "输入框标签同步变化"}],
+        },
+    ]
+
+    summary = story_ai_result_service.save_ai_results(
+        db_session,
+        batch_id="batch_test_cases",
+        n8n_response=[
+            {
+                "success": True,
+                "execution": {"id": 1923, "name": "s40413"},
+                "results": [
+                    {
+                        "story_id": 6939,
+                        "story_title": "线放样场景增加高程控制方式",
+                        "briefing": "需求测试简报",
+                        "test_cases": test_cases,
+                    }
+                ],
+            }
+        ],
+    )
+
+    db_session.refresh(row)
+    assert summary == {"success": 1, "failed": 0, "per_story": {6939: "success"}}
+    assert row.title == "线放样场景增加高程控制方式"
+    assert json.loads(row.raw_ai_result_json)["test_cases"] == test_cases
+    output = StoryAIResultOut.model_validate(_hydrate(row))
+    assert output.title == "线放样场景增加高程控制方式"
+    assert output.test_cases == test_cases
 
 
 def test_save_ai_results_infers_story_id_for_single_item_batch(db_session):
