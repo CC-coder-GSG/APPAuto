@@ -557,7 +557,7 @@ def create_zentao_tasks(payload: AssignPublishPayload, current_user=Depends(get_
 
     用于「分配并发布（企微）」之后单独补建任务：创建有时会部分失败，若靠重新点击
     发布来重试会重复推送企微通知，故独立成一个按钮。幂等：已建过的按 story 认领，
-    禅道侧已取消/关闭的会重建。
+    禅道侧已取消的会重建；已关闭的是有效终态，会保留关联且不重复创建。
     """
     ensure_tab_access(current_user, "assign")
     task_service = ZentaoTaskSyncService(db)

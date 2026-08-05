@@ -165,10 +165,11 @@ def test_incremental_assignment_reuses_existing_parent(db_session, monkeypatch, 
     assert setup["r2"].zentao_parent_task_id == 9000
 
 
-def test_dead_parent_not_reused(db_session, monkeypatch, setup):
-    # 同名父任务已被取消 → 不复用，新建一个
+@pytest.mark.parametrize("parent_status", ["cancel", "closed"])
+def test_unusable_parent_not_reused(db_session, monkeypatch, setup, parent_status):
+    # 同名父任务已取消或关闭 → 不复用，新建一个
     existing = [{"id": 9000, "type": "test", "story": 0, "parent": 0,
-                 "status": "cancel", "name": "V4.0.3.15 测试任务"}]
+                 "status": parent_status, "name": "V4.0.3.15 测试任务"}]
     client = FakeClient(assignable={"alice": "爱丽丝", "bob": "鲍勃"}, existing_tasks=existing)
     _patch_client(monkeypatch, client)
     svc = ZentaoTaskSyncService(db_session)
@@ -240,24 +241,78 @@ def test_recreate_when_existing_task_cancelled(db_session, monkeypatch, setup):
     assert setup["r1"].zentao_task_assigned_to == "bob"
 
 
-def test_recreate_when_existing_task_closed(db_session, monkeypatch, setup):
-    # 关闭(closed)同样视为失效，重新分配应新建
+def test_retains_linked_task_when_existing_task_closed(db_session, monkeypatch, setup):
+    # 已关闭任务是有效终态：保留原关联，不改派、不重复创建
     setup["r1"].zentao_task_id = 556
+    setup["r1"].zentao_parent_task_id = 9000
     db_session.commit()
     existing = [{"id": 556, "type": "test", "story": 6706, "parent": 9000,
                  "status": "closed", "assignedTo": {"account": "alice"}}]
-    client = FakeClient(assignable={"alice": "爱丽丝"}, existing_tasks=existing)
+    client = FakeClient(assignable={"alice": "爱丽丝", "bob": "鲍勃"}, existing_tasks=existing)
     _patch_client(monkeypatch, client)
     svc = ZentaoTaskSyncService(db_session)
     res = svc.create_tasks_for_assignment(
         setup["major"].id,
-        [{"requirement_id": setup["r1"].id, "owner_id": setup["alice"].id}],
+        [{"requirement_id": setup["r1"].id, "owner_id": setup["bob"].id}],
         est_started="2026-06-29", deadline="2026-07-03", actor=setup["actor"],
     )
+    assert res["ok"] is True, res["errors"]
+    assert client.created == []
     assert client.reassigned == []
-    assert res["parent_task_id"] is not None
+    assert res["parent_task_id"] is None
+    assert res["retained_closed_tasks"] == [556]
     db_session.refresh(setup["r1"])
-    assert setup["r1"].zentao_task_id not in (None, 556)
+    assert setup["r1"].zentao_task_id == 556
+    assert setup["r1"].zentao_parent_task_id == 9000
+    assert setup["r1"].zentao_task_status_cache == "closed"
+    assert setup["r1"].zentao_task_assigned_to == "alice"
+
+
+def test_adopts_closed_task_by_story_without_recreating(db_session, monkeypatch, setup):
+    # 本地未写回任务 id，但同 story 在禅道已有关闭任务 → 认领并保留，不重复创建
+    existing = [{"id": 557, "type": "test", "story": 6706, "parent": 9000,
+                 "status": "closed", "assignedTo": {"account": "alice"}}]
+    client = FakeClient(assignable={"alice": "爱丽丝", "bob": "鲍勃"}, existing_tasks=existing)
+    _patch_client(monkeypatch, client)
+
+    res = ZentaoTaskSyncService(db_session).create_tasks_for_assignment(
+        setup["major"].id,
+        [{"requirement_id": setup["r1"].id, "owner_id": setup["bob"].id}],
+        est_started="2026-06-29", deadline="2026-07-03", actor=setup["actor"],
+    )
+
+    assert res["ok"] is True, res["errors"]
+    assert client.created == []
+    assert client.reassigned == []
+    assert res["retained_closed_tasks"] == [557]
+    db_session.refresh(setup["r1"])
+    assert setup["r1"].zentao_task_id == 557
+    assert setup["r1"].zentao_parent_task_id == 9000
+    assert setup["r1"].zentao_task_status_cache == "closed"
+
+
+def test_active_task_by_story_wins_over_newer_closed_task(db_session, monkeypatch, setup):
+    existing = [
+        {"id": 8800, "type": "test", "story": 6706, "parent": 9000,
+         "status": "doing", "assignedTo": {"account": "alice"}},
+        {"id": 9900, "type": "test", "story": 6706, "parent": 9000,
+         "status": "closed", "assignedTo": {"account": "alice"}},
+    ]
+    client = FakeClient(assignable={"alice": "爱丽丝"}, existing_tasks=existing)
+    _patch_client(monkeypatch, client)
+
+    res = ZentaoTaskSyncService(db_session).create_tasks_for_assignment(
+        setup["major"].id,
+        [{"requirement_id": setup["r1"].id, "owner_id": setup["alice"].id}],
+        actor=setup["actor"],
+    )
+
+    assert res["ok"] is True, res["errors"]
+    assert res["retained_closed_tasks"] == []
+    assert client.created == []
+    db_session.refresh(setup["r1"])
+    assert setup["r1"].zentao_task_id == 8800
+    assert setup["r1"].zentao_task_status_cache == "doing"
 
 
 def test_sync_tasks_status_for_major_updates_cache_and_assignee(db_session, monkeypatch, setup):

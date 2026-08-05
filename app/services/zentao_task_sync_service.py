@@ -89,9 +89,11 @@ def _task_account(t: dict) -> Optional[str]:
     return str(a) if a else None
 
 
-# 禅道侧「已失效」的任务状态：被取消 / 关闭的任务不应再被认领或改派，
-# 需求应视为「未建任务」重新创建一条新的子任务。
-_DEAD_TASK_STATUSES = {"cancel", "closed"}
+# 已取消的子任务视为作废，可按缺失重新创建；已关闭的子任务是有效终态，
+# 必须保留并参与 story 去重，避免任务分配台重复创建。父任务则不同：
+# 已取消/已关闭的父任务都不能继续挂载新的子任务。
+_RECREATE_CHILD_TASK_STATUSES = {"cancel"}
+_UNUSABLE_PARENT_TASK_STATUSES = {"cancel", "closed"}
 
 
 def _task_status(t: dict) -> str:
@@ -109,8 +111,16 @@ def _response_confirms_status(response, expected: str) -> bool:
     )
 
 
-def _is_dead_task(t: Optional[dict]) -> bool:
-    return _task_status(t) in _DEAD_TASK_STATUSES
+def _should_recreate_child_task(t: Optional[dict]) -> bool:
+    return _task_status(t) in _RECREATE_CHILD_TASK_STATUSES
+
+
+def _is_closed_task(t: Optional[dict]) -> bool:
+    return _task_status(t) == "closed"
+
+
+def _is_unusable_parent_task(t: Optional[dict]) -> bool:
+    return _task_status(t) in _UNUSABLE_PARENT_TASK_STATUSES
 
 
 class ZentaoTaskSyncService:
@@ -263,6 +273,7 @@ class ZentaoTaskSyncService:
             "reused_parent": False,  # True=挂进执行下已有的同名父任务（增量分配）
             "created_tasks": [],
             "reassigned_tasks": [],
+            "retained_closed_tasks": [],
             "unassigned": [],   # [{requirement_id, owner_name}] 解析不到禅道账号
             "errors": [],
         }
@@ -309,10 +320,10 @@ class ZentaoTaskSyncService:
             u.id: u for u in self.db.query(User).filter(User.id.in_(owner_ids)).all()
         } if owner_ids else {}
 
-        # 先拉取执行下现有任务索引（by_id 判活 / by_story 认领），据此分类：
-        #   - 本地已关联且禅道侧任务仍存活（非取消/关闭/删除）→ 改派
-        #   - 否则清除本地陈旧关联，走「认领同 story 存活任务 / 新建」流程
-        # 这样「分配后在禅道取消/关闭了任务，再重新分配」也能正确新建一条新任务。
+        # 先拉取执行下现有任务索引（by_id 判状态 / by_story 去重认领），据此分类：
+        #   - 本地已关联且禅道侧任务已关闭 → 保留终态，不改派、不重建
+        #   - 本地已关联且禅道侧任务已取消 → 清除关联并重新创建
+        #   - 其他已关联任务 → 改派；未关联任务 → 按 story 认领或新建
         by_id, existing_by_story = self._index_existing_test_tasks(client, exec_id)
 
         reassign_items: list[tuple[Requirement, User]] = []  # 待改派（现有存活任务）
@@ -324,13 +335,20 @@ class ZentaoTaskSyncService:
             if not req or not owner:
                 continue
             live = by_id.get(int(req.zentao_task_id)) if req.zentao_task_id else None
-            if req.zentao_task_id and _is_dead_task(live):
-                # 禅道侧已被取消/关闭：作废本地关联，按缺失重新建任务。
-                # （仅在明确查到 dead 状态时才重建；查不到可能是分页/临时不可见，
+            if req.zentao_task_id and _is_closed_task(live):
+                tid = int(req.zentao_task_id)
+                req.zentao_parent_task_id = _coerce_int(live.get("parent")) or None
+                req.zentao_task_status_cache = "closed"
+                req.zentao_task_assigned_to = _task_account(live)
+                out["retained_closed_tasks"].append(tid)
+                logger.info("req %s keeps closed Zentao task #%s", req.id, tid)
+            elif req.zentao_task_id and _should_recreate_child_task(live):
+                # 禅道侧已取消：作废本地关联，按缺失重新建任务。
+                # （仅在明确查到 cancel 状态时才重建；查不到可能是分页/临时不可见，
                 #  仍走改派以避免误重建。）
                 logger.info(
-                    "req %s 本地关联子任务 #%s 在禅道已%s，将重新建任务",
-                    req.id, req.zentao_task_id, _task_status(live),
+                    "req %s 本地关联子任务 #%s 在禅道已取消，将重新建任务",
+                    req.id, req.zentao_task_id,
                 )
                 req.zentao_task_id = None
                 req.zentao_parent_task_id = None
@@ -356,10 +374,10 @@ class ZentaoTaskSyncService:
                 logger.warning("reassign task %s -> %s failed: %s", req.zentao_task_id, acc, exc)
                 out["errors"].append(f"改派子任务 #{req.zentao_task_id}（{req.title}）失败：{exc}")
 
-        # ── 认领同 story 的存活任务 + 仅对真正缺失的新建 ──
+        # ── 认领同 story 的现有任务 + 仅对真正缺失的新建 ──
         # 若某需求的任务此前已建过（常见于子任务很多、单次请求超时导致禅道已建但本地
-        # 没写回），本次直接认领写回，绝不重复新建。已取消/关闭的死任务不在 by_story 中，
-        # 不会被认领。
+        # 没写回），本次直接认领写回，绝不重复新建。关闭任务参与去重但不改派；
+        # 已取消任务不参与去重，仍允许按缺失重新创建。
         adopt_items: list[tuple[Requirement, User, dict]] = []
         create_new_items: list[tuple[Requirement, User]] = []
         for req, owner in pending_items:
@@ -379,18 +397,23 @@ class ZentaoTaskSyncService:
             if pid:
                 req.zentao_parent_task_id = pid
             req.zentao_task_status_cache = str(t.get("status") or "wait")
-            acc = self._resolve_account(owner, assignable)
             cur_acc = _task_account(t)
             req.zentao_task_assigned_to = cur_acc  # 先按禅道现值缓存，改派成功后再覆盖
-            if acc and cur_acc and acc.strip().lower() != cur_acc.strip().lower():
-                try:
-                    client.reassign_task(tid, acc)
-                    req.zentao_task_assigned_to = acc
-                    out["reassigned_tasks"].append(tid)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("reassign adopted task %s -> %s failed: %s", tid, acc, exc)
-                    out["errors"].append(f"改派子任务 #{tid}（{req.title}）失败：{exc}")
-            out["created_tasks"].append(tid)
+            if _is_closed_task(t):
+                req.zentao_task_status_cache = "closed"
+                out["retained_closed_tasks"].append(tid)
+                logger.info("req %s adopts closed Zentao task #%s without reassign", req.id, tid)
+            else:
+                acc = self._resolve_account(owner, assignable)
+                if acc and cur_acc and acc.strip().lower() != cur_acc.strip().lower():
+                    try:
+                        client.reassign_task(tid, acc)
+                        req.zentao_task_assigned_to = acc
+                        out["reassigned_tasks"].append(tid)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("reassign adopted task %s -> %s failed: %s", tid, acc, exc)
+                        out["errors"].append(f"改派子任务 #{tid}（{req.title}）失败：{exc}")
+                out["created_tasks"].append(tid)
             try:
                 self.db.commit()
             except Exception as exc:  # noqa: BLE001
@@ -408,7 +431,7 @@ class ZentaoTaskSyncService:
             parent_name = ensure_test_prefix(legacy_parent_name)
             reuse = None
             for t in by_id.values():
-                if _is_dead_task(t) or str(t.get("name") or "").strip() not in (parent_name, legacy_parent_name):
+                if _is_unusable_parent_task(t) or str(t.get("name") or "").strip() not in (parent_name, legacy_parent_name):
                     continue
                 # 只认顶层任务（parent<=0），避免误把某个子任务当父容器
                 if (_coerce_int(t.get("parent")) or 0) > 0:
@@ -495,9 +518,9 @@ class ZentaoTaskSyncService:
         """索引执行下已有的 test 任务，返回 (by_id, by_story)。
 
         - by_id：按任务 id 索引全部 test 任务（含已取消/关闭），用于按 id 判活。
-        - by_story：按 story 索引「存活」(非取消/关闭)的 test 子任务，取同 story 中
-          id 最大（最新）的一条，供认领。已取消/关闭的任务不进 by_story，避免把
-          禅道上已被取消/关闭的死任务重新认领回来（会导致重新分配时不新建）。
+        - by_story：按 story 索引未取消的 test 子任务，活动/完成任务优先于关闭任务，
+          同状态类别取 id 最大（最新）的一条。关闭任务参与去重但认领后不改派；
+          已取消任务不参与去重，允许重新创建。
         """
         try:
             rows = client.list_execution_tasks(exec_id) or []
@@ -515,11 +538,15 @@ class ZentaoTaskSyncService:
             sid = _coerce_int(t.get("story"))
             if not sid or not tid:
                 continue
-            if _is_dead_task(t):
+            if _should_recreate_child_task(t):
                 continue
-            # 只认子任务（有 parent），父任务 story 通常为 0、不会进来
             prev = by_story.get(sid)
-            if prev is None or tid > _coerce_int(prev.get("id")):
+            candidate_rank = (0 if _is_closed_task(t) else 1, tid)
+            prev_rank = (
+                0 if _is_closed_task(prev) else 1,
+                _coerce_int(prev.get("id")) or 0,
+            ) if prev is not None else None
+            if prev_rank is None or candidate_rank > prev_rank:
                 by_story[sid] = t
         return by_id, by_story
 

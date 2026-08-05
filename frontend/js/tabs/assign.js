@@ -404,11 +404,13 @@ function showPublishResult(zentao, opts = {}) {
   }
   const created = (zentao.created_tasks || []).length;
   const reassigned = (zentao.reassigned_tasks || []).length;
+  const retainedClosed = (zentao.retained_closed_tasks || []).length;
   const unassigned = zentao.unassigned || [];
   const errors = zentao.errors || [];
   const parts = [lead];
   if (created) parts.push(`禅道新建子任务 ${created} 个`);
   if (reassigned) parts.push(`改派 ${reassigned} 个`);
+  if (retainedClosed) parts.push(`已存在关闭任务 ${retainedClosed} 个（未重复创建）`);
   if (unassigned.length) {
     const names = unassigned.map((u) => u.owner_name).filter(Boolean).join('、');
     parts.push(`未能指派（缺禅道账号）：${names}`);
