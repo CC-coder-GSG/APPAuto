@@ -34,7 +34,11 @@ from app.services.zentao_system_client import (
     get_user_zentao_client,
     get_user_zentao_web_login,
 )
-from app.services.zentao_task_status import effective_task_status, raw_task_status
+from app.services.zentao_task_status import (
+    effective_task_status,
+    raw_task_status,
+    task_finish_side_effect_observed,
+)
 from app.services.zentao_effort_service import AUTO_NOTE, merge_extra_hours, submit_day_efforts
 from app.services.zentao_web_session import (
     ZentaoWebSessionError,
@@ -681,12 +685,16 @@ class ZentaoTaskSyncService:
         def _matches(status: str) -> bool:
             return str(status or "").strip().lower() in accepted
 
-        def _readback(client) -> str:
+        def _read_task(client) -> dict:
             try:
-                return effective_task_status(client.get_task(task_id) or {})
+                task = client.get_task(task_id) or {}
+                return dict(task) if isinstance(task, dict) else {}
             except Exception as exc:  # noqa: BLE001
                 logger.warning("readback task %s after %s failed: %s", task_id, zh, exc)
-                return ""
+                return {}
+
+        def _readback(client) -> str:
+            return effective_task_status(_read_task(client))
 
         def _ensure_desired_assignee(client) -> bool:
             nonlocal last_err, last_assignee
@@ -742,7 +750,8 @@ class ZentaoTaskSyncService:
             # A previous attempt may have reached Zentao even if its response
             # or immediate readback failed (notably after a 401). Do not repeat
             # the lifecycle write when this candidate already sees the target.
-            actual = _readback(client)
+            before_task = _read_task(client)
+            actual = effective_task_status(before_task)
             if _matches(actual):
                 target_status_seen = True
                 if _succeed(client, actual):
@@ -758,12 +767,37 @@ class ZentaoTaskSyncService:
             # finish through the web fallback.
             if accept_response_status and _response_confirms_status(response, expected):
                 return _succeed(client)
-            actual = _readback(client)
+            after_rest = _read_task(client)
+            actual = effective_task_status(after_rest)
             if _matches(actual):
                 target_status_seen = True
                 if _succeed(client, actual):
                     return True
                 continue
+            if accept_response_status and task_finish_side_effect_observed(before_task, response, after_rest):
+                # The incremental effort has already been written. Repair only
+                # the lifecycle fields; never send currentConsumed again via a
+                # web session or another account.
+                try:
+                    client.update_task(task_id, {"status": "done", "left": 0, "finishedDate": _fmt_dt(local_now())})
+                    repaired = _read_task(client)
+                    actual = effective_task_status(repaired)
+                    if _matches(actual):
+                        target_status_seen = True
+                        return _succeed(client, actual)
+                except Exception as exc:  # noqa: BLE001
+                    last_err = exc
+                    logger.warning(
+                        "%s task %s via %s partially applied but status repair failed: %s",
+                        zh,
+                        task_id,
+                        label,
+                        exc,
+                    )
+                out["errors"].append(
+                    "禅道已写入本次工时，但任务状态未能切换为已完成；平台已停止重试以避免重复工时"
+                )
+                return False
             # REST 未生效 → 同账号网页 cookie 会话兜底（操作人归属不变）
             web = web_logins.get(label)
             if web_op is not None and web is not None:

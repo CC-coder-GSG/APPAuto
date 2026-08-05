@@ -223,6 +223,72 @@ def test_finish_does_not_repeat_when_rest_confirms_done_but_readback_is_stale(db
     assert req.zentao_task_status_cache == "done"
 
 
+def test_finish_repairs_partial_rest_write_without_web_retry(db_session, monkeypatch, req):
+    """A partial finish is finalized without submitting currentConsumed twice."""
+    from app.models import User, UserRole
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    actor = User(username="tester_finish_partial", password_hash="x", role=UserRole.USER)
+    db_session.add(actor)
+    db_session.commit()
+
+    class PartialFinishClient(FakeClient):
+        def __init__(self):
+            super().__init__(status="doing")
+            self._task.update({"consumed": 0.0, "left": 24.0})
+
+        def finish_task(self, task_id, *, current_consumed, finished_date=None, assigned_to=None):
+            self.calls.append(("finish", task_id, current_consumed, finished_date))
+            self._task.update({"status": "doing", "consumed": current_consumed, "left": 8.0})
+            return dict(self._task)
+
+        def update_task(self, task_id, data):
+            self.calls.append(("update", task_id, data))
+            self._task.update(data)
+            return dict(self._task)
+
+    client = PartialFinishClient()
+    system = FakeClient(status="doing")
+    web_calls = []
+    monkeypatch.setattr(tss, "get_user_zentao_client", lambda uid, db: client)
+    monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: system)
+    monkeypatch.setattr(
+        tss,
+        "get_user_zentao_web_login",
+        lambda uid, db: ZentaoWebLogin(base_url="http://z", account="tester", password="p"),
+    )
+    monkeypatch.setattr(tss, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(
+        tss,
+        "finish_task_via_web",
+        lambda *args, **kwargs: web_calls.append((args, kwargs)),
+    )
+    req.task_started_at = datetime(2026, 8, 5, 15, 36)
+    req.zentao_task_status_cache = "doing"
+    db_session.commit()
+    monkeypatch.setattr(tss, "local_now", lambda: datetime(2026, 8, 5, 16, 13))
+
+    res = ZentaoTaskSyncService(db_session).finish_requirement_task(
+        req,
+        acting_user=actor,
+        consumed=0.6,
+    )
+
+    assert res["ok"] is True
+    assert [call[0] for call in client.calls].count("finish") == 1
+    assert [call for call in client.calls if call[0] == "update"] == [
+        (
+            "update",
+            777,
+            {"status": "done", "left": 0, "finishedDate": "2026-08-05 16:13:00"},
+        )
+    ]
+    assert web_calls == []
+    assert system.calls == []
+    assert req.zentao_task_status_cache == "done"
+    assert req.task_efforts_submitted == 0.6
+
+
 def test_finish_without_timer_requires_confirmed_consumed(db_session, monkeypatch, req):
     client = FakeClient()
     monkeypatch.setattr(tss, "get_system_zentao_client", lambda db: client)

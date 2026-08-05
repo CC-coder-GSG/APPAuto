@@ -173,7 +173,16 @@ def _restore_task_status(
             elif expected == "closed":
                 client.close_task(task_id, comment="OmniQA 修改工时后恢复原任务状态")
             else:
-                client.update_task(task_id, {"status": raw_expected})
+                payload = {"status": raw_expected}
+                if expected == "done":
+                    # Deleting/editing a completion effort can reopen the task.
+                    # Restore lifecycle fields without calling finish again,
+                    # which would submit another currentConsumed record.
+                    payload["left"] = original_task.get("left", 0) or 0
+                    finished_date = original_task.get("finishedDate") or original_task.get("finished_date")
+                    if finished_date:
+                        payload["finishedDate"] = finished_date
+                client.update_task(task_id, payload)
             current = client.get_task(task_id) or {}
             if effective_task_status(current) == expected:
                 return current
@@ -342,6 +351,14 @@ def delete_effort_for_user(
         raise HTTPException(status_code=404, detail="工时记录不存在（可能已被删除）")
     if (row.get("account") or "").strip().lower() != my_account:
         raise HTTPException(status_code=403, detail="只能删除本人的工时记录")
+    clients = _task_clients(db, current_user)
+    original_task = _read_task_snapshot(clients, task_id) or _cached_task_snapshot(db, task_id)
+    if original_task is None or not effective_task_status(original_task):
+        raise HTTPException(
+            status_code=502,
+            detail="无法读取任务原状态，已取消删除工时，避免意外改变任务状态",
+        )
+    original_status = effective_task_status(original_task)
     try:
         efforts = delete_task_effort_via_web(login, task_id, effort_id)
     except ZentaoWebSessionError as exc:
@@ -349,9 +366,27 @@ def delete_effort_for_user(
     if any(e["id"] == int(effort_id) for e in efforts):
         # 双重保护：底层本应已拦截，服务层仍不允许把残留记录当作成功。
         raise HTTPException(status_code=502, detail="删除工时记录失败：禅道回读后记录仍然存在")
+    final_task = _read_task_snapshot(clients, task_id)
+    status_restored = False
+    if final_task is None or effective_task_status(final_task) != original_status:
+        try:
+            final_task = _restore_task_status(clients, login, task_id, original_task)
+            status_restored = True
+        except ZentaoWebSessionError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"工时记录已删除，但任务状态恢复失败：{exc}；请立即检查禅道任务状态",
+            )
+    _sync_task_snapshot(db, task_id, final_task or original_task, action="delete_effort")
     for e in efforts:
         e["can_edit"] = (e.get("account") or "").strip().lower() == my_account
-    return {"ok": True, "efforts": efforts, "can_edit_any": True}
+    return {
+        "ok": True,
+        "efforts": efforts,
+        "can_edit_any": True,
+        "task_status": original_status,
+        "status_restored": status_restored,
+    }
 
 
 __all__ = [

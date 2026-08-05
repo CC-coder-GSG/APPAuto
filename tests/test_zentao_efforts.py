@@ -298,6 +298,11 @@ def test_delete_effort_happy_path_requires_remote_absence(db_session, monkeypatc
     remaining = {"id": 10, "date": "2026-06-30", "consumed": 1.0, "left": 3.0, "account": "alice", "work": "保留"}
     monkeypatch.setattr(zes, "get_user_zentao_web_login", lambda uid, db: _login())
     monkeypatch.setattr(zes, "list_task_efforts_via_web", lambda login, tid: [dict(original), dict(remaining)])
+    class TaskClient:
+        def get_task(self, task_id):
+            return {"id": task_id, "status": "doing", "consumed": 3.0, "left": 3.0}
+
+    monkeypatch.setattr(zes, "_task_clients", lambda db, user: [TaskClient()])
     deleted = {}
 
     def fake_delete(login, task_id, effort_id):
@@ -317,6 +322,7 @@ def test_delete_effort_remote_failure_is_not_success(db_session, monkeypatch):
     row = {"id": 9, "date": "2026-06-29", "consumed": 2.0, "left": 4.0, "account": "alice", "work": "旧"}
     monkeypatch.setattr(zes, "get_user_zentao_web_login", lambda uid, db: _login())
     monkeypatch.setattr(zes, "list_task_efforts_via_web", lambda login, tid: [dict(row)])
+    monkeypatch.setattr(zes, "_cached_task_snapshot", lambda db, task_id: {"status": "doing"})
     monkeypatch.setattr(
         zes,
         "delete_task_effort_via_web",
@@ -326,6 +332,98 @@ def test_delete_effort_remote_failure_is_not_success(db_session, monkeypatch):
         zes.delete_effort_for_user(db_session, 42, 9, alice)
     assert ei.value.status_code == 502
     assert "禅道未确认删除" in ei.value.detail
+
+
+def test_delete_completion_effort_restores_done_without_new_effort_and_syncs_board(db_session, monkeypatch):
+    alice = _user(db_session, username="alice_delete_done")
+    mirror = ZentaoTaskMirror(
+        task_id=18400,
+        execution_id=1164,
+        name="任务18400",
+        type="test",
+        status="done",
+        assigned_to="alice",
+        consumed=1.2,
+        left=0.0,
+    )
+    db_session.add(mirror)
+    db_session.commit()
+
+    original_effort = {
+        "id": 99,
+        "date": "2026-08-05",
+        "consumed": 0.6,
+        "left": 0.0,
+        "account": "alice",
+        "work": "完成了任务",
+    }
+
+    class ReopeningClient:
+        def __init__(self):
+            self.task = {
+                "id": 18400,
+                "status": "done",
+                "consumed": 1.2,
+                "left": 0.0,
+                "finishedDate": "2026-08-05 16:13:12",
+            }
+            self.calls = []
+
+        def get_task(self, task_id):
+            return dict(self.task)
+
+        def update_task(self, task_id, payload):
+            self.calls.append((task_id, dict(payload)))
+            self.task.update(payload)
+            return dict(self.task)
+
+    client = ReopeningClient()
+    events = []
+    monkeypatch.setattr(zes, "get_user_zentao_web_login", lambda uid, db: _login())
+    monkeypatch.setattr(zes, "list_task_efforts_via_web", lambda login, tid: [dict(original_effort)])
+    monkeypatch.setattr(zes, "_task_clients", lambda db, user: [client])
+
+    def fake_delete(login, task_id, effort_id):
+        client.task.update({"status": "doing", "consumed": 0.6, "left": 16.0})
+        return []
+
+    monkeypatch.setattr(zes, "delete_task_effort_via_web", fake_delete)
+    monkeypatch.setattr(
+        zes,
+        "sse_publish",
+        lambda event, payload, channels=None: events.append((event, payload, channels)),
+    )
+
+    res = zes.delete_effort_for_user(db_session, 18400, 99, alice)
+
+    assert res["ok"] is True
+    assert res["status_restored"] is True
+    assert client.calls == [
+        (
+            18400,
+            {"status": "done", "left": 0, "finishedDate": "2026-08-05 16:13:12"},
+        )
+    ]
+    assert client.task["consumed"] == 0.6
+    assert client.task["status"] == "done"
+    assert not any("currentConsumed" in payload for _, payload in client.calls)
+    db_session.refresh(mirror)
+    assert mirror.status == "done"
+    assert mirror.consumed == 0.6
+    assert mirror.left == 0.0
+    assert events == [
+        (
+            "zentao_task_changed",
+            {
+                "task_id": 18400,
+                "status": "done",
+                "action": "delete_effort",
+                "source": "effort_modal",
+                "requirement_id": None,
+            },
+            ["global"],
+        )
+    ]
 
 
 def test_delete_effort_via_web_uses_confirm_and_verifies_absence(monkeypatch):

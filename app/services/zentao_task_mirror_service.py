@@ -22,7 +22,7 @@ from app.services.zentao_system_client import (
     get_user_zentao_client,
     get_user_zentao_web_login,
 )
-from app.services.zentao_task_status import effective_task_status
+from app.services.zentao_task_status import effective_task_status, task_finish_side_effect_observed
 from app.services.zentao_effort_service import AUTO_NOTE, merge_extra_hours, submit_day_efforts
 from app.services.zentao_web_session import (
     ZentaoWebSessionError,
@@ -825,15 +825,43 @@ class ZentaoTaskMirrorService:
 
             zh = {"start": "开始", "pause": "暂停", "finish": "完成", "close": "关闭", "cancel": "取消", "reactivate": "重新激活"}.get(action, action)
             resp = None
+            before_finish = None
             try:
+                if action == "finish":
+                    before_finish = dict(cli.get_task(task_id) or {})
                 resp = _rest()
                 # finish carries incremental effort. A confirmed REST result
                 # must not be sent again through the web fallback just because
                 # the immediately following task read is temporarily stale.
                 if action == "finish" and _response_confirms_status(resp, _expected):
                     return resp
-                if _status_matches(cli.get_task(task_id) or {}):
+                after_rest = dict(cli.get_task(task_id) or {})
+                if _status_matches(after_rest):
                     return resp
+                if action == "finish" and task_finish_side_effect_observed(before_finish, resp, after_rest):
+                    # IPD may accept currentConsumed and reduce left without
+                    # switching the task to done. Do not replay the same effort
+                    # through the web fallback. Complete only the status fields.
+                    try:
+                        repaired = cli.update_task(
+                            task_id,
+                            {"status": "done", "left": 0, "finishedDate": _fmt_now()},
+                        )
+                        verified = cli.get_task(task_id) or {}
+                        if _status_matches(verified):
+                            return verified or repaired
+                    except Exception as repair_exc:  # noqa: BLE001
+                        logger.warning(
+                            "finish task %s via %s partially applied but status repair failed: %s",
+                            task_id,
+                            label,
+                            repair_exc,
+                        )
+                    return {
+                        "_omniqa_partial_finish": True,
+                        "task": after_rest,
+                        "response": resp,
+                    }
             except Exception as exc:  # noqa: BLE001 — REST 失败/未生效都尝试网页会话
                 logger.warning("%s via REST (%s) task %s failed: %s", action, label, task_id, exc)
             web = web_logins.get(label)
@@ -848,6 +876,7 @@ class ZentaoTaskMirrorService:
         last_resp = None
         last_err = None
         confirmed_task = None
+        finish_partially_applied = False
         last_actual_status = ""
         last_actual_assigned = ""
         for label, cli in candidates:
@@ -872,6 +901,15 @@ class ZentaoTaskMirrorService:
                 last_err = exc
                 logger.warning("operate task %s action=%s via %s failed: %s", task_id, action, label, exc)
                 continue
+            if action == "finish" and isinstance(last_resp, dict) and last_resp.get("_omniqa_partial_finish"):
+                finish_partially_applied = True
+                partial_task = last_resp.get("task")
+                if isinstance(partial_task, dict):
+                    confirmed_task = partial_task
+                    last_actual_status = effective_task_status(partial_task)
+                # The effort write is already visible remotely. Trying the web
+                # transport or another account would submit it again.
+                break
             # 回读在确认前必须是只读的。旧实现直接刷新 row，导致操作未生效时也会
             # 把回读到的其他状态提交进本地镜像，前端随后刷新就像本地操作成功了一样。
             fresh = self._fetch_one_task(cli, row.task_id)
@@ -901,7 +939,11 @@ class ZentaoTaskMirrorService:
             # 200 但未生效 → 试下一个候选账号
             last_err = None
         if used_client is None:
-            if last_err is not None:
+            if finish_partially_applied:
+                errors.append(
+                    "禅道已写入本次工时，但任务状态未能切换为已完成；平台已停止重试以避免重复工时"
+                )
+            elif last_err is not None:
                 errors.append(str(last_err))
             elif action == "assign":
                 errors.append(
@@ -949,6 +991,12 @@ class ZentaoTaskMirrorService:
                 # 看板延期归列全靠它——回读拿不到就用操作时刻兜底
                 if not row.finished_date:
                     row.finished_date = op_now
+        elif finish_partially_applied:
+            if confirmed_task:
+                self._apply_task_data(row, confirmed_task)
+            row.efforts_submitted = round(float(row.efforts_submitted or 0.0) + finish_consumed, 2)
+            row.consumed_accum = 0.0
+            row.local_started_at = None
 
         # 兜底校正：操作生效后若禅道把指派人清空/改掉（系统账号代操作的已知副作用），改派回本人。
         client = used_client or candidates[0][1]

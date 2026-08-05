@@ -212,7 +212,8 @@ window.deleteTaskEffort = async function deleteTaskEffort(effortId) {
     ctx.canEditAny = !!res.can_edit_any;
     ctx.deletingId = null;
     renderRows();
-    window.showMessage && window.showMessage('工时记录已删除，禅道已确认同步', 'success');
+    const statusNote = res.status_restored ? '，任务状态已恢复并同步看板' : '，任务状态保持不变';
+    window.showMessage && window.showMessage(`工时记录已删除并同步禅道${statusNote}`, 'success');
   } catch (err) {
     ctx.deletingId = null;
     renderRows();

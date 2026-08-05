@@ -1144,6 +1144,127 @@ def test_operate_finish_does_not_repeat_when_rest_confirms_done_but_readback_is_
     assert row.efforts_submitted == 2.0
 
 
+def test_operate_finish_repairs_partial_rest_write_without_repeating_effort(db_session, monkeypatch):
+    """Regression for task 18400: REST writes effort/left but remains doing."""
+    from datetime import datetime
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    alice = _user(db_session, "alice_finish_partial", account="alice")
+    _major(db_session, "V-TW-PARTIAL")
+    row = _mirror(db_session, 18400, alice.id, account="alice", status="doing")
+    row.local_started_at = datetime(2026, 8, 5, 15, 36)
+    db_session.commit()
+
+    class PartialFinishClient(FakeClient):
+        def finish_task(self, task_id, **kw):
+            self.calls.append(("finish", task_id, kw))
+            self._tasks[task_id].update({"status": "doing", "consumed": 0.6, "left": 8.0})
+            return dict(self._tasks[task_id])
+
+    client = PartialFinishClient()
+    client.set_task(
+        18400,
+        {"id": 18400, "status": "doing", "consumed": 0.0, "left": 24.0,
+         "assignedTo": {"account": "alice"}},
+    )
+    system = FakeClient()
+    web_calls = []
+    monkeypatch.setattr(tms, "get_user_zentao_client", lambda uid, db: client)
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: system)
+    monkeypatch.setattr(
+        tms,
+        "get_user_zentao_web_login",
+        lambda uid, db: ZentaoWebLogin(base_url="http://z", account="alice", password="p"),
+    )
+    monkeypatch.setattr(tms, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(
+        tms,
+        "finish_task_via_web",
+        lambda *args, **kwargs: web_calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(tms, "local_now", lambda: datetime(2026, 8, 5, 16, 13))
+
+    res = ZentaoTaskMirrorService(db_session).operate_task(
+        task_id=18400,
+        action="finish",
+        current_user=alice,
+        consumed=0.6,
+    )
+
+    assert res["ok"] is True
+    assert [call[0] for call in client.calls].count("finish") == 1
+    assert [call for call in client.calls if call[0] == "update"] == [
+        (
+            "update",
+            18400,
+            {"status": "done", "left": 0, "finishedDate": "2026-08-05 16:13:00"},
+        )
+    ]
+    assert web_calls == []
+    assert system.calls == []
+    assert row.status == "done"
+    assert row.consumed == 0.6
+    assert row.left == 0.0
+    assert row.efforts_submitted == 0.6
+
+
+def test_operate_finish_partial_write_stops_all_retries_when_status_repair_fails(db_session, monkeypatch):
+    """Even a failed status-only repair must not replay currentConsumed."""
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    alice = _user(db_session, "alice_finish_partial_fail", account="alice")
+    _major(db_session, "V-TW-PARTIAL-FAIL")
+    row = _mirror(db_session, 18401, alice.id, account="alice", status="doing")
+
+    class PartialUnrepairableClient(FakeClient):
+        def finish_task(self, task_id, **kw):
+            self.calls.append(("finish", task_id, kw))
+            self._tasks[task_id].update({"status": "doing", "consumed": 0.6, "left": 8.0})
+            return dict(self._tasks[task_id])
+
+        def update_task(self, task_id, data):
+            self.calls.append(("update", task_id, data))
+            raise RuntimeError("status update rejected")
+
+    client = PartialUnrepairableClient()
+    client.set_task(
+        18401,
+        {"id": 18401, "status": "doing", "consumed": 0.0, "left": 24.0,
+         "assignedTo": {"account": "alice"}},
+    )
+    system = FakeClient()
+    web_calls = []
+    monkeypatch.setattr(tms, "get_user_zentao_client", lambda uid, db: client)
+    monkeypatch.setattr(tms, "get_system_zentao_client", lambda db: system)
+    monkeypatch.setattr(
+        tms,
+        "get_user_zentao_web_login",
+        lambda uid, db: ZentaoWebLogin(base_url="http://z", account="alice", password="p"),
+    )
+    monkeypatch.setattr(tms, "get_system_zentao_web_login", lambda db: None)
+    monkeypatch.setattr(
+        tms,
+        "finish_task_via_web",
+        lambda *args, **kwargs: web_calls.append((args, kwargs)),
+    )
+
+    res = ZentaoTaskMirrorService(db_session).operate_task(
+        task_id=18401,
+        action="finish",
+        current_user=alice,
+        consumed=0.6,
+    )
+
+    assert res["ok"] is False
+    assert "停止重试" in res["errors"][0]
+    assert [call[0] for call in client.calls].count("finish") == 1
+    assert web_calls == []
+    assert system.calls == []
+    assert row.status == "doing"
+    assert row.consumed == 0.6
+    assert row.efforts_submitted == 0.6
+
+
 def test_operate_task_publishes_task_board_refresh_event(db_session, monkeypatch):
     """任务工作台操作提交镜像后通知已打开的任务看板刷新。"""
     alice = _user(db_session, "alice_task_event", account="alice")
