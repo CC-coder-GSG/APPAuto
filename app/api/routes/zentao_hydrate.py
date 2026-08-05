@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, get_db
 from app.models.bug import BugTracking
 from app.models.user_zentao_binding import UserZentaoBinding
+from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.services.zentao_auth_service import get_valid_token, invalidate_token
 from app.services.zentao_client_service import ZentaoClient, ZentaoAPIError
 from app.services.zentao_normalizer import (
@@ -76,6 +77,7 @@ router = APIRouter(prefix="/zentao", tags=["zentao_hydrate"])
 _MAX_BATCH = 500
 # Maximum concurrent upstream requests per hydration call
 _MAX_CONCURRENCY = 10
+_TASK_DETAIL_FALLBACK_LIMIT = 2000
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +284,22 @@ def get_task_detail(
         if ctx2 is None:
             return {"error": "no_binding", "message": "禅道 token 失效且无法续期"}
         client2, base_url = ctx2
+        client = client2
         raw, err_code = _fetch(client2)
+
+    if not isinstance(raw, dict):
+        # Some Zentao IPD releases render task action history while serving the
+        # single-task endpoint. A malformed action can therefore make
+        # /tasks/{id} return PHP Fatal Error even though the same task is still
+        # available from /executions/{id}/tasks. Use the mirror only to locate
+        # the execution, then recover the live task from that list endpoint.
+        raw = _fetch_task_from_execution_list(client, task_id, db)
+        if isinstance(raw, dict):
+            logger.warning(
+                "get_task_detail task=%s recovered from execution list after direct fetch status=%s",
+                task_id,
+                err_code,
+            )
 
     if not isinstance(raw, dict):
         if err_code == 404:
@@ -338,6 +355,40 @@ def get_task_detail(
         "desc": _rewrite_file_urls(raw.get("desc")),
         "url": f"{base_url}/task-view-{task_id}.html",
     }
+
+
+def _fetch_task_from_execution_list(
+    client: ZentaoClient,
+    task_id: int,
+    db: Session,
+) -> dict | None:
+    mirror = (
+        db.query(ZentaoTaskMirror)
+        .filter(ZentaoTaskMirror.task_id == task_id)
+        .first()
+    )
+    if mirror is None or not mirror.execution_id:
+        return None
+
+    try:
+        tasks = client.list_execution_tasks(
+            int(mirror.execution_id),
+            limit=_TASK_DETAIL_FALLBACK_LIMIT,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "get_task_detail fallback task=%s execution=%s err=%s",
+            task_id,
+            mirror.execution_id,
+            exc,
+        )
+        return None
+
+    wanted = str(task_id)
+    for task in tasks or []:
+        if isinstance(task, dict) and str(task.get("id") or "") == wanted:
+            return task
+    return None
 
 
 # ---------------------------------------------------------------------------
