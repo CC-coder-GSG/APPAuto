@@ -149,6 +149,14 @@ def dashboard_page():
     return FileResponse(str(FRONTEND_DIR / "index.html"), headers=_NO_CACHE_HTML)
 
 
+@app.get("/competitor-analysis", include_in_schema=False)
+def competitor_analysis_page():
+    return FileResponse(
+        str(FRONTEND_DIR / "competitor-analysis" / "index.html"),
+        headers=_NO_CACHE_HTML,
+    )
+
+
 def _push_daily_report() -> None:
     db = SessionLocal()
     try:

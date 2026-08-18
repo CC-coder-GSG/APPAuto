@@ -107,6 +107,27 @@ label { color: var(--w-ink-soft) !important; }
     box-shadow: none !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    min-height: 0 !important;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin !important;
+    scrollbar-color: rgba(87, 83, 78, 0.32) transparent !important;
+  }
+
+  #tabs::-webkit-scrollbar {
+    display: block !important;
+    width: 8px;
+  }
+
+  #tabs::-webkit-scrollbar-thumb {
+    background: rgba(87, 83, 78, 0.28);
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
   }
 
   /* rail 顶部品牌字：用伪元素生成，避免改动 index.html 结构 */
@@ -137,6 +158,7 @@ label { color: var(--w-ink-soft) !important; }
     font-size: 13.5px !important;
     font-weight: 600 !important;
     min-height: 38px;
+    flex: 0 0 auto !important;
     background: transparent !important;
     color: var(--w-ink-soft) !important;
     border: none !important;
@@ -159,6 +181,7 @@ label { color: var(--w-ink-soft) !important; }
     margin-top: auto !important;
     align-self: stretch !important;
     justify-content: center !important;
+    flex: 0 0 auto !important;
   }
 }
 

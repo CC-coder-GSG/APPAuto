@@ -6,6 +6,7 @@ from app.models.build_record import BuildRecord
 from app.models.bug import BugTracking
 from app.models.cad_test import CadAttachment, CadBoard, CadCustomColumn, CadItem, CadItemFile, CadItemFolder, CadRecord, CadVersion
 from app.models.case_review import TestCaseReview
+from app.models.competitor_analysis import CompetitorAnalysisReport
 from app.models.enums import (
     AssessmentStatus,
     BugSourceType,
@@ -74,6 +75,7 @@ __all__ = [
     "CadItemFolder",
     "CadRecord",
     "CadVersion",
+    "CompetitorAnalysisReport",
     "FeatureTreeCaseLink",
     "FeatureTreeMark",
     "FeatureTreeNode",
