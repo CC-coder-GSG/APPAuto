@@ -1,0 +1,566 @@
+"""
+Zentao hydration proxy endpoints.
+
+The frontend zentao-hydrator.js calls these endpoints to batch-fetch
+live Zentao data (bug status, story stage, etc.) for IDs visible on
+the current page.  The backend proxies the requests using the calling
+user's stored Zentao token, refreshing it automatically if needed.
+
+Token handling
+--------------
+If Zentao returns 401 (token expired/invalid), the stored token is
+invalidated and a fresh one is fetched before retrying the batch.
+This handles the common case where Zentao's actual token lifetime is
+shorter than our 2-hour assumption.
+
+Concurrency
+-----------
+Requests to Zentao are made concurrently (up to _MAX_CONCURRENCY at a
+time) using asyncio.gather + asyncio.to_thread, dramatically reducing
+total latency when a page contains many bugs/stories.
+
+Error semantics
+---------------
+The response includes an optional "__fetch_errors__" list with IDs that
+could not be fetched due to network/server errors (distinct from IDs
+simply not present in Zentao).  Callers should NOT cache these as
+"not found"; they should retry on the next render cycle.
+
+Routes
+------
+GET /zentao/hydrate/bugs?ids=29875,29876
+GET /zentao/hydrate/stories?ids=5604,5605
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_current_user, get_db
+from app.models.bug import BugTracking
+from app.models.user_zentao_binding import UserZentaoBinding
+from app.models.zentao_task_mirror import ZentaoTaskMirror
+from app.services.zentao_auth_service import get_valid_token, invalidate_token
+from app.services.zentao_client_service import ZentaoClient, ZentaoAPIError
+from app.services.zentao_normalizer import (
+    normalize_bug,
+    normalize_story,
+    normalize_story_detail,
+    normalize_testcase_detail,
+)
+from app.services.zentao_task_status import effective_task_status
+
+# Rewrite Zentao file URLs inside rich-text HTML to the local /zentao/files/{id}
+# proxy so the browser can load them without a direct Zentao session. Mirrors
+# the regex used in app/api/routes/zentao_bug_actions.py.
+_FILE_URL_RE = re.compile(
+    r'(?:https?://)?[^"\'>\s]*/file-(?:read|download|preview)-(\d+)\.[a-zA-Z0-9]+'
+)
+
+
+def _rewrite_file_urls(html: str | None) -> str:
+    if not html:
+        return ""
+    return _FILE_URL_RE.sub(lambda m: f"/zentao/files/{m.group(1)}", html)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/zentao", tags=["zentao_hydrate"])
+
+# Hard cap: don't let a single request fan out to an unbounded number of
+# upstream calls.  Stage5 now supports configurable page sizes, so the cap is
+# raised to 500 to avoid silently truncating the lower half of long pages.
+_MAX_BATCH = 500
+# Maximum concurrent upstream requests per hydration call
+_MAX_CONCURRENCY = 10
+_TASK_DETAIL_FALLBACK_LIMIT = 2000
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@router.get("/hydrate/bugs")
+async def hydrate_bugs(
+    ids: str = Query(..., description="Comma-separated Zentao bug IDs (numeric)"),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Batch-fetch live bug data from Zentao (concurrent).
+
+    Returns a mapping: { "<bug_id>": normalized_bug_dict, … }
+    IDs with transient errors are listed under "__fetch_errors__" so
+    callers can distinguish them from confirmed-not-found IDs.
+    If the user has no Zentao binding, returns an empty object.
+    """
+    id_list = _parse_id_list(ids)
+    if not id_list:
+        return {}
+
+    ctx = _get_client_ctx(current_user.id, db)
+    if ctx is None:
+        return {}
+    client, base_url = ctx
+
+    result, got_401, errors = await _fetch_bugs_concurrent(client, base_url, id_list)
+
+    if got_401:
+        invalidate_token(current_user.id, db)
+        ctx2 = _get_client_ctx(current_user.id, db)
+        if ctx2 is None:
+            return _build_response({}, errors)
+        client2, base_url2 = ctx2
+        result, _, errors = await _fetch_bugs_concurrent(client2, base_url2, id_list)
+
+    # Write-back: persist title + URL for bugs that don't have them yet.
+    # Matches on bug_id like "b#29009" → Zentao numeric ID 29009.
+    _writeback_bug_fields(db, result, base_url)
+
+    return _build_response(result, errors)
+
+
+@router.get("/hydrate/stories")
+async def hydrate_stories(
+    ids: str = Query(..., description="Comma-separated Zentao story IDs (numeric)"),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Batch-fetch live story/requirement data from Zentao (concurrent).
+
+    Returns a mapping: { "<story_id>": normalized_story_dict, … }
+    Transient errors are listed under "__fetch_errors__".
+    """
+    id_list = _parse_id_list(ids)
+    if not id_list:
+        return {}
+
+    ctx = _get_client_ctx(current_user.id, db)
+    if ctx is None:
+        return {}
+    client, base_url = ctx
+
+    result, got_401, errors = await _fetch_stories_concurrent(client, base_url, id_list)
+
+    if got_401:
+        invalidate_token(current_user.id, db)
+        ctx2 = _get_client_ctx(current_user.id, db)
+        if ctx2 is None:
+            return _build_response({}, errors)
+        client2, base_url2 = ctx2
+        result, _, errors = await _fetch_stories_concurrent(client2, base_url2, id_list)
+
+    return _build_response(result, errors)
+
+
+@router.get("/story/{story_id}/detail")
+def get_story_detail(
+    story_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Fetch one Zentao story's full payload (including spec/verify) for the
+    requirement preview modal.
+
+    Returns the normalized dict from ``normalize_story_detail``. On any
+    failure the response carries an ``error`` key so the frontend can show
+    a friendly message in the modal instead of failing silently.
+    """
+    ctx = _get_client_ctx(current_user.id, db)
+    if ctx is None:
+        return {"error": "no_binding", "message": "当前用户未绑定禅道账号"}
+    client, base_url = ctx
+
+    def _fetch(c: ZentaoClient) -> tuple[dict | None, int | None]:
+        try:
+            raw = c.get_story(story_id)
+            return raw, None
+        except ZentaoAPIError as exc:
+            return None, exc.status_code
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_story_detail story=%s err=%s", story_id, exc)
+            return None, -1
+
+    raw, err_code = _fetch(client)
+    if err_code == 401:
+        invalidate_token(current_user.id, db)
+        ctx2 = _get_client_ctx(current_user.id, db)
+        if ctx2 is None:
+            return {"error": "no_binding", "message": "禅道 token 失效且无法续期"}
+        client2, base_url = ctx2
+        raw, err_code = _fetch(client2)
+
+    if raw is None:
+        if err_code == 404:
+            return {"error": "not_found", "message": f"禅道中找不到需求 s#{story_id}"}
+        return {"error": "fetch_failed", "message": "拉取禅道需求详情失败"}
+
+    detail = normalize_story_detail(raw, base_url=base_url)
+    detail["spec"] = _rewrite_file_urls(detail.get("spec"))
+    detail["verify"] = _rewrite_file_urls(detail.get("verify"))
+    return detail
+
+
+@router.get("/testcase/{case_id}/detail")
+def get_testcase_detail(
+    case_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Fetch one Zentao testcase's full payload for the preview modal."""
+    ctx = _get_client_ctx(current_user.id, db)
+    if ctx is None:
+        return {"error": "no_binding", "message": "当前用户未绑定禅道账号"}
+    client, base_url = ctx
+
+    def _fetch(c: ZentaoClient) -> tuple[dict | None, int | None]:
+        try:
+            raw = c.get_testcase(case_id)
+            return raw, None
+        except ZentaoAPIError as exc:
+            return None, exc.status_code
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_testcase_detail case=%s err=%s", case_id, exc)
+            return None, -1
+
+    raw, err_code = _fetch(client)
+    if err_code == 401:
+        invalidate_token(current_user.id, db)
+        ctx2 = _get_client_ctx(current_user.id, db)
+        if ctx2 is None:
+            return {"error": "no_binding", "message": "禅道 token 失效且无法续期"}
+        client2, base_url = ctx2
+        raw, err_code = _fetch(client2)
+
+    if raw is None:
+        if err_code == 404:
+            return {"error": "not_found", "message": f"禅道中找不到用例 case#{case_id}"}
+        return {"error": "fetch_failed", "message": "拉取禅道用例详情失败"}
+
+    detail = normalize_testcase_detail(raw, base_url=base_url)
+    detail["precondition"] = _rewrite_file_urls(detail.get("precondition"))
+    for step in detail.get("steps") or []:
+        if isinstance(step, dict):
+            step["step"] = _rewrite_file_urls(step.get("step"))
+            step["expect"] = _rewrite_file_urls(step.get("expect"))
+    return detail
+
+
+@router.get("/task/{task_id}/detail")
+def get_task_detail(
+    task_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """拉取单个禅道任务详情，供需求测试台「子任务预览」用。
+
+    时刻字段转上海本地；assignedTo 兼容对象/字符串。失败时返回 error 键。
+    """
+    from app.utils.time_utils import parse_external_datetime_to_local_naive
+
+    ctx = _get_client_ctx(current_user.id, db)
+    if ctx is None:
+        return {"error": "no_binding", "message": "当前用户未绑定禅道账号"}
+    client, base_url = ctx
+
+    def _fetch(c: ZentaoClient):
+        try:
+            return c.get_task(task_id), None
+        except ZentaoAPIError as exc:
+            return None, exc.status_code
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_task_detail task=%s err=%s", task_id, exc)
+            return None, -1
+
+    raw, err_code = _fetch(client)
+    if err_code == 401:
+        invalidate_token(current_user.id, db)
+        ctx2 = _get_client_ctx(current_user.id, db)
+        if ctx2 is None:
+            return {"error": "no_binding", "message": "禅道 token 失效且无法续期"}
+        client2, base_url = ctx2
+        client = client2
+        raw, err_code = _fetch(client2)
+
+    if not isinstance(raw, dict):
+        # Some Zentao IPD releases render task action history while serving the
+        # single-task endpoint. A malformed action can therefore make
+        # /tasks/{id} return PHP Fatal Error even though the same task is still
+        # available from /executions/{id}/tasks. Use the mirror only to locate
+        # the execution, then recover the live task from that list endpoint.
+        raw = _fetch_task_from_execution_list(client, task_id, db)
+        if isinstance(raw, dict):
+            logger.warning(
+                "get_task_detail task=%s recovered from execution list after direct fetch status=%s",
+                task_id,
+                err_code,
+            )
+
+    if not isinstance(raw, dict):
+        if err_code == 404:
+            return {"error": "not_found", "message": f"禅道中找不到任务 #{task_id}"}
+        return {"error": "fetch_failed", "message": "拉取禅道任务详情失败"}
+
+    def _acc(v, realname=None):
+        if isinstance(v, dict):
+            return v.get("realname") or realname or v.get("account") or ""
+        return str(realname or v or "")
+
+    def _local(v):
+        dt = parse_external_datetime_to_local_naive(v) if v else None
+        return dt.isoformat() if dt else None
+
+    # 父/子任务判定：isParent=1 为父任务；parent>0 为子任务（其父为 parent_id）。
+    is_parent = str(raw.get("isParent") or "0").strip() in ("1", "true", "True")
+    try:
+        parent_id = int(raw.get("parent") or 0)
+    except (TypeError, ValueError):
+        parent_id = 0
+    parent_name = None
+    if parent_id > 0:
+        try:
+            pctx = _get_client_ctx(current_user.id, db)
+            if pctx:
+                praw = pctx[0].get_task(parent_id)
+                if isinstance(praw, dict):
+                    parent_name = praw.get("name")
+        except Exception:  # noqa: BLE001
+            parent_name = None
+
+    return {
+        "id": raw.get("id"),
+        "name": raw.get("name"),
+        "type": raw.get("type"),
+        "status": effective_task_status(raw),
+        "pri": raw.get("pri"),
+        "story": raw.get("story"),
+        "story_title": raw.get("storyTitle"),
+        "parent": parent_id or None,
+        "is_parent": is_parent,
+        "parent_name": parent_name,
+        "assigned_to": _acc(raw.get("assignedTo"), raw.get("assignedToRealName")),
+        "finished_by": _acc(raw.get("finishedBy"), raw.get("finishedByRealName")),
+        "estimate": raw.get("estimate"),
+        "consumed": raw.get("consumed"),
+        "left": raw.get("left"),
+        "est_started": raw.get("estStarted"),
+        "deadline": raw.get("deadline"),
+        "real_started": _local(raw.get("realStarted")),
+        "finished_date": _local(raw.get("finishedDate")),
+        "desc": _rewrite_file_urls(raw.get("desc")),
+        "url": f"{base_url}/task-view-{task_id}.html",
+    }
+
+
+def _fetch_task_from_execution_list(
+    client: ZentaoClient,
+    task_id: int,
+    db: Session,
+) -> dict | None:
+    mirror = (
+        db.query(ZentaoTaskMirror)
+        .filter(ZentaoTaskMirror.task_id == task_id)
+        .first()
+    )
+    if mirror is None or not mirror.execution_id:
+        return None
+
+    try:
+        tasks = client.list_execution_tasks(
+            int(mirror.execution_id),
+            limit=_TASK_DETAIL_FALLBACK_LIMIT,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "get_task_detail fallback task=%s execution=%s err=%s",
+            task_id,
+            mirror.execution_id,
+            exc,
+        )
+        return None
+
+    wanted = str(task_id)
+    for task in tasks or []:
+        if isinstance(task, dict) and str(task.get("id") or "") == wanted:
+            return task
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Concurrent fetch helpers
+# ---------------------------------------------------------------------------
+
+async def _fetch_bugs_concurrent(
+    client: ZentaoClient,
+    base_url: str,
+    id_list: list[int],
+) -> tuple[dict, bool, list[str]]:
+    """
+    Fetch bug data for all IDs concurrently (up to _MAX_CONCURRENCY at once).
+
+    Returns (result_dict, got_401, error_id_strings).
+    """
+    sem = asyncio.Semaphore(_MAX_CONCURRENCY)
+    result: dict[str, dict] = {}
+    errors: list[str] = []
+    got_401 = False
+
+    async def _one(bug_id: int) -> None:
+        nonlocal got_401
+        async with sem:
+            try:
+                raw = await asyncio.to_thread(client.get_bug_with_fallback, bug_id)
+                if raw:
+                    data = normalize_bug(raw)
+                    data["zentao_url"] = f"{base_url}/bug-view-{bug_id}.html"
+                    result[str(bug_id)] = data
+            except ZentaoAPIError as exc:
+                if exc.status_code == 401:
+                    got_401 = True
+                else:
+                    logger.warning("hydrate_bugs: bug_id=%s err=%s", bug_id, exc)
+                    errors.append(str(bug_id))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("hydrate_bugs: bug_id=%s unexpected=%s", bug_id, exc)
+                errors.append(str(bug_id))
+
+    await asyncio.gather(*[_one(bug_id) for bug_id in id_list])
+    return result, got_401, errors
+
+
+async def _fetch_stories_concurrent(
+    client: ZentaoClient,
+    base_url: str,
+    id_list: list[int],
+) -> tuple[dict, bool, list[str]]:
+    """
+    Fetch story data for all IDs concurrently (up to _MAX_CONCURRENCY at once).
+
+    Returns (result_dict, got_401, error_id_strings).
+    """
+    sem = asyncio.Semaphore(_MAX_CONCURRENCY)
+    result: dict[str, dict] = {}
+    errors: list[str] = []
+    got_401 = False
+
+    async def _one(story_id: int) -> None:
+        nonlocal got_401
+        async with sem:
+            try:
+                raw = await asyncio.to_thread(client.get_story, story_id)
+                if raw:
+                    data = normalize_story(raw)
+                    data["zentao_url"] = f"{base_url}/story-view-{story_id}.html"
+                    result[str(story_id)] = data
+            except ZentaoAPIError as exc:
+                if exc.status_code == 401:
+                    got_401 = True
+                else:
+                    logger.warning("hydrate_stories: story_id=%s err=%s", story_id, exc)
+                    errors.append(str(story_id))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("hydrate_stories: story_id=%s unexpected=%s", story_id, exc)
+                errors.append(str(story_id))
+
+    await asyncio.gather(*[_one(story_id) for story_id in id_list])
+    return result, got_401, errors
+
+
+# ---------------------------------------------------------------------------
+# Response builder
+# ---------------------------------------------------------------------------
+
+def _build_response(result: dict, errors: list[str]) -> dict:
+    """Attach __fetch_errors__ to the result dict when there are transient errors."""
+    response = dict(result)
+    if errors:
+        response["__fetch_errors__"] = errors
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def _parse_id_list(raw: str) -> list[int]:
+    """Parse a comma-separated string of integers, capped at _MAX_BATCH."""
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    result: list[int] = []
+    for part in parts[:_MAX_BATCH]:
+        try:
+            result.append(int(part))
+        except ValueError:
+            pass
+    return result
+
+
+def _get_client_ctx(user_id: int, db: Session) -> tuple[ZentaoClient, str] | None:
+    """
+    Return (ZentaoClient, base_url) for the given user, or None if the user
+    has no binding or a valid token cannot be obtained.
+    """
+    binding = (
+        db.query(UserZentaoBinding)
+        .filter(UserZentaoBinding.user_id == user_id)
+        .first()
+    )
+    if not binding or not binding.base_url:
+        return None
+
+    token = get_valid_token(user_id, db)
+    if not token:
+        return None
+
+    base_url = binding.base_url.rstrip('/')
+    return ZentaoClient(base_url=base_url, token=token), base_url
+
+
+def _writeback_bug_fields(db: Session, result: dict, base_url: str) -> None:
+    """
+    For each fetched bug, persist title, URL, zentao_bug_id and live status
+    back to BugTracking so they are available on next page load without
+    requiring a fresh hydration call.
+
+    Matching key: BugTracking.bug_id == "b#<zt_id>"
+    """
+    if not result:
+        return
+    try:
+        any_changed = False
+        for zt_id_str, data in result.items():
+            if not data or not isinstance(data, dict):
+                continue
+            title = data.get("title") or ""
+            status = data.get("status") or ""
+            zt_url = f"{base_url}/bug-view-{zt_id_str}.html"
+            bug_id_str = f"b#{zt_id_str}"
+            row = db.query(BugTracking).filter(BugTracking.bug_id == bug_id_str).first()
+            if row is None:
+                continue
+            if not row.zentao_bug_title and title:
+                row.zentao_bug_title = title
+                any_changed = True
+            if not row.zentao_bug_url:
+                row.zentao_bug_url = zt_url
+                any_changed = True
+            if not row.zentao_bug_id:
+                row.zentao_bug_id = zt_id_str
+                any_changed = True
+            if status and row.zentao_live_status != status:
+                row.zentao_live_status = status
+                any_changed = True
+            # 禅道已删除：实时核对到 deleted 即回写标记，供大盘排除统计/筛选并红色展示。
+            if data.get("deleted") and not row.zentao_deleted:
+                row.zentao_deleted = True
+                row.zentao_sync_message = "禅道已删除（页面核对）"
+                any_changed = True
+        if any_changed:
+            db.commit()
+    except Exception as exc:
+        logger.warning("_writeback_bug_fields: %s", exc)
+        db.rollback()

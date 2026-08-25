@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+import json
+
+from app.api.routes.zentao_ai import _hydrate
+from app.models import StoryAIResult
+from app.schemas.zentao_ai import StoryAIResultOut
+from app.services import story_ai_result_service
+
+
+def _seed_pending(db_session, *, batch_id: str, story_id: int, title: str = "story") -> StoryAIResult:
+    story_ai_result_service.create_pending_rows(
+        db_session,
+        batch_id=batch_id,
+        user_id=1,
+        execution_id=1645,
+        execution_name="s40311",
+        stories=[{"id": story_id, "title": title}],
+    )
+    return db_session.query(StoryAIResult).filter(StoryAIResult.batch_id == batch_id).one()
+
+
+def test_save_ai_results_accepts_nested_results_and_alias_fields(db_session):
+    row = _seed_pending(db_session, batch_id="batch_nested", story_id=6236, title="old title")
+
+    response = {
+        "data": {
+            "results": [
+                {
+                    "storyId": 6236,
+                    "title": "重庆在线坐标转换需求",
+                    "briefing": "需求测试简报",
+                    "module": "坐标转换",
+                    "scene": "OA流程",
+                    "stage": "developing",
+                    "caseType": "功能测试",
+                    "priority": "高",
+                    "precondition": "已选择需求",
+                    "steps": json.dumps([{"step": "提交生成", "expected": "返回用例"}], ensure_ascii=False),
+                    "riskPoints": ["坐标精度异常"],
+                    "questionsToConfirm": ["转换坐标系范围"],
+                    "testcaseTemplate": "1. 打开页面",
+                }
+            ]
+        }
+    }
+
+    summary = story_ai_result_service.save_ai_results(
+        db_session,
+        batch_id="batch_nested",
+        n8n_response=response,
+    )
+
+    db_session.refresh(row)
+    assert summary == {"success": 1, "failed": 0, "per_story": {6236: "success"}}
+    assert row.ai_status == "success"
+    assert row.title == "重庆在线坐标转换需求"
+    assert row.module_name == "坐标转换"
+    assert row.scene_name == "OA流程"
+    assert row.stage_name == "developing"
+    assert row.case_type == "功能测试"
+    assert row.testcase_template == "1. 打开页面"
+    assert json.loads(row.steps_json) == [{"step": "提交生成", "expected": "返回用例"}]
+    assert json.loads(row.risk_points_json) == ["坐标精度异常"]
+    assert json.loads(row.questions_to_confirm_json) == ["转换坐标系范围"]
+
+
+def test_save_ai_results_accepts_top_level_list_payload(db_session):
+    row = _seed_pending(db_session, batch_id="batch_list", story_id=7001)
+
+    summary = story_ai_result_service.save_ai_results(
+        db_session,
+        batch_id="batch_list",
+        n8n_response=[
+            {
+                "story_id": 7001,
+                "briefing": "列表形式返回也应入库",
+                "testcase_template": "case text",
+            }
+        ],
+    )
+
+    db_session.refresh(row)
+    assert summary == {"success": 1, "failed": 0, "per_story": {7001: "success"}}
+    assert row.ai_status == "success"
+    assert row.briefing == "列表形式返回也应入库"
+
+
+def test_save_ai_results_accepts_top_level_wrapper_list_payload(db_session):
+    row = _seed_pending(db_session, batch_id="batch_wrapper_list", story_id=5905)
+
+    summary = story_ai_result_service.save_ai_results(
+        db_session,
+        batch_id="batch_wrapper_list",
+        n8n_response=[
+            {
+                "execution": {"id": 1645, "name": "s40311"},
+                "results": [
+                    {
+                        "story_id": 5905,
+                        "briefing": "顶层数组包装 execution/results 也应入库",
+                        "module": "注册与激活",
+                    }
+                ],
+            }
+        ],
+    )
+
+    db_session.refresh(row)
+    assert summary == {"success": 1, "failed": 0, "per_story": {5905: "success"}}
+    assert row.ai_status == "success"
+    assert row.briefing == "顶层数组包装 execution/results 也应入库"
+    assert row.module_name == "注册与激活"
+
+
+def test_save_ai_results_preserves_new_nested_test_cases_and_story_title(db_session):
+    row = _seed_pending(db_session, batch_id="batch_test_cases", story_id=6939, title="old title")
+    test_cases = [
+        {
+            "title": "高程控制默认关闭",
+            "case_type": "功能测试",
+            "priority": "中",
+            "precondition": "已打开偏移设置面板",
+            "steps": [{"step": "查看开关", "expected": "开关处于关闭状态"}],
+            "keywords": "高程控制；默认关闭",
+            "testcase_template": "用例标题：高程控制默认关闭",
+        },
+        {
+            "title": "切换高程控制方式",
+            "case_type": "功能测试",
+            "priority": "高",
+            "steps": [{"step": "切换方式", "expected": "输入框标签同步变化"}],
+        },
+    ]
+
+    summary = story_ai_result_service.save_ai_results(
+        db_session,
+        batch_id="batch_test_cases",
+        n8n_response=[
+            {
+                "success": True,
+                "execution": {"id": 1923, "name": "s40413"},
+                "results": [
+                    {
+                        "story_id": 6939,
+                        "story_title": "线放样场景增加高程控制方式",
+                        "briefing": "需求测试简报",
+                        "test_cases": test_cases,
+                    }
+                ],
+            }
+        ],
+    )
+
+    db_session.refresh(row)
+    assert summary == {"success": 1, "failed": 0, "per_story": {6939: "success"}}
+    assert row.title == "线放样场景增加高程控制方式"
+    assert json.loads(row.raw_ai_result_json)["test_cases"] == test_cases
+    output = StoryAIResultOut.model_validate(_hydrate(row))
+    assert output.title == "线放样场景增加高程控制方式"
+    assert output.test_cases == test_cases
+
+
+def test_save_ai_results_infers_story_id_for_single_item_batch(db_session):
+    row = _seed_pending(db_session, batch_id="batch_single", story_id=8001)
+
+    summary = story_ai_result_service.save_ai_results(
+        db_session,
+        batch_id="batch_single",
+        n8n_response={"results": [{"briefing": "单条批次缺少 story_id 时自动匹配"}]},
+    )
+
+    db_session.refresh(row)
+    assert summary == {"success": 1, "failed": 0, "per_story": {8001: "success"}}
+    assert row.ai_status == "success"
+    assert row.briefing == "单条批次缺少 story_id 时自动匹配"

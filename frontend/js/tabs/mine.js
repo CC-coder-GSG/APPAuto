@@ -1,0 +1,1785 @@
+﻿import { api } from '../api.js';
+import { state } from '../state.js';
+import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
+import { closeModal, openModal } from '../components/modal.js';
+import { renderCaseReviewControls } from '../components/case-review.js?v=20260714-1';
+import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, sourceTypeZh } from '../utils.js';
+
+const RESULT_OPTIONS = [
+  { value: 'passed', label: '通过' },
+  { value: 'failed', label: '失败' },
+  { value: 'blocked', label: '阻塞' },
+  { value: 'partial', label: '部分完成' },
+  { value: 'untested', label: '未测试' },
+];
+
+const modalState = {
+  reqId: null,
+  checkboxEl: null,
+};
+
+const notesModalState = {
+  reqId: null,
+  afterSave: null,
+};
+
+const bugResultModalState = {
+  bugId: null,
+  zentaoBugId: '',
+  wasClosed: false,
+};
+let mineSseBound = false;
+let minePreflightPromise = null;
+let minePreflightKey = '';
+let minePreflightAt = 0;
+let minePreflightFailedAt = 0;
+let minePreflightHandled = null;
+let mineLoadSeq = 0;
+
+function getFoldStorageKey() {
+  const uid = state.currentUser?.id || window.currentUser?.id || 'anonymous';
+  return `omniqa_mine_fold_state_v1_${uid}`;
+}
+
+function getFoldStateMap() {
+  try {
+    const raw = localStorage.getItem(getFoldStorageKey());
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function setFoldStateMap(map) {
+  localStorage.setItem(getFoldStorageKey(), JSON.stringify(map || {}));
+}
+
+function getMode() {
+  return document.getElementById('mineDisplayMode')?.value || 'version';
+}
+
+function getMinorText(minorId) {
+  const sel = document.getElementById('mineMinorSelect');
+  if (!sel) return String(minorId || '未选择');
+  const opt = Array.from(sel.options || []).find((o) => Number(o.value || 0) === Number(minorId || 0));
+  return opt?.text || String(minorId || '未选择');
+}
+
+function renderAutoLinkedBadge(label = '自动归集') {
+  return `<span class="badge" style="background:#ecfeff; color:#0f766e; border:1px solid #99f6e4; margin-left:8px; padding:2px 6px;">${label}</span>`;
+}
+
+// 禅道校对徽章：本地关联的用例/Bug 与禅道镜像比对不一致时提示（后端产出字段）
+function renderZentaoCheckBadge(item) {
+  if (item.zentao_deleted) {
+    return '<span title="禅道侧该记录已删除，本地关联可能已失效" style="background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; padding:1px 5px; border-radius:4px; font-size:10px; font-weight:600; margin-left:4px;">⚠禅道已删除</span>';
+  }
+  if (item.story_mismatch) {
+    const sid = item.mirror_story_id || item.zentao_story_id || '?';
+    return `<span title="禅道上该记录归属另一需求（story #${sid}），与本需求不一致，请核实关联" style="background:#fffbeb; color:#b45309; border:1px solid #fde68a; padding:1px 5px; border-radius:4px; font-size:10px; font-weight:600; margin-left:4px;">⚠归属不一致</span>`;
+  }
+  return '';
+}
+
+// story 关联禅道任务标签：任务号 + 标题 + 当前指派人 + 状态；最多平铺 3 个，
+// 其余折叠进「+N」，点击展开/收起；点任务标签打开禅道任务预览。
+const TASK_CHIP_TONE = {
+  doing: { zh: '进行中', bg: '#eff6ff', fg: '#1d4ed8', bd: '#bfdbfe' },
+  changed: { zh: '进行中', bg: '#eff6ff', fg: '#1d4ed8', bd: '#bfdbfe' },
+  wait: { zh: '未开始', bg: '#f8fafc', fg: '#475569', bd: '#e2e8f0' },
+  pause: { zh: '已暂停', bg: '#fffbeb', fg: '#b45309', bd: '#fde68a' },
+  done: { zh: '已完成', bg: '#f0fdf4', fg: '#15803d', bd: '#bbf7d0' },
+  cancel: { zh: '已取消', bg: '#f8fafc', fg: '#94a3b8', bd: '#e2e8f0' },
+  closed: { zh: '已关闭', bg: '#f8fafc', fg: '#94a3b8', bd: '#e2e8f0' },
+};
+function renderStoryTaskChips(tasks, domScope, reqId) {
+  if (!tasks || !tasks.length) return '';
+  const MAX_INLINE = 3;
+  const chip = (t) => {
+    const tone = TASK_CHIP_TONE[t.status] || TASK_CHIP_TONE.wait;
+    const struck = t.status === 'cancel' || t.status === 'closed' ? ' qa-task-chip--closed' : '';
+    const assignee = t.assigned_to_name ? `<span class="qa-task-chip-assignee">👤${escapeHtml(t.assigned_to_name)}</span>` : '';
+    // 完成者单独展示：任务完成后 assignedTo 常已流转给下一环节的人
+    const finisher = t.finished_by_name ? `<span class="qa-task-chip-assignee">✔${escapeHtml(t.finished_by_name)}完成</span>` : '';
+    const tip = `任务 #${t.task_id}【${tone.zh}】${t.name || ''}`
+      + (t.assigned_to_name ? ` · 当前指派：${t.assigned_to_name}` : '')
+      + (t.finished_by_name ? ` · 由 ${t.finished_by_name} 完成` : '')
+      + '（点击预览）';
+    return `<span class="qa-task-chip${struck}" style="background:${tone.bg}; color:${tone.fg}; border-color:${tone.bd};" title="${escapeHtml(tip)}"
+      onclick="event.preventDefault(); event.stopPropagation(); window.OmniQAPreview && window.OmniQAPreview.openTask(${t.task_id})">
+      ⚙#${t.task_id}<span class="qa-task-chip-title">${escapeHtml(t.name || '')}</span>${assignee}${finisher}<span class="qa-task-chip-status">${tone.zh}</span></span>`;
+  };
+  const head = tasks.slice(0, MAX_INLINE).map(chip).join('');
+  const rest = tasks.slice(MAX_INLINE);
+  let restHtml = '';
+  if (rest.length) {
+    const moreId = `qaTaskMore_${domScope}_${reqId}`;
+    restHtml = `<span id="${moreId}" class="qa-task-chips-rest" style="display:none;">${rest.map(chip).join('')}</span>`
+      + `<span class="qa-task-chip qa-task-chip-more" title="展开/收起其余 ${rest.length} 个关联任务"
+          onclick="event.preventDefault(); event.stopPropagation(); const el=document.getElementById('${moreId}'); const show=el.style.display==='none'; el.style.display=show?'contents':'none'; this.firstChild.textContent=show?'收起':'+${rest.length}';"><span>+${rest.length}</span></span>`;
+  }
+  return `<div class="qa-task-chips">${head}${restHtml}</div>`;
+}
+
+// 注意：必须是普通函数并返回模块级 promise 本体（而非 async 包装的新 Promise），
+// schedulePreflightBackgroundRefresh 靠 promise 同一性去重「同一次同步只挂一次重载」
+function preflightWorkbenchData(softwareId) {
+  if (!softwareId) return null;
+  const key = String(softwareId);
+  const now = Date.now();
+  if (minePreflightPromise && minePreflightKey === key) {
+    return minePreflightPromise;
+  }
+  if (minePreflightKey === key && now - minePreflightAt < 30000) {
+    return null;
+  }
+  // 失败短冷却：禅道慢/绑定失效时，避免每次切进工作台都重新等一遍慢失败
+  if (minePreflightKey === key && now - minePreflightFailedAt < 60000) {
+    return null;
+  }
+  minePreflightKey = key;
+  minePreflightPromise = api('/workbench/preflight-refresh', {
+    method: 'POST',
+    headers: window.H,
+    body: {
+      software_id: softwareId,
+      include_bugs: true,
+      include_testcases: true,
+      force: false,
+    },
+  }).then(async (resp) => {
+    minePreflightAt = Date.now();
+    try { return await resp.json(); } catch { return null; }
+  }).catch((err) => {
+    minePreflightFailedAt = Date.now();
+    console.warn('workbench preflight refresh failed', err);
+    return null;
+  }).finally(() => {
+    minePreflightPromise = null;
+  });
+  return minePreflightPromise;
+}
+
+// 后台 preflight：不阻塞首屏。真正发生了禅道同步（非 cached/无错误）且
+// 需求工作台仍在前台时，静默重载一次让新数据上屏。
+// 同一个 preflight 请求只挂一次重载回调（快速来回切页时防重复重载）。
+function schedulePreflightBackgroundRefresh(softwareId) {
+  const p = preflightWorkbenchData(softwareId);
+  if (!p || typeof p.then !== 'function' || p === minePreflightHandled) return;
+  minePreflightHandled = p;
+  p.then((res) => {
+    if (!res) return;
+    const synced = (part) => part && part.cached !== true && !part.error;
+    if (!synced(res.bugs) && !synced(res.testcases)) return;
+    if (window.isWorkbenchSubtabActive && !window.isWorkbenchSubtabActive('demand')) return;
+    loadMyWorkbench().catch((err) => console.warn('workbench reload after preflight failed', err));
+  });
+}
+
+// 勾选「用例完成 / 测试完成」后的增量刷新：
+//  - 执行在后端（/workbench/preflight-refresh 只拉禅道「最近编辑」的 Bug/用例页）。
+//  - 勾「用例完成」时带 testcases_recent：用例走轻量增量同步（绕过 5 分钟 TTL，
+//    刚在禅道新建的用例秒级可见；服务端有 60s 最小间隔 + 同步锁保护）。
+//  - 前端只负责触发：800ms 去抖合并连续勾选 + 20s 冷却，防止勾选风暴打接口。
+// 同步完成后重载工作台一次，让需求的用例/Bug 内容保持最新。
+let incrementalRefreshTimer = null;
+let incrementalRefreshAt = 0;
+let incrementalRefreshWantRecent = false;
+
+function scheduleCompletionIncrementalRefresh(opts = {}) {
+  // 去抖窗口内只要有一次是「用例完成」，合并后的这次同步就走用例快速路径
+  if (opts.testcasesRecent) incrementalRefreshWantRecent = true;
+  if (incrementalRefreshTimer) clearTimeout(incrementalRefreshTimer);
+  incrementalRefreshTimer = setTimeout(async () => {
+    incrementalRefreshTimer = null;
+    const wantRecent = incrementalRefreshWantRecent;
+    incrementalRefreshWantRecent = false;
+    const softwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+    if (!softwareId) return;
+    if (Date.now() - incrementalRefreshAt < 20000) return;
+    incrementalRefreshAt = Date.now();
+    try {
+      await api('/workbench/preflight-refresh', {
+        method: 'POST',
+        headers: window.H,
+        body: {
+          software_id: softwareId,
+          include_bugs: true,
+          include_testcases: true,
+          force: false,
+          testcases_recent: wantRecent,
+        },
+      });
+      await loadMyWorkbench();
+    } catch (err) {
+      console.warn('completion-toggle incremental refresh failed', err);
+    }
+  }, 800);
+}
+
+// DB 缓存的禅道状态/指派人，用于预填 zt-bug-slot（先显示，hydrator 再覆盖更新）。
+// 视觉与 zentao-hydrator 的徽章保持一致。
+const ZT_BUG_STATUS = {
+  active: { zh: '激活', bg: '#fee2e2', color: '#b91c1c' },
+  resolved: { zh: '已解决', bg: '#dcfce7', color: '#166534' },
+  closed: { zh: '已关闭', bg: '#f1f5f9', color: '#475569' },
+};
+function renderCachedBugSlot(bug) {
+  const status = (bug.zentao_live_status || '').toLowerCase();
+  const meta = ZT_BUG_STATUS[status];
+  const statusBadge = meta
+    ? `<span style="background:${meta.bg};color:${meta.color};padding:1px 5px;border-radius:4px;font-size:10px;font-weight:600;">${meta.zh}</span>`
+    : '';
+  const assignee = bug.zentao_assigned_to_name
+    ? `<span style="color:#0ea5e9;font-size:10px;margin-left:3px;">→${escapeHtml(bug.zentao_assigned_to_name)}</span>`
+    : '';
+  return `${statusBadge}${assignee}`;
+}
+
+function renderBugChip(req, bug) {
+  const immutable = req.test_completed || bug.auto_linked;
+  const dBadge = bug.dispatched_to_name
+    ? `<span style="color:#ea580c; background:#ffedd5; padding:1px 4px; border-radius:4px; font-size:11px; margin-left:6px;">🪂已特派给:${bug.dispatched_to_name}</span>`
+    : '';
+  // 跨大版本归集：Bug 挂在其他大版本下时标注来源（同一需求跨版本时后端不再过滤）
+  const crossMajorBadge = (bug.major_version_id && req.major_version_id
+    && Number(bug.major_version_id) !== Number(req.major_version_id) && bug.major_version_no)
+    ? `<span title="该Bug记录在其他大版本下" style="background:#ede9fe; color:#6d28d9; padding:1px 5px; border-radius:4px; font-size:10px; font-weight:600; margin-left:4px;">🔀来自 ${escapeHtml(bug.major_version_no)}</span>`
+    : '';
+  const verText = bug.fixed_minor_version_no
+    ? `<span style="color:#16a34a; font-size:11px; margin-left:4px;">(✅解决于: 🏷️${bug.fixed_minor_version_no})</span>`
+    : `<span style="color:#94a3b8; font-size:11px; margin-left:4px;">(发现于: 🏷️${bug.found_minor_version_no || '未知'})</span>`;
+  const ztBugId = (bug.bug_id || '').replace(/\D/g, '');
+  // 用 DB 缓存的状态/指派人预填，先显示出来；hydrator 拉到最新后再覆盖。
+  const cachedSlot = renderCachedBugSlot(bug);
+  const ztSlot = ztBugId
+    ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}"${cachedSlot ? ' data-zt-prefilled="1"' : ''} style="margin-left:4px;">${cachedSlot}</span>`
+    : '';
+  const autoBadge = bug.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
+  const previewBugBtn = renderPreviewBtn('bug', ztBugId);
+  // 修复结果/闭环确认入口：点击弹窗完成「修复通过 + 确认闭环 + 保存记录」，不占用标签空间
+  const closedHint = bug.closed
+    ? '<span title="已闭环" style="color:#16a34a; margin-left:4px;">✅</span>'
+    : '';
+  const resultBtn = `<a href="javascript:void(0)" title="修复结果 / 闭环确认" onclick="openBugResultModal(${bug.id}, '${bug.bug_id}', ${bug.closed ? 'true' : 'false'}, '${bug.zentao_bug_id || ''}')" style="color:#16a34a; margin-left:6px; text-decoration:none;">🛠️</a>`;
+  // 复测问题标记（原测试人视角）：激活 → 复测发现未修好；测后归集 → 复测新发现的问题
+  const retestProblemBadge = bug.retest_problem
+    ? `<span style="background:#dc2626; color:#fff; padding:1px 6px; border-radius:4px; font-size:11px; font-weight:700; margin-left:4px;">${bug.retest_problem_kind === 'activated' ? '🔄复测发现未修好' : '🆕复测新发现的问题'}${bug.retest_activated_by_name ? '·' + escapeHtml(bug.retest_activated_by_name) : ''}</span>`
+    : '';
+  const chipTone = bug.retest_problem
+    ? 'background:#fef2f2; border:1.5px solid #ef4444;'
+    : 'background:#f1f5f9; border:1px solid #cbd5e1;';
+
+  return `<span class="badge" style="${chipTone} padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
+      ${renderBugLink(bug)} ${ztSlot} ${previewBugBtn} ${verText} ${crossMajorBadge} ${dBadge} ${autoBadge}${renderZentaoCheckBadge(bug)}${retestProblemBadge}${closedHint}
+      ${resultBtn}
+      <a href="javascript:void(0)" title="编辑" onclick="${immutable ? 'return false;' : `editWorkbenchBug(${bug.id}, '${bug.bug_id}')`}" style="color:${immutable ? '#94a3b8' : '#3b82f6'}; margin-left:4px; text-decoration:none;">✎</a>
+      <a href="javascript:void(0)" title="删除" onclick="${immutable ? 'return false;' : `removeWorkbenchBug(${bug.id})`}" style="color:${immutable ? '#94a3b8' : '#ef4444'}; margin-left:2px; text-decoration:none;">×</a>
+  </span>`;
+}
+
+function initTestExecutionModal() {
+  const resultSel = document.getElementById('mineTestExecResult');
+  if (resultSel && !resultSel.dataset.initialized) {
+    resultSel.innerHTML = RESULT_OPTIONS.map((r) => `<option value="${r.value}">${r.label}</option>`).join('');
+    resultSel.value = 'passed';
+    resultSel.dataset.initialized = '1';
+  }
+}
+
+function getRequirementById(reqId) {
+  return (state.currentMineData || []).find((r) => Number(r.id) === Number(reqId)) || null;
+}
+
+function getMinorOptionsByMajor(majorId) {
+  const allVersions = window.versions || [];
+  return allVersions.filter((v) => v.version_type === 'minor' && Number(v.parent_id) === Number(majorId));
+}
+
+function syncModalMinorSelect(reqId) {
+  const modalMinorSel = document.getElementById('mineTestExecMinorSelect');
+  if (!modalMinorSel) return;
+
+  const req = getRequirementById(reqId);
+  const reqMajorId = Number(req?.major_version_id || 0);
+  const linkedMinors = reqMajorId ? getMinorOptionsByMajor(reqMajorId) : [];
+  if (linkedMinors.length === 0) {
+    modalMinorSel.innerHTML = "<option value=''>暂无子版本</option>";
+    return;
+  }
+
+  modalMinorSel.innerHTML = linkedMinors
+    .map((o) => `<option value="${o.id}">${o.version_no}</option>`)
+    .join('');
+
+  const pageMinorSel = document.getElementById('mineMinorSelect');
+  if (pageMinorSel.value) {
+    modalMinorSel.value = pageMinorSel.value;
+  }
+
+  if (!modalMinorSel.value) {
+    const firstValid = Array.from(modalMinorSel.options || []).find((o) => Number(o.value || 0) > 0);
+    if (firstValid) modalMinorSel.value = firstValid.value;
+  }
+}
+
+function openTestExecutionModal(reqId, checkboxEl) {
+  initTestExecutionModal();
+  syncModalMinorSelect(reqId);
+  const minorId = Number(document.getElementById('mineTestExecMinorSelect')?.value || 0);
+  const modal = document.getElementById('mineTestExecModal');
+  const minorSel = document.getElementById('mineTestExecMinorSelect');
+  const noteInput = document.getElementById('mineTestExecNotes');
+  const resultSel = document.getElementById('mineTestExecResult');
+  if (!modal || !minorSel || !noteInput || !resultSel) return;
+  if (!minorId) {
+    if (checkboxEl) checkboxEl.checked = false;
+    window.showMessage && window.showMessage('请先在页面顶部选择当前大版本对应的小版本', 'error');
+    return;
+  }
+
+  modalState.reqId = reqId;
+  modalState.checkboxEl = checkboxEl || null;
+
+  noteInput.value = '';
+  resultSel.value = 'passed';
+  openModal(modal);
+}
+
+export function closeMineTestExecutionModal() {
+  const modal = document.getElementById('mineTestExecModal');
+  if (modal) closeModal(modal);
+  if (modalState.checkboxEl) modalState.checkboxEl.checked = false;
+  modalState.reqId = null;
+  modalState.checkboxEl = null;
+}
+
+export function closeReqTestNotesModal() {
+  clearNotesImageSelection();
+  const modal = document.getElementById('mineReqNotesModal');
+  if (modal) closeModal(modal);
+  notesModalState.reqId = null;
+  notesModalState.afterSave = null;
+}
+
+// ── 测试要点富文本编辑 ──────────────────────────────────────
+// 旧数据是纯文本：进编辑器前转 HTML；保存时同时导出纯文本版（test_notes），
+// 供移动端编辑、数据管理台/报表预览等纯文本消费方降级使用。
+function plainNotesToHtml(text) {
+  return escapeHtml(text).replace(/\n/g, '<br>');
+}
+// contenteditable 清空后常残留 <br>/<div><br></div>/&nbsp;：含图片算有内容，否则剥标签判空
+function isBlankNotesHtml(html) {
+  if (!html) return true;
+  if (/<img\b/i.test(html)) return false;
+  const t = html.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ');
+  return !t.trim();
+}
+
+function syncNotesCheckboxState(checkbox) {
+  if (!checkbox?.matches?.('input.qa-notes-check[type="checkbox"]')) return;
+  checkbox.toggleAttribute('checked', checkbox.checked);
+  checkbox.closest('.qa-notes-check-item')?.classList.toggle('is-checked', checkbox.checked);
+}
+
+function normalizeNotesCheckboxes(editor) {
+  editor?.querySelectorAll('input.qa-notes-check[type="checkbox"]').forEach(syncNotesCheckboxState);
+  // 兼容首版勾选项在每行后写入的空 div：仅清理两个勾选项之间的旧占位行。
+  editor?.querySelectorAll('.qa-notes-check-item').forEach((item) => {
+    const spacer = item.nextElementSibling;
+    if (
+      spacer?.matches('div')
+      && !spacer.textContent.trim()
+      && !spacer.querySelector('img, input')
+      && spacer.nextElementSibling?.classList.contains('qa-notes-check-item')
+    ) {
+      spacer.remove();
+    }
+  });
+}
+
+let notesSelectedImage = null;
+let notesImageResizer = null;
+
+function normalizeNotesImages(editor) {
+  editor?.querySelectorAll('img').forEach((img) => {
+    img.classList.add('qa-notes-resizable-image');
+    img.style.maxWidth = '100%';
+    img.style.height = 'auto';
+  });
+}
+
+function updateNotesImageResizer() {
+  if (!notesSelectedImage?.isConnected || !notesImageResizer) return;
+  const rect = notesSelectedImage.getBoundingClientRect();
+  notesImageResizer.style.left = `${rect.left}px`;
+  notesImageResizer.style.top = `${rect.top}px`;
+  notesImageResizer.style.width = `${rect.width}px`;
+  notesImageResizer.style.height = `${rect.height}px`;
+}
+
+function clearNotesImageSelection() {
+  notesSelectedImage = null;
+  notesImageResizer?.classList.add('hidden');
+}
+
+function ensureNotesImageResizer() {
+  if (notesImageResizer) return notesImageResizer;
+  const resizer = document.createElement('div');
+  resizer.className = 'qa-notes-image-resizer hidden';
+  resizer.innerHTML = '<span class="qa-notes-image-resize-handle" title="拖动缩放图片"></span>';
+  document.body.appendChild(resizer);
+
+  resizer.querySelector('.qa-notes-image-resize-handle').addEventListener('pointerdown', (event) => {
+    if (!notesSelectedImage) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const editor = document.getElementById('mineReqNotesEditor');
+    const image = notesSelectedImage;
+    const startX = event.clientX;
+    const startWidth = image.getBoundingClientRect().width;
+    const maxWidth = Math.max(80, (editor?.clientWidth || startWidth) - 28);
+
+    const onMove = (moveEvent) => {
+      const width = Math.min(maxWidth, Math.max(80, startWidth + moveEvent.clientX - startX));
+      image.style.width = `${Math.round(width)}px`;
+      image.style.height = 'auto';
+      updateNotesImageResizer();
+    };
+    const onEnd = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onEnd);
+      document.removeEventListener('pointercancel', onEnd);
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onEnd);
+    document.addEventListener('pointercancel', onEnd);
+  });
+
+  notesImageResizer = resizer;
+  return resizer;
+}
+
+function selectNotesImage(image) {
+  if (!image) return;
+  notesSelectedImage = image;
+  ensureNotesImageResizer().classList.remove('hidden');
+  updateNotesImageResizer();
+}
+
+// innerText 不会包含 input 的勾选状态。导出纯文本时显式替换为 [ ] / [x]，
+// 让移动端、报表等纯文本消费方也能看出每个任务项的完成状态。
+function notesEditorToPlainText(editor) {
+  if (!editor) return '';
+  const clone = editor.cloneNode(true);
+  clone.removeAttribute('id');
+  clone.removeAttribute('contenteditable');
+  clone.querySelectorAll('input.qa-notes-check[type="checkbox"]').forEach((checkbox) => {
+    const checked = checkbox.checked || checkbox.hasAttribute('checked');
+    checkbox.replaceWith(document.createTextNode(checked ? '[x] ' : '[ ] '));
+  });
+  clone.setAttribute('aria-hidden', 'true');
+  clone.style.cssText = 'position:fixed;left:-10000px;top:0;width:760px;opacity:0;pointer-events:none;';
+  document.body.appendChild(clone);
+  try {
+    return (clone.innerText || '').replace(/ /g, ' ').trim();
+  } finally {
+    clone.remove();
+  }
+}
+
+// 工具条操作（字号下拉/颜色选择器）会让编辑器失焦丢选区，这里持续记录
+// 编辑器内的最后选区，应用格式前先恢复。
+let notesSavedRange = null;
+function restoreNotesSelection() {
+  const ed = document.getElementById('mineReqNotesEditor');
+  if (!ed) return;
+  ed.focus();
+  if (notesSavedRange && ed.contains(notesSavedRange.startContainer)) {
+    const sel = document.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(notesSavedRange);
+  }
+}
+
+function createNotesChecklistItem(label = '') {
+  const item = document.createElement('div');
+  item.className = 'qa-notes-check-item';
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.className = 'qa-notes-check';
+  checkbox.setAttribute('contenteditable', 'false');
+  checkbox.setAttribute('aria-label', '任务状态');
+  const text = document.createElement('span');
+  text.className = 'qa-notes-check-text';
+  if (label) text.textContent = label;
+  else text.appendChild(document.createElement('br'));
+  item.append(checkbox, text);
+  return { item, text };
+}
+
+function focusNotesChecklistText(text, selectAll = false) {
+  const range = document.createRange();
+  range.selectNodeContents(text);
+  if (!selectAll) range.collapse(true);
+  const selection = document.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  notesSavedRange = range.cloneRange();
+  text.scrollIntoView({ block: 'nearest' });
+}
+
+function insertNotesChecklistItem() {
+  const ed = document.getElementById('mineReqNotesEditor');
+  if (!ed) return;
+  restoreNotesSelection();
+  const { item, text } = createNotesChecklistItem('待办事项');
+
+  // 勾选项始终作为编辑器的一级独立行插入，避免嵌套进上一个 flex 文本节点。
+  const range = notesSavedRange && ed.contains(notesSavedRange.startContainer) ? notesSavedRange : null;
+  if (range?.startContainer === ed) {
+    ed.insertBefore(item, ed.childNodes[range.startOffset] || null);
+  } else if (range) {
+    let topLevel = range.startContainer.nodeType === Node.ELEMENT_NODE
+      ? range.startContainer
+      : range.startContainer.parentNode;
+    while (topLevel?.parentNode && topLevel.parentNode !== ed) topLevel = topLevel.parentNode;
+    if (topLevel?.parentNode === ed) topLevel.after(item);
+    else ed.appendChild(item);
+  } else {
+    ed.appendChild(item);
+  }
+
+  // 插入后选中占位文字，用户可直接输入任务内容。
+  focusNotesChecklistText(text, true);
+}
+
+function handleNotesChecklistEnter(event, editor) {
+  // 空格保留为文本输入；Enter 新建下一条，Shift+Enter 才在当前条目内换行。
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+  const selection = document.getSelection();
+  if (!selection?.rangeCount) return;
+  const anchor = selection.anchorNode?.nodeType === Node.ELEMENT_NODE
+    ? selection.anchorNode
+    : selection.anchorNode?.parentElement;
+  const currentItem = anchor?.closest?.('.qa-notes-check-item');
+  if (!currentItem || currentItem.parentElement !== editor) return;
+
+  event.preventDefault();
+  const currentText = currentItem.querySelector(':scope > .qa-notes-check-text');
+  const hasText = (currentText?.innerText || currentText?.textContent || '')
+    .replace(/\u200b/g, '')
+    .trim();
+
+  // 在空条目上再按一次 Enter，退出清单并回到普通文本行。
+  if (!hasText) {
+    const line = document.createElement('div');
+    line.appendChild(document.createElement('br'));
+    currentItem.replaceWith(line);
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    notesSavedRange = range.cloneRange();
+    return;
+  }
+
+  const { item, text } = createNotesChecklistItem();
+  currentItem.after(item);
+  focusNotesChecklistText(text);
+}
+
+async function uploadAndInsertNotesImage(file) {
+  try {
+    const form = new FormData();
+    form.append('file', file, file.name || `paste-${Date.now()}.png`);
+    const resp = await api('/feature-tree/upload-image', { method: 'POST', body: form });
+    const data = await resp.json();
+    if (data && data.url) {
+      restoreNotesSelection();
+      const marker = `qa-notes-image-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      document.execCommand('insertHTML', false, `<img src="${data.url}" data-new-notes-image="${marker}" style="max-width:100%;height:auto;">`);
+      const editor = document.getElementById('mineReqNotesEditor');
+      const image = editor?.querySelector(`[data-new-notes-image="${marker}"]`);
+      if (image) {
+        image.removeAttribute('data-new-notes-image');
+        normalizeNotesImages(editor);
+        selectNotesImage(image);
+      }
+    }
+  } catch (err) { window.showMessage && window.showMessage(err.message || '图片上传失败', 'error'); }
+}
+
+function bindNotesEditorTools() {
+  const modal = document.getElementById('mineReqNotesModal');
+  if (!modal || modal._notesToolsBound) return;
+  modal._notesToolsBound = true;
+
+  document.addEventListener('selectionchange', () => {
+    const ed = document.getElementById('mineReqNotesEditor');
+    const sel = document.getSelection();
+    if (ed && sel && sel.rangeCount && ed.contains(sel.anchorNode)) {
+      notesSavedRange = sel.getRangeAt(0).cloneRange();
+    }
+  });
+
+  // 加粗/下划线/清除格式：mousedown + preventDefault，不让编辑器失焦
+  modal.querySelectorAll('.qa-notes-toolbar [data-cmd]').forEach((btn) => {
+    btn.addEventListener('mousedown', (e) => { e.preventDefault(); document.execCommand(btn.dataset.cmd, false, null); });
+  });
+
+  const sizeSel = document.getElementById('mineReqNotesFontSize');
+  if (sizeSel) {
+    sizeSel.addEventListener('change', () => {
+      const v = sizeSel.value;
+      sizeSel.value = '';
+      if (!v) return;
+      restoreNotesSelection();
+      document.execCommand('fontSize', false, v);
+    });
+  }
+
+  const colorInput = document.getElementById('mineReqNotesColor');
+  if (colorInput) {
+    colorInput.addEventListener('input', () => {
+      restoreNotesSelection();
+      document.execCommand('foreColor', false, colorInput.value);
+    });
+  }
+
+  const checklistBtn = document.getElementById('mineReqNotesChecklistBtn');
+  if (checklistBtn) {
+    checklistBtn.addEventListener('click', insertNotesChecklistItem);
+  }
+
+  const imgBtn = document.getElementById('mineReqNotesImageBtn');
+  const imgInput = document.getElementById('mineReqNotesImageInput');
+  if (imgBtn && imgInput) {
+    imgBtn.addEventListener('click', () => imgInput.click());
+    imgInput.addEventListener('change', async () => {
+      const f = imgInput.files && imgInput.files[0];
+      if (f) await uploadAndInsertNotesImage(f);
+      imgInput.value = '';
+    });
+  }
+
+  const ed = document.getElementById('mineReqNotesEditor');
+  if (ed) {
+    ed.addEventListener('keydown', (event) => {
+      handleNotesChecklistEnter(event, ed);
+    });
+    ed.addEventListener('change', (event) => {
+      syncNotesCheckboxState(event.target);
+    });
+    ed.addEventListener('paste', async (event) => {
+      const cd = event.clipboardData;
+      if (!cd) return;
+      const imgs = Array.from(cd.items || []).filter((it) => it.kind === 'file' && (it.type || '').startsWith('image/'));
+      if (!imgs.length) return;
+      event.preventDefault();
+      for (const it of imgs) { const f = it.getAsFile(); if (f) await uploadAndInsertNotesImage(f); }
+    });
+    ed.addEventListener('click', (event) => {
+      const image = event.target.closest?.('img');
+      if (image && ed.contains(image)) selectNotesImage(image);
+      else clearNotesImageSelection();
+    });
+    ed.addEventListener('dblclick', (event) => {
+      const image = event.target.closest?.('img');
+      if (!image || !ed.contains(image)) return;
+      event.preventDefault();
+      image.style.removeProperty('width');
+      image.removeAttribute('width');
+      image.style.height = 'auto';
+      selectNotesImage(image);
+    });
+    ed.addEventListener('scroll', updateNotesImageResizer, { passive: true });
+    window.addEventListener('resize', updateNotesImageResizer);
+  }
+}
+
+export function toggleReqNotesMaximize() {
+  const dialog = document.getElementById('mineReqNotesDialog');
+  const btn = document.getElementById('mineReqNotesMaxBtn');
+  if (!dialog) return;
+  const maxed = dialog.classList.toggle('qa-notes-dialog--max');
+  if (btn) btn.innerText = maxed ? '⤡ 还原' : '⤢ 放大';
+  requestAnimationFrame(updateNotesImageResizer);
+}
+
+export function openReqTestNotesEditor(req, afterSave = null) {
+  if (!req) {
+    window.showMessage && window.showMessage('需求不存在', 'error');
+    return;
+  }
+  const modal = document.getElementById('mineReqNotesModal');
+  const titleEl = document.getElementById('mineReqNotesTitle');
+  const editor = document.getElementById('mineReqNotesEditor');
+  const metaEl = document.getElementById('mineReqNotesMeta');
+  if (!modal || !titleEl || !editor || !metaEl) return;
+
+  notesModalState.reqId = Number(req.id);
+  notesModalState.afterSave = typeof afterSave === 'function' ? afterSave : null;
+  notesSavedRange = null;
+  titleEl.innerText = `需求测试要点 - ${req.zentao_req_id} ${req.title}`;
+  editor.innerHTML = req.test_notes_html || (req.test_notes ? plainNotesToHtml(req.test_notes) : '');
+  normalizeNotesCheckboxes(editor);
+  normalizeNotesImages(editor);
+  clearNotesImageSelection();
+
+  if (req.test_notes_updated_at || req.test_notes_updated_by_name) {
+    const t = req.test_notes_updated_at ? new Date(req.test_notes_updated_at).toLocaleString() : '未知时间';
+    const u = req.test_notes_updated_by_name || '未知';
+    metaEl.innerText = `最后更新：${u} ${t}`;
+  } else {
+    metaEl.innerText = '尚未填写测试要点';
+  }
+
+  bindNotesEditorTools();
+  openModal(modal);
+}
+
+export function openReqTestNotesModal(reqId) {
+  openReqTestNotesEditor(getRequirementById(reqId));
+}
+
+export async function saveReqTestNotes() {
+  const reqId = Number(notesModalState.reqId || 0);
+  if (!reqId) {
+    closeReqTestNotesModal();
+    return;
+  }
+  const editor = document.getElementById('mineReqNotesEditor');
+  normalizeNotesCheckboxes(editor);
+  normalizeNotesImages(editor);
+  clearNotesImageSelection();
+  const html = (editor?.innerHTML || '').trim();
+  const blank = isBlankNotesHtml(html);
+  // 纯文本降级版：图片占位标注，避免"仅贴图"的要点在纯文本侧显示为空/未填写
+  let text = blank ? '' : notesEditorToPlainText(editor);
+  if (!blank && !text) text = '[图片要点，请在网页端查看]';
+  try {
+    await api(`/requirements/${reqId}/test-notes`, {
+      method: 'PUT',
+      headers: window.H,
+      body: { test_notes: text || null, test_notes_html: blank ? null : html },
+    });
+    window.showMessage && window.showMessage('测试要点保存成功', 'success');
+    const afterSave = notesModalState.afterSave;
+    closeReqTestNotesModal();
+    if (afterSave) await afterSave();
+    else await loadMyWorkbench();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '保存测试要点失败', 'error');
+  }
+}
+
+function toggleBugResultCloseComment() {
+  const wrap = document.getElementById('mineBugResultCommentWrap');
+  if (!wrap) return;
+  const done = !!document.getElementById('mineBugResultDone')?.checked;
+  const isZentao = !!bugResultModalState.zentaoBugId;
+  // 仅在「禅道 Bug + 勾选闭环」时需要填写闭环说明（会同步写入禅道备注）
+  wrap.style.display = done && isZentao ? '' : 'none';
+}
+
+export function openBugResultModal(bugId, bugIdText, closed, zentaoBugId) {
+  const modal = document.getElementById('mineBugResultModal');
+  if (!modal) return;
+  const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
+  if (!minorId) {
+    window.showMessage && window.showMessage('请先在页面顶部选择【当前复测发包(小版本)】环境！', 'error');
+    return;
+  }
+  bugResultModalState.bugId = bugId;
+  bugResultModalState.zentaoBugId = String(zentaoBugId || '');
+  bugResultModalState.wasClosed = !!closed;
+  const titleEl = document.getElementById('mineBugResultTitle');
+  const minorEl = document.getElementById('mineBugResultMinor');
+  const resSel = document.getElementById('mineBugResultResolution');
+  const doneChk = document.getElementById('mineBugResultDone');
+  const commentEl = document.getElementById('mineBugResultComment');
+  const hintEl = document.getElementById('mineBugResultZentaoHint');
+  if (titleEl) titleEl.innerText = `Bug 修复结果 / 闭环确认 - ${bugIdText}`;
+  if (minorEl) minorEl.innerText = getMinorText(minorId);
+  if (resSel) resSel.value = 'fixed';
+  if (doneChk) doneChk.checked = !!closed;
+  if (commentEl) commentEl.value = '';
+  if (hintEl) {
+    hintEl.innerText = bugResultModalState.zentaoBugId
+      ? '该 Bug 关联禅道，勾选「确认闭环」保存时会同步关闭禅道 Bug（需禅道中已是“已解决”状态）。'
+      : '该 Bug 为本地 Bug，保存仅记录闭环结果。';
+  }
+  toggleBugResultCloseComment();
+  openModal(modal);
+}
+
+export function closeBugResultModal() {
+  const modal = document.getElementById('mineBugResultModal');
+  if (modal) closeModal(modal);
+  bugResultModalState.bugId = null;
+  bugResultModalState.zentaoBugId = '';
+  bugResultModalState.wasClosed = false;
+}
+
+export async function confirmBugResultModal() {
+  const bugId = Number(bugResultModalState.bugId || 0);
+  if (!bugId) {
+    closeBugResultModal();
+    return;
+  }
+  const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
+  if (!minorId) {
+    window.showMessage && window.showMessage('请先在页面顶部选择【当前复测发包(小版本)】环境！', 'error');
+    return;
+  }
+  const resolution = document.getElementById('mineBugResultResolution')?.value || 'fixed';
+  const done = !!document.getElementById('mineBugResultDone')?.checked;
+  const comment = (document.getElementById('mineBugResultComment')?.value || '').trim();
+  const zentaoBugId = bugResultModalState.zentaoBugId;
+  const isZentaoBug = !!zentaoBugId;
+
+  try {
+    // 勾选闭环且是禅道 Bug：先同步关闭禅道（与测试工作台一致）
+    if (isZentaoBug && done) {
+      const ztId = Number(zentaoBugId);
+      if (ztId) {
+        try {
+          await api(`/zentao/bugs/${ztId}/close`, {
+            method: 'POST',
+            headers: window.H,
+            body: { comment },
+          });
+        } catch (err) {
+          window.showMessage && window.showMessage(err.message || '禅道关闭失败，本地未保存闭环结果', 'error');
+          return;
+        }
+      }
+    }
+
+    // 取消闭环且禅道侧已关闭：必须先在禅道重新激活，再落本地未闭环
+    if (isZentaoBug && !done && bugResultModalState.wasClosed) {
+      const ztId = Number(zentaoBugId);
+      if (ztId) {
+        const reactivate = window.OmniQAOverallTestTab?.openS5ReactivateModalAsync;
+        if (typeof reactivate === 'function') {
+          window.showMessage && window.showMessage('取消闭环需要先在禅道重新激活该 Bug', 'info');
+          const activated = await reactivate(bugId, ztId);
+          if (!activated) {
+            window.showMessage && window.showMessage('未完成重新激活，已取消「取消闭环」操作', 'error');
+            return;
+          }
+        }
+      }
+    }
+
+    await api(`/overall-test/bugs/${bugId}/result`, {
+      method: 'PUT',
+      headers: window.H,
+      body: { minor_version_id: minorId, test_done: done, newly_found_bug_id: null, resolution },
+    });
+    window.showMessage && window.showMessage('Bug 修复结果已保存并同步至总盘', 'success');
+    closeBugResultModal();
+    await loadMyWorkbench();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '保存失败，请稍后重试', 'error');
+  }
+}
+
+export async function submitTestExecution(reqId, payload) {
+  return api(`/requirements/${reqId}/test-execution`, {
+    method: 'PUT',
+    headers: window.H,
+    body: payload,
+  });
+}
+
+function promptRequirementTaskConsumed(req) {
+  if (!req?.zentao_task_id || !req.task_assigned_to_me || req.task_has_time_tracking) return undefined;
+  const suggested = Number(req.estimated_test_hours || 1);
+  const input = window.prompt(
+    '未检测到该禅道任务的计时记录，请输入本次实际测试工时（小时）：',
+    String(suggested),
+  );
+  if (input === null) return null;
+  const consumed = Number(input);
+  if (!Number.isFinite(consumed) || consumed <= 0 || consumed > 999) {
+    window.showMessage && window.showMessage('实际工时需在 0~999 小时之间', 'error');
+    return null;
+  }
+  return consumed;
+}
+
+export async function confirmMineTestExecutionModal() {
+  const reqId = Number(modalState.reqId || 0);
+  if (!reqId) {
+    closeMineTestExecutionModal();
+    return;
+  }
+  const minorId = Number(document.getElementById('mineTestExecMinorSelect')?.value || 0);
+  const resultStatus = document.getElementById('mineTestExecResult')?.value || 'passed';
+  const notes = (document.getElementById('mineTestExecNotes')?.value || '').trim();
+  if (!minorId) {
+    window.showMessage && window.showMessage('请先选择当前复测发包（小版本）', 'error');
+    return;
+  }
+  const req = getRequirementById(reqId);
+  const taskConsumedHours = promptRequirementTaskConsumed(req);
+  if (taskConsumedHours === null) return;
+
+  const pageMinorSel = document.getElementById('mineMinorSelect');
+  if (pageMinorSel) pageMinorSel.value = String(minorId);
+
+  showLoading('正在提交测试完成并同步禅道任务，请稍候…');
+  try {
+    await submitTestExecution(reqId, {
+      minor_version_id: minorId,
+      result_status: resultStatus,
+      test_completed: true,
+      notes,
+      ...(taskConsumedHours !== undefined ? { task_consumed_hours: taskConsumedHours } : {}),
+    });
+    const modal = document.getElementById('mineTestExecModal');
+    if (modal) closeModal(modal);
+    scheduleCompletionIncrementalRefresh(); // 测试完成 → 增量同步用例/Bug 保持最新
+    // 加载条挂到工作台重载完成再收起：提示出现时界面已是最新状态
+    setLoadingText('禅道已同步，正在刷新工作台…');
+    try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
+    hideLoading();
+    window.showMessage && window.showMessage('测试执行记录已提交，需求已标记测试完成（禅道任务已联动完成）', 'success');
+  } catch (err) {
+    hideLoading();
+    if (modalState.checkboxEl) modalState.checkboxEl.checked = false;
+    window.showMessage && window.showMessage(err.message || '提交失败，请稍后重试', 'error');
+  } finally {
+    modalState.reqId = null;
+    modalState.checkboxEl = null;
+  }
+}
+
+export async function handleTestCompletedToggle(reqId, checked, checkboxEl) {
+  if (checked) {
+    const req = getRequirementById(reqId);
+    const linkedMinors = getMinorOptionsByMajor(Number(req?.major_version_id || 0));
+    if (linkedMinors.length === 0) {
+      if (checkboxEl) checkboxEl.checked = false;
+      window.showMessage && window.showMessage('当前需求所属大版本下暂无可用小版本，请先补充小版本', 'error');
+      return;
+    }
+    openTestExecutionModal(reqId, checkboxEl);
+    return;
+  }
+
+  const ok = confirm('确认取消该需求的测试完成状态吗？');
+  if (!ok) {
+    if (checkboxEl) checkboxEl.checked = true;
+    return;
+  }
+  showLoading('正在取消测试完成并同步禅道（重新激活任务），请稍候…');
+  let msg = '已取消测试完成状态（禅道任务已联动重新激活）';
+  let msgType = 'success';
+  try {
+    await api(`/requirements/${reqId}/status`, {
+      method: 'PATCH',
+      headers: window.H,
+      body: { test_completed: false },
+    });
+  } catch (err) {
+    if (checkboxEl) checkboxEl.checked = true;
+    msg = err.message || '状态更新失败';
+    msgType = 'error';
+  }
+  // 加载条挂到工作台重载完成再收起，提示与界面更新同时出现
+  setLoadingText('正在刷新工作台数据…');
+  try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
+  hideLoading();
+  window.showMessage && window.showMessage(msg, msgType);
+}
+
+export function toggleMineMode() {
+  const mode = getMode();
+  const wrap = document.getElementById('mineVersionWrap');
+  if (wrap) wrap.style.display = mode === 'version' ? 'flex' : 'none';
+  refreshMineMinorSelectByMode();
+  return loadMyWorkbench();
+}
+
+function refreshMineMinorSelectByMode() {
+  const minorSel = document.getElementById('mineMinorSelect');
+  if (!minorSel) return;
+  const mode = getMode();
+
+  if (mode === 'all_pending') {
+    const allMinors = (window.versions || []).filter((v) => v.version_type === 'minor');
+    if (allMinors.length === 0) {
+      minorSel.innerHTML = "<option value=''>暂无子版本</option>";
+      return;
+    }
+    const prev = minorSel.value;
+    minorSel.innerHTML = allMinors.map((v) => `<option value="${v.id}">${v.version_no}</option>`).join('');
+    if (prev) minorSel.value = prev;
+    if (!minorSel.value && allMinors[0]) minorSel.value = String(allMinors[0].id);
+    return;
+  }
+
+  if (typeof window.fillMinorSelectByMajor === 'function') {
+    window.fillMinorSelectByMajor('mineMajorSelect', 'mineMinorSelect');
+  }
+}
+
+// ——「指派给我的Bug」面板：完全照搬测试工作台（overall-test）的行布局 ——
+// 判定禅道 Bug 是否已实质关闭 / 可重新激活，与 overall-test.js 保持一致。
+function isDispatchBugEffectivelyClosed(bug) {
+  if (!bug?.zentao_bug_id) return false;
+  const zentaoStatus = String(bug.zentao_live_status || '').toLowerCase();
+  return (
+    zentaoStatus === 'closed'
+    || !!bug.zentao_close_date
+    || !!bug.zentao_closed_by_name
+    || String(bug.zentao_assigned_to_name || '').toLowerCase() === 'closed'
+  );
+}
+
+function isDispatchBugReactivatable(bug) {
+  if (!bug?.zentao_bug_id) return false;
+  const zentaoStatus = String(bug.zentao_live_status || '').toLowerCase();
+  return isDispatchBugEffectivelyClosed(bug) || zentaoStatus === 'resolved';
+}
+
+function getDispatchAssignedDisplayName(value) {
+  const text = String(value || '').trim();
+  if (!text) return '-';
+  return text.toLowerCase() === 'closed' ? '已关闭' : text;
+}
+
+// 单行渲染：镜像 overall-test.js 的 buildS5RowHtml，列结构为
+// 编号(来源) | 标题 | 操作(编辑/删除/指派/重新激活) | 验证操作(结果+我的闭环确认+说明+保存)。
+function renderDispatchedBugRow(b) {
+  const isMyClosed = b.my_test_done;
+  const isZentaoDeleted = !!b.zentao_deleted;
+  const rowStyle = isZentaoDeleted
+    ? 'background:#fef2f2; box-shadow: inset 4px 0 0 #dc2626;'
+    : (isMyClosed ? 'background: #f8fafc; color: #94a3b8;' : '');
+  const isZentaoBug = !!b.zentao_bug_id;
+  const isEffectivelyClosed = isDispatchBugEffectivelyClosed(b);
+  const canReactivate = isDispatchBugReactivatable(b);
+  const shouldStrikeClosed = !!(isMyClosed || isEffectivelyClosed);
+  const strikeDecoration = shouldStrikeClosed
+    ? 'text-decoration:line-through; text-decoration-thickness:1px; text-decoration-color:#94a3b8;'
+    : '';
+
+  const failBadge = b.is_retest_failed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; margin-left:4px;">🚨复测打回</span>' : '';
+
+  const bugIdText = escapeHtml(b.bug_id || '-');
+  const ztBugId = (b.zentao_bug_id) ? String(b.zentao_bug_id) : (b.bug_id || '').replace(/\D/g, '');
+  const bugHref = b.zentao_bug_url
+    ? `<a class="qa-ext-link" href="${b.zentao_bug_url}" target="_blank" rel="noopener noreferrer">${bugIdText}</a>`
+    : ztBugId
+      ? `<span class="qa-bug-id-nohref" data-zt-bug-id="${ztBugId}">${bugIdText}</span>`
+      : `<span>${bugIdText}</span>`;
+  const bugTitle = escapeHtml(b.zentao_bug_title || b.bug_title || '');
+  const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" data-zt-no-title="1" style="margin-left:4px;"></span>` : '';
+  const previewBugBtn = renderPreviewBtn('bug', ztBugId);
+  const deletedBadge = isZentaoDeleted
+    ? `<span class="badge" style="background:#dc2626; color:#fff; font-weight:bold;">🗑️ 禅道已删除</span>`
+    : '';
+  const reqMeta = `<span style="font-size:12px;color:#64748b;">(${escapeHtml(b.req_title || '')})</span>`;
+  const syncMeta = b.last_zentao_synced_at ? `<span class="badge" style="background:#f8fafc; color:#64748b;">同步 ${escapeHtml(b.last_zentao_synced_at)}</span>` : '';
+  const assignedMeta = (!isZentaoDeleted && b.zentao_assigned_to_name) ? `<span class="badge" style="background:#faf5ff; color:#7c3aed;">当前指派 ${escapeHtml(getDispatchAssignedDisplayName(b.zentao_assigned_to_name))}</span>` : '';
+  const closedByMeta = (!isZentaoDeleted && b.zentao_closed_by_name) ? `<span class="badge" style="background:#ecfdf5; color:#047857;">禅道关闭 ${escapeHtml(b.zentao_closed_by_name)}</span>` : '';
+  const closeDateMeta = (!isZentaoDeleted && b.zentao_close_date) ? `<span class="badge" style="background:#f1f5f9; color:#475569;">${escapeHtml(b.zentao_close_date)}</span>` : '';
+  const otherClosedMeta = (b.other_records && b.other_records.length > 0)
+    ? `<span class="badge" style="background:#eff6ff; color:#1d4ed8;">他人闭环 ${b.other_records.length}</span>`
+    : '';
+
+  const linkStyle = 'font-size:12px; text-decoration:none; white-space:nowrap;';
+  const editLink = `<a href="javascript:void(0)" onclick="dispatchEditBug(${b.id})" style="${linkStyle} color:#3b82f6;">编辑</a>`;
+  const deleteLink = `<a href="javascript:void(0)" onclick="dispatchRemoveBug(${b.id})" style="${linkStyle} color:#ef4444;">删除</a>`;
+  const sep = `<span style="color:#e2e8f0; margin:0 2px;">|</span>`;
+  let actionsHtml;
+  if (isZentaoBug) {
+    const assignLink = `<a href="javascript:void(0)" onclick="dispatchAssignBug(${b.id})" style="${linkStyle} color:#8b5cf6;">指派</a>`;
+    const reactivateVis = canReactivate ? 'visible' : 'hidden';
+    const reactivateLink = `<a href="javascript:void(0)" onclick="dispatchReactivateBug(${b.id})" style="${linkStyle} color:#059669; font-weight:bold; visibility:${reactivateVis};">重新激活</a>`;
+    actionsHtml = `
+      <div style="display:flex; flex-direction:column; gap:3px;">
+        <div style="display:flex; align-items:center; gap:2px;">${editLink}${sep}${deleteLink}</div>
+        <div style="display:flex; align-items:center; gap:2px;">${assignLink}${sep}${reactivateLink}</div>
+      </div>`;
+  } else {
+    actionsHtml = `
+      <div style="display:flex; flex-direction:column; gap:3px;">
+        <div style="display:flex; align-items:center; gap:2px;">${editLink}${sep}${deleteLink}</div>
+        <div style="height:18px;"></div>
+      </div>`;
+  }
+
+  const closeOnChange = `onchange="toggleDispatchedClose(${b.id}, this.checked)"`;
+  const closeLabel = `<label style="color:#0f172a; font-weight:bold; display:flex; align-items:center; gap:4px; margin:0; ${strikeDecoration}"><input id='ddone_${b.id}' type='checkbox' ${isMyClosed ? 'checked' : ''} ${closeOnChange}> 我的闭环确认</label>`;
+  const closeCommentRow = isZentaoBug
+    ? `<div id='dcomment_wrap_${b.id}' style="display:none; margin-top:4px; width:100%;">
+        <textarea id='dcomment_${b.id}' placeholder='闭环说明（将同步写入禅道备注）' style='width:100%; font-size:12px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; resize:vertical; min-height:40px;'>${escapeHtml(b.my_comment || '')}</textarea>
+       </div>`
+    : '';
+
+  return `<tr class="mine-dispatch-row-card" data-bug-id="${b.id}" style="${rowStyle}">
+    <td style="vertical-align:middle; padding:6px 10px;">
+      <div${isZentaoDeleted ? ' style="color:#dc2626; font-weight:bold;"' : ''}>${bugHref}${ztSlot} ${previewBugBtn} <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span>${failBadge}</div>
+      <div style="margin-top:6px;">${reqMeta}</div>
+      ${(deletedBadge || otherClosedMeta) ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">${deletedBadge}${otherClosedMeta}</div>` : ''}
+    </td>
+    <td style="vertical-align:middle; padding:6px 10px;">
+      ${bugTitle ? `<div style="max-height:60px; overflow-y:auto; font-size:13px; color:#475569; line-height:1.65; word-break:break-word; ${strikeDecoration}">${bugTitle}</div>` : '<span style="color:#94a3b8;">-</span>'}
+      ${(syncMeta || assignedMeta || closedByMeta || closeDateMeta) ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">${syncMeta}${assignedMeta}${closedByMeta}${closeDateMeta}</div>` : ''}
+    </td>
+    <td style="vertical-align:middle; padding:6px 8px; width:120px;">${actionsHtml}</td>
+    <td style="text-decoration:none; vertical-align:middle; padding:6px 10px;">
+      <input type="hidden" id="dzt_${b.id}" value="${b.zentao_bug_id || ''}">
+      <input type="hidden" id="dwasclosed_${b.id}" value="${b.closed ? '1' : ''}">
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <select id='dres_${b.id}' style="padding:2px; font-size:13px; border:1px solid #cbd5e1; border-radius:4px; color:#475569; ${strikeDecoration}" ${isMyClosed ? 'disabled' : ''}>
+          <option value="fixed" ${b.my_resolution === 'fixed' ? 'selected' : ''}>✅修复通过</option>
+          <option value="false_alarm" ${b.my_resolution === 'false_alarm' ? 'selected' : ''}>⚠️误报</option>
+          <option value="rejected" ${b.my_resolution === 'rejected' ? 'selected' : ''}>拒绝修复</option>
+        </select>
+        ${closeLabel}
+        ${closeCommentRow}
+        <button class="${isMyClosed ? 'secondary' : ''}" style="${strikeDecoration}" onclick="saveDispatchedBug(${b.id})">保存记录</button>
+      </div>
+    </td>
+  </tr>`;
+}
+
+// 可折叠面板（默认折叠），内部表格与测试工作台大盘行布局一致。
+function renderDispatchPanel(ddata) {
+  const rows = ddata.map((b) => renderDispatchedBugRow(b)).join('');
+  return `<details class="card" data-dispatch-panel="1" style="border:2px solid #3b82f6; background:#eff6ff; margin-bottom:24px;">
+    <summary style="outline:none; cursor:pointer; color:#1d4ed8; font-size:16px; font-weight:bold; display:flex; align-items:center; gap:8px; list-style:none;">
+      <span>🪂 指派给我的Bug</span>
+      <span class="badge" style="background:#dbeafe; color:#1d4ed8; border:1px solid #bfdbfe;">${ddata.length}</span>
+      <span style="font-size:12px; color:#64748b; font-weight:normal;">(点击展开/收起)</span>
+    </summary>
+    <div style="margin-top:12px;">
+      <table style="background:#fff; border-radius:6px; overflow:hidden;">
+        <thead><tr><th style="width:260px">Bug 编号 (来源)</th><th>Bug 标题</th><th style="width:120px">操作</th><th style="width:420px">验证操作</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </details>`;
+}
+
+export async function loadMyWorkbench() {
+  initTestExecutionModal();
+  refreshMineMinorSelectByMode();
+  const mode = getMode();
+  const majorId = Number(document.getElementById('mineMajorSelect')?.value || 0);
+  let url = '/workbench/mine?mode=' + mode;
+  if (mode === 'version' && majorId) url += '&major_version_id=' + majorId;
+  const currentSoftwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+  if (currentSoftwareId) url += `&software_id=${currentSoftwareId}`;
+  // 缓存优先：本地数据（禅道镜像缓存）立刻上屏，禅道 preflight 同步转后台，
+  // 真同步到新数据后静默重载一次。进页面不再空等禅道全量用例同步。
+  if (currentSoftwareId) {
+    schedulePreflightBackgroundRefresh(currentSoftwareId);
+  }
+
+  // 三路数据并行拉取；seq 防竞态：只有最新一次加载的结果允许上屏
+  const seq = ++mineLoadSeq;
+
+  const feedbackPromise = (async () => {
+    if (window.OmniQAFeedbackTab && typeof window.OmniQAFeedbackTab.loadFeedbackTodoOnMine === 'function') {
+      try {
+        await window.OmniQAFeedbackTab.loadFeedbackTodoOnMine(mode === 'version' ? majorId : null);
+        return;
+      } catch { /* 失败清空，下方兜底 */ }
+    }
+    state.currentFeedbackTodoHtml = '';
+  })();
+
+  const dispatchPromise = (mode === 'version' && majorId)
+    ? api('/bugs/dispatched-to-me?major_version_id=' + majorId).then((r) => r.json())
+    : Promise.resolve([]);
+
+  const [, ddata, mineData] = await Promise.all([
+    feedbackPromise,
+    dispatchPromise,
+    api(url).then((r) => r.json()),
+  ]);
+  if (seq !== mineLoadSeq) return; // 已有更新的加载在跑，丢弃本次结果
+
+  state.currentDispatchData = ddata;
+  state.currentDispatchHtml = ddata.length > 0 ? renderDispatchPanel(ddata) : '';
+  state.currentMineData = mineData;
+  const summaryEl = document.getElementById('mineSummaryText');
+  const pendingCount = state.currentMineData.filter((r) => !r.test_completed || !r.case_completed).length;
+  if (summaryEl) {
+    if (mode === 'version') {
+      const select = document.getElementById('mineMajorSelect');
+      const vName = select?.options?.[select.selectedIndex]?.text || '当前大版本';
+      summaryEl.innerHTML = `📢 <b>${vName}</b> 剩余 <b style="color:#dc2626; font-size:18px;">${pendingCount}</b> 个需求未完成测试！`;
+    } else {
+      summaryEl.innerHTML = `📢 跨版本汇总：您共有 <b style="color:#dc2626; font-size:18px;">${pendingCount}</b> 个待办测试需求！`;
+    }
+    summaryEl.style.display = 'block';
+  }
+  renderMineCards();
+}
+
+const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', changed: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
+
+// 「开始」按钮（放在用例/测试勾选框之前）。仅在关联了禅道任务时显示，并按任务状态切换：
+//   wait（已关联未开始）→ 可点「开始」
+//   doing（已开始 / 重新激活后）→「任务已开始」禁用
+//   done（测试完成）→「任务已完成」禁用
+function renderTaskStartControl(req) {
+  if (!req.zentao_task_id) return '';
+  const status = String(req.zentao_task_status || '').toLowerCase();
+  // 需求工作台的完成态优先于禅道完成后的指派流转。
+  if (status === 'done' || status === 'closed' || req.test_completed) {
+    return `<button class="secondary" disabled style="padding:2px 10px; font-size:12px; opacity:.7;">✅ 任务已完成</button>`;
+  }
+  // 任务未指派给当前账号：不显示操作按钮（仅指派人本人可操作）。
+  if (!req.task_assigned_to_me) return '';
+  if (status === 'doing' || status === 'changed') {
+    // 进行中：可暂停（禅道同步暂停）。
+    return `<button style="padding:2px 10px; font-size:12px; background:#d97706;" onclick="pauseReqTask(${req.id})" title="暂停任务，禅道子任务同步暂停">⏸ 暂停</button>`;
+  }
+  if (status === 'pause') {
+    // 已暂停：用「开始」继续（后端识别暂停态走 restart 继续）。
+    return `<button style="padding:2px 10px; font-size:12px; background:#16a34a;" onclick="startReqTask(${req.id})" title="继续任务，禅道子任务同步继续">▶ 继续</button>`;
+  }
+  return `<button style="padding:2px 10px; font-size:12px; background:#16a34a;" onclick="startReqTask(${req.id})" title="开始测试，禅道子任务同步开始">▶ 开始</button>`;
+}
+
+// 子任务标签 + 预览 + 预计用时输入。预计用时仅在「任务指派给本人」时可编辑；
+// 非指派人只读展示子任务状态与指派人，避免误操作他人任务。
+function renderTaskMeta(req) {
+  if (req.zentao_task_id) {
+    const rawStatus = String(req.zentao_task_status || '').toLowerCase();
+    const effectiveStatus = req.test_completed ? 'done' : rawStatus;
+    const zh = TASK_STATUS_ZH[effectiveStatus] || effectiveStatus || '';
+    const done = effectiveStatus === 'done' || effectiveStatus === 'closed';
+    const taskTag = `<span class="badge" style="background:${done ? '#dcfce7' : '#eff6ff'}; color:${done ? '#166534' : '#1d4ed8'}; border:1px solid ${done ? '#bbf7d0' : '#bfdbfe'};">禅道子任务 #${req.zentao_task_id}${zh ? '·' + zh : ''}</span>${renderPreviewBtn('task', req.zentao_task_id)}`;
+    if (!req.task_assigned_to_me) {
+      // 非指派人：隐藏预计用时输入，改为只读的指派人标签。
+      const assignee = req.zentao_task_assigned_to
+        ? `<span class="badge" style="background:#faf5ff; color:#7c3aed; border:1px solid #e9d5ff;">指派给 ${escapeHtml(req.zentao_task_assigned_to)}</span>`
+        : '';
+      return `${taskTag}${assignee}`;
+    }
+    const est = (req.estimated_test_hours != null ? req.estimated_test_hours : 4);
+    const estInput = `<label class="badge" style="background:#f8fafc; color:#475569; border:1px solid #e2e8f0; display:inline-flex; align-items:center; gap:4px;">预计用时
+      <input type="number" min="0.5" step="0.5" value="${est}" style="width:54px; padding:1px 4px; border:1px solid #cbd5e1; border-radius:4px;" onchange="setReqEstimatedHours(${req.id}, this.value)" onclick="event.stopPropagation()">h</label>`;
+    return `${estInput}${taskTag}`;
+  }
+  return `<span class="badge" style="background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;">未关联禅道任务</span>`;
+}
+
+// 收集一个需求卡片下的全部 bug（用例关联 bug + 自由 bug）。
+function collectReqBugs(req) {
+  const caseBugs = (req.test_cases || []).flatMap((c) => c.bugs || []);
+  return [...caseBugs, ...(req.free_bugs || [])];
+}
+
+export function renderMineCards() {
+  const searchKw = (document.getElementById('mineSearchInput')?.value || '').trim().toLowerCase();
+  const onlyAssignedToMe = !!document.getElementById('mineAssignedToMe')?.checked;
+  const filteredData = state.currentMineData.filter((req) => {
+    // 搜索：匹配需求编号/名称，或卡片内任一 bug 的编号/标题（卡片级过滤）
+    if (searchKw) {
+      const bugs = collectReqBugs(req);
+      const hit = (req.zentao_req_id && req.zentao_req_id.toLowerCase().includes(searchKw))
+        || (req.title && req.title.toLowerCase().includes(searchKw))
+        || bugs.some((b) => (b.bug_id && b.bug_id.toLowerCase().includes(searchKw))
+          || (b.zentao_bug_title && b.zentao_bug_title.toLowerCase().includes(searchKw)));
+      if (!hit) return false;
+    }
+    // 「指派给我的」：只保留含有 ≥1 个指派给当前用户 bug 的卡片
+    if (onlyAssignedToMe && !collectReqBugs(req).some((b) => b.assigned_to_me)) return false;
+    return true;
+  });
+  const mode = getMode();
+  const foldStateMap = getFoldStateMap();
+
+  const reqsHtml = filteredData.map((req) => {
+    const caseDisabled = req.case_completed ? 'disabled' : '';
+    const testDisabled = req.test_completed ? 'disabled' : '';
+    const isFullyCompleted = req.test_completed && req.case_completed;
+    const isOpen = Object.prototype.hasOwnProperty.call(foldStateMap, String(req.id)) ? !!foldStateMap[String(req.id)] : !isFullyCompleted;
+    const vTag = mode === 'all_pending' && req.major_version_name
+      ? `<span class="badge" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; margin-right:8px; padding:2px 6px;">🏷️${req.major_version_name}</span>`
+      : '';
+    const syncSummary = [
+      req.auto_linked_case_count > 0 ? renderAutoLinkedBadge(`自动归集用例 ${req.auto_linked_case_count}`) : '',
+      req.auto_linked_bug_count > 0 ? renderAutoLinkedBadge(`自动归集Bug ${req.auto_linked_bug_count}`) : '',
+    ].join('');
+
+    const caseHtml = (req.test_cases || []).map((c) => {
+      const caseZtId = String(c.zentao_case_id || '').replace(/\D/g, '');
+      return `
+      <div class="case-item">
+        <div class="row">
+          ${renderCaseLink(c)}${renderPreviewBtn('testcase', caseZtId)}${c.auto_linked ? renderAutoLinkedBadge() : ''}${renderZentaoCheckBadge(c)}
+        </div>
+        ${(() => { const rv = renderCaseReviewControls(c, req.id, { actions: false }); return rv ? `<div style="margin-top:6px;">${rv}</div>` : ''; })()}
+        <div class="case-bugs" style="margin-top:6px;">${(c.bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无关联Bug</span>'}</div>
+      </div>`;
+    }).join('');
+
+    const freeBugHtml = (req.free_bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无自由Bug</span>';
+
+    const ztStoryId = (req.zentao_req_id || '').replace(/\D/g, '');
+    const ztStorySlot = ztStoryId ? `<span class="zt-story-slot" data-zt-story-id="${ztStoryId}" style="margin-left:6px; vertical-align:middle;"></span>` : '';
+    const aiResultSlot = ztStoryId ? `<span class="ai-result-slot" data-story-id="${ztStoryId}" style="margin-left:6px; vertical-align:middle;"></span>` : '';
+    const reqIdHtml = ztStoryId
+      ? `<span class="qa-story-id-nohref" data-zt-story-id="${ztStoryId}">${req.zentao_req_id}</span>`
+      : (req.zentao_req_id || '');
+    const previewBtn = renderPreviewBtn('story', ztStoryId);
+    // 复测出现问题：标题旁醒目文本 + 整卡红框（对所有能看到该需求卡片的人展示）
+    const retestFailed = req.retest_conclusion === 'failed';
+    const retestFailTag = retestFailed
+      ? '<span style="background:#dc2626; color:#fff; padding:2px 8px; border-radius:6px; font-size:12px; font-weight:700; margin-left:8px; white-space:nowrap; vertical-align:middle;">🚨此需求复测出现未发现的问题</span>'
+      : '';
+    const retestFailBorder = retestFailed ? 'border:2px solid #ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.12);' : '';
+
+    return `
+      <details class="mine-req-card" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; ${retestFailBorder} transition: all 0.3s;">
+        <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
+          <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${renderStoryTaskChips(req.story_tasks, 'mine', req.id)}</div>
+          ${isFullyCompleted ? '<span style="color:#16a34a; font-size:14px; background:#f0fdf4; padding:4px 8px; border-radius:4px; border:1px solid #bbf7d0;">✅ 测试已完成</span>' : '<span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开卡片)</span>'}
+        </summary>
+        <div style="margin-top: 12px;">
+          <div class="row" style="margin-bottom:8px">
+            ${renderTaskStartControl(req)}
+            ${req.final_test
+              ? `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'case_completed', this.checked, this)">✅用例完成</label>
+            <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'test_completed', this.checked, this)">✅测试完成</label>`
+              : `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked).then(()=>loadMyWorkbench())">✅用例完成</label>
+            <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">✅测试完成</label>`}
+            ${renderTaskMeta(req)}
+            <span class="badge" style="background:${req.test_notes ? '#dcfce7' : '#f1f5f9'}; color:${req.test_notes ? '#166534' : '#64748b'}; border:1px solid ${req.test_notes ? '#bbf7d0' : '#e2e8f0'};">
+              测试要点：${req.test_notes ? '已填写' : '未填写'}
+            </span>
+            <button class="secondary" style="padding:2px 8px; font-size:12px;" onclick="openReqTestNotesModal(${req.id})">${req.test_notes ? '查看/编辑测试要点' : '填写测试要点'}</button>
+            ${syncSummary}
+          </div>
+          <div>${caseHtml}</div>
+          <div class="free-bug-box"><div><b>自由Bug</b></div><div style="margin-top:6px;">${freeBugHtml}</div></div>
+          <div class="muted" style="margin-top:10px; font-size:12px; padding:6px 10px; background:#f8fafc; border-left:3px solid #94a3b8; border-radius:4px;">
+            用例与 Bug 已改为按禅道 story / testcase 自动归集，不再需要手工录入。如需补救异常归属，请到“同步中心”由管理员处理。
+          </div>
+        </div>
+      </details>`;
+  }).join('');
+
+  const finalTestBanner = (state.currentMineData || []).some((r) => r.final_test)
+    ? `<div class="card" style="border:2px solid #f59e0b; background:#fffbeb; margin-bottom:16px;">
+         <b style="color:#92400e;">🏁 该版本已进入「最终测试」阶段</b>
+         <div class="muted" style="margin-top:4px;">以下为该版本全部需求（无视任务分配）。您的勾选独立记录，与原有测试状态互不影响。</div>
+       </div>`
+    : '';
+
+  const mineCards = document.getElementById('mineCards');
+  if (mineCards) {
+    mineCards.innerHTML = finalTestBanner + (state.currentFeedbackTodoHtml || '') + state.currentDispatchHtml + reqsHtml;
+    window.OmniQAZentao?.hydrateContainer(mineCards);
+    window.OmniQAStoryAI?.refreshSlots?.(mineCards);
+  }
+  window.scheduleWorkbenchViewportResize?.();
+  if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
+    window.OmniQASSE.releaseAttention?.();
+    document.querySelectorAll('.mine-req-card[data-req-id]').forEach((el) => {
+      window.OmniQASSE.mountAttention(el, { scope: 'mine_requirement', key: el.getAttribute('data-req-id'), tone: 'blue', hoverDelayMs: 420 });
+    });
+  }
+}
+
+function bindMineSSE() {
+  if (mineSseBound) return;
+  if (!window.OmniQASSE?.subscribe) return;
+
+  // 新需求进来：尝试增量刷新工作台（保持筛选/折叠状态）
+  window.OmniQASSE.subscribe('workbench_requirement_created', ({ payload }) => {
+    const reqId = Number(payload?.id || 0);
+    if (!reqId) return;
+    const myId = Number(state.currentUser?.id || window.currentUser?.id || 0);
+    if (myId && payload?.owner_id && Number(payload.owner_id) !== myId) return;
+    // Refresh quietly to get new card data; markUnread is handled by sse.js
+    const majorId = Number(document.getElementById('mineMajorSelect')?.value || 0);
+    const mode = document.getElementById('mineDisplayMode')?.value || 'version';
+    if (!majorId && mode === 'version') return;
+    // Debounce so rapid-fire events only trigger one reload
+    if (window._mineSSERequirementTimer) clearTimeout(window._mineSSERequirementTimer);
+    window._mineSSERequirementTimer = setTimeout(async () => {
+      window._mineSSERequirementTimer = null;
+      if (!window.isWorkbenchSubtabActive?.('demand')) return;
+      if (typeof window.loadMyWorkbench === 'function') await window.loadMyWorkbench();
+      // After reload, pulse the new card
+      const el = document.querySelector(`.mine-req-card[data-req-id='${reqId}']`);
+      if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'blue');
+    }, 500);
+  });
+
+  // 新 testcase：容器级轻流光，不进主角标
+  window.OmniQASSE.subscribe('workbench_testcase_created', ({ payload }) => {
+    const reqId = Number(payload?.requirement_id || 0);
+    if (!reqId) return;
+    const el = document.querySelector(`.mine-req-card[data-req-id='${reqId}']`);
+    if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'teal');
+  });
+
+  // 测试要点可由审查工作台中的任意用户协作修改；需求工作台在前台时
+  // 自动刷新，避免继续展示其他用户修改前的内容。
+  window.OmniQASSE.subscribe('requirement_test_notes_updated', () => {
+    if (!window.isWorkbenchSubtabActive?.('demand')) return;
+    if (window._mineSSETestNotesTimer) clearTimeout(window._mineSSETestNotesTimer);
+    window._mineSSETestNotesTimer = setTimeout(() => {
+      window._mineSSETestNotesTimer = null;
+      loadMyWorkbench().catch(() => {});
+    }, 500);
+  });
+
+  // 任务看板/任务工作台执行开始、完成或重新激活后，需求工作台同步刷新
+  // 禅道状态标签；重新激活关联任务时也会同步取消「测试完成」。
+  window.OmniQASSE.subscribe('zentao_task_changed', ({ payload }) => {
+    if (!payload?.task_id || !window.isWorkbenchSubtabActive?.('demand')) return;
+    if (window._mineSSETaskTimer) clearTimeout(window._mineSSETaskTimer);
+    window._mineSSETaskTimer = setTimeout(() => {
+      window._mineSSETaskTimer = null;
+      loadMyWorkbench().catch(() => {});
+    }, 400);
+  });
+  window.OmniQASSE.subscribe('final_test_requirement_status_changed', ({ payload }) => {
+    const myId = Number(state.currentUser?.id || window.currentUser?.id || 0);
+    if (payload?.user_id && myId && Number(payload.user_id) !== myId) return;
+    if (!window.isWorkbenchSubtabActive?.('demand')) return;
+    if (window._mineSSEFinalTestTimer) clearTimeout(window._mineSSEFinalTestTimer);
+    window._mineSSEFinalTestTimer = setTimeout(() => {
+      window._mineSSEFinalTestTimer = null;
+      loadMyWorkbench().catch(() => {});
+    }, 400);
+  });
+  window.OmniQASSE.subscribe('retest_requirement_status_changed', ({ payload }) => {
+    if (!Object.prototype.hasOwnProperty.call(payload || {}, 'test_completed')) return;
+    if (!window.isWorkbenchSubtabActive?.('demand')) return;
+    if (window._mineSSECompletionTimer) clearTimeout(window._mineSSECompletionTimer);
+    window._mineSSECompletionTimer = setTimeout(() => {
+      window._mineSSECompletionTimer = null;
+      loadMyWorkbench().catch(() => {});
+    }, 400);
+  });
+
+  // 新 bug（执行阶段挂载到需求）：在需求卡片上显示琥珀色流光，不进主角标
+  window.OmniQASSE.subscribe('bug_created', ({ payload }) => {
+    const reqId = Number(payload?.requirement_id || 0);
+    if (!reqId) return;
+    const el = document.querySelector(`.mine-req-card[data-req-id='${reqId}']`);
+    if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'amber');
+  });
+
+  mineSseBound = true;
+}
+bindMineSSE();
+
+export function rememberMineReqFold(reqId, isOpen) {
+  const map = getFoldStateMap();
+  map[String(reqId)] = !!isOpen;
+  setFoldStateMap(map);
+  // 展开/收起卡片后容器高度会变化，重新计算工作台视口高度，避免末尾内容被裁切
+  window.scheduleWorkbenchViewportResize?.();
+}
+
+export async function editWorkbenchCase(id, oldCaseId) {
+  const num = prompt('请输入正确的用例数字部分：', oldCaseId.replace('u#', ''));
+  if (!num) return;
+  try {
+    await api('/test-cases/' + id, { method: 'PUT', headers: window.H, body: { zentao_case_id: window.withPrefix('u#', num) } });
+    window.showMessage && window.showMessage('用例编号已修改', 'success');
+    await loadMyWorkbench();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '修改失败', 'error');
+  }
+}
+
+export async function editWorkbenchBug(id, oldBugId) {
+  const num = prompt('请输入正确的 Bug 数字部分：', oldBugId.replace('b#', ''));
+  if (!num) return;
+  try {
+    await api('/bugs/' + id + '?new_bug_id=' + encodeURIComponent(window.withPrefix('b#', num)), { method: 'PUT' });
+    window.showMessage && window.showMessage('Bug 编号已纠正', 'success');
+    await loadMyWorkbench();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '修改失败', 'error');
+  }
+}
+
+export async function removeWorkbenchBug(id) {
+  if (!confirm('确定要在工作台中彻底删除这个 Bug 吗？')) return;
+  try {
+    await api('/bugs/' + id, { method: 'DELETE' });
+    window.showMessage && window.showMessage('Bug 已彻底删除', 'success');
+    await loadMyWorkbench();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '删除失败', 'error');
+  }
+}
+
+export async function setReqStatus(reqId, key, checked) {
+  // 测试完成勾选/取消会联动禅道任务（完成/重新激活），给出等待提示。
+  // showLoading/hideLoading 是计数器配对的，用标志位保证「确认框取消」的
+  // 早退路径不会多调一次 hideLoading。
+  // 带加载条的路径（test_completed）把加载条挂到工作台重载完成、提示放在
+  // 重载之后，保证「条消失/提示出现」时界面已与禅道一致；
+  // 无加载条的路径（case_completed）保持提示即时、静默重载。
+  let loadingShown = false;
+  let msg = '';
+  let msgType = 'success';
+  try {
+    if (!checked) {
+      const ok = confirm(key === 'case_completed' ? '确认取消【用例完成】状态吗？' : '确认取消【测试完成】状态吗？');
+      if (!ok) {
+        await loadMyWorkbench();
+        return;
+      }
+    }
+    let taskConsumedHours;
+    if (key === 'test_completed' && checked) {
+      taskConsumedHours = promptRequirementTaskConsumed(getRequirementById(reqId));
+      if (taskConsumedHours === null) {
+        await loadMyWorkbench();
+        return;
+      }
+    }
+    if (key === 'test_completed') {
+      showLoading(`正在${checked ? '标记测试完成' : '取消测试完成'}并同步禅道，请稍候…`);
+      loadingShown = true;
+    }
+    const payload = {};
+    payload[key] = checked;
+    if (taskConsumedHours !== undefined) payload.task_consumed_hours = taskConsumedHours;
+    await api(`/requirements/${reqId}/status`, { method: 'PATCH', headers: window.H, body: payload });
+    msg = loadingShown ? '需求状态已更新，已同步禅道' : '需求状态已更新';
+    if (!loadingShown) window.showMessage && window.showMessage(msg, msgType);
+    // 勾选完成 → 触发一次增量同步（去抖 + 冷却 + 后端节流，多次勾选不叠加开销）；
+    // 用例完成走用例快速同步路径，新建用例及时可见
+    if (checked && (key === 'case_completed' || key === 'test_completed')) {
+      scheduleCompletionIncrementalRefresh({ testcasesRecent: key === 'case_completed' });
+    }
+  } catch (err) {
+    msg = err.message || '状态更新失败';
+    msgType = 'error';
+    if (!loadingShown) window.showMessage && window.showMessage(msg, msgType);
+  }
+  if (loadingShown) setLoadingText('正在刷新工作台数据…');
+  try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
+  if (loadingShown) {
+    hideLoading();
+    window.showMessage && window.showMessage(msg, msgType);
+  }
+}
+
+// 禅道任务联动：点击「开始」→ 记录开始时刻并让禅道子任务开始。
+// 加载条挂到工作台重载完成、提示放在重载之后：条消失时界面已与禅道一致。
+export async function startReqTask(reqId) {
+  showLoading('正在开始任务并同步禅道，请稍候…');
+  let msg = '任务已开始，已同步禅道';
+  let msgType = 'success';
+  try {
+    const res = await api(`/requirements/${reqId}/task/start`, { method: 'POST', headers: window.H, body: {} });
+    let data = null;
+    try { data = await res.json(); } catch (_) { /* ignore */ }
+    const errs = (data && data.errors) || [];
+    if (errs.length) {
+      msg = `任务已开始（禅道侧部分失败：${errs[0]}）`;
+      msgType = 'error';
+    }
+  } catch (err) {
+    msg = err.message || '开始任务失败';
+    msgType = 'error';
+  }
+  setLoadingText(msgType === 'success' ? '禅道已同步，正在刷新工作台…' : '正在刷新工作台…');
+  try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
+  hideLoading();
+  window.showMessage && window.showMessage(msg, msgType);
+}
+
+// 禅道任务联动：点击「暂停」→ 让禅道子任务暂停（之后可用「开始」继续）
+export async function pauseReqTask(reqId) {
+  showLoading('正在暂停任务并同步禅道，请稍候…');
+  let msg = '任务已暂停，已同步禅道';
+  let msgType = 'success';
+  try {
+    const res = await api(`/requirements/${reqId}/task/pause`, { method: 'POST', headers: window.H, body: {} });
+    let data = null;
+    try { data = await res.json(); } catch (_) { /* ignore */ }
+    const errs = (data && data.errors) || [];
+    if (errs.length) {
+      msg = `任务已暂停（禅道侧部分失败：${errs[0]}）`;
+      msgType = 'error';
+    }
+  } catch (err) {
+    msg = err.message || '暂停任务失败';
+    msgType = 'error';
+  }
+  setLoadingText(msgType === 'success' ? '禅道已同步，正在刷新工作台…' : '正在刷新工作台…');
+  try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
+  hideLoading();
+  window.showMessage && window.showMessage(msg, msgType);
+}
+
+// 修改某需求的预计测试用时（小时）
+export async function setReqEstimatedHours(reqId, value) {
+  const hours = Number(value);
+  if (!Number.isFinite(hours) || hours <= 0) {
+    window.showMessage && window.showMessage('预计用时必须是正数', 'error');
+    return;
+  }
+  try {
+    await api(`/requirements/${reqId}/estimated-hours`, { method: 'PUT', headers: window.H, body: { estimated_test_hours: hours } });
+    window.showMessage && window.showMessage('预计测试用时已更新', 'success');
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '更新预计用时失败', 'error');
+    await loadMyWorkbench();
+  }
+}
+
+export async function setFinalTestStatus(reqId, key, checked, checkboxEl) {
+  if (key === 'test_completed' && !checked) {
+    const ok = confirm('确认取消该需求的【测试完成】状态吗？');
+    if (!ok) {
+      if (checkboxEl) checkboxEl.checked = true;
+      return;
+    }
+  }
+  try {
+    const payload = {};
+    payload[key] = checked;
+    await api(`/final-test/requirements/${reqId}/status`, { method: 'PATCH', headers: window.H, body: payload });
+    window.showMessage && window.showMessage('最终测试状态已更新', 'success');
+    if (checked && (key === 'case_completed' || key === 'test_completed')) {
+      scheduleCompletionIncrementalRefresh({ testcasesRecent: key === 'case_completed' });
+    }
+  } catch (err) {
+    if (checkboxEl) checkboxEl.checked = !checked;
+    window.showMessage && window.showMessage(err.message || '状态更新失败', 'error');
+  } finally {
+    await loadMyWorkbench();
+  }
+}
+
+export async function addCase(reqId) {
+  try {
+    const n = document.getElementById(`new_case_${reqId}`).value;
+    const caseId = window.withPrefix('u#', n);
+    if (!caseId) {
+      window.showMessage && window.showMessage('请输入用例编号数字部分', 'error');
+      return;
+    }
+    await api(`/requirements/${reqId}/cases`, { method: 'POST', headers: window.H, body: { zentao_case_id: caseId } });
+    window.showMessage && window.showMessage('用例新增成功', 'success');
+    await loadMyWorkbench();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '新增用例失败', 'error');
+  }
+}
+
+export async function deleteCase(caseId) {
+  if (!confirm('确定删除该用例吗？')) return;
+  try {
+    await api(`/test-cases/${caseId}`, { method: 'DELETE' });
+    window.showMessage && window.showMessage('用例已删除', 'success');
+    await loadMyWorkbench();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '删除用例失败', 'error');
+  }
+}
+
+export async function promptCaseBug(reqId, caseId) {
+  const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
+  if (!minorId) {
+    window.showMessage && window.showMessage('拦截：请先在页面顶部选择【当前复测发包(小版本)】环境！', 'error');
+    return;
+  }
+  const n = prompt('请输入关联 Bug 的数字部分：');
+  if (!n) return;
+  const bug = window.withPrefix('b#', n);
+  try {
+    await api('/bugs/execution', { method: 'POST', headers: window.H, body: { bug_id: bug, minor_version_id: minorId, requirement_id: reqId, source_type: 'case', source_ref: String(caseId) } });
+    window.showMessage && window.showMessage('关联Bug新增成功', 'success');
+    await loadMyWorkbench();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '新增Bug失败', 'error');
+  }
+}
+
+export async function addFreeBug(reqId) {
+  const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
+  if (!minorId) {
+    window.showMessage && window.showMessage('拦截：请先在页面顶部选择【当前复测发包(小版本)】环境！', 'error');
+    return;
+  }
+  const n = document.getElementById(`new_free_bug_${reqId}`).value;
+  const bug = window.withPrefix('b#', n);
+  if (!bug) {
+    window.showMessage && window.showMessage('请输入自由Bug数字', 'error');
+    return;
+  }
+  try {
+    await api('/bugs/execution', { method: 'POST', headers: window.H, body: { bug_id: bug, minor_version_id: minorId, requirement_id: reqId, source_type: 'manual' } });
+    window.showMessage && window.showMessage('自由Bug新增成功', 'success');
+    await loadMyWorkbench();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '新增自由Bug失败', 'error');
+  }
+}
+
+export async function pushCase() {
+  if (!(window.confirmPush && window.confirmPush())) return;
+  await api('/push/case-progress', { method: 'POST', headers: window.H, body: { major_version_id: Number(document.getElementById('mineMajorSelect')?.value || 0) } });
+  window.showMessage && window.showMessage('用例进度已推送');
+}
+
+export async function pushTest() {
+  if (!(window.confirmPush && window.confirmPush())) return;
+  await api(`/push/test-progress?minor_version_id=${Number(document.getElementById('mineMinorSelect')?.value || 0)}&major_version_id=${Number(document.getElementById('mineMajorSelect')?.value || 0)}`, { method: 'POST' });
+  window.showMessage && window.showMessage('测试进度已推送');
+}
+
+window.rememberMineReqFold = rememberMineReqFold;
+// 直接挂到 window，避免依赖（可能被缓存的）index.html 内联包装函数
+window.setFinalTestStatus = setFinalTestStatus;
+window.OmniQAMineTab = {
+  toggleMineMode,
+  loadMyWorkbench,
+  renderMineCards,
+  rememberMineReqFold,
+  editWorkbenchCase,
+  editWorkbenchBug,
+  removeWorkbenchBug,
+  setReqStatus,
+  setFinalTestStatus,
+  startReqTask,
+  pauseReqTask,
+  setReqEstimatedHours,
+  addCase,
+  deleteCase,
+  promptCaseBug,
+  addFreeBug,
+  pushCase,
+  pushTest,
+  handleTestCompletedToggle,
+  submitTestExecution,
+  confirmMineTestExecutionModal,
+  closeMineTestExecutionModal,
+  openReqTestNotesModal,
+  openReqTestNotesEditor,
+  closeReqTestNotesModal,
+  saveReqTestNotes,
+  toggleReqNotesMaximize,
+  openBugResultModal,
+  closeBugResultModal,
+  confirmBugResultModal,
+  toggleBugResultCloseComment,
+};

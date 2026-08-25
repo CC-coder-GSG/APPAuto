@@ -1,0 +1,2 @@
+class BugRepository:
+    pass

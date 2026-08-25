@@ -1,0 +1,164 @@
+{
+  "$schemaVersion": "2026.06",
+  "$comment": "APPAuto QA mobile visual tokens. Android maps these to Jetpack Compose Material3; iOS maps the same semantic tokens to SwiftUI, with liquid glass material enabled for elevated surfaces.",
+  "brand": {
+    "name": "APPAuto QA",
+    "voice": "calm, precise, fast, engineering-grade",
+    "visualStyle": "modern operational tool with soft depth, crisp typography, and semantic status color"
+  },
+  "color": {
+    "brand": {
+      "primary": "#0F766E",
+      "primaryDark": "#115E59",
+      "primaryContainer": "#E6FFFA",
+      "onPrimaryContainer": "#0F766E",
+      "accent": "#2563EB",
+      "accentContainer": "#EFF6FF"
+    },
+    "text": {
+      "strong": "#0F172A",
+      "default": "#1E293B",
+      "muted": "#64748B",
+      "disabled": "#94A3B8"
+    },
+    "surface": {
+      "background": "#F5F7FB",
+      "surfaceSubtle": "#F8FAFC",
+      "card": "#FFFFFF",
+      "cardPressed": "#F1F5F9",
+      "border": "#E2E8F0",
+      "borderStrong": "#CBD5E1"
+    },
+    "status": {
+      "success": "#16A34A",
+      "successContainer": "#F0FDF4",
+      "successBorder": "#BBF7D0",
+      "warning": "#B45309",
+      "warningContainer": "#FFF7ED",
+      "warningBorder": "#FED7AA",
+      "danger": "#E11D48",
+      "dangerContainer": "#FFF1F2",
+      "dangerBorder": "#FFCCD5",
+      "info": "#2563EB"
+    }
+  },
+  "typography": {
+    "headline": { "size": 28, "lineHeight": 34, "weight": "bold" },
+    "title": { "size": 21, "lineHeight": 28, "weight": "bold" },
+    "sectionTitle": { "size": 17, "lineHeight": 24, "weight": "semibold" },
+    "itemTitle": { "size": 15, "lineHeight": 21, "weight": "semibold" },
+    "body": { "size": 14, "lineHeight": 21, "weight": "regular" },
+    "label": { "size": 13, "lineHeight": 18, "weight": "medium" },
+    "caption": { "size": 12, "lineHeight": 16, "weight": "regular" }
+  },
+  "radius": {
+    "sm": 4,
+    "md": 8,
+    "lg": 8,
+    "xl": 12,
+    "pill": 999
+  },
+  "spacing": {
+    "xxs": 2,
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "xxl": 32
+  },
+  "elevation": {
+    "flat": { "androidDp": 0, "iosShadow": "none" },
+    "card": { "androidDp": 1, "iosShadow": "0 8 24 rgba(15, 23, 42, 0.08)" },
+    "floating": { "androidDp": 8, "iosShadow": "0 18 48 rgba(15, 23, 42, 0.14)" },
+    "modal": { "androidDp": 16, "iosShadow": "0 24 64 rgba(15, 23, 42, 0.18)" }
+  },
+  "material": {
+    "android": {
+      "base": "Material3 light mode",
+      "glassFallback": {
+        "background": "linear-gradient(#EFFCF8, #F5F7FB, #F8FAFC)",
+        "panelFill": "rgba(255,255,255,0.78)",
+        "panelBorder": "rgba(255,255,255,0.88)",
+        "tonalElevationDp": 2
+      }
+    },
+    "ios": {
+      "base": "SwiftUI Liquid Glass",
+      "liquidGlass": {
+        "material": "ultraThinMaterial",
+        "tint": "rgba(255,255,255,0.42)",
+        "stroke": "rgba(255,255,255,0.62)",
+        "innerHighlight": "rgba(255,255,255,0.75)",
+        "blurRadius": 22,
+        "saturation": 1.35,
+        "shadow": "0 18 48 rgba(15, 23, 42, 0.14)",
+        "cornerRadius": 18,
+        "interaction": {
+          "pressedScale": 0.985,
+          "hoverLift": 2,
+          "specularShift": 10
+        }
+      }
+    }
+  },
+  "components": {
+    "screen": {
+      "background": "soft vertical gradient; no decorative blobs; content remains dense and scannable"
+    },
+    "topBar": {
+      "height": "platform default",
+      "android": "background surface blends into screen; no heavy shadow",
+      "ios": "liquid glass floating bar when scrolling content passes under it"
+    },
+    "bottomNav": {
+      "android": "white Material3 navigation bar with primaryContainer selected indicator",
+      "ios": "glass tab bar, ultraThinMaterial, 18 radius on floating compact layouts"
+    },
+    "panel": {
+      "radius": 8,
+      "border": "surface.border",
+      "fill": "surface.card",
+      "padding": 16
+    },
+    "glassPanel": {
+      "android": "translucent white panel over gradient",
+      "ios": "liquid glass material with white stroke and subtle highlight"
+    },
+    "pill": {
+      "radius": 999,
+      "paddingX": 8,
+      "paddingY": 4,
+      "font": "caption semibold",
+      "usage": "ids, status, short metadata, segmented options"
+    },
+    "button": {
+      "primary": "primary fill, white text, 50dp/50pt height on forms",
+      "secondary": "white or glass fill, border surface.border, primary text",
+      "danger": "danger text or dangerContainer fill for destructive confirmation"
+    },
+    "listCard": {
+      "android": "flat card with 1dp border; use 2dp tonal elevation only for active/selected states",
+      "ios": "glass only for navigation/floating panels; ordinary list rows use clean card surfaces"
+    }
+  },
+  "motion": {
+    "fast": 150,
+    "normal": 280,
+    "slow": 420,
+    "curve": "standard decelerate / SwiftUI smooth",
+    "rules": [
+      "Use motion to confirm state changes, not as decoration.",
+      "List refresh and tab changes should be under 300ms.",
+      "Pressed controls scale subtly only on iOS glass components."
+    ]
+  },
+  "implementationRules": [
+    "Do not use gradient blobs, decorative orbs, or marketing-style hero cards.",
+    "Cards use 8dp radius by default; pill controls are the only fully rounded shape.",
+    "Status colors are semantic and must not replace the primary brand color.",
+    "Keep operational screens dense, with filters above lists and actions close to the affected item.",
+    "Use native icons for actions instead of emoji text.",
+    "Android glass is a lightweight approximation; iOS owns the true liquid glass material."
+  ]
+}

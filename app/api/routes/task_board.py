@@ -1,0 +1,329 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_current_user, get_db
+from app.core.exceptions import AppError
+from app.models import User
+from app.services.permission_service import ensure_tab_access
+from app.services.task_board_service import TaskBoardService, can_manage_board
+from app.utils.time_utils import local_now
+
+router = APIRouter(prefix="/task-board", tags=["task-board"])
+
+
+class TaskCreatePayload(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: Optional[str] = None
+    board_date: Optional[date] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    assignee_id: Optional[int] = None
+    software_id: Optional[int] = None
+    major_version_id: Optional[int] = None
+    target_type: Optional[str] = None
+    target_id: Optional[int] = None
+    due_at: Optional[datetime] = None
+
+
+class TaskUpdatePayload(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    board_date: Optional[date] = None
+    priority: Optional[str] = None
+    assignee_id: Optional[int] = None
+    software_id: Optional[int] = None
+    major_version_id: Optional[int] = None
+    target_type: Optional[str] = None
+    target_id: Optional[int] = None
+    due_at: Optional[datetime] = None
+    sort_order: Optional[int] = None
+
+    class Config:
+        # Treat explicit nulls as "set to null"; missing keys are ignored.
+        # Pydantic v2 helper: we filter in the route.
+        extra = "ignore"
+
+
+class TaskStatusPayload(BaseModel):
+    status: str
+    progress: Optional[str] = None
+
+
+class TaskProgressPayload(BaseModel):
+    content: str = Field(min_length=1)
+
+
+class TaskCarryOverPayload(BaseModel):
+    to_date: date
+
+
+class ZentaoTaskCreatePayload(BaseModel):
+    major_version_id: int
+    name: str = Field(min_length=1, max_length=255)
+    task_type: str = "test"
+    assigned_to: Optional[str] = None
+    parent_task_id: Optional[int] = None
+    story: Optional[int] = None
+    est_started: Optional[str] = None   # YYYY-MM-DD
+    deadline: Optional[str] = None      # YYYY-MM-DD
+    estimate: Optional[float] = None
+    pri: int = 3
+    desc: Optional[str] = None
+
+
+def _ensure_read(current_user: User) -> None:
+    ensure_tab_access(current_user, "task-board", "无权限访问任务看板")
+
+
+@router.get("/tasks")
+def list_tasks(
+    board_date: Optional[date] = Query(default=None),
+    software_id: Optional[int] = Query(default=None),
+    major_version_id: Optional[int] = Query(default=None),
+    assignee_id: Optional[int] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+    mine: bool = Query(default=False),
+    include_archived: bool = Query(default=False),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_read(current_user)
+    target_date = board_date or local_now().date()
+    service = TaskBoardService(db)
+    data = service.list_board(
+        board_date=target_date,
+        software_id=software_id,
+        major_version_id=major_version_id,
+        assignee_id=assignee_id,
+        status=status,
+        mine_user_id=current_user.id if mine else None,
+        include_archived=include_archived,
+    )
+    data["can_manage"] = can_manage_board(current_user)
+    return data
+
+
+@router.get("/tasks/{task_id}")
+def get_task(task_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _ensure_read(current_user)
+    service = TaskBoardService(db)
+    try:
+        detail = service.get_detail(task_id)
+    except AppError as exc:
+        raise _to_http(exc)
+    return detail
+
+
+@router.get("/team-candidates")
+def list_team_candidates(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    _ensure_read(current_user)
+    return TaskBoardService(db).list_team_candidates()
+
+
+@router.post("/tasks", status_code=201)
+def create_task(
+    payload: TaskCreatePayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_read(current_user)
+    service = TaskBoardService(db)
+    try:
+        return service.create_task(
+            actor=current_user,
+            title=payload.title,
+            description=payload.description,
+            board_date=payload.board_date,
+            status=payload.status,
+            priority=payload.priority,
+            assignee_id=payload.assignee_id,
+            software_id=payload.software_id,
+            major_version_id=payload.major_version_id,
+            target_type=payload.target_type,
+            target_id=payload.target_id,
+            due_at=payload.due_at,
+        )
+    except AppError as exc:
+        raise _to_http(exc)
+
+
+@router.patch("/tasks/{task_id}")
+def update_task(
+    task_id: int,
+    payload: TaskUpdatePayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_read(current_user)
+    raw = payload.model_dump(exclude_unset=True)
+    service = TaskBoardService(db)
+    try:
+        return service.update_task(actor=current_user, task_id=task_id, patch=raw)
+    except AppError as exc:
+        raise _to_http(exc)
+
+
+@router.patch("/tasks/{task_id}/status")
+def update_status(
+    task_id: int,
+    payload: TaskStatusPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_read(current_user)
+    service = TaskBoardService(db)
+    try:
+        return service.update_status(
+            actor=current_user,
+            task_id=task_id,
+            status=payload.status,
+            progress=payload.progress,
+        )
+    except AppError as exc:
+        raise _to_http(exc)
+
+
+@router.post("/tasks/{task_id}/updates", status_code=201)
+def add_progress(
+    task_id: int,
+    payload: TaskProgressPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_read(current_user)
+    service = TaskBoardService(db)
+    try:
+        return service.add_progress(actor=current_user, task_id=task_id, content=payload.content)
+    except AppError as exc:
+        raise _to_http(exc)
+
+
+@router.post("/tasks/{task_id}/archive")
+def archive_task(
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_read(current_user)
+    service = TaskBoardService(db)
+    try:
+        return service.archive_task(actor=current_user, task_id=task_id)
+    except AppError as exc:
+        raise _to_http(exc)
+
+
+@router.post("/tasks/{task_id}/carry-over")
+def carry_over(
+    task_id: int,
+    payload: TaskCarryOverPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _ensure_read(current_user)
+    service = TaskBoardService(db)
+    try:
+        return service.carry_over(actor=current_user, task_id=task_id, to_date=payload.to_date)
+    except AppError as exc:
+        raise _to_http(exc)
+
+
+@router.get("/zentao-tasks")
+def list_zentao_tasks(
+    scope: str = Query(default="all"),       # all | mine
+    execution_id: Optional[int] = Query(default=None),
+    refresh: bool = Query(default=False),     # true 时先按需刷新该执行的镜像
+    major_version_id: Optional[int] = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """任务看板：读取禅道任务镜像（后端缓存）。
+
+    scope=mine 只看当前用户；execution_id 限定某执行；refresh=true 且给定
+    major_version_id 时先刷新该执行的镜像再读。
+    """
+    _ensure_read(current_user)
+    from app.models import Version
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+    svc = ZentaoTaskMirrorService(db)
+    refreshed = None
+    if refresh and major_version_id:
+        refreshed = svc.sync_one_major(major_version_id)
+    # 前端按大版本筛选 → 解析成执行 id
+    if execution_id is None and major_version_id:
+        major = db.query(Version).filter(Version.id == major_version_id).first()
+        if major and major.zentao_execution_id:
+            execution_id = int(major.zentao_execution_id)
+    tasks = svc.list_tasks(
+        scope=scope,
+        current_user_id=current_user.id,
+        execution_id=execution_id,
+    )
+    return {"tasks": tasks, "scope": scope, "refreshed": refreshed}
+
+
+@router.get("/zentao-task-form-options")
+def zentao_task_form_options(
+    major_version_id: int = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """新建禅道任务的表单选项（可指派人 / 父任务候选 / 关联研发需求）。"""
+    _ensure_read(current_user)
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+    return ZentaoTaskMirrorService(db).form_options(major_version_id)
+
+
+@router.post("/zentao-tasks/create")
+def create_zentao_task(
+    payload: ZentaoTaskCreatePayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """任务看板：直接在禅道执行下创建任务（复刻禅道创建页核心字段）。"""
+    _ensure_read(current_user)
+    if not can_manage_board(current_user):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="当前账号无任务派发权限")
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+    return ZentaoTaskMirrorService(db).create_board_task(
+        current_user=current_user,
+        major_version_id=payload.major_version_id,
+        name=payload.name,
+        task_type=payload.task_type,
+        assigned_to=payload.assigned_to,
+        parent_task_id=payload.parent_task_id,
+        story=payload.story,
+        est_started=payload.est_started,
+        deadline=payload.deadline,
+        estimate=payload.estimate,
+        pri=payload.pri,
+        desc=payload.desc,
+    )
+
+
+@router.post("/zentao-tasks/sync")
+def sync_zentao_tasks(
+    major_version_id: Optional[int] = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """手动刷新禅道任务镜像（全量或单个大版本）。"""
+    _ensure_read(current_user)
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+    svc = ZentaoTaskMirrorService(db)
+    if major_version_id:
+        return svc.sync_one_major(major_version_id)
+    return svc.sync_all()
+
+
+def _to_http(exc: AppError):
+    from fastapi import HTTPException
+    return HTTPException(status_code=exc.status_code, detail=exc.message)

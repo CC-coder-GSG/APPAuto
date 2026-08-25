@@ -1,0 +1,117 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base
+from app.models.enums import BugSourceType
+from app.utils.time_utils import local_now
+
+
+class BugTracking(Base):
+    __tablename__ = "bug_tracking"
+    __table_args__ = (
+        UniqueConstraint("zentao_bug_id", name="uq_bug_tracking_zentao_bug_id"),
+        UniqueConstraint("zentao_client_record_id", name="uq_bug_tracking_zentao_client_record_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    major_version_id: Mapped[int] = mapped_column(ForeignKey("versions.id", ondelete="CASCADE"), nullable=False)
+    requirement_id: Mapped[Optional[int]] = mapped_column(ForeignKey("requirements.id", ondelete="CASCADE"), nullable=True)
+    source_type: Mapped[BugSourceType] = mapped_column(SAEnum(BugSourceType), default=BugSourceType.REQUIREMENT, nullable=False)
+    source_ref: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    bug_id: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    found_minor_version_id: Mapped[Optional[int]] = mapped_column(ForeignKey("versions.id"), nullable=True)
+    fixed_minor_version_id: Mapped[Optional[int]] = mapped_column(ForeignKey("versions.id"), nullable=True)
+    test_done: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    newly_found_bug_id: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    resolution: Mapped[str] = mapped_column(String, default="fixed", nullable=False)
+    closed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    dispatched_to_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    closed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # 旧「标记未修好」勾选（2026-07 复测结论改版后仅保留历史数据，只读不再使用）
+    is_retest_failed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # ── 复测问题留痕（2026-07 复测结论改版）───────────────────────
+    # 复测激活：复测人在复测工作台真实激活了禅道 Bug，本地记录激活人/时间/
+    # 所属需求，作为「复测发现未修好」的依据。
+    retest_activated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    retest_activated_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    retest_activated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    retest_activated_req_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    # 取消复测结论（误报）：勾选后该 Bug 不再作为复测问题参与结论判定
+    retest_dismissed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    retest_dismissed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    zentao_bug_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
+    zentao_bug_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    zentao_client_record_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
+    zentao_source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    zentao_captured_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    zentao_top_href: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    zentao_product_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    zentao_product_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    zentao_project_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    zentao_project_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    zentao_opened_build_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    zentao_affected_version: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    zentao_bug_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    zentao_source_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    zentao_linked_case_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    zentao_linked_case_label: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    zentao_linked_case_href: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    zentao_display_bucket: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    zentao_execution_id: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    zentao_execution_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    zentao_requirement_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    zentao_requirement_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    zentao_creator_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    zentao_sync_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    zentao_sync_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Where this row was last touched from. Allowed values:
+    # browser_event / scheduled_pull / on_enter_refresh / nightly_reconcile /
+    # manual_sync. Lets the workbench tell "still waiting on a periodic pull"
+    # apart from "just refreshed because user opened the page".
+    zentao_sync_source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    zentao_raw_payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Zentao anchor fields — supplemental linkage for API hydration
+    zentao_story_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    zentao_build_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    zentao_release_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    zentao_testtask_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_zentao_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_zentao_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Live status cached from last sync or hydration: "active" / "resolved" / "closed"
+    zentao_live_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    zentao_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Cached closer info from Zentao
+    zentao_closed_by_account: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    zentao_closed_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    zentao_close_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    zentao_close_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Cached assignee info
+    zentao_assigned_to_account: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    zentao_assigned_to_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # Remote last-edited timestamp from Zentao
+    zentao_remote_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Remote opened timestamp (禅道真实提交时间) — used by all time-based statistics
+    # so reports reflect when a bug was actually filed in Zentao, not when it
+    # happened to land in the local DB.
+    zentao_opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    zentao_opened_by_account: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    zentao_opened_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False)
+
+    requirement = relationship("Requirement", back_populates="bug_tracks")
+    major_version = relationship("Version", back_populates="bugs", foreign_keys=[major_version_id])
+    dispatched_to = relationship("User", foreign_keys=[dispatched_to_id])
+    retest_activated_by = relationship("User", foreign_keys=[retest_activated_by_id])
+    stage5_records = relationship("BugStage5Record", back_populates="bug", cascade="all, delete-orphan")
+
+
+__all__ = ["BugTracking"]

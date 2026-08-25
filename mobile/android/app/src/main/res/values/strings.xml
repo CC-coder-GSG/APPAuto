@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">测量测试</string>
+    <string name="app_full_name">测量软件测试平台</string>
+
+    <string name="login_title">测量软件测试平台</string>
+    <string name="login_subtitle">测试管理系统</string>
+    <string name="login_username_hint">用户名</string>
+    <string name="login_password_hint">密码</string>
+    <string name="login_button">登录</string>
+    <string name="login_loading">登录中…</string>
+    <string name="logout">退出登录</string>
+</resources>
