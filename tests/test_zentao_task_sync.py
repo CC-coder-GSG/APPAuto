@@ -328,7 +328,42 @@ def test_sync_tasks_status_for_major_updates_cache_and_assignee(db_session, monk
     db_session.refresh(setup["r1"])
     assert setup["r1"].zentao_task_status_cache == "done"
     assert setup["r1"].zentao_task_assigned_to == "carol"
+    assert setup["r1"].test_completed is True
+    assert setup["r1"].test_completed_at is not None
     assert out["updated"] == 1
+
+
+def test_sync_tasks_status_uses_zentao_finished_time_and_is_idempotent(
+    db_session,
+    monkeypatch,
+    setup,
+):
+    from datetime import datetime
+
+    req = setup["r1"]
+    req.zentao_task_id = 702
+    db_session.commit()
+    task = {
+        "id": 702,
+        "type": "test",
+        "story": 6706,
+        "parent": 9000,
+        "status": "done",
+        "finishedDate": "2026-08-25 14:30:00",
+        "assignedTo": {"account": "alice"},
+    }
+    _patch_client(monkeypatch, FakeClient(existing_tasks=[task]))
+
+    svc = ZentaoTaskSyncService(db_session)
+    svc.sync_tasks_status_for_major(setup["major"].id)
+    db_session.refresh(req)
+    assert req.test_completed is True
+    assert req.test_completed_at == datetime(2026, 8, 25, 14, 30)
+
+    # Repeated polling must not move the retest evidence cutoff forward.
+    svc.sync_tasks_status_for_major(setup["major"].id)
+    db_session.refresh(req)
+    assert req.test_completed_at == datetime(2026, 8, 25, 14, 30)
 
 
 def test_sync_tasks_status_derives_changed_from_left_and_finish_fact(

@@ -451,6 +451,26 @@ class RequirementService:
         else:
             requirement.test_completed = bool(test_completed)
 
+    def mark_test_completed_from_zentao_task(
+        self,
+        requirement: Requirement,
+        *,
+        completed_at: datetime | None = None,
+    ) -> bool:
+        """One-way reconciliation for a requirement whose Zentao task is done.
+
+        The remote task is already complete, so this path must not call the
+        normal checkbox transition (which would try to finish the same task a
+        second time).  Reopening remains an explicit operation and keeps the
+        existing task-reactivation behavior unchanged.
+        """
+        if requirement.test_completed:
+            return False
+        requirement.test_completed = True
+        requirement.test_completed_at = completed_at or local_now()
+        self.recalculate_requirement_status(requirement, actor_id=None)
+        return True
+
     def reopen_after_task_reactivation(
         self,
         requirement: Requirement,
@@ -470,7 +490,11 @@ class RequirementService:
         return changed
 
     @staticmethod
-    def _publish_completion_status(requirement: Requirement) -> None:
+    def _publish_completion_status(
+        requirement: Requirement,
+        *,
+        source: str = "requirement_workbench",
+    ) -> None:
         """完成态提交后通知所有工作台读取同一份最新数据。"""
         sse_publish(
             "retest_requirement_status_changed",
@@ -485,7 +509,7 @@ class RequirementService:
                     else str(requirement.status)
                 ),
                 "owner_id": requirement.owner_id,
-                "source": "requirement_workbench",
+                "source": source,
             },
             channels=(
                 ["global", f"user:{requirement.owner_id}"]

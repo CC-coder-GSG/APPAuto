@@ -112,10 +112,13 @@ class ZentaoTaskMirrorService:
         row.consumed_accum = float(requirement.task_consumed_accum or 0.0)
         row.efforts_submitted = float(requirement.task_efforts_submitted or 0.0)
 
-    @staticmethod
-    def _sync_requirement_from_mirror(row: ZentaoTaskMirror, requirement: Optional[Requirement]) -> None:
+    def _sync_requirement_from_mirror(
+        self,
+        row: ZentaoTaskMirror,
+        requirement: Optional[Requirement],
+    ) -> bool:
         if requirement is None:
-            return
+            return False
         requirement.zentao_task_status_cache = row.status
         requirement.zentao_task_assigned_to = row.assigned_to
         requirement.task_started_at = row.local_started_at
@@ -126,6 +129,15 @@ class ZentaoTaskMirrorService:
             requirement.task_finished_at = row.finished_date
         elif status in {"doing", "changed"}:
             requirement.task_finished_at = None
+        if status != "done" or requirement.test_completed:
+            return False
+
+        from app.services.requirement_service import RequirementService
+
+        return RequirementService(self.db).mark_test_completed_from_zentao_task(
+            requirement,
+            completed_at=row.finished_date,
+        )
 
     def _sync_requirement_reactivated(
         self,
@@ -258,6 +270,17 @@ class ZentaoTaskMirrorService:
     def _sync_execution(self, client, major: Version, by_account: dict[str, int], by_name: dict[str, int]) -> int:
         exec_id = int(major.zentao_execution_id)
         tasks = client.list_execution_tasks(exec_id) or []
+        requirements_by_task_id = {
+            int(req.zentao_task_id): req
+            for req in (
+                self.db.query(Requirement)
+                .filter(
+                    Requirement.major_version_id == major.id,
+                    Requirement.zentao_task_id.isnot(None),
+                )
+                .all()
+            )
+        }
         n = 0
         for t in tasks:
             if not isinstance(t, dict):
@@ -265,11 +288,13 @@ class ZentaoTaskMirrorService:
             tid = _coerce_int(t.get("id"))
             if not tid:
                 continue
+            linked_requirement = requirements_by_task_id.get(tid)
             account, realname = _account_of(t.get("assignedTo"))
             row = self.db.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == tid).first()
             if row is None:
                 row = ZentaoTaskMirror(task_id=tid)
                 self.db.add(row)
+            self._hydrate_tracking_from_requirement(row, linked_requirement)
             row.execution_id = exec_id
             row.execution_name_cache = major.zentao_execution_name_cache or major.version_no
             row.project_id = _coerce_int(t.get("project"))
@@ -304,6 +329,7 @@ class ZentaoTaskMirrorService:
             if _fin is not None or str(t.get("status") or "").strip().lower() not in {"done", "closed"}:
                 row.finished_date = _fin
             row.synced_at = local_now()
+            self._sync_requirement_from_mirror(row, linked_requirement)
             n += 1
         return n
 

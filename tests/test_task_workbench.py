@@ -1516,3 +1516,46 @@ def test_sync_keeps_finished_date_when_zentao_returns_empty(db_session, monkeypa
     assert row.finished_date is not None
     assert row.finished_date != datetime(2026, 7, 17, 18, 0)
     assert row.finished_date.second == 31
+
+
+def test_background_mirror_sync_marks_linked_requirement_test_completed(db_session):
+    """A task completed directly in Zentao also completes its linked requirement."""
+    from datetime import datetime
+
+    alice = _user(db_session, "alice_remote_done", account="alice")
+    major = _major(db_session, "V-TW-REMOTE-DONE")
+    req = _req(
+        db_session,
+        major.id,
+        "r#remote-done",
+        task_id=1303,
+        owner_id=alice.id,
+    )
+
+    class ListClient:
+        def list_execution_tasks(self, exec_id, limit=500):
+            return [{
+                "id": 1303,
+                "name": "需求测试任务",
+                "type": "test",
+                "status": "done",
+                "parent": 0,
+                "isParent": 0,
+                "assignedTo": {"account": "alice"},
+                "finishedDate": "2026-08-25 16:20:00",
+            }]
+
+    count = ZentaoTaskMirrorService(db_session)._sync_execution(
+        ListClient(),
+        major,
+        {"alice": alice.id},
+        {},
+    )
+    db_session.commit()
+    db_session.refresh(req)
+
+    assert count == 1
+    assert req.zentao_task_status_cache == "done"
+    assert req.test_completed is True
+    assert req.test_completed_at == datetime(2026, 8, 25, 16, 20)
+    assert req.status == RequirementStatus.TEST_DONE

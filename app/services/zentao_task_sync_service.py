@@ -579,6 +579,7 @@ class ZentaoTaskSyncService:
             .all()
         )
         changed = False
+        completed_requirements: list[Requirement] = []
         for req in reqs:
             t = by_id.get(int(req.zentao_task_id))
             if not t:
@@ -592,12 +593,34 @@ class ZentaoTaskSyncService:
             if acc is not None and req.zentao_task_assigned_to != acc:
                 req.zentao_task_assigned_to = acc
                 changed = True
+            if status == "done" and not req.test_completed:
+                # Zentao is authoritative for the task lifecycle.  It is
+                # already done here, so only reconcile the local requirement;
+                # do not invoke the checkbox path that writes back to Zentao.
+                from app.services.requirement_service import RequirementService
+
+                completed_at = _zentao_dt_to_local(t.get("finishedDate"))
+                if RequirementService(self.db).mark_test_completed_from_zentao_task(
+                    req,
+                    completed_at=completed_at,
+                ):
+                    completed_requirements.append(req)
+                    changed = True
         if changed:
             try:
                 self.db.commit()
             except Exception as exc:  # noqa: BLE001
                 logger.warning("commit task status sync major %s failed: %s", major_version_id, exc)
                 self.db.rollback()
+                completed_requirements.clear()
+        if completed_requirements:
+            from app.services.requirement_service import RequirementService
+
+            for req in completed_requirements:
+                RequirementService._publish_completion_status(
+                    req,
+                    source="zentao_task_sync",
+                )
         return out
 
     # ------------------------------------------------------------------
