@@ -34,6 +34,7 @@ from app.models import (
     TestExecution,
     User,
     UserRole,
+    UserSession,
     Version,
     VersionType,
 )
@@ -68,6 +69,11 @@ def login_page():
 @app.get("/dashboard", include_in_schema=False)
 def dashboard_page():
     return FileResponse(str(FRONTEND_DIR / "index.html"))
+
+
+@app.get("/mobile", include_in_schema=False)
+def mobile_page():
+    return FileResponse(str(FRONTEND_DIR / "mobile.html"))
 
 
 class Token(BaseModel):
@@ -264,7 +270,12 @@ def get_current_user(
 
     user = db.query(User).filter(User.username == username).first()
     # 核心拦截逻辑：如果用户不存在，或者 token 里的 session 已经被新的登录冲刷掉了，则拒绝访问
-    if not user or session_token != user.session_token:
+    session = None if not user or not session_token else db.query(UserSession).filter(
+        UserSession.user_id == user.id,
+        UserSession.token == session_token,
+        UserSession.expires_at > datetime.utcnow(),
+    ).first()
+    if not user or not session:
         raise credential_exception
     return user
 
@@ -369,12 +380,14 @@ def login(
     if not user:
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
-    user.session_token = str(uuid.uuid4())
+    session_token = str(uuid.uuid4())
+    expires_delta = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    db.add(UserSession(user_id=user.id, token=session_token, expires_at=datetime.utcnow() + expires_delta))
     db.commit()
 
     access_token = _create_access_token(
-        data={"sub": user.username, "role": user.role.value, "session": user.session_token},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+        data={"sub": user.username, "role": user.role.value, "session": session_token},
+        expires_delta=expires_delta,
     )
     return Token(access_token=access_token)
 
@@ -466,7 +479,7 @@ def change_my_password(payload: PasswordChangeSelf, current_user: Annotated[User
         raise HTTPException(status_code=400, detail="新密码不能与原密码相同")
 
     current_user.password_hash = User.hash_password(payload.new_password)
-    current_user.session_token = None  # 清空会话，强制自己重新登录
+    db.query(UserSession).filter(UserSession.user_id == current_user.id).delete(synchronize_session=False)
     db.commit()
     return {"message": "密码修改成功，请重新登录"}
 
@@ -478,7 +491,7 @@ def reset_user_password(user_id: int, payload: PasswordResetAdmin, _: Annotated[
         raise HTTPException(status_code=404, detail="User not found")
 
     user.password_hash = User.hash_password(payload.new_password)
-    user.session_token = None  # 清空会话，强制该用户下线
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete(synchronize_session=False)
     db.commit()
     return {"message": f"用户 {user.username} 的密码已重置，且已被强制下线"}
 
@@ -1628,3 +1641,9 @@ def export_data(format: str = Query("csv", pattern="^(csv|xlsx)$"), major_versio
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
     return FileResponse(path=str(out_path), filename=out_path.name, media_type=media_type)
+
+
+# 学习中心保持为独立模块，复用本系统的登录身份与数据库会话。
+from app.learning_api import create_learning_router
+
+app.include_router(create_learning_router(get_current_user))

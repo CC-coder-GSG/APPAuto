@@ -4,6 +4,7 @@
   <meta charset="utf-8"/>
   <title>OmniQA 测试管理系统</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/learning.css">
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -49,9 +50,67 @@
     <button onclick="showTab('retest')">复测工作台</button>
     <button onclick="showTab('stage5')">整体测试</button>
     <button onclick="showTab('report')">报表中心</button>
+    <button onclick="showTab('learning')">学习中心</button>
     <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
     <button id="tabDispatchBtn" class="hidden" onclick="showTab('dispatch')">BUG特派</button>
   </div>
+
+  <section id="tab-learning" class="hidden card learning-center">
+    <div class="learning-head">
+      <div><h2>学习中心</h2><p class="muted">学习资料、课程与团队答题活动</p></div>
+      <div class="row"><button class="secondary" onclick="showLearningContentForm()">新增资料/课程</button><button onclick="openQuizEditor()">创建答题活动</button><button class="secondary" onclick="loadLearningCenter()">刷新</button></div>
+    </div>
+
+    <div id="learningHome">
+      <h3>资料与课程</h3>
+      <div id="learningContents" class="learning-grid"></div>
+      <h3 style="margin-top:24px">答题活动</h3>
+      <div id="learningQuizzes" class="learning-grid"></div>
+    </div>
+
+    <div id="learningContentForm" class="hidden learning-panel">
+      <div class="learning-panel-head"><h3 id="learningContentFormTitle">新增学习内容</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+      <input type="hidden" id="learningContentId">
+      <div class="learning-form-grid">
+        <label>类型<select id="learningContentKind"><option value="material">学习资料</option><option value="course">课程</option></select></label>
+        <label>标题<input id="learningContentTitle" maxlength="200"></label>
+        <label class="wide">简介<textarea id="learningContentDescription" rows="2"></textarea></label>
+        <label class="wide">正文/学习说明<textarea id="learningContentBody" rows="6"></textarea></label>
+        <label class="wide">外部资源链接<input id="learningContentUrl" type="url" placeholder="https://..."></label>
+        <label class="check"><input id="learningContentPublished" type="checkbox"> 立即向团队发布</label>
+      </div>
+      <button onclick="saveLearningContent()">保存</button>
+    </div>
+
+    <div id="quizEditor" class="hidden learning-panel">
+      <div class="learning-panel-head"><h3 id="quizEditorTitle">创建答题活动</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+      <input type="hidden" id="quizEditId">
+      <div class="learning-form-grid">
+        <label>标题<input id="quizTitle" maxlength="200"></label>
+        <label class="wide">答题说明<textarea id="quizDescription" rows="2"></textarea></label>
+      </div>
+      <div class="question-toolbar"><strong>题目</strong><button class="secondary" onclick="addQuestionEditor('single_choice')">+ 单选</button><button class="secondary" onclick="addQuestionEditor('multiple_choice')">+ 多选</button><button class="secondary" onclick="addQuestionEditor('fill_blank')">+ 填空</button><button class="secondary" onclick="addQuestionEditor('short_answer')">+ 简答</button></div>
+      <div id="quizQuestionEditors"></div>
+      <button onclick="saveQuizDraft()">保存草稿</button>
+    </div>
+
+    <div id="quizTakePanel" class="hidden learning-panel">
+      <div class="learning-panel-head"><div><h3 id="takeQuizTitle"></h3><p id="takeQuizDescription" class="muted"></p></div><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+      <div id="takeQuizQuestions"></div>
+      <button id="submitQuizButton" onclick="submitCurrentQuiz()">确认提交（仅一次）</button>
+    </div>
+
+    <div id="quizResultPanel" class="hidden learning-panel">
+      <div class="learning-panel-head"><h3>我的成绩</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+      <div id="quizResultBody"></div>
+    </div>
+
+    <div id="quizReviewPanel" class="hidden learning-panel">
+      <div class="learning-panel-head"><h3 id="reviewQuizTitle">批阅与统计</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+      <div id="quizStatsBody"></div>
+      <div id="quizSubmissionsBody"></div>
+    </div>
+  </section>
 
   <section id="tab-assign" class="hidden card">
     <h2>任务分配台（仅管理员）</h2>
@@ -328,6 +387,7 @@
   </section>
 </div>
 
+<script src="/static/learning.js"></script>
 <script>
 const token=localStorage.getItem('token'); if(!token) location.href='/login';
 const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
@@ -355,11 +415,12 @@ function sourceTypeZh(v){
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
 function showTab(name){
-  ['assign','mine','retest','stage5','report','data','dispatch'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
+  ['assign','mine','retest','stage5','report','data','dispatch','learning'].forEach(x=>document.getElementById('tab-'+x).classList.add('hidden'));
   document.getElementById('tab-'+name).classList.remove('hidden');
   if(name === 'dispatch') { loadDispatchedAll(); }
   if(name === 'data' && !dataOverviewCache) { loadDataOverview().catch(err=>showMessage(err.message||'加载数据管理台失败','error')); }
   if(name==='report'){loadReportOnDemand()}
+  if(name==='learning'){loadLearningCenter()}
 }
 function isAllUsersReport(){return currentUser && currentUser.role==='admin' && reportUserSelect && reportUserSelect.value==='0'}
 function adjustReportChartVisibility(){
