@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#4338ca">
+  <title>OmniQA 学习答题</title>
+  <link rel="stylesheet" href="/static/mobile.css">
+</head>
+<body>
+  <header><div><strong>OmniQA</strong><span>学习答题</span></div><div><button id="serverBtn" class="link hidden" onclick="AndroidApp.openSettings()">服务器</button><button id="logoutBtn" class="link hidden" onclick="mobileLogout()">退出</button></div></header>
+  <main>
+    <section id="loginView" class="view card">
+      <h1>登录后开始学习</h1>
+      <p class="muted">使用测试管理系统的账号确认身份</p>
+      <label>用户名<input id="mobileUsername" autocomplete="username"></label>
+      <label>密码<input id="mobilePassword" type="password" autocomplete="current-password"></label>
+      <button onclick="mobileLogin()">登录</button>
+      <p id="loginError" class="error"></p>
+    </section>
+
+    <section id="homeView" class="view hidden">
+      <div class="welcome"><div><span class="muted">你好</span><h2 id="mobileMe"></h2></div><button class="secondary" onclick="loadMobileHome()">刷新</button></div>
+      <nav><button id="navQuiz" class="active" onclick="mobileTab('quiz')">答题活动</button><button id="navContent" onclick="mobileTab('content')">学习内容</button></nav>
+      <div id="mobileQuizList"></div>
+      <div id="mobileContentList" class="hidden"></div>
+    </section>
+
+    <section id="takeView" class="view hidden">
+      <button class="back" onclick="showMobileView('homeView')">‹ 返回</button>
+      <h2 id="mobileTakeTitle"></h2><p id="mobileTakeDesc" class="muted"></p>
+      <div id="mobileQuestions"></div>
+      <button class="submit" onclick="submitMobileQuiz()">确认提交（仅一次）</button>
+    </section>
+
+    <section id="resultView" class="view hidden">
+      <button class="back" onclick="showMobileView('homeView')">‹ 返回</button>
+      <h2>我的成绩</h2><div id="mobileResult"></div>
+    </section>
+
+    <section id="statsView" class="view hidden">
+      <button class="back" onclick="showMobileView('homeView')">‹ 返回</button>
+      <h2 id="mobileStatsTitle">答题情况</h2><div id="mobileStats"></div>
+    </section>
+  </main>
+  <div id="mobileToast"></div>
+  <script src="/static/mobile.js"></script>
+</body>
+</html>

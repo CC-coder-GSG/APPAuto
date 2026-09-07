@@ -94,6 +94,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
+from app.api.deps import get_current_user
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.db.session import SessionLocal
@@ -147,6 +148,11 @@ def login_page():
 @app.get("/dashboard", include_in_schema=False)
 def dashboard_page():
     return FileResponse(str(FRONTEND_DIR / "index.html"), headers=_NO_CACHE_HTML)
+
+
+@app.get("/mobile", include_in_schema=False)
+def mobile_page():
+    return FileResponse(str(FRONTEND_DIR / "mobile.html"), headers=_NO_CACHE_HTML)
 
 
 @app.get("/competitor-analysis", include_in_schema=False)
@@ -236,3 +242,10 @@ def on_shutdown() -> None:
 
 
 app.include_router(api_router)
+
+# The redesigned learning center uses its own, non-conflicting /learning/contents
+# and /learning/quizzes endpoints while the existing topic/assessment API remains
+# available for previously created learning data.
+from app.learning_api import create_learning_router
+
+app.include_router(create_learning_router(get_current_user))

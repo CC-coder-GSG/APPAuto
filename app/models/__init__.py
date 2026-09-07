@@ -40,6 +40,17 @@ from app.models.learning import (
     LearningMaterial,
     LearningTopic,
 )
+from app.models.learning_quiz import (
+    FillGradingMode,
+    LearningAnswer,
+    LearningContent,
+    LearningContentKind,
+    LearningQuestion,
+    LearningQuestionType,
+    LearningQuiz,
+    LearningQuizStatus,
+    LearningSubmission,
+)
 from app.models.requirement import Requirement
 from app.models.requirement_retest_record import RequirementRetestRecord
 from app.models.requirement_status_history import RequirementStatusHistory
@@ -96,6 +107,15 @@ __all__ = [
     "AssessmentSubmission",
     "LearningMaterial",
     "LearningTopic",
+    "FillGradingMode",
+    "LearningAnswer",
+    "LearningContent",
+    "LearningContentKind",
+    "LearningQuestion",
+    "LearningQuestionType",
+    "LearningQuiz",
+    "LearningQuizStatus",
+    "LearningSubmission",
     "QuestionType",
     "SubmissionStatus",
     "Requirement",

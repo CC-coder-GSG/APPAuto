@@ -1,0 +1,37 @@
+.learning-center { min-height: 560px; }
+.learning-head, .learning-panel-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:20px; }
+.learning-head p, .learning-panel-head p { margin:0; }
+.learning-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+.learning-item { border:1px solid #e2e8f0; border-radius:12px; padding:16px; background:linear-gradient(145deg,#fff,#f8fafc); }
+.learning-item h4 { margin:8px 0 6px; color:#0f172a; }
+.learning-item p { margin:4px 0; white-space:pre-wrap; }
+.learning-item-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+.learning-item-actions button { padding:6px 10px; font-size:13px; }
+.learning-panel { max-width:960px; margin:0 auto; }
+.learning-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:16px; }
+.learning-form-grid label { display:flex; flex-direction:column; gap:5px; font-weight:600; }
+.learning-form-grid label.wide { grid-column:1/-1; }
+.learning-form-grid label.check { flex-direction:row; align-items:center; font-weight:500; }
+.question-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:12px 0; border-top:1px solid #e2e8f0; }
+.question-editor, .take-question, .review-submission, .result-answer { border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-bottom:14px; background:#fff; }
+.question-editor-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }
+.question-editor textarea, .question-editor input, .question-editor select { width:100%; }
+.question-editor-grid { display:grid; grid-template-columns:2fr 1fr; gap:10px; }
+.question-editor-grid .wide { grid-column:1/-1; }
+.option-answer { display:block; margin:8px 0; padding:10px; border:1px solid #e2e8f0; border-radius:8px; cursor:pointer; }
+.option-answer:hover { border-color:#4f46e5; background:#eef2ff; }
+.option-answer input { margin-right:8px; }
+.quiz-score { font-size:28px; font-weight:800; color:#4f46e5; margin:10px 0 20px; }
+.status-pill { display:inline-block; padding:3px 9px; border-radius:999px; font-size:12px; font-weight:700; background:#e2e8f0; }
+.status-open { background:#dcfce7; color:#166534; }
+.status-closed { background:#fee2e2; color:#991b1b; }
+.status-draft { background:#fef3c7; color:#92400e; }
+.learning-answer-table { overflow-x:auto; }
+.stats-bar { height:8px; border-radius:999px; overflow:hidden; background:#e2e8f0; margin-top:6px; }
+.stats-bar span { display:block; height:100%; background:#10b981; }
+.review-score { width:90px !important; }
+@media (max-width:700px) {
+  .learning-head, .learning-panel-head { flex-direction:column; }
+  .learning-form-grid, .question-editor-grid { grid-template-columns:1fr; }
+  .learning-form-grid label.wide, .question-editor-grid .wide { grid-column:auto; }
+}

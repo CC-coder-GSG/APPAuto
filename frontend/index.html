@@ -5,6 +5,7 @@
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css">
   <link rel="stylesheet" href="/static/css/weave.css?v=20260728-2">
+  <link rel="stylesheet" href="/static/learning.css?v=20260908-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
@@ -324,18 +325,70 @@
     </div>
   </section>
 
-  <section id="tab-learning" class="hidden card">
-    <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-      <div>
-        <h2 style="margin-bottom:4px;">学习中心</h2>
-        <div class="muted">知识资料学习 + 考核测验。每个主题对应一份考核，一轮 = 一个学习周期。</div>
-      </div>
-      <div class="row" style="gap:8px;">
-        <button id="learningNewTopicBtn" onclick="OmniQALearningTab.openCreateTopic()">+ 新建学习主题</button>
-      </div>
+  <section id="tab-learning" class="hidden card learning-center">
+    <div class="learning-head">
+      <div><h2>学习中心</h2><p class="muted">学习资料、课程与团队答题活动</p></div>
+      <div class="row"><button class="secondary" onclick="showLearningContentForm()">新增资料/课程</button><button onclick="openQuizEditor()">创建答题活动</button><button class="secondary" onclick="loadLearningCenter()">刷新</button></div>
     </div>
-    <div id="learningTopicList" style="margin-top:14px;"></div>
-    <div id="learningDetailArea" style="margin-top:14px;"></div>
+
+    <div id="learningHome">
+      <h3>资料与课程</h3>
+      <div id="learningContents" class="learning-grid"></div>
+      <h3 style="margin-top:24px">答题活动</h3>
+      <div id="learningQuizzes" class="learning-grid"></div>
+
+      <details class="learning-panel" style="margin-top:24px">
+        <summary><strong>历史学习主题与附件考核</strong></summary>
+        <div class="row" style="justify-content:flex-end; margin-top:12px">
+          <button id="learningNewTopicBtn" onclick="OmniQALearningTab.openCreateTopic()">+ 新建学习主题</button>
+        </div>
+        <div id="learningTopicList" style="margin-top:14px;"></div>
+        <div id="learningDetailArea" style="margin-top:14px;"></div>
+      </details>
+    </div>
+
+    <div id="learningContentForm" class="hidden learning-panel">
+      <div class="learning-panel-head"><h3 id="learningContentFormTitle">新增学习内容</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+      <input type="hidden" id="learningContentId">
+      <div class="learning-form-grid">
+        <label>类型<select id="learningContentKind"><option value="material">学习资料</option><option value="course">课程</option></select></label>
+        <label>标题<input id="learningContentTitle" maxlength="200"></label>
+        <label class="wide">简介<textarea id="learningContentDescription" rows="2"></textarea></label>
+        <label class="wide">正文/学习说明<textarea id="learningContentBody" rows="6"></textarea></label>
+        <label class="wide">外部资源链接<input id="learningContentUrl" type="url" placeholder="https://..."></label>
+        <label class="check"><input id="learningContentPublished" type="checkbox"> 立即向团队发布</label>
+      </div>
+      <button onclick="saveLearningContent()">保存</button>
+    </div>
+
+    <div id="quizEditor" class="hidden learning-panel">
+      <div class="learning-panel-head"><h3 id="quizEditorTitle">创建答题活动</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+      <input type="hidden" id="quizEditId">
+      <div class="learning-form-grid">
+        <label>标题<input id="quizTitle" maxlength="200"></label>
+        <label class="wide">答题说明<textarea id="quizDescription" rows="2"></textarea></label>
+      </div>
+      <div class="question-toolbar"><strong>题目</strong><button class="secondary" onclick="addQuestionEditor('single_choice')">+ 单选</button><button class="secondary" onclick="addQuestionEditor('multiple_choice')">+ 多选</button><button class="secondary" onclick="addQuestionEditor('fill_blank')">+ 填空</button><button class="secondary" onclick="addQuestionEditor('short_answer')">+ 简答</button></div>
+      <div id="quizQuestionEditors"></div>
+      <button onclick="saveQuizDraft()">保存草稿</button>
+    </div>
+
+    <div id="quizTakePanel" class="hidden learning-panel">
+      <div class="learning-panel-head"><div><h3 id="takeQuizTitle"></h3><p id="takeQuizDescription" class="muted"></p></div><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+      <div id="takeQuizQuestions"></div>
+      <button id="submitQuizButton" onclick="submitCurrentQuiz()">确认提交（仅一次）</button>
+    </div>
+
+    <div id="quizResultPanel" class="hidden learning-panel">
+      <div class="learning-panel-head"><h3>我的成绩</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+      <div id="quizResultBody"></div>
+    </div>
+
+    <div id="quizReviewPanel" class="hidden learning-panel">
+      <div class="learning-panel-head"><h3 id="reviewQuizTitle">批阅与统计</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+      <div id="quizStatsBody"></div>
+      <div id="quizSubmissionsBody"></div>
+    </div>
   </section>
 
   <section id="tab-task-board" class="hidden card">
@@ -2185,6 +2238,7 @@
 
 </div>
 
+<script src="/static/learning.js?v=20260908-1"></script>
 <script>
 const token=localStorage.getItem('token'); if(!token) location.href='/login';
 const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
@@ -2584,7 +2638,10 @@ async function showTab(name){
   if(name === 'jenkins') { window.OmniQAJenkinsTab && window.OmniQAJenkinsTab.loadJenkinsTab && window.OmniQAJenkinsTab.loadJenkinsTab().catch(err=>showMessage(err.message||'加载自动化测试失败','error')); }
   if(name === 'cad-test') { window.OmniQACadTab && window.OmniQACadTab.activate && window.OmniQACadTab.activate().catch(err=>showMessage(err.message||'加载CAD测试统计失败','error')); }
   if(name === 'terminal') { window.OmniQATerminalTab && window.OmniQATerminalTab.loadTerminalTab && window.OmniQATerminalTab.loadTerminalTab().catch(err=>showMessage(err.message||'加载终端控制台失败','error')); }
-  if(name === 'learning') { window.OmniQALearningTab && window.OmniQALearningTab.loadLearningTab && window.OmniQALearningTab.loadLearningTab().catch(err=>showMessage(err.message||'加载学习中心失败','error')); }
+  if(name === 'learning') {
+    window.OmniQALearningTab && window.OmniQALearningTab.loadLearningTab && window.OmniQALearningTab.loadLearningTab().catch(err=>showMessage(err.message||'加载历史学习主题失败','error'));
+    loadLearningCenter().catch(err=>showMessage(err.message||'加载学习中心失败','error'));
+  }
   if(name==='report'){loadReportOnDemand()}
 }
 function isAllUsersReport(){return currentUser && currentUser.role==='admin' && reportUserSelect && reportUserSelect.value==='0'}
