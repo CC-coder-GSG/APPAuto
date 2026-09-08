@@ -55,6 +55,33 @@ class LearningContent(Base):
     )
 
     creator = relationship("User", foreign_keys=[creator_id])
+    attachments = relationship(
+        "LearningContentAttachment",
+        back_populates="content",
+        cascade="all, delete-orphan",
+        order_by="LearningContentAttachment.created_at",
+    )
+
+
+class LearningContentAttachment(Base):
+    __tablename__ = "learning_content_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    content_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_contents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    file_ext: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    file_size: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    preview_pdf_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    uploaded_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    content = relationship("LearningContent", back_populates="attachments")
+    uploader = relationship("User", foreign_keys=[uploaded_by_id])
 
 
 class LearningQuiz(Base):
@@ -163,6 +190,7 @@ __all__ = [
     "FillGradingMode",
     "LearningAnswer",
     "LearningContent",
+    "LearningContentAttachment",
     "LearningContentKind",
     "LearningQuestion",
     "LearningQuestionType",

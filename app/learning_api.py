@@ -1,10 +1,14 @@
 import json
+import mimetypes
 import re
 import unicodedata
+import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated, Any, Callable, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -14,6 +18,7 @@ from app.models import (
     FillGradingMode,
     LearningAnswer,
     LearningContent,
+    LearningContentAttachment,
     LearningContentKind,
     LearningQuestion,
     LearningQuiz,
@@ -22,6 +27,30 @@ from app.models import (
     LearningQuizStatus as QuizStatus,
     User,
 )
+from app.utils.office_convert import convert_to_pdf
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LEARNING_CONTENT_UPLOAD_ROOT = PROJECT_ROOT / "uploads" / "learning-content"
+MAX_LEARNING_FILE_SIZE = 100 * 1024 * 1024
+ALLOWED_LEARNING_FILE_EXTS = {
+    ".csv",
+    ".doc",
+    ".docx",
+    ".gif",
+    ".jpeg",
+    ".jpg",
+    ".markdown",
+    ".md",
+    ".pdf",
+    ".png",
+    ".ppt",
+    ".pptx",
+    ".txt",
+    ".webp",
+    ".xls",
+    ".xlsx",
+}
 
 
 class ContentPayload(BaseModel):
@@ -198,6 +227,27 @@ def _quiz_base(quiz: LearningQuiz, current_user: User, my_submission: Optional[L
     }
 
 
+def _attachment_dict(item: LearningContentAttachment) -> dict:
+    ext = (item.file_ext or "").lower()
+    preview_kind = (
+        "pdf"
+        if item.preview_pdf_path or ext == ".pdf"
+        else "markdown"
+        if ext in {".md", ".markdown"}
+        else "none"
+    )
+    return {
+        "id": item.id,
+        "original_name": item.original_name,
+        "file_type": item.file_type,
+        "file_ext": item.file_ext,
+        "file_size": item.file_size,
+        "previewable": preview_kind != "none",
+        "preview_kind": preview_kind,
+        "created_at": item.created_at,
+    }
+
+
 def _content_dict(item: LearningContent) -> dict:
     return {
         "id": item.id,
@@ -211,7 +261,28 @@ def _content_dict(item: LearningContent) -> dict:
         "creator_name": item.creator.username if item.creator else "",
         "created_at": item.created_at,
         "updated_at": item.updated_at,
+        "files": [_attachment_dict(file) for file in item.attachments],
     }
+
+
+def _resolve_stored_path(relative_path: str) -> Path:
+    root = PROJECT_ROOT.resolve()
+    path = (root / relative_path).resolve()
+    if path != root and root not in path.parents:
+        raise HTTPException(status_code=404, detail="文件路径无效")
+    return path
+
+
+def _remove_attachment_files(item: LearningContentAttachment) -> None:
+    for relative_path in (item.file_path, item.preview_pdf_path):
+        if not relative_path:
+            continue
+        try:
+            path = _resolve_stored_path(relative_path)
+            if path.is_file():
+                path.unlink()
+        except (HTTPException, OSError):
+            pass
 
 
 def create_learning_router(current_user_dependency: Callable) -> APIRouter:
@@ -234,11 +305,43 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
         if quiz.creator_id != user.id:
             raise HTTPException(status_code=403, detail="仅出题人可执行此操作")
 
+    def get_content(db: Session, content_id: int) -> LearningContent:
+        item = (
+            db.query(LearningContent)
+            .options(
+                selectinload(LearningContent.creator),
+                selectinload(LearningContent.attachments),
+            )
+            .filter(LearningContent.id == content_id)
+            .first()
+        )
+        if not item:
+            raise HTTPException(status_code=404, detail="学习内容不存在")
+        return item
+
+    def require_content_access(item: LearningContent, user: User) -> None:
+        if not item.published and item.creator_id != user.id:
+            raise HTTPException(status_code=404, detail="学习内容不存在")
+
+    def get_attachment(db: Session, file_id: int) -> LearningContentAttachment:
+        item = (
+            db.query(LearningContentAttachment)
+            .options(selectinload(LearningContentAttachment.content))
+            .filter(LearningContentAttachment.id == file_id)
+            .first()
+        )
+        if not item:
+            raise HTTPException(status_code=404, detail="附件不存在")
+        return item
+
     @router.get("/contents")
     def list_contents(current_user: CurrentUser, db: Db):
         items = (
             db.query(LearningContent)
-            .options(selectinload(LearningContent.creator))
+            .options(
+                selectinload(LearningContent.creator),
+                selectinload(LearningContent.attachments),
+            )
             .filter((LearningContent.published.is_(True)) | (LearningContent.creator_id == current_user.id))
             .order_by(LearningContent.created_at.desc())
             .all()
@@ -256,9 +359,7 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
 
     @router.put("/contents/{content_id}")
     def update_content(content_id: int, payload: ContentPayload, current_user: CurrentUser, db: Db):
-        item = db.query(LearningContent).filter(LearningContent.id == content_id).first()
-        if not item:
-            raise HTTPException(status_code=404, detail="学习内容不存在")
+        item = get_content(db, content_id)
         if item.creator_id != current_user.id:
             raise HTTPException(status_code=403, detail="仅创建人可修改")
         for key, value in payload.model_dump().items():
@@ -270,14 +371,129 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
 
     @router.delete("/contents/{content_id}")
     def delete_content(content_id: int, current_user: CurrentUser, db: Db):
-        item = db.query(LearningContent).filter(LearningContent.id == content_id).first()
-        if not item:
-            raise HTTPException(status_code=404, detail="学习内容不存在")
+        item = get_content(db, content_id)
         if item.creator_id != current_user.id:
             raise HTTPException(status_code=403, detail="仅创建人可删除")
+        for attachment in item.attachments:
+            _remove_attachment_files(attachment)
         db.delete(item)
         db.commit()
         return {"message": "已删除"}
+
+    @router.post("/contents/{content_id}/files", status_code=201)
+    def upload_content_file(
+        content_id: int,
+        file: UploadFile,
+        current_user: CurrentUser,
+        db: Db,
+    ):
+        item = get_content(db, content_id)
+        if item.creator_id != current_user.id:
+            raise HTTPException(status_code=403, detail="仅创建人可上传附件")
+
+        original_name = Path((file.filename or "").replace("\\", "/")).name.strip()
+        suffix = Path(original_name).suffix.lower()
+        if not original_name or suffix not in ALLOWED_LEARNING_FILE_EXTS:
+            allowed = "、".join(sorted(ALLOWED_LEARNING_FILE_EXTS))
+            raise HTTPException(status_code=400, detail=f"不支持该文件类型，可上传：{allowed}")
+
+        now = datetime.now()
+        folder = LEARNING_CONTENT_UPLOAD_ROOT / now.strftime("%Y") / now.strftime("%m") / str(content_id)
+        folder.mkdir(parents=True, exist_ok=True)
+        stored_name = f"{uuid.uuid4().hex}{suffix}"
+        full_path = folder / stored_name
+        total_size = 0
+        try:
+            with full_path.open("wb") as target:
+                while True:
+                    chunk = file.file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total_size += len(chunk)
+                    if total_size > MAX_LEARNING_FILE_SIZE:
+                        raise HTTPException(status_code=413, detail="单个附件不能超过 100 MB")
+                    target.write(chunk)
+            if total_size == 0:
+                raise HTTPException(status_code=400, detail="不能上传空文件")
+        except Exception:
+            if full_path.exists():
+                full_path.unlink()
+            raise
+
+        guessed_type = file.content_type or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
+        preview_path = convert_to_pdf(full_path, folder) if suffix in {".ppt", ".pptx"} else None
+        attachment = LearningContentAttachment(
+            content_id=item.id,
+            original_name=original_name,
+            stored_name=stored_name,
+            file_path=str(full_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+            file_type=guessed_type,
+            file_ext=suffix,
+            file_size=total_size,
+            preview_pdf_path=(
+                str(preview_path.relative_to(PROJECT_ROOT)).replace("\\", "/")
+                if preview_path is not None
+                else None
+            ),
+            uploaded_by_id=current_user.id,
+        )
+        db.add(attachment)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            _remove_attachment_files(attachment)
+            raise
+        db.refresh(attachment)
+        return _attachment_dict(attachment)
+
+    @router.get("/content-files/{file_id}/download")
+    def download_content_file(file_id: int, current_user: CurrentUser, db: Db):
+        attachment = get_attachment(db, file_id)
+        require_content_access(attachment.content, current_user)
+        full_path = _resolve_stored_path(attachment.file_path)
+        if not full_path.is_file():
+            raise HTTPException(status_code=404, detail="附件文件不存在")
+        return FileResponse(
+            path=str(full_path),
+            filename=attachment.original_name,
+            media_type=attachment.file_type or "application/octet-stream",
+        )
+
+    @router.get("/content-files/{file_id}/preview")
+    def preview_content_file(file_id: int, current_user: CurrentUser, db: Db):
+        attachment = get_attachment(db, file_id)
+        require_content_access(attachment.content, current_user)
+        ext = (attachment.file_ext or "").lower()
+        if attachment.preview_pdf_path:
+            relative_path = attachment.preview_pdf_path
+            media_type = "application/pdf"
+        elif ext == ".pdf":
+            relative_path = attachment.file_path
+            media_type = "application/pdf"
+        elif ext in {".md", ".markdown"}:
+            relative_path = attachment.file_path
+            media_type = "text/plain; charset=utf-8"
+        else:
+            raise HTTPException(status_code=409, detail="该附件不支持在线预览，请下载查看")
+        full_path = _resolve_stored_path(relative_path)
+        if not full_path.is_file():
+            raise HTTPException(status_code=404, detail="预览文件不存在")
+        return FileResponse(
+            path=str(full_path),
+            media_type=media_type,
+            headers={"Content-Disposition": "inline"},
+        )
+
+    @router.delete("/content-files/{file_id}")
+    def delete_content_file(file_id: int, current_user: CurrentUser, db: Db):
+        attachment = get_attachment(db, file_id)
+        if attachment.content.creator_id != current_user.id:
+            raise HTTPException(status_code=403, detail="仅创建人可删除附件")
+        _remove_attachment_files(attachment)
+        db.delete(attachment)
+        db.commit()
+        return {"message": "附件已删除"}
 
     def apply_quiz_payload(quiz: LearningQuiz, payload: QuizPayload) -> None:
         quiz.title = payload.title

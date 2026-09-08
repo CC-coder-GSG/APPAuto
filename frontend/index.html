@@ -5,7 +5,7 @@
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css">
   <link rel="stylesheet" href="/static/css/weave.css?v=20260728-2">
-  <link rel="stylesheet" href="/static/learning.css?v=20260908-1">
+  <link rel="stylesheet" href="/static/learning.css?v=20260908-2">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
@@ -356,9 +356,15 @@
         <label class="wide">简介<textarea id="learningContentDescription" rows="2"></textarea></label>
         <label class="wide">正文/学习说明<textarea id="learningContentBody" rows="6"></textarea></label>
         <label class="wide">外部资源链接<input id="learningContentUrl" type="url" placeholder="https://..."></label>
+        <label class="wide">教学附件
+          <input id="learningContentFiles" type="file" multiple accept=".ppt,.pptx,.pdf,.md,.markdown,.doc,.docx,.xls,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.gif,.webp">
+          <span class="muted" style="font-weight:400">单个文件最大 100 MB；PPT/PPTX、PDF、Markdown 支持预览，所有文件均可下载。</span>
+        </label>
         <label class="check"><input id="learningContentPublished" type="checkbox"> 立即向团队发布</label>
       </div>
-      <button onclick="saveLearningContent()">保存</button>
+      <div id="learningContentExistingFiles" class="learning-file-list"></div>
+      <div id="learningContentUploadStatus" class="muted"></div>
+      <button id="learningContentSaveBtn" onclick="saveLearningContent()">保存</button>
     </div>
 
     <div id="quizEditor" class="hidden learning-panel">
@@ -388,6 +394,16 @@
       <div class="learning-panel-head"><h3 id="reviewQuizTitle">批阅与统计</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
       <div id="quizStatsBody"></div>
       <div id="quizSubmissionsBody"></div>
+    </div>
+
+    <div id="learningFilePreviewModal" class="learning-preview-modal hidden" aria-hidden="true">
+      <div class="learning-preview-dialog">
+        <div class="learning-panel-head">
+          <h3 id="learningFilePreviewTitle">附件预览</h3>
+          <button class="secondary" onclick="closeLearningFilePreview()">关闭</button>
+        </div>
+        <div id="learningFilePreviewBody" class="learning-preview-body"></div>
+      </div>
     </div>
   </section>
 
@@ -2238,7 +2254,7 @@
 
 </div>
 
-<script src="/static/learning.js?v=20260908-1"></script>
+<script src="/static/learning.js?v=20260908-2"></script>
 <script>
 const token=localStorage.getItem('token'); if(!token) location.href='/login';
 const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};

@@ -40,6 +40,21 @@ def _login(client: TestClient, username: str, *, mobile: bool = False) -> dict[s
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
+def _create_content(client: TestClient, headers: dict[str, str], *, published: bool = True) -> dict:
+    response = client.post(
+        "/learning/contents",
+        headers=headers,
+        json={
+            "kind": "course",
+            "title": "附件课程",
+            "description": "用于验证教学附件",
+            "published": published,
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
 def test_complete_quiz_workflow(learning_client):
     author_headers = _login(learning_client, "quiz_author")
     student_headers = _login(learning_client, "quiz_student")
@@ -149,3 +164,125 @@ def test_web_and_mobile_sessions_can_coexist(learning_client):
 
     assert learning_client.get("/auth/me", headers=web_headers).status_code == 200
     assert learning_client.get("/auth/me", headers=mobile_headers).status_code == 200
+
+
+def test_content_file_upload_preview_download_and_delete(learning_client, monkeypatch, tmp_path):
+    import app.learning_api as learning_api
+
+    monkeypatch.setattr(learning_api, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        learning_api,
+        "LEARNING_CONTENT_UPLOAD_ROOT",
+        tmp_path / "uploads" / "learning-content",
+    )
+    author_headers = _login(learning_client, "quiz_author")
+    student_headers = _login(learning_client, "quiz_student")
+    content = _create_content(learning_client, author_headers)
+
+    uploaded = learning_client.post(
+        f"/learning/contents/{content['id']}/files",
+        headers=author_headers,
+        files={"file": ("lesson.md", b"# Lesson\n\nStudy carefully.", "text/markdown")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    file_data = uploaded.json()
+    assert file_data["original_name"] == "lesson.md"
+    assert file_data["previewable"] is True
+    assert file_data["preview_kind"] == "markdown"
+
+    listed = learning_client.get("/learning/contents", headers=student_headers)
+    assert listed.status_code == 200
+    listed_file = listed.json()[0]["files"][0]
+    assert listed_file["id"] == file_data["id"]
+
+    preview = learning_client.get(
+        f"/learning/content-files/{file_data['id']}/preview", headers=student_headers
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.headers["content-type"].startswith("text/plain")
+    assert preview.content == b"# Lesson\n\nStudy carefully."
+
+    download = learning_client.get(
+        f"/learning/content-files/{file_data['id']}/download", headers=student_headers
+    )
+    assert download.status_code == 200
+    assert download.content == preview.content
+    assert "attachment" in download.headers["content-disposition"]
+
+    assert any(path.is_file() for path in learning_api.LEARNING_CONTENT_UPLOAD_ROOT.rglob("*"))
+    deleted = learning_client.delete(f"/learning/contents/{content['id']}", headers=author_headers)
+    assert deleted.status_code == 200
+    assert not any(path.is_file() for path in learning_api.LEARNING_CONTENT_UPLOAD_ROOT.rglob("*"))
+
+
+def test_ppt_is_converted_to_pdf_preview(learning_client, monkeypatch, tmp_path):
+    import app.learning_api as learning_api
+
+    monkeypatch.setattr(learning_api, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        learning_api,
+        "LEARNING_CONTENT_UPLOAD_ROOT",
+        tmp_path / "uploads" / "learning-content",
+    )
+
+    def fake_convert_to_pdf(source, output_dir):
+        pdf = output_dir / f"{source.stem}.pdf"
+        pdf.write_bytes(b"%PDF-1.4 preview")
+        return pdf
+
+    monkeypatch.setattr(learning_api, "convert_to_pdf", fake_convert_to_pdf)
+    author_headers = _login(learning_client, "quiz_author")
+    content = _create_content(learning_client, author_headers)
+    uploaded = learning_client.post(
+        f"/learning/contents/{content['id']}/files",
+        headers=author_headers,
+        files={"file": ("training.pptx", b"fake pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    assert uploaded.json()["preview_kind"] == "pdf"
+
+    preview = learning_client.get(
+        f"/learning/content-files/{uploaded.json()['id']}/preview", headers=author_headers
+    )
+    assert preview.status_code == 200
+    assert preview.headers["content-type"].startswith("application/pdf")
+    assert preview.content.startswith(b"%PDF")
+
+
+def test_content_file_permissions_and_validation(learning_client, monkeypatch, tmp_path):
+    import app.learning_api as learning_api
+
+    monkeypatch.setattr(learning_api, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        learning_api,
+        "LEARNING_CONTENT_UPLOAD_ROOT",
+        tmp_path / "uploads" / "learning-content",
+    )
+    author_headers = _login(learning_client, "quiz_author")
+    student_headers = _login(learning_client, "quiz_student")
+    content = _create_content(learning_client, author_headers, published=False)
+
+    forbidden = learning_client.post(
+        f"/learning/contents/{content['id']}/files",
+        headers=student_headers,
+        files={"file": ("lesson.pdf", b"%PDF", "application/pdf")},
+    )
+    assert forbidden.status_code == 403
+
+    rejected = learning_client.post(
+        f"/learning/contents/{content['id']}/files",
+        headers=author_headers,
+        files={"file": ("unsafe.exe", b"not allowed", "application/octet-stream")},
+    )
+    assert rejected.status_code == 400
+
+    uploaded = learning_client.post(
+        f"/learning/contents/{content['id']}/files",
+        headers=author_headers,
+        files={"file": ("private.pdf", b"%PDF", "application/pdf")},
+    )
+    assert uploaded.status_code == 201
+    hidden = learning_client.get(
+        f"/learning/content-files/{uploaded.json()['id']}/download", headers=student_headers
+    )
+    assert hidden.status_code == 404

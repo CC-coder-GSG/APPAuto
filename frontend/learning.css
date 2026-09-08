@@ -7,6 +7,19 @@
 .learning-item p { margin:4px 0; white-space:pre-wrap; }
 .learning-item-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
 .learning-item-actions button { padding:6px 10px; font-size:13px; }
+.learning-file-list { display:flex; flex-direction:column; gap:8px; margin:12px 0; }
+.learning-file-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 10px; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+.learning-file-name { min-width:0; overflow-wrap:anywhere; }
+.learning-file-actions { display:flex; flex:0 0 auto; flex-wrap:wrap; gap:6px; }
+.learning-file-actions button { padding:4px 9px; font-size:12px; }
+.learning-preview-modal { position:fixed; inset:0; z-index:12000; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(15,23,42,.55); }
+.learning-preview-modal.hidden { display:none; }
+.learning-preview-dialog { width:min(1100px,96vw); height:min(820px,92vh); display:flex; flex-direction:column; padding:18px; border-radius:14px; background:#fff; box-shadow:0 24px 60px rgba(15,23,42,.28); }
+.learning-preview-dialog .learning-panel-head { margin-bottom:12px; }
+.learning-preview-dialog h3 { min-width:0; margin:0; overflow-wrap:anywhere; }
+.learning-preview-body { flex:1; min-height:0; overflow:auto; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; }
+.learning-preview-body iframe { width:100%; height:100%; min-height:600px; border:0; background:#fff; }
+.learning-markdown-preview { min-height:100%; margin:0; padding:20px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; color:#0f172a; font:14px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:#fff; }
 .learning-panel { max-width:960px; margin:0 auto; }
 .learning-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:16px; }
 .learning-form-grid label { display:flex; flex-direction:column; gap:5px; font-weight:600; }
@@ -34,4 +47,7 @@
   .learning-head, .learning-panel-head { flex-direction:column; }
   .learning-form-grid, .question-editor-grid { grid-template-columns:1fr; }
   .learning-form-grid label.wide, .question-editor-grid .wide { grid-column:auto; }
+  .learning-file-row { align-items:flex-start; flex-direction:column; }
+  .learning-preview-modal { padding:8px; }
+  .learning-preview-dialog { width:100%; height:96vh; padding:12px; }
 }

@@ -2,6 +2,7 @@ let learningContentsCache = [];
 let learningQuizzesCache = [];
 let activeQuiz = null;
 let activeQuizPreview = false;
+let learningPreviewObjectUrl = null;
 
 function learningEsc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
@@ -13,6 +14,33 @@ function learningStatus(status) {
 
 function learningType(type) {
   return {single_choice:'单选题', multiple_choice:'多选题', fill_blank:'填空题', short_answer:'简答题'}[type] || type;
+}
+
+function learningFileSize(bytes) {
+  const value = Number(bytes || 0);
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function findLearningContentFile(fileId) {
+  for (const item of learningContentsCache) {
+    const file = (item.files || []).find(candidate => candidate.id === Number(fileId));
+    if (file) return file;
+  }
+  return null;
+}
+
+function renderLearningFileList(files, canDelete = false, contentId = null) {
+  if (!files || !files.length) return '<p class="muted">暂无附件</p>';
+  return files.map(file => `<div class="learning-file-row">
+    <span class="learning-file-name">📎 ${learningEsc(file.original_name)} <span class="muted">(${learningFileSize(file.file_size)})</span></span>
+    <span class="learning-file-actions">
+      ${file.previewable ? `<button class="secondary" onclick="previewLearningContentFile(${file.id})">预览</button>` : ''}
+      <button class="secondary" onclick="downloadLearningContentFile(${file.id})">下载</button>
+      ${canDelete ? `<button class="danger" onclick="deleteLearningContentFile(${file.id},${contentId})">删除</button>` : ''}
+    </span>
+  </div>`).join('');
 }
 
 function closeLearningPanels() {
@@ -45,6 +73,7 @@ function renderLearningContents() {
       <p class="muted">创建人：${learningEsc(item.creator_name)}</p>
       ${item.description ? `<p>${learningEsc(item.description)}</p>` : ''}
       ${item.body ? `<details><summary>查看内容</summary><p>${learningEsc(item.body)}</p></details>` : ''}
+      ${(item.files || []).length ? `<div class="learning-file-list">${renderLearningFileList(item.files)}</div>` : ''}
       <div class="learning-item-actions">
         ${item.resource_url ? `<a href="${learningEsc(item.resource_url)}" target="_blank" rel="noopener"><button class="secondary">打开资源</button></a>` : ''}
         ${currentUser && item.creator_id === currentUser.id ? `<button class="secondary" onclick="showLearningContentForm(${item.id})">编辑</button><button class="danger" onclick="deleteLearningContent(${item.id})">删除</button>` : ''}
@@ -93,6 +122,11 @@ function showLearningContentForm(id = null) {
   learningContentBody.value = item ? item.body || '' : '';
   learningContentUrl.value = item ? item.resource_url || '' : '';
   learningContentPublished.checked = item ? item.published : false;
+  learningContentFiles.value = '';
+  learningContentUploadStatus.textContent = '';
+  learningContentExistingFiles.innerHTML = item
+    ? `<h4>已上传附件</h4>${renderLearningFileList(item.files || [], true, item.id)}`
+    : '';
 }
 
 async function saveLearningContent() {
@@ -106,16 +140,92 @@ async function saveLearningContent() {
     published: learningContentPublished.checked
   };
   if (!payload.title) return showMessage('请输入标题', 'error');
+  const pendingFiles = [...learningContentFiles.files];
+  learningContentSaveBtn.disabled = true;
   try {
-    await api(id ? `/learning/contents/${id}` : '/learning/contents', {method:id ? 'PUT' : 'POST', headers:H, body:JSON.stringify(payload)});
-    showMessage('学习内容已保存'); closeLearningPanels();
-  } catch(e) { showMessage(e.message, 'error'); }
+    const saved = await api(id ? `/learning/contents/${id}` : '/learning/contents', {method:id ? 'PUT' : 'POST', headers:H, body:JSON.stringify(payload)}).then(r => r.json());
+    learningContentId.value = saved.id;
+    for (let index = 0; index < pendingFiles.length; index += 1) {
+      const file = pendingFiles[index];
+      learningContentUploadStatus.textContent = `正在上传 ${index + 1}/${pendingFiles.length}：${file.name}`;
+      const form = new FormData();
+      form.append('file', file);
+      await api(`/learning/contents/${saved.id}/files`, {method:'POST', body:form});
+    }
+    learningContentUploadStatus.textContent = pendingFiles.length ? '附件上传完成' : '';
+    showMessage(pendingFiles.length ? '学习内容及附件已保存' : '学习内容已保存');
+    closeLearningPanels();
+  } catch(e) {
+    learningContentFiles.value = '';
+    showMessage(`${e.message || '保存失败'}${learningContentId.value ? '；已保存的内容可重新编辑并继续上传' : ''}`, 'error');
+  } finally {
+    learningContentSaveBtn.disabled = false;
+  }
 }
 
 async function deleteLearningContent(id) {
   if (!confirm('确定删除这项学习内容？')) return;
   try { await api(`/learning/contents/${id}`, {method:'DELETE'}); showMessage('已删除'); loadLearningCenter(); }
   catch(e) { showMessage(e.message, 'error'); }
+}
+
+async function downloadLearningContentFile(fileId) {
+  const file = findLearningContentFile(fileId);
+  try {
+    const response = await api(`/learning/content-files/${fileId}/download`);
+    const blob = await response.blob();
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = file?.original_name || 'download';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+  } catch(e) { showMessage(e.message || '附件下载失败', 'error'); }
+}
+
+async function previewLearningContentFile(fileId) {
+  const file = findLearningContentFile(fileId);
+  if (!file?.previewable) return showMessage('该附件不支持在线预览，请下载查看', 'error');
+  const modal = document.getElementById('learningFilePreviewModal');
+  const body = document.getElementById('learningFilePreviewBody');
+  learningFilePreviewTitle.textContent = file.original_name;
+  body.innerHTML = '<p class="muted" style="padding:20px">正在加载预览…</p>';
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
+  try {
+    const response = await api(`/learning/content-files/${fileId}/preview`);
+    if (file.preview_kind === 'markdown') {
+      body.innerHTML = `<pre class="learning-markdown-preview">${learningEsc(await response.text())}</pre>`;
+      return;
+    }
+    const blob = await response.blob();
+    if (learningPreviewObjectUrl) URL.revokeObjectURL(learningPreviewObjectUrl);
+    learningPreviewObjectUrl = URL.createObjectURL(blob);
+    body.innerHTML = `<iframe src="${learningPreviewObjectUrl}" title="${learningEsc(file.original_name)}"></iframe>`;
+  } catch(e) {
+    body.innerHTML = `<p style="padding:20px;color:#dc2626">${learningEsc(e.message || '预览失败，请下载查看')}</p>`;
+  }
+}
+
+function closeLearningFilePreview() {
+  learningFilePreviewModal.classList.add('hidden');
+  learningFilePreviewModal.setAttribute('aria-hidden', 'true');
+  learningFilePreviewBody.innerHTML = '';
+  if (learningPreviewObjectUrl) {
+    URL.revokeObjectURL(learningPreviewObjectUrl);
+    learningPreviewObjectUrl = null;
+  }
+}
+
+async function deleteLearningContentFile(fileId, contentId) {
+  if (!confirm('确定删除这个附件？')) return;
+  try {
+    await api(`/learning/content-files/${fileId}`, {method:'DELETE'});
+    await loadLearningCenter();
+    showLearningContentForm(contentId);
+    showMessage('附件已删除');
+  } catch(e) { showMessage(e.message || '附件删除失败', 'error'); }
 }
 
 async function openQuizEditor(id = null) {

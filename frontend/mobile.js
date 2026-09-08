@@ -1,6 +1,8 @@
 let mobileToken = localStorage.getItem('mobile_token');
 let mobileUser = null;
 let mobileActiveQuiz = null;
+let mobileContents = [];
+let mobileFileObjectUrl = null;
 
 function mEsc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
 function mAnswer(v){if(v===null||v===undefined||v==='')return '（未作答）';return Array.isArray(v)?v.join('；'):String(v)}
@@ -22,7 +24,7 @@ async function mobileBoot(){
 }
 
 async function loadMobileHome(){
-  try{const [quizzes,contents]=await Promise.all([mApi('/learning/quizzes').then(r=>r.json()),mApi('/learning/contents').then(r=>r.json())]);renderMobileQuizzes(quizzes);renderMobileContents(contents.filter(x=>x.published))}catch(e){toast(e.message)}
+  try{const [quizzes,contents]=await Promise.all([mApi('/learning/quizzes').then(r=>r.json()),mApi('/learning/contents').then(r=>r.json())]);mobileContents=contents.filter(x=>x.published);renderMobileQuizzes(quizzes);renderMobileContents(mobileContents)}catch(e){toast(e.message)}
 }
 
 function mobileTab(tab){navQuiz.classList.toggle('active',tab==='quiz');navContent.classList.toggle('active',tab==='content');mobileQuizList.classList.toggle('hidden',tab!=='quiz');mobileContentList.classList.toggle('hidden',tab!=='content')}
@@ -34,8 +36,16 @@ function renderMobileQuizzes(items){
 
 function renderMobileContents(items){
   if(!items.length){mobileContentList.innerHTML='<div class="card muted">暂无学习资料或课程</div>';return}
-  mobileContentList.innerHTML=items.map(x=>`<article class="mobile-card"><span class="pill">${x.kind==='course'?'课程':'资料'}</span><h3>${mEsc(x.title)}</h3>${x.description?`<p>${mEsc(x.description)}</p>`:''}${x.body?`<details><summary>查看学习内容</summary><p>${mEsc(x.body)}</p></details>`:''}${x.resource_url?`<p><a href="${mEsc(x.resource_url)}" target="_blank" rel="noopener">打开外部资源</a></p>`:''}</article>`).join('')
+  mobileContentList.innerHTML=items.map(x=>`<article class="mobile-card"><span class="pill">${x.kind==='course'?'课程':'资料'}</span><h3>${mEsc(x.title)}</h3>${x.description?`<p>${mEsc(x.description)}</p>`:''}${x.body?`<details><summary>查看学习内容</summary><p>${mEsc(x.body)}</p></details>`:''}${x.resource_url?`<p><a href="${mEsc(x.resource_url)}" target="_blank" rel="noopener">打开外部资源</a></p>`:''}${(x.files||[]).length?`<div class="mobile-file-list">${x.files.map(f=>`<div class="mobile-file">📎 ${mEsc(f.original_name)}<div class="mobile-file-actions">${f.previewable?`<button class="secondary" onclick="previewMobileContentFile(${f.id})">预览</button>`:'<span></span>'}<button class="secondary" onclick="downloadMobileContentFile(${f.id})">下载</button></div></div>`).join('')}</div>`:''}</article>`).join('')
 }
+
+function findMobileContentFile(fileId){for(const content of mobileContents){const file=(content.files||[]).find(x=>x.id===Number(fileId));if(file)return file}return null}
+
+async function downloadMobileContentFile(fileId){const file=findMobileContentFile(fileId);try{const r=await mApi(`/learning/content-files/${fileId}/download`);const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=file?.original_name||'download';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),60000)}catch(e){toast(e.message)}}
+
+async function previewMobileContentFile(fileId){const file=findMobileContentFile(fileId);if(!file?.previewable)return toast('该附件不支持预览');mobileFileTitle.textContent=file.original_name;mobileFilePreview.innerHTML='<p class="muted" style="padding:16px">正在加载预览…</p>';showMobileView('filePreviewView');try{const r=await mApi(`/learning/content-files/${fileId}/preview`);if(file.preview_kind==='markdown'){mobileFilePreview.innerHTML=`<pre>${mEsc(await r.text())}</pre>`;return}const blob=await r.blob();if(mobileFileObjectUrl)URL.revokeObjectURL(mobileFileObjectUrl);mobileFileObjectUrl=URL.createObjectURL(blob);mobileFilePreview.innerHTML=`<iframe src="${mobileFileObjectUrl}" title="${mEsc(file.original_name)}"></iframe>`}catch(e){mobileFilePreview.innerHTML=`<p class="error" style="padding:16px">${mEsc(e.message)}</p>`}}
+
+function closeMobileFilePreview(){if(mobileFileObjectUrl){URL.revokeObjectURL(mobileFileObjectUrl);mobileFileObjectUrl=null}mobileFilePreview.innerHTML='';showMobileView('homeView')}
 
 async function openMobileQuiz(id){
   try{mobileActiveQuiz=await mApi(`/learning/quizzes/${id}`).then(r=>r.json());mobileTakeTitle.textContent=mobileActiveQuiz.title;mobileTakeDesc.textContent=mobileActiveQuiz.description||'';mobileQuestions.innerHTML=mobileActiveQuiz.questions.map(renderMobileQuestion).join('');showMobileView('takeView')}catch(e){toast(e.message)}
