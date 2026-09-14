@@ -31,6 +31,44 @@
 .question-editor textarea, .question-editor input, .question-editor select { width:100%; }
 .question-editor-grid { display:grid; grid-template-columns:2fr 1fr; gap:10px; }
 .question-editor-grid .wide { grid-column:1/-1; }
+#quizEditor .question-editor { padding:22px; border-radius:16px; box-shadow:0 3px 12px rgba(15,23,42,.04); }
+#quizEditor .question-editor-head { padding-bottom:14px; border-bottom:1px solid #e2e8f0; margin-bottom:18px; }
+#quizEditor .question-editor-head strong { font-size:16px; color:#4338ca; }
+#quizEditor .question-editor-grid { gap:16px; }
+#quizEditor .question-editor-grid > label { display:flex; flex-direction:column; gap:8px; font-weight:600; }
+#quizEditor textarea { box-sizing:border-box; resize:vertical; line-height:1.6; min-width:0; }
+#quizEditor .qe-score-field { max-width:160px; }
+#quizEditor .qe-section { border-top:1px solid #eef2f7; padding-top:16px; }
+#quizEditor .qe-section-head, #quizEditor .qe-blank-tools { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+#quizEditor .muted { font-size:13px; line-height:1.6; font-weight:400; margin-top:0; margin-bottom:0; }
+#quizEditor .qe-option-list, #quizEditor .qe-reference-list { display:grid; gap:10px; margin-bottom:12px; }
+#quizEditor .qe-option-row, #quizEditor .qe-reference-row { display:flex; align-items:center; gap:12px; padding:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; }
+#quizEditor .qe-option-row.is-correct { border-color:#34d399; background:#ecfdf5; }
+#quizEditor .qe-option-check { display:flex; align-items:center; gap:10px; cursor:pointer; flex-shrink:0; padding:8px 0; }
+#quizEditor .qe-option-correct { width:18px; height:18px; margin:0; accent-color:#059669; cursor:pointer; }
+#quizEditor .qe-option-letter, #quizEditor .qe-reference-number { display:grid; place-items:center; min-width:28px; height:28px; border-radius:7px; background:#e0e7ff; color:#4338ca; font-weight:700; }
+#quizEditor .qe-option-text, #quizEditor .qe-reference-text { flex:1; width:0; background:#fff; }
+#quizEditor .qe-option-row button, #quizEditor .qe-reference-row button { flex-shrink:0; font-size:12px; padding:6px 8px; }
+#quizEditor button:disabled { opacity:.4; cursor:not-allowed; }
+#quizEditor :is(input, textarea, select, button):focus-visible { outline:2px solid #6366f1; outline-offset:3px; }
+#quizEditor [hidden] { display:none !important; }
+#quizEditor .qe-preview { margin-top:18px; border-top:1px dashed #cbd5e1; padding-top:12px; }
+#quizEditor .qe-preview summary { cursor:pointer; color:#4f46e5; font-size:13px; width:fit-content; }
+#quizEditor .qe-preview-body { margin-top:12px; padding:16px; border-radius:10px; background:#f8fafc; }
+#quizEditor .qe-preview-prompt, #quizEditor .qe-preview-option { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.7; }
+#quizEditor .qe-preview-prompt { font-weight:600; margin-bottom:10px; }
+#quizEditor .qe-preview-option { padding:7px 10px; margin-top:6px; border-radius:6px; background:#fff; }
+#quizEditor .qe-preview-option.is-correct { background:#ecfdf5; color:#065f46; }
+#quizEditor .qe-correct-tag { display:inline-block; margin-left:12px; font-size:12px; color:#047857; }
+#quizEditor .qe-preview-answer { border:1px dashed #cbd5e1; border-radius:6px; padding:16px; color:#64748b; }
+#quizEditor .has-error { border-color:#ef4444; }
+#quizEditor .qe-error { color:#b91c1c; margin:12px 0 0; font-size:13px; }
+#quizEditor .quiz-editor-footer { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:16px; border:1px solid #e2e8f0; background:#f8fafc; border-radius:12px; }
+@media (max-width:700px) {
+  #quizEditor .question-editor { padding:14px; }
+  #quizEditor .qe-option-row, #quizEditor .qe-reference-row { gap:8px; padding:8px; flex-wrap:wrap; }
+  #quizEditor .qe-option-text, #quizEditor .qe-reference-text { min-width:120px; }
+}
 .option-answer { display:block; margin:8px 0; padding:10px; border:1px solid #e2e8f0; border-radius:8px; cursor:pointer; }
 .option-answer:hover { border-color:#4f46e5; background:#eef2ff; }
 .option-answer input { margin-right:8px; }

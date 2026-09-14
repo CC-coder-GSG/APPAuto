@@ -246,29 +246,154 @@ async function openQuizEditor(id = null) {
 }
 
 function addQuestionEditor(type) {
-  addQuestionEditorFromData({question_type:type, prompt:'', score:1, options:['选项A','选项B'], correct_answers:[], fill_grading_mode:'exact', match_count:1});
+  addQuestionEditorFromData({question_type:type, prompt:'', score:1, options:['','','',''], correct_answers:[], fill_grading_mode:'exact', match_count:1});
 }
+
+let questionEditorSequence = 0;
 
 function addQuestionEditorFromData(q) {
   const host = document.getElementById('quizQuestionEditors');
   const el = document.createElement('div');
   el.className = 'question-editor';
   el.dataset.type = q.question_type;
+  el.dataset.editorId = String(++questionEditorSequence);
   const choice = ['single_choice','multiple_choice'].includes(q.question_type);
   const fill = q.question_type === 'fill_blank';
   const modeOptions = [
     ['exact','必须一字不差'],['contains','填写内容连续包含答案'],['normalized','去除标点/空格/符号后匹配'],['match_any','与任一参考答案匹配'],['match_count','匹配指定数量的参考答案']
   ].map(([v,t]) => `<option value="${v}" ${q.fill_grading_mode===v?'selected':''}>${t}</option>`).join('');
-  el.innerHTML = `<div class="question-editor-head"><strong>${learningType(q.question_type)}</strong><button class="danger" onclick="this.closest('.question-editor').remove();renumberQuestionEditors()">移除</button></div>
+  el.innerHTML = `<div class="question-editor-head"><strong>${learningType(q.question_type)}</strong><button type="button" class="secondary qe-remove-question">删除题目</button></div>
     <div class="question-editor-grid">
-      <label class="wide">题目<textarea class="qe-prompt" rows="2">${learningEsc(q.prompt)}</textarea></label>
-      <label>分值<input class="qe-score" type="number" min="0.5" step="0.5" value="${q.score || 1}"></label>
-      ${choice ? `<label class="wide">选项（每行一个）<textarea class="qe-options" rows="4">${learningEsc((q.options||[]).join('\n'))}</textarea></label><label class="wide">正确答案（填写完整选项，多选每行一个）<textarea class="qe-correct" rows="3">${learningEsc((q.correct_answers||[]).join('\n'))}</textarea></label>` : ''}
-      ${fill ? `<label class="wide">参考答案（每行一个）<textarea class="qe-correct" rows="3">${learningEsc((q.correct_answers||[]).join('\n'))}</textarea></label><label>自动批改方式<select class="qe-mode">${modeOptions}</select></label><label>至少匹配答案数<input class="qe-count" type="number" min="1" value="${q.match_count || 1}"></label>` : ''}
+      <label class="wide">题干<textarea class="qe-prompt" rows="3" placeholder="在这里输入题目内容…">${learningEsc(q.prompt)}</textarea></label>
+      ${fill ? '<div class="wide qe-blank-tools"><button type="button" class="secondary qe-insert-blank">＋ 插入填空位</button><span class="muted">在光标处插入；选中文字后点击，可将文字转为参考答案。</span></div>' : ''}
+      <label class="qe-score-field">分值<input class="qe-score" type="number" min="0.5" max="10000" step="0.5" value="${learningEsc(q.score ?? 1)}"></label>
+      ${choice ? `<div class="wide qe-section"><div class="qe-section-head"><strong>选项与正确答案</strong><span class="muted">${q.question_type === 'single_choice' ? '点击圆圈设为正确答案（单选）' : '勾选所有正确答案（多选）'}</span></div><div class="qe-option-list"></div><button type="button" class="secondary qe-add-option">＋ 添加选项</button></div>` : ''}
+      ${fill ? `<div class="wide qe-section"><div class="qe-section-head"><strong>参考答案</strong><span class="muted">每个输入框填写一个答案，无需手动分隔</span></div><div class="qe-reference-list"></div><button type="button" class="secondary qe-add-reference">＋ 添加参考答案</button></div><label>自动批改方式<select class="qe-mode">${modeOptions}</select></label><label class="qe-count-field">至少匹配答案数<input class="qe-count" type="number" min="1" step="1" value="${learningEsc(q.match_count || 1)}"></label><p class="wide muted qe-mode-help"></p><p class="wide muted">多个空位的答案由答题人统一填写在答案框中，按本题的参考答案和批改方式评分，不按空位逐一计分。</p>` : ''}
       ${q.question_type === 'short_answer' ? '<p class="muted wide">简答题提交后由出题人手工评分。</p>' : ''}
-    </div>`;
+    </div><details class="qe-preview"><summary>查看题目预览</summary><div class="qe-preview-body"></div></details><p class="qe-error" role="alert" hidden></p>`;
   host.appendChild(el);
+  el.querySelector('.qe-remove-question').onclick = () => {
+    if (!confirm('确定删除这道题目？未保存的内容将被移除。')) return;
+    el.remove(); renumberQuestionEditors();
+  };
+  if (choice) {
+    (q.options?.length ? q.options : ['','']).forEach(text => addQuizOption(el, text, (q.correct_answers || []).includes(text)));
+    el.querySelector('.qe-add-option').onclick = () => addQuizOption(el, '', false, true);
+  }
+  if (fill) {
+    (q.correct_answers?.length ? q.correct_answers : ['']).forEach(text => addQuizReference(el, text));
+    el.querySelector('.qe-add-reference').onclick = () => addQuizReference(el, '', true);
+    el.querySelector('.qe-insert-blank').onclick = () => insertQuizBlank(el);
+    el.querySelector('.qe-mode').onchange = () => updateQuizFillMode(el);
+    updateQuizFillMode(el);
+  }
+  el.addEventListener('input', () => { clearQuizQuestionError(el); updateQuizQuestionPreview(el); });
+  el.addEventListener('change', () => updateQuizQuestionPreview(el));
+  updateQuizQuestionPreview(el);
   renumberQuestionEditors();
+}
+
+function quizOptionLetter(index) {
+  let label = '';
+  for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) label = String.fromCharCode(65 + (n - 1) % 26) + label;
+  return label;
+}
+
+function addQuizOption(el, text = '', checked = false, focus = false) {
+  const row = document.createElement('div');
+  row.className = 'qe-option-row';
+  row.innerHTML = `<label class="qe-option-check"><input class="qe-option-correct" type="${el.dataset.type === 'single_choice' ? 'radio' : 'checkbox'}" name="qe-answer-${el.dataset.editorId}" ${checked ? 'checked' : ''}><span class="qe-option-letter"></span></label><textarea class="qe-option-text" rows="2" placeholder="输入选项内容，无需填写 A、B 编号">${learningEsc(text)}</textarea><button type="button" class="secondary qe-remove-option">删除</button>`;
+  el.querySelector('.qe-option-list').appendChild(row);
+  row.querySelector('.qe-remove-option').onclick = () => {
+    row.remove(); refreshQuizOptionRows(el); clearQuizQuestionError(el); updateQuizQuestionPreview(el);
+  };
+  refreshQuizOptionRows(el);
+  clearQuizQuestionError(el);
+  updateQuizQuestionPreview(el);
+  if (focus) row.querySelector('textarea').focus();
+}
+
+function refreshQuizOptionRows(el) {
+  const rows = [...el.querySelectorAll('.qe-option-row')];
+  rows.forEach((row, i) => {
+    const letter = quizOptionLetter(i);
+    row.querySelector('.qe-option-letter').textContent = letter;
+    row.querySelector('input').setAttribute('aria-label', `将选项 ${letter} 设为正确答案`);
+    row.querySelector('textarea').setAttribute('aria-label', `选项 ${letter} 内容`);
+    const remove = row.querySelector('button');
+    remove.disabled = rows.length <= 2;
+    remove.setAttribute('aria-label', `删除选项 ${letter}`);
+    remove.title = rows.length <= 2 ? '选择题至少保留两个选项' : `删除选项 ${letter}`;
+  });
+}
+
+function addQuizReference(el, text = '', focus = false) {
+  const row = document.createElement('div');
+  row.className = 'qe-reference-row';
+  row.innerHTML = `<span class="qe-reference-number"></span><textarea class="qe-reference-text" rows="2" placeholder="输入可接受的答案">${learningEsc(text)}</textarea><button type="button" class="secondary">删除</button>`;
+  el.querySelector('.qe-reference-list').appendChild(row);
+  row.querySelector('button').onclick = () => {
+    row.remove(); refreshQuizReferences(el); clearQuizQuestionError(el); updateQuizQuestionPreview(el);
+  };
+  refreshQuizReferences(el);
+  clearQuizQuestionError(el);
+  if (focus) row.querySelector('textarea').focus();
+}
+
+function refreshQuizReferences(el) {
+  const rows = [...el.querySelectorAll('.qe-reference-row')];
+  rows.forEach((row, i) => {
+    row.querySelector('span').textContent = i + 1;
+    row.querySelector('textarea').setAttribute('aria-label', `参考答案 ${i + 1}`);
+    row.querySelector('button').disabled = rows.length <= 1;
+    row.querySelector('button').setAttribute('aria-label', `删除参考答案 ${i + 1}`);
+  });
+}
+
+function insertQuizBlank(el) {
+  const prompt = el.querySelector('.qe-prompt');
+  const selected = prompt.value.slice(prompt.selectionStart, prompt.selectionEnd).trim();
+  prompt.setRangeText(' ______ ', prompt.selectionStart, prompt.selectionEnd, 'end');
+  prompt.focus();
+  if (selected) {
+    const refs = [...el.querySelectorAll('.qe-reference-text')];
+    if (!refs.some(input => input.value.trim() === selected)) {
+      const empty = refs.find(input => !input.value.trim());
+      if (empty) empty.value = selected;
+      else addQuizReference(el, selected);
+    }
+  }
+  clearQuizQuestionError(el);
+  updateQuizQuestionPreview(el);
+}
+
+function updateQuizFillMode(el) {
+  const mode = el.querySelector('.qe-mode').value;
+  el.querySelector('.qe-count-field').hidden = mode !== 'match_count';
+  el.querySelector('.qe-mode-help').textContent = {
+    exact:'填写内容与任一参考答案完全一致即可得分。',
+    contains:'填写内容连续包含任一参考答案即可得分，不区分英文大小写。',
+    normalized:'去除空白、标点和符号，统一全半角及英文大小写后，与任一参考答案一致即可得分。',
+    match_any:'填写内容可用换行、逗号或分号分隔，规范化后命中任一参考答案即可得分。',
+    match_count:'填写内容可用换行、逗号或分号分隔，至少命中指定数量的不同参考答案即可得分。'
+  }[mode];
+  clearQuizQuestionError(el);
+}
+
+function updateQuizQuestionPreview(el) {
+  const body = el.querySelector('.qe-preview-body');
+  if (!body) return;
+  const rows = [...el.querySelectorAll('.qe-option-row')];
+  rows.forEach(row => row.classList.toggle('is-correct', row.querySelector('input').checked));
+  body.innerHTML = `<div class="qe-preview-prompt">${learningEsc(el.querySelector('.qe-prompt').value || '尚未填写题干')}</div>` +
+    rows.map((row, i) => `<div class="qe-preview-option ${row.querySelector('input').checked ? 'is-correct' : ''}"><b>${quizOptionLetter(i)}.</b> ${learningEsc(row.querySelector('textarea').value || '（未填写选项）')}${row.querySelector('input').checked ? '<span class="qe-correct-tag">正确答案</span>' : ''}</div>`).join('') +
+    (rows.length ? '' : '<div class="qe-preview-answer">答题区域：请输入答案</div>');
+}
+
+function clearQuizQuestionError(el) {
+  el.classList.remove('has-error');
+  const error = el.querySelector('.qe-error');
+  if (error) { error.hidden = true; error.textContent = ''; }
 }
 
 function renumberQuestionEditors() {
@@ -276,9 +401,9 @@ function renumberQuestionEditors() {
     const title = el.querySelector('.question-editor-head strong');
     title.textContent = `${i+1}. ${learningType(el.dataset.type)}`;
   });
+  const summary = document.getElementById('quizEditorSummary');
+  if (summary) summary.textContent = `共 ${document.querySelectorAll('#quizQuestionEditors .question-editor').length} 道题 · 保存草稿后可试答预览`;
 }
-
-function lines(value) { return value.split(/\r?\n/).map(x => x.trim()).filter(Boolean); }
 
 async function saveQuizDraft() {
   const editors = [...document.querySelectorAll('#quizQuestionEditors .question-editor')];
@@ -286,12 +411,42 @@ async function saveQuizDraft() {
     question_type:el.dataset.type,
     prompt:el.querySelector('.qe-prompt').value.trim(),
     score:Number(el.querySelector('.qe-score').value),
-    options:el.querySelector('.qe-options') ? lines(el.querySelector('.qe-options').value) : [],
-    correct_answers:el.querySelector('.qe-correct') ? lines(el.querySelector('.qe-correct').value) : [],
+    options:[...el.querySelectorAll('.qe-option-text')].map(input => input.value.trim()),
+    correct_answers:el.querySelector('.qe-option-list')
+      ? [...el.querySelectorAll('.qe-option-row')].filter(row => row.querySelector('.qe-option-correct').checked).map(row => row.querySelector('.qe-option-text').value.trim())
+      : [...el.querySelectorAll('.qe-reference-text')].map(input => input.value.trim()),
     fill_grading_mode:el.querySelector('.qe-mode') ? el.querySelector('.qe-mode').value : null,
-    match_count:el.querySelector('.qe-count') ? Number(el.querySelector('.qe-count').value) : 1
+    match_count:el.querySelector('.qe-mode')?.value === 'match_count' ? Number(el.querySelector('.qe-count').value) : 1
   }))};
-  if (!payload.title || !payload.questions.length || payload.questions.some(q => !q.prompt)) return showMessage('请填写标题和所有题目', 'error');
+  if (!payload.title) { quizTitle.focus(); return showMessage('请填写答题活动标题', 'error'); }
+  if (!payload.questions.length) return showMessage('请至少添加一道题目', 'error');
+  for (let i = 0; i < payload.questions.length; i++) {
+    const q = payload.questions[i];
+    const el = editors[i];
+    clearQuizQuestionError(el);
+    let message = '', selector = '.qe-prompt';
+    if (!q.prompt) message = '请填写题干';
+    else if (!Number.isFinite(q.score) || q.score <= 0 || q.score > 10000) { message = '分值必须大于 0 且不超过 10000'; selector = '.qe-score'; }
+    else if (q.options.length) {
+      selector = '.qe-option-text';
+      if (q.options.length < 2 || q.options.some(x => !x)) message = '请填写所有选项内容，不需要的选项可以删除';
+      else if (new Set(q.options).size !== q.options.length) message = '选项内容不能重复';
+      else if (!q.correct_answers.length || (q.question_type === 'single_choice' && q.correct_answers.length !== 1)) { message = '请选择正确答案'; selector = '.qe-option-correct'; }
+    } else if (q.question_type === 'fill_blank') {
+      selector = '.qe-reference-text';
+      if (!q.correct_answers.length || q.correct_answers.some(x => !x)) message = '请填写参考答案，或删除多余的空答案框';
+      else if (new Set(q.correct_answers).size !== q.correct_answers.length) message = '参考答案不能重复';
+      else if (!Number.isInteger(q.match_count) || q.match_count < 1 || q.match_count > q.correct_answers.length) { message = '匹配数量必须为正整数，且不能超过参考答案数量'; selector = '.qe-count'; }
+    }
+    if (message) {
+      el.classList.add('has-error');
+      el.querySelector('.qe-error').textContent = message;
+      el.querySelector('.qe-error').hidden = false;
+      el.querySelector(selector)?.focus();
+      el.scrollIntoView({behavior:'smooth', block:'center'});
+      return showMessage(`第 ${i + 1} 题：${message}`, 'error');
+    }
+  }
   const id = quizEditId.value;
   try {
     await api(id ? `/learning/quizzes/${id}` : '/learning/quizzes', {method:id ? 'PUT' : 'POST', headers:H, body:JSON.stringify(payload)});

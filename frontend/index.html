@@ -5,7 +5,7 @@
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css">
   <link rel="stylesheet" href="/static/css/weave.css?v=20260728-2">
-  <link rel="stylesheet" href="/static/learning.css?v=20260908-2">
+  <link rel="stylesheet" href="/static/learning.css?v=20260914-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
@@ -376,7 +376,7 @@
       </div>
       <div class="question-toolbar"><strong>题目</strong><button class="secondary" onclick="addQuestionEditor('single_choice')">+ 单选</button><button class="secondary" onclick="addQuestionEditor('multiple_choice')">+ 多选</button><button class="secondary" onclick="addQuestionEditor('fill_blank')">+ 填空</button><button class="secondary" onclick="addQuestionEditor('short_answer')">+ 简答</button></div>
       <div id="quizQuestionEditors"></div>
-      <button onclick="saveQuizDraft()">保存草稿</button>
+      <div class="quiz-editor-footer"><span id="quizEditorSummary" class="muted">添加题目后保存草稿，可继续试答预览</span><button onclick="saveQuizDraft()">保存草稿</button></div>
     </div>
 
     <div id="quizTakePanel" class="hidden learning-panel">
@@ -2254,7 +2254,7 @@
 
 </div>
 
-<script src="/static/learning.js?v=20260908-2"></script>
+<script src="/static/learning.js?v=20260914-1"></script>
 <script>
 const token=localStorage.getItem('token'); if(!token) location.href='/login';
 const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
