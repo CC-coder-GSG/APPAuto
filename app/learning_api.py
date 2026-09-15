@@ -716,6 +716,8 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
                     {
                         "question_id": answer.question_id,
                         "prompt": answer.question.prompt,
+                        "position": answer.question.position,
+                        "options": _loads(answer.question.options_json, []),
                         "question_type": answer.question.question_type.value,
                         "max_score": answer.question.score,
                         "answer": _loads(answer.answer_json, None),
@@ -724,7 +726,7 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
                         "reviewer_comment": answer.reviewer_comment,
                         "correct_answers": _loads(answer.question.correct_answers_json, []),
                     }
-                    for answer in row.answers
+                    for answer in sorted(row.answers, key=lambda item: item.question.position)
                 ],
             }
             for row in rows
@@ -790,7 +792,23 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
         if not submission:
             raise HTTPException(status_code=404, detail="尚未提交答卷")
         if not quiz.results_released:
-            return {"released": False, "status": submission.status, "submitted_at": submission.submitted_at}
+            return {
+                "released": False,
+                "status": submission.status,
+                "submitted_at": submission.submitted_at,
+                "answers": [
+                    {
+                        "question_id": a.question_id,
+                        "position": a.question.position,
+                        "question_type": a.question.question_type.value,
+                        "prompt": a.question.prompt,
+                        "options": _loads(a.question.options_json, []),
+                        "max_score": a.question.score,
+                        "answer": _loads(a.answer_json, None),
+                    }
+                    for a in sorted(submission.answers, key=lambda item: item.question.position)
+                ],
+            }
         return {
             "released": True,
             "status": submission.status,
@@ -801,6 +819,9 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
                 {
                     "question_id": a.question_id,
                     "prompt": a.question.prompt,
+                    "position": a.question.position,
+                    "question_type": a.question.question_type.value,
+                    "options": _loads(a.question.options_json, []),
                     "answer": _loads(a.answer_json, None),
                     "awarded_score": a.awarded_score,
                     "max_score": a.question.score,
@@ -808,7 +829,7 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
                     "reviewer_comment": a.reviewer_comment,
                     "correct_answers": _loads(a.question.correct_answers_json, []) if quiz.show_answers else None,
                 }
-                for a in submission.answers
+                for a in sorted(submission.answers, key=lambda item: item.question.position)
             ],
         }
 

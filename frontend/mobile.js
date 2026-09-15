@@ -1,3 +1,7 @@
+function renderMobileOriginal(q, index) {
+  return `<div class="learning-original"><div class="muted">${mEsc(({single_choice:'单选题',multiple_choice:'多选题',fill_blank:'填空题',short_answer:'简答题'}[q.question_type] || ''))} · ${q.max_score ?? q.score ?? 0} 分</div><strong class="learning-prompt">${q.position ?? index}. ${mEsc(q.prompt)}</strong>${(q.options || []).length ? `<ol class="learning-original-options" type="A">${q.options.map(o => `<li>${mEsc(o)}</li>`).join('')}</ol>` : ''}</div>`;
+}
+
 let mobileToken = localStorage.getItem('mobile_token');
 let mobileUser = null;
 let mobileActiveQuiz = null;
@@ -31,7 +35,7 @@ function mobileTab(tab){navQuiz.classList.toggle('active',tab==='quiz');navConte
 
 function renderMobileQuizzes(items){
   if(!items.length){mobileQuizList.innerHTML='<div class="card muted">暂无可参与的答题活动</div>';return}
-  mobileQuizList.innerHTML=items.map(q=>{let action='<p class="meta">当前不可答题</p>';if(q.is_creator)action=q.status==='draft'?'<p class="meta">请在网页端编辑、预览和开始答题</p>':`<button onclick="openMobileStats(${q.id})">查看答题情况</button>`;else if(q.status==='open'&&!q.my_submission)action=`<button onclick="openMobileQuiz(${q.id})">开始答题</button>`;else if(q.my_submission&&q.results_released)action=`<button onclick="openMobileResult(${q.id})">查看成绩</button>`;else if(q.my_submission)action='<p class="meta">✓ 已提交，等待出题人发布成绩</p>';return `<article class="mobile-card"><span class="pill">${q.status==='open'?'答题中':q.status==='closed'?'已结束':'草稿'}</span><h3>${mEsc(q.title)}</h3><p class="meta">出题人：${mEsc(q.creator_name)} · ${q.question_count} 题 · ${q.total_points} 分</p>${q.description?`<p>${mEsc(q.description)}</p>`:''}${action}</article>`}).join('')
+  mobileQuizList.innerHTML=items.map(q=>{let action='<p class="meta">当前不可答题</p>';if(q.is_creator)action=q.status==='draft'?'<p class="meta">请在网页端编辑、预览和开始答题</p>':`<button onclick="openMobileStats(${q.id})">查看答题情况</button>`;else if(q.status==='open'&&!q.my_submission)action=`<button onclick="openMobileQuiz(${q.id})">开始答题</button>`;else if(q.my_submission&&q.results_released)action=`<button onclick="openMobileResult(${q.id})">查看成绩</button>`;else if(q.my_submission)action=`<p class="meta">✓ 已提交，等待发布成绩</p><button onclick="openMobileResult(${q.id})">查看原题与作答</button>`;return `<article class="mobile-card"><span class="pill">${q.status==='open'?'答题中':q.status==='closed'?'已结束':'草稿'}</span><h3>${mEsc(q.title)}</h3><p class="meta">出题人：${mEsc(q.creator_name)} · ${q.question_count} 题 · ${q.total_points} 分</p>${q.description?`<p>${mEsc(q.description)}</p>`:''}${action}</article>`}).join('')
 }
 
 function renderMobileContents(items){
@@ -62,11 +66,11 @@ async function submitMobileQuiz(){
 }
 
 async function openMobileResult(id){
-  try{const r=await mApi(`/learning/quizzes/${id}/my-result`).then(x=>x.json());if(!r.released)return toast('成绩尚未发布');mobileResult.innerHTML=`<div class="score">${r.score} / ${r.total_points} 分</div>`+r.answers.map((a,i)=>`<article class="result-row"><strong>${i+1}. ${mEsc(a.prompt)}</strong><p>你的答案：${mEsc(mAnswer(a.answer))}</p><p>得分：${a.awarded_score} / ${a.max_score}</p>${a.reviewer_comment?`<p>批语：${mEsc(a.reviewer_comment)}</p>`:''}${r.show_answers?`<p>参考答案：${mEsc(mAnswer(a.correct_answers))}</p>`:''}</article>`).join('');showMobileView('resultView')}catch(e){toast(e.message)}
+  try{const r=await mApi(`/learning/quizzes/${id}/my-result`).then(x=>x.json());mobileResult.innerHTML=(r.released?`<div class="score">${r.score} / ${r.total_points} 分</div>`:'<p class="meta">答卷已提交，成绩尚未发布。可查看原题和自己的作答。</p>')+r.answers.map((a,i)=>`<article class="result-row">${renderMobileOriginal(a,i+1)}<p>你的答案：${mEsc(mAnswer(a.answer))}</p>${r.released?`<p>得分：${a.awarded_score} / ${a.max_score}</p>`:''}${a.reviewer_comment?`<p>批语：${mEsc(a.reviewer_comment)}</p>`:''}${r.show_answers?`<p>参考答案：${mEsc(mAnswer(a.correct_answers))}</p>`:''}</article>`).join('');showMobileView('resultView')}catch(e){toast(e.message)}
 }
 
 async function openMobileStats(id){
-  try{const [stats,quiz]=await Promise.all([mApi(`/learning/quizzes/${id}/stats`).then(r=>r.json()),mApi(`/learning/quizzes/${id}`).then(r=>r.json())]);mobileStatsTitle.textContent=`答题情况：${quiz.title}`;mobileStats.innerHTML=`<article class="mobile-card"><strong>已提交 ${stats.submitted_count} / ${stats.expected_count} 人</strong><p class="meta">已批阅 ${stats.graded_count} 人 · 未提交 ${stats.pending_count} 人</p></article>`+stats.questions.map(q=>`<article class="mobile-card"><h3>${q.position}. ${mEsc(q.prompt)}</h3><p>${q.correct_rate===null?'等待人工评分':`正确率 ${q.correct_rate}%`} · ${q.answered_count} 人作答</p><details><summary>查看答题人的答案</summary>${q.answers.map(a=>`<p><strong>${mEsc(a.username)}</strong>：${mEsc(mAnswer(a.answer))} ${a.is_correct===null?'（待评）':a.is_correct?'✓':'✗'}</p>`).join('')||'<p class="muted">暂无答案</p>'}</details></article>`).join('');showMobileView('statsView')}catch(e){toast(e.message)}
+  try{const [stats,quiz]=await Promise.all([mApi(`/learning/quizzes/${id}/stats`).then(r=>r.json()),mApi(`/learning/quizzes/${id}`).then(r=>r.json())]);mobileStatsTitle.textContent=`答题情况：${quiz.title}`;mobileStats.innerHTML=`<article class="mobile-card"><strong>已提交 ${stats.submitted_count} / ${stats.expected_count} 人</strong><p class="meta">已批阅 ${stats.graded_count} 人 · 未提交 ${stats.pending_count} 人</p></article>`+stats.questions.map(q=>`<article class="mobile-card">${renderMobileOriginal(q,q.position)}<p>参考答案：${mEsc(mAnswer(q.correct_answers))}</p><p>${q.correct_rate===null?'等待人工评分':`正确率 ${q.correct_rate}%`} · ${q.answered_count} 人作答</p><details><summary>查看答题人的答案</summary>${q.answers.map(a=>`<p><strong>${mEsc(a.username)}</strong>：${mEsc(mAnswer(a.answer))} ${a.is_correct===null?'（待评）':a.is_correct?'✓':'✗'}</p>`).join('')||'<p class="muted">暂无答案</p>'}</details></article>`).join('');showMobileView('statsView')}catch(e){toast(e.message)}
 }
 
 mobilePassword.addEventListener('keydown',e=>{if(e.key==='Enter')mobileLogin()});

@@ -171,8 +171,8 @@ async function renderTopicDetail(topicId) {
       <div class="lc-panel">
         <div class="lc-section-head">
           <span class="lc-title">📚 知识资料</span>
-          <span class="row" style="gap:6px; align-items:center;"><input type="file" id="learningMatFile_${topicId}" style="font-size:12px;">
-          <button class="secondary" style="padding:2px 10px;" onclick="OmniQALearningTab.uploadMaterial(${topicId})">上传</button></span>
+          <span class="row" style="gap:6px; align-items:center;"><input type="file" multiple id="learningMatFile_${topicId}" style="font-size:12px;">
+          <button class="secondary" style="padding:2px 10px;" id="learningUploadBtn_${topicId}" onclick="OmniQALearningTab.uploadMaterial(${topicId})">上传</button></span>
         </div>
         <div id="learningUploadProgress_${topicId}" class="lc-progress" style="display:none;">
           <div class="lc-progress-track"><div id="learningUploadBar_${topicId}" class="lc-progress-bar" style="width:0%;"></div></div>
@@ -202,68 +202,28 @@ export function refreshTopic(topicId) {
 
 export async function uploadMaterial(topicId) {
   const input = document.getElementById(`learningMatFile_${topicId}`);
-  const file = input?.files?.[0];
-  if (!file) { window.showMessage && window.showMessage('请先选择文件', 'error'); return; }
-  const prog = document.getElementById(`learningUploadProgress_${topicId}`);
-  const bar = document.getElementById(`learningUploadBar_${topicId}`);
-  const label = document.getElementById(`learningUploadLabel_${topicId}`);
-  const setPct = (p, text) => {
-    if (bar) bar.style.width = `${p}%`;
-    if (label) label.textContent = text != null ? text : `${p}%`;
-  };
-  const form = new FormData();
-  form.append('file', file);
-  if (prog) prog.style.display = 'flex';
-  setPct(0, '准备上传…');
+  const button = document.getElementById(`learningUploadBtn_${topicId}`);
+  if (!input || input.disabled) return;
+  const files = [...input.files];
+  if (!files.length) { window.showMessage?.('请先选择文件，可一次选择多个', 'error'); return; }
+  const host = document.getElementById(`learningUploadProgress_${topicId}`);
+  host.style.display = 'block';
+  input.disabled = true;
+  button.disabled = true;
   try {
-    await uploadWithProgress(`/learning/topics/${topicId}/materials`, form, (p) => {
-      // 上传字节到 100% 后，服务端可能还在转 PDF，给出"处理中"提示
-      if (p >= 100) setPct(100, '上传完成，正在处理…');
-      else setPct(p, `上传中 ${p}%`);
-    });
-    setPct(100, '完成 ✓');
-    window.showMessage && window.showMessage('资料上传成功', 'success');
-    if (input) input.value = '';
-    await refreshTopic(topicId);
-    await loadTopicList();
-  } catch (err) {
-    if (prog) prog.style.display = 'none';
-    window.showMessage && window.showMessage(err.message || '上传失败', 'error');
+    const failed = await window.uploadLearningFiles(`/learning/topics/${topicId}/materials`, files, host);
+    window.retainLearningFiles(input, failed);
+    if (failed.length) {
+      window.showMessage?.(`${failed.length} 个文件失败，点击上传重试；成功的文件已保存`, 'error');
+    } else {
+      window.showMessage?.('全部资料上传成功', 'success');
+      await refreshTopic(topicId);
+      await loadTopicList();
+    }
+  } finally {
+    input.disabled = false;
+    button.disabled = false;
   }
-}
-
-// 带上传进度的 POST（fetch 无法读取上传进度，故用 XHR）。
-function uploadWithProgress(url, formData, onProgress) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url);
-    const token = localStorage.getItem('token');
-    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && typeof onProgress === 'function') {
-        onProgress(Math.round((e.loaded / e.total) * 100));
-      }
-    };
-    xhr.onload = () => {
-      if (xhr.status === 401) {
-        localStorage.removeItem('token');
-        window.location.href = '/login';
-        reject(new Error('401'));
-        return;
-      }
-      if (xhr.status >= 200 && xhr.status < 300) {
-        let data = {};
-        try { data = JSON.parse(xhr.responseText); } catch {}
-        resolve(data);
-      } else {
-        let msg = `上传失败 (HTTP ${xhr.status})`;
-        try { const d = JSON.parse(xhr.responseText); msg = d.detail || d.message || msg; } catch {}
-        reject(new Error(msg));
-      }
-    };
-    xhr.onerror = () => reject(new Error('网络错误，上传失败'));
-    xhr.send(formData);
-  });
 }
 
 export function previewMaterial(materialId, kind) {
@@ -396,6 +356,9 @@ export function updateQ(i, key, val) {
 export function addQuestion() {
   window._learningEditQuestions.push(blankQuestion());
   rerenderEditorKeepMeta();
+  const card = document.querySelector('#learningQEditor .lc-q:last-child');
+  card?.scrollIntoView({block:'center', behavior:'smooth'});
+  card?.querySelector('textarea')?.focus({preventScroll:true});
 }
 export function removeQuestion(i) {
   window._learningEditQuestions.splice(i, 1);
@@ -600,7 +563,7 @@ export async function openResults(assessmentId) {
       const q = qById[ans.question_id] || {};
       return `<div style="border-bottom:1px dashed #e2e8f0; padding:4px 0;">
         <div class="muted" style="font-size:12px;">${TYPE_LABEL[q.type] || ''} · ${q.score || 0}分 · 得 ${ans.score} 分</div>
-        <div style="white-space:pre-wrap;">${esc(q.prompt || '')}</div>
+        ${originalQuestion(q)}
         <div>作答：<b>${esc(formatResp(ans.response))}</b></div>
         <div class="muted" style="font-size:12px;">正确答案：${esc(formatResp(q.answer))}${ans.grader_comment ? ' ｜ 批注：' + esc(ans.grader_comment) : ''}</div>
       </div>`;
@@ -618,9 +581,16 @@ export async function openResults(assessmentId) {
   area.innerHTML = `
     <div class="lc-panel">
       <div class="lc-section-head"><span class="lc-title">🏆 成绩公示（第 ${data.round_no} 轮 · 满分 ${data.total_score}）</span><span class="muted">出题人 ${esc(data.author_name || '—')}</span></div>
+      <h3>原题与参考答案</h3>
+      <div class="lc-original-paper">${(data.questions || []).map((q,i) => `<article class="lc-q"><div class="muted">第 ${i+1} 题 · ${TYPE_LABEL[q.type] || ''} · ${q.score} 分</div>${originalQuestion(q)}<p>参考答案：${esc(formatResp(q.answer))}</p></article>`).join('')}</div>
+      <h3>成绩与逐题作答</h3>
       <div>${board}</div>
       ${absent}
     </div>`;
+}
+
+function originalQuestion(q) {
+  return `<div class="learning-prompt">${esc(q.prompt || '')}</div>${(q.options || []).length ? `<ul class="learning-original-options">${q.options.map(o => `<li>${esc(o.key)}. ${esc(o.text)}</li>`).join('')}</ul>` : ''}`;
 }
 
 function formatResp(v) {

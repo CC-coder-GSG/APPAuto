@@ -5,7 +5,7 @@
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css">
   <link rel="stylesheet" href="/static/css/weave.css?v=20260728-2">
-  <link rel="stylesheet" href="/static/learning.css?v=20260914-1">
+  <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
@@ -357,8 +357,8 @@
         <label class="wide">正文/学习说明<textarea id="learningContentBody" rows="6"></textarea></label>
         <label class="wide">外部资源链接<input id="learningContentUrl" type="url" placeholder="https://..."></label>
         <label class="wide">教学附件
-          <input id="learningContentFiles" type="file" multiple accept=".ppt,.pptx,.pdf,.md,.markdown,.doc,.docx,.xls,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.gif,.webp">
-          <span class="muted" style="font-weight:400">单个文件最大 100 MB；PPT/PPTX、PDF、Markdown 支持预览，所有文件均可下载。</span>
+          <input id="learningContentFiles" type="file" multiple onchange="showLearningSelectedFiles()" accept=".ppt,.pptx,.pdf,.md,.markdown,.doc,.docx,.xls,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.gif,.webp">
+          <span class="muted" style="font-weight:400">支持一次选择多个附件（电脑按住 Ctrl 或 Shift 多选）。单个文件最大 100 MB；PPT/PPTX、PDF、Markdown 支持预览，所有文件均可下载。</span>
         </label>
         <label class="check"><input id="learningContentPublished" type="checkbox"> 立即向团队发布</label>
       </div>
@@ -376,6 +376,7 @@
       </div>
       <div class="question-toolbar"><strong>题目</strong><button class="secondary" onclick="addQuestionEditor('single_choice')">+ 单选</button><button class="secondary" onclick="addQuestionEditor('multiple_choice')">+ 多选</button><button class="secondary" onclick="addQuestionEditor('fill_blank')">+ 填空</button><button class="secondary" onclick="addQuestionEditor('short_answer')">+ 简答</button></div>
       <div id="quizQuestionEditors"></div>
+      <div class="question-toolbar"><strong>继续添加题目</strong><button class="secondary" onclick="addQuestionEditor('single_choice')">+ 单选</button><button class="secondary" onclick="addQuestionEditor('multiple_choice')">+ 多选</button><button class="secondary" onclick="addQuestionEditor('fill_blank')">+ 填空</button><button class="secondary" onclick="addQuestionEditor('short_answer')">+ 简答</button></div>
       <div class="quiz-editor-footer"><span id="quizEditorSummary" class="muted">添加题目后保存草稿，可继续试答预览</span><button onclick="saveQuizDraft()">保存草稿</button></div>
     </div>
 
@@ -386,7 +387,7 @@
     </div>
 
     <div id="quizResultPanel" class="hidden learning-panel">
-      <div class="learning-panel-head"><h3>我的成绩</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+      <div class="learning-panel-head"><h3>我的答卷与成绩</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
       <div id="quizResultBody"></div>
     </div>
 
@@ -2254,7 +2255,7 @@
 
 </div>
 
-<script src="/static/learning.js?v=20260914-1"></script>
+<script src="/static/learning.js?v=20260915-1"></script>
 <script>
 const token=localStorage.getItem('token'); if(!token) location.href='/login';
 const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};

@@ -114,11 +114,22 @@ def test_complete_quiz_workflow(learning_client):
     )
     assert duplicate.status_code == 409
 
+    pending_result = learning_client.get(
+        f"/learning/quizzes/{quiz_id}/my-result", headers=student_headers
+    ).json()
+    assert pending_result["released"] is False
+    assert pending_result["answers"][0]["options"] == ["A", "B"]
+    assert pending_result["answers"][0]["answer"] == "A"
+    assert "correct_answers" not in pending_result["answers"][0]
+    assert "awarded_score" not in pending_result["answers"][0]
+
     learning_client.post(f"/learning/quizzes/{quiz_id}/close", headers=author_headers)
     rows = learning_client.get(
         f"/learning/quizzes/{quiz_id}/submissions", headers=author_headers
     ).json()
     submission = next(row for row in rows if not row["is_preview"])
+    assert submission["answers"][0]["options"] == ["A", "B"]
+    assert submission["answers"][0]["position"] == 1
     grades = {
         "grades": [
             {
@@ -150,6 +161,20 @@ def test_complete_quiz_workflow(learning_client):
     assert result["released"] is True
     assert result["score"] == 9
     assert result["answers"][0]["correct_answers"] == ["A"]
+    assert result["answers"][0]["options"] == ["A", "B"]
+    assert result["answers"][0]["question_type"] == "single_choice"
+
+    learning_client.post(
+        f"/learning/quizzes/{quiz_id}/release", headers=author_headers,
+        json={"show_answers": False},
+    )
+    mobile_headers = _login(learning_client, "quiz_student", mobile=True)
+    hidden_result = learning_client.get(
+        f"/learning/quizzes/{quiz_id}/my-result", headers=mobile_headers
+    ).json()
+    assert hidden_result["answers"][0]["options"] == ["A", "B"]
+    assert hidden_result["answers"][0]["prompt"] == "请选择 A"
+    assert hidden_result["answers"][0]["correct_answers"] is None
 
     stats = learning_client.get(
         f"/learning/quizzes/{quiz_id}/stats", headers=author_headers

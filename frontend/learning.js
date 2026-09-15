@@ -1,3 +1,7 @@
+function renderLearningOriginal(q, index) {
+  return `<div class="learning-original"><div class="muted">${learningEsc(learningType(q.question_type || ''))} · ${q.max_score ?? q.score ?? 0} 分</div><strong class="learning-prompt">${q.position ?? index}. ${learningEsc(q.prompt)}</strong>${(q.options || []).length ? `<ol class="learning-original-options" type="A">${q.options.map(o => `<li>${learningEsc(o)}</li>`).join('')}</ol>` : ''}</div>`;
+}
+
 let learningContentsCache = [];
 let learningQuizzesCache = [];
 let activeQuiz = null;
@@ -95,8 +99,8 @@ function renderLearningQuizzes() {
       if (q.status === 'closed') actions += `<button onclick="reviewLearningQuiz(${q.id})">批阅与统计</button>`;
     } else if (q.status === 'open' && !q.my_submission) {
       actions += `<button onclick="openTakeQuiz(${q.id},false)">开始答题</button>`;
-    } else if (q.my_submission && q.results_released) {
-      actions += `<button onclick="viewMyQuizResult(${q.id})">查看成绩</button>`;
+    } else if (q.my_submission) {
+      actions += `<button onclick="viewMyQuizResult(${q.id})">${q.results_released ? '成绩与原题' : '查看原题与作答'}</button>`;
     }
     const mine = q.my_submission ? (q.results_released ? `成绩 ${q.my_submission.total_score ?? '-'} / ${q.total_points}` : '已提交，等待发布成绩') : '';
     return `<article class="learning-item">
@@ -130,6 +134,7 @@ function showLearningContentForm(id = null) {
 }
 
 async function saveLearningContent() {
+  if (learningContentSaveBtn.disabled) return;
   const id = learningContentId.value;
   const payload = {
     kind: learningContentKind.value,
@@ -141,26 +146,85 @@ async function saveLearningContent() {
   };
   if (!payload.title) return showMessage('请输入标题', 'error');
   const pendingFiles = [...learningContentFiles.files];
+  if (pendingFiles.some(file => file.size > 100 * 1024 * 1024)) return showMessage('单个附件不能超过 100 MB，请重新选择', 'error');
   learningContentSaveBtn.disabled = true;
+  learningContentFiles.disabled = true;
   try {
     const saved = await api(id ? `/learning/contents/${id}` : '/learning/contents', {method:id ? 'PUT' : 'POST', headers:H, body:JSON.stringify(payload)}).then(r => r.json());
     learningContentId.value = saved.id;
-    for (let index = 0; index < pendingFiles.length; index += 1) {
-      const file = pendingFiles[index];
-      learningContentUploadStatus.textContent = `正在上传 ${index + 1}/${pendingFiles.length}：${file.name}`;
-      const form = new FormData();
-      form.append('file', file);
-      await api(`/learning/contents/${saved.id}/files`, {method:'POST', body:form});
+    const failed = await uploadLearningFiles(`/learning/contents/${saved.id}/files`, pendingFiles, learningContentUploadStatus);
+    retainLearningFiles(learningContentFiles, failed);
+    if (failed.length) {
+      showMessage(`${failed.length} 个附件上传失败，点击保存可重试；已成功的附件不会重复上传`, 'error');
+      return;
     }
-    learningContentUploadStatus.textContent = pendingFiles.length ? '附件上传完成' : '';
     showMessage(pendingFiles.length ? '学习内容及附件已保存' : '学习内容已保存');
     closeLearningPanels();
   } catch(e) {
-    learningContentFiles.value = '';
     showMessage(`${e.message || '保存失败'}${learningContentId.value ? '；已保存的内容可重新编辑并继续上传' : ''}`, 'error');
   } finally {
     learningContentSaveBtn.disabled = false;
+    learningContentFiles.disabled = false;
   }
+}
+
+function retainLearningFiles(input, files) {
+  const transfer = new DataTransfer();
+  files.forEach(file => transfer.items.add(file));
+  input.files = transfer.files;
+}
+
+function showLearningSelectedFiles() {
+  const files = [...learningContentFiles.files];
+  learningContentUploadStatus.innerHTML = files.length ? `<div class="learning-upload-summary">已选择 ${files.length} 个附件 · 点击保存开始上传</div><div class="learning-upload-list">${files.map(file => `<div class="learning-file-row"><strong class="learning-file-name">${learningEsc(file.name)}</strong><span>${learningFileSize(file.size)}</span></div>`).join('')}</div>` : '';
+}
+
+async function uploadLearningFiles(url, files, host) {
+  if (!files.length) return [];
+  host.innerHTML = `<div class="learning-upload-summary" role="status"></div><div class="learning-upload-list">${files.map(file => `<div class="learning-upload-file"><strong>${learningEsc(file.name)}</strong><progress max="100" value="0" aria-label="${learningEsc(file.name)} 上传进度"></progress><span>等待上传 · ${learningFileSize(file.size)}</span></div>`).join('')}</div>`;
+  const summary = host.querySelector('[role="status"]');
+  const rows = host.querySelectorAll('.learning-upload-file');
+  const failed = [];
+  for (const [index, file] of files.entries()) {
+    summary.textContent = `正在上传 ${index + 1} / ${files.length} 个附件`;
+    const progress = rows[index].querySelector('progress');
+    const label = rows[index].querySelector('span');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url);
+        const token = localStorage.getItem('token');
+        if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        label.textContent = '准备上传…';
+        xhr.upload.onprogress = event => {
+          if (!event.lengthComputable) { progress.removeAttribute('value'); label.textContent = '正在上传…'; return; }
+          const percent = Math.round(event.loaded / event.total * 100);
+          progress.value = percent;
+          label.textContent = percent === 100 ? '上传完成，服务器处理中…' : `上传中 ${percent}%`;
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) return resolve();
+          let message = xhr.status === 401 ? '登录已过期，请重新登录后重试' : `上传失败（HTTP ${xhr.status}）`;
+          try { message = JSON.parse(xhr.responseText).detail || message; } catch {}
+          reject(new Error(message));
+        };
+        xhr.onerror = () => reject(new Error('网络异常，请重试'));
+        xhr.onabort = () => reject(new Error('上传已取消'));
+        xhr.send(form);
+      });
+      progress.value = 100;
+      label.textContent = '上传成功';
+      rows[index].classList.add('is-success');
+    } catch (error) {
+      failed.push(file);
+      label.textContent = error.message;
+      rows[index].classList.add('is-error');
+    }
+  }
+  summary.textContent = `上传结束：成功 ${files.length - failed.length} / ${files.length}${failed.length ? `，失败 ${failed.length} 个，可重试` : ''}`;
+  return failed;
 }
 
 async function deleteLearningContent(id) {
@@ -247,6 +311,9 @@ async function openQuizEditor(id = null) {
 
 function addQuestionEditor(type) {
   addQuestionEditorFromData({question_type:type, prompt:'', score:1, options:['','','',''], correct_answers:[], fill_grading_mode:'exact', match_count:1});
+  const card = document.getElementById('quizQuestionEditors').lastElementChild;
+  card.scrollIntoView({block:'center', behavior:'smooth'});
+  card.querySelector('.qe-prompt').focus({preventScroll:true});
 }
 
 let questionEditorSequence = 0;
@@ -501,7 +568,7 @@ function renderTakeQuestion(q) {
   } else {
     input = `<textarea id="answer_${q.id}" rows="${q.question_type === 'short_answer' ? 5 : 2}" style="width:100%" placeholder="请输入答案"></textarea>`;
   }
-  return `<div class="take-question" data-id="${q.id}" data-type="${q.question_type}"><strong>${q.position}. ${learningEsc(q.prompt)}</strong><span class="badge" style="float:right">${q.score} 分</span><div style="margin-top:12px">${input}</div></div>`;
+  return `<div class="take-question" data-id="${q.id}" data-type="${q.question_type}"><strong class="learning-prompt">${q.position}. ${learningEsc(q.prompt)}</strong><span class="badge" style="float:right">${q.score} 分</span><div style="margin-top:12px">${input}</div></div>`;
 }
 
 async function submitCurrentQuiz() {
@@ -524,9 +591,8 @@ async function viewMyQuizResult(id) {
     const result = await api(`/learning/quizzes/${id}/my-result`).then(r => r.json());
     document.getElementById('learningHome').classList.add('hidden');
     document.getElementById('quizResultPanel').classList.remove('hidden');
-    if (!result.released) { quizResultBody.innerHTML = '<p>答卷已提交，成绩尚未发布。</p>'; return; }
-    quizResultBody.innerHTML = `<div class="quiz-score">${result.score} / ${result.total_points} 分</div>` + result.answers.map((a,i) => `
-      <div class="result-answer"><strong>${i+1}. ${learningEsc(a.prompt)}</strong><p>你的答案：${learningEsc(formatLearningAnswer(a.answer))}</p><p>得分：${a.awarded_score} / ${a.max_score}</p>${a.reviewer_comment ? `<p>批语：${learningEsc(a.reviewer_comment)}</p>` : ''}${result.show_answers ? `<p>参考答案：${learningEsc(formatLearningAnswer(a.correct_answers))}</p>` : ''}</div>`).join('');
+    quizResultBody.innerHTML = (result.released ? `<div class="quiz-score">${result.score} / ${result.total_points} 分</div>` : '<p class="learning-upload-summary">答卷已提交，成绩尚未发布。可查看原题和自己的作答。</p>') + result.answers.map((a,i) => `
+      <div class="result-answer">${renderLearningOriginal(a,i+1)}<p>你的答案：${learningEsc(formatLearningAnswer(a.answer))}</p>${result.released ? `<p>得分：${a.awarded_score} / ${a.max_score}</p>` : ''}${a.reviewer_comment ? `<p>批语：${learningEsc(a.reviewer_comment)}</p>` : ''}${result.show_answers ? `<p>参考答案：${learningEsc(formatLearningAnswer(a.correct_answers))}</p>` : ''}</div>`).join('');
   } catch(e) { showMessage(e.message, 'error'); }
 }
 
@@ -547,7 +613,7 @@ async function reviewLearningQuiz(id) {
     document.getElementById('quizReviewPanel').classList.remove('hidden');
     reviewQuizTitle.textContent = `批阅与统计：${quiz.title}`;
     quizStatsBody.innerHTML = `<div class="learning-item" style="margin-bottom:16px"><strong>已提交 ${stats.submitted_count} / ${stats.expected_count} 人</strong> · 已批阅 ${stats.graded_count} 人 · 未提交 ${stats.pending_count} 人</div>` +
-      stats.questions.map(q => `<div class="learning-item" style="margin-bottom:10px"><strong>${q.position}. ${learningEsc(q.prompt)}</strong><p>作答 ${q.answered_count} 人 · ${q.correct_rate === null ? '待人工评分' : `正确率 ${q.correct_rate}%`}</p><div class="stats-bar"><span style="width:${q.correct_rate || 0}%"></span></div><details><summary>查看所有人的答案</summary>${q.answers.map(a => `<p>${learningEsc(a.username)}：${learningEsc(formatLearningAnswer(a.answer))} ${a.is_correct === null ? '（待评）' : a.is_correct ? '✓' : '✗'}</p>`).join('') || '<p class="muted">暂无</p>'}</details></div>`).join('');
+      stats.questions.map(q => `<div class="learning-item" style="margin-bottom:10px">${renderLearningOriginal(q,q.position)}<p>参考答案：${learningEsc(formatLearningAnswer(q.correct_answers))}</p><p>作答 ${q.answered_count} 人 · ${q.correct_rate === null ? '待人工评分' : `正确率 ${q.correct_rate}%`}</p><div class="stats-bar"><span style="width:${q.correct_rate || 0}%"></span></div><details><summary>查看所有人的答案</summary>${q.answers.map(a => `<p>${learningEsc(a.username)}：${learningEsc(formatLearningAnswer(a.answer))} ${a.is_correct === null ? '（待评）' : a.is_correct ? '✓' : '✗'}</p>`).join('') || '<p class="muted">暂无</p>'}</details></div>`).join('');
     const release = quiz.status === 'closed' ? `<div class="learning-item" style="margin-bottom:16px"><strong>${quiz.results_released ? '成绩已发布' : '完成批阅后发布成绩'}</strong><div class="learning-item-actions"><button onclick="releaseLearningResults(${quiz.id},true)">发布成绩并展示答案</button><button class="secondary" onclick="releaseLearningResults(${quiz.id},false)">发布成绩但隐藏答案</button></div></div>` : '';
     quizSubmissionsBody.innerHTML = release + (submissions.map(renderReviewSubmission).join('') || '<p class="muted">暂时没有答卷。</p>');
   } catch(e) { showMessage(e.message, 'error'); }
@@ -555,7 +621,7 @@ async function reviewLearningQuiz(id) {
 
 function renderReviewSubmission(s) {
   return `<div class="review-submission" data-submission="${s.id}"><h4>${learningEsc(s.username)} ${s.is_preview ? '<span class="badge">出题人预览</span>' : ''} <span class="status-pill">${s.status === 'graded' ? `已批阅 ${s.total_score} 分` : '待批阅'}</span></h4>
-    <div class="learning-answer-table"><table><thead><tr><th>题目/答案</th><th>参考答案</th><th>得分</th><th>批语</th></tr></thead><tbody>${s.answers.map(a => `<tr data-question="${a.question_id}"><td><strong>${learningEsc(a.prompt)}</strong><br>${learningEsc(formatLearningAnswer(a.answer))}</td><td>${learningEsc(formatLearningAnswer(a.correct_answers))}</td><td><input class="review-score" type="number" min="0" max="${a.max_score}" step="0.5" value="${a.awarded_score ?? ''}" placeholder="/${a.max_score}"></td><td><input class="review-comment" value="${learningEsc(a.reviewer_comment || '')}" placeholder="可选"></td></tr>`).join('')}</tbody></table></div><button onclick="gradeLearningSubmission(${activeQuiz.id},${s.id})">保存批阅</button></div>`;
+    <div class="learning-answer-table"><table><thead><tr><th>题目/答案</th><th>参考答案</th><th>得分</th><th>批语</th></tr></thead><tbody>${s.answers.map(a => `<tr data-question="${a.question_id}"><td>${renderLearningOriginal(a,a.position)}<p>作答：${learningEsc(formatLearningAnswer(a.answer))}</p></td><td>${learningEsc(formatLearningAnswer(a.correct_answers))}</td><td><input class="review-score" type="number" min="0" max="${a.max_score}" step="0.5" value="${a.awarded_score ?? ''}" placeholder="/${a.max_score}"></td><td><input class="review-comment" value="${learningEsc(a.reviewer_comment || '')}" placeholder="可选"></td></tr>`).join('')}</tbody></table></div><button onclick="gradeLearningSubmission(${activeQuiz.id},${s.id})">保存批阅</button></div>`;
 }
 
 async function gradeLearningSubmission(quizId, submissionId) {

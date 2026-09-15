@@ -1,4 +1,54 @@
 .learning-center { min-height: 560px; }
+.learning-center { --learning-border:#e2e8f0; line-height:1.65; }
+.learning-center .learning-head { padding:8px 0 24px; border-bottom:1px solid var(--learning-border); }
+.learning-center .learning-head h2 { margin:0 0 6px; letter-spacing:.02em; }
+.learning-center .learning-head > .row { flex-wrap:wrap; gap:8px; }
+.learning-center #learningHome > h3 { font-size:17px; margin:22px 0 14px; }
+.learning-center .learning-grid { align-items:start; gap:18px; }
+.learning-center .learning-item { padding:20px; border-radius:16px; background:#fff; box-shadow:0 3px 14px #0f172a06; min-width:0; overflow-wrap:anywhere; }
+.learning-center .learning-item h4 { font-size:17px; line-height:1.5; margin:12px 0 8px; }
+.learning-center .learning-item-actions { padding-top:14px; border-top:1px solid #eef2f7; }
+.learning-center .learning-panel-head { align-items:center; padding-bottom:16px; border-bottom:1px solid var(--learning-border); }
+.learning-center .learning-panel-head h3 { margin:0; }
+.learning-center .learning-form-grid :is(input:not([type=checkbox]),textarea,select) { box-sizing:border-box; width:100%; min-width:0; padding:10px 12px; border:1px solid #cbd5e1; border-radius:9px; font:inherit; }
+.learning-center .question-toolbar { gap:10px; padding:16px 0; }
+.learning-center .question-toolbar strong { margin-right:auto; }
+.learning-prompt { display:block; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.75; margin:8px 0 12px; }
+.learning-original-options { padding:0 0 0 30px; margin:12px 0 16px; }
+.learning-original-options li { padding:8px 12px; margin:6px 0; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.65; }
+.learning-center .result-answer { padding:22px; border-radius:14px; }
+.learning-center .result-answer p { white-space:pre-wrap; overflow-wrap:anywhere; margin:10px 0; }
+.learning-center .quiz-score { padding:20px 24px; border:1px solid #c7d2fe; border-radius:14px; background:#eef2ff; }
+.learning-center .learning-answer-table table { width:100%; }
+.learning-center .learning-answer-table td { vertical-align:top; padding:14px; }
+.learning-center .learning-answer-table th { padding:12px 14px; text-align:left; background:#f8fafc; }
+.learning-center .learning-answer-table td:first-child { min-width:220px; }
+.learning-upload-list { display:grid; gap:10px; margin:12px 0; }
+.learning-upload-file { display:grid; grid-template-columns:minmax(0,1fr) 140px; gap:8px 16px; padding:14px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; }
+.learning-upload-file strong { overflow-wrap:anywhere; color:#334155; }
+.learning-upload-file span { grid-column:1/-1; font-size:13px; }
+.learning-upload-file progress { width:100%; align-self:center; accent-color:#4f46e5; }
+.learning-upload-file.is-error { border-color:#fca5a5; color:#b91c1c; }
+.learning-upload-file.is-success span { color:#047857; }
+.learning-upload-summary { color:#334155; font-weight:600; margin-top:12px; }
+#tab-learning .lc-section-head, #tab-learning .lc-row { gap:12px; flex-wrap:wrap; }
+#tab-learning .lc-row > span { min-width:0; overflow-wrap:anywhere; }
+#tab-learning .lc-q { line-height:1.7; }
+@media (max-width:700px) {
+  .learning-center .learning-grid { grid-template-columns:minmax(0,1fr); }
+  .learning-center .learning-head > .row { width:100%; }
+  .learning-center .question-toolbar strong { width:100%; }
+  .learning-center .question-toolbar button { flex:1 1 40%; min-height:42px; }
+  .learning-center .learning-panel-head { align-items:stretch; }
+  .learning-upload-file { grid-template-columns:minmax(0,1fr); }
+  .learning-center .learning-answer-table table, .learning-center .learning-answer-table tbody, .learning-center .learning-answer-table tr, .learning-center .learning-answer-table td { display:block; width:auto; }
+  .learning-center .learning-answer-table thead { display:none; }
+  .learning-center .learning-answer-table tr { border:1px solid #e2e8f0; border-radius:12px; margin-bottom:14px; padding:8px; }
+  .learning-center .learning-answer-table td { border:0; padding:8px; min-width:0; }
+  .learning-center .learning-answer-table td:nth-child(2)::before { content:'参考答案：'; color:#64748b; }
+  .learning-center .learning-answer-table td:nth-child(3)::before { content:'得分：'; color:#64748b; }
+  .learning-center .learning-answer-table td:nth-child(4)::before { content:'批语：'; color:#64748b; }
+}
 .learning-head, .learning-panel-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:20px; }
 .learning-head p, .learning-panel-head p { margin:0; }
 .learning-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
