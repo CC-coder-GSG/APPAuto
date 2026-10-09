@@ -2408,7 +2408,6 @@ function ensureWorkbenchPanelObserver(activePanel){
 }
 function applyWorkbenchSubtabVisibility(){
   const buttonMap={
-    'bugly':'tabBuglyBtn',
     demand:'workbenchDemandBtn',
     retest:'workbenchRetestBtn',
     'overall-test':'workbenchOverallTestBtn',
@@ -2563,6 +2562,7 @@ window.switchWorkbenchSubtab = switchWorkbenchSubtab;
 })();
 function applyTabVisibility(){
   const buttonMap={
+    'bugly':'tabBuglyBtn',
     'assign':'tabAssignBtn','mine':'tabMineBtn','task-board':'tabTaskBoardBtn','feedback':'tabFeedbackBtn',
     'field-test':'tabFieldTestBtn','build-records':'tabBuildRecordsBtn','testcase-center':'tabTestcaseCenterBtn',
     'report':'tabReportBtn','activity':'tabActivityBtn',
