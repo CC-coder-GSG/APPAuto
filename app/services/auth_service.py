@@ -15,6 +15,8 @@ class AuthService:
         user = authenticate_user(db, username, password)
         if not user:
             raise HTTPException(status_code=400, detail="Incorrect username or password")
+        from app.core.account_access import ensure_active_account
+        ensure_active_account(user)
 
         client_type = normalize_client_type(client_type)
         new_token = str(uuid.uuid4())

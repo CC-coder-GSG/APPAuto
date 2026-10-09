@@ -21,3 +21,5 @@ docs/
 android/.gradle/
 android/app/build/
 release/*.apk
+bugly-validation-tmp/
+bugly-backups/

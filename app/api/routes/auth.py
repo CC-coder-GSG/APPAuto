@@ -31,4 +31,13 @@ def auth_me(current_user=Depends(get_current_user)):
         "role": current_user.role.value,
         "is_team_member": getattr(current_user, "is_team_member", True),
         "allowed_tabs": get_allowed_tabs(current_user),
+        "account_type": current_user.account_type,
     }
+
+
+@router.post("/auth/logout")
+def logout(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    current_user.session_token = None
+    current_user.session_token_mobile = None
+    db.commit()
+    return {"message": "已退出登录"}

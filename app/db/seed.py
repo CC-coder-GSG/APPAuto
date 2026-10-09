@@ -316,6 +316,14 @@ def ensure_feature_tree_schema_compat(db: Session) -> None:
 def ensure_user_schema_compat(db: Session) -> None:
     rows = db.execute(text("PRAGMA table_info(users)")).fetchall()
     cols = {r[1] for r in rows}
+    for column, ddl in (
+        ("account_type", "VARCHAR(20) NOT NULL DEFAULT 'internal'"),
+        ("is_active", "BOOLEAN NOT NULL DEFAULT 1"),
+        ("expires_at", "DATETIME"),
+    ):
+        if column not in cols:
+            db.execute(text(f"ALTER TABLE users ADD COLUMN {column} {ddl}"))
+    db.commit()
     if "display_name" not in cols:
         db.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(80)"))
         db.commit()

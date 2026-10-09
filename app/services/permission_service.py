@@ -9,6 +9,7 @@ from app.core.exceptions import PermissionDenied
 # alias in `_TAB_KEY_ALIASES` so persisted permissions keep working
 # without a data migration.
 ALL_TAB_KEYS = [
+    "bugly",
     "assign",
     "mine",
     "task-board",
@@ -76,6 +77,8 @@ def normalize_tab_permissions(tab_keys: list[str] | None) -> list[str]:
 
 
 def get_allowed_tabs(user) -> list[str]:
+    if getattr(user, "account_type", "internal") == "external":
+        return ["bugly"]
     role_value = getattr(user.role, "value", user.role)
     if role_value == "admin":
         return list(ALL_TAB_KEYS)

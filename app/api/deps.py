@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Generator
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
@@ -23,7 +23,7 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db), request: Request = None) -> User:
     credential_exception = HTTPException(status_code=401, detail="Could not validate credentials")
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
@@ -37,6 +37,10 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credential_exception from exc
 
     user = db.query(User).filter(User.username == username).first()
-    if not user or session_token_for(user, client_type) != session_token:
+    if not user or not session_token or session_token_for(user, client_type) != session_token:
         raise credential_exception
+    from app.core.account_access import ensure_active_account, ensure_account_route
+    ensure_active_account(user)
+    if request is not None:
+        ensure_account_route(user, request)
     return user

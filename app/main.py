@@ -163,6 +163,12 @@ def competitor_analysis_page():
     )
 
 
+@app.get("/bugly", include_in_schema=False)
+@app.get("/bugly/external", include_in_schema=False)
+def bugly_page():
+    return FileResponse(str(FRONTEND_DIR / "bugly" / "index.html"), headers=_NO_CACHE_HTML)
+
+
 def _push_daily_report() -> None:
     db = SessionLocal()
     try:

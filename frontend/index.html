@@ -212,6 +212,7 @@
     <button id="tabTerminalBtn" class="hidden" onclick="showTab('terminal')">终端控制台</button>
     <button id="tabLearningBtn" class="hidden" onclick="showTab('learning')">学习中心</button>
     <button id="tabCompetitorAnalysisBtn" onclick="window.location.href='/competitor-analysis'">竞品分析工作台</button>
+    <button id="tabBuglyBtn" class="hidden" onclick="window.location.href='/bugly'">Bugly 问题中心</button>
     <span id="sseConnectionState" class="sse-conn-badge hidden" aria-live="polite">实时连接中</span>
   </div>
 
@@ -2290,7 +2291,7 @@ function sourceTypeZh(v){
 }
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
-const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal','learning'];
+const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal','learning','bugly'];
 const DEFAULT_ALLOWED_TABS=['mine','task-board','feedback','retest','overall-test','field-test','testcase-center','report','jenkins','learning'];
 const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test','task','review'];
 const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test', task:'mine', review:'mine' };
@@ -2315,7 +2316,7 @@ let workbenchViewportResizePending=false;
 function getAllowedTabs(){
   if(!currentUser) return new Set(DEFAULT_ALLOWED_TABS);
   if(currentUser.role==='admin') return new Set(ALL_TAB_KEYS);
-  const tabs=Array.isArray(currentUser.allowed_tabs)&&currentUser.allowed_tabs.length?currentUser.allowed_tabs:DEFAULT_ALLOWED_TABS;
+  const tabs=Array.isArray(currentUser.allowed_tabs)?currentUser.allowed_tabs:DEFAULT_ALLOWED_TABS;
   return new Set(tabs);
 }
 function canAccessRawTab(name){return getAllowedTabs().has(name)}
@@ -2407,6 +2408,7 @@ function ensureWorkbenchPanelObserver(activePanel){
 }
 function applyWorkbenchSubtabVisibility(){
   const buttonMap={
+    'bugly':'tabBuglyBtn',
     demand:'workbenchDemandBtn',
     retest:'workbenchRetestBtn',
     'overall-test':'workbenchOverallTestBtn',
@@ -2727,6 +2729,8 @@ async function init(){
     try{ await window.OmniQABootReady; }catch(_){}
   }
   currentUser=await (await api('/auth/me')).json();
+  if(currentUser.account_type==='external'){location.replace('/bugly/external');return;}
+  if(currentUser.role!=='admin' && Array.isArray(currentUser.allowed_tabs) && currentUser.allowed_tabs.length===1 && currentUser.allowed_tabs[0]==='bugly'){location.replace('/bugly');return;}
   window.currentUser = currentUser;
   if(window.OmniQAStateActions && typeof window.OmniQAStateActions.setCurrentUser === 'function'){
     window.OmniQAStateActions.setCurrentUser(currentUser);

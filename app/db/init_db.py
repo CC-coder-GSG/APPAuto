@@ -55,6 +55,8 @@ from app.models import (
 
 
 def init_db() -> None:
+    from app.db.bugly_upgrade import backup_before_bugly_upgrade
+    backup_before_bugly_upgrade(engine)
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:

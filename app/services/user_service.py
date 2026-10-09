@@ -16,6 +16,9 @@ def _user_to_dict(user: User) -> dict:
         "role": user.role.value,
         "is_team_member": user.is_team_member,
         "allowed_tabs": get_allowed_tabs(user),
+        "account_type": user.account_type,
+        "is_active": user.is_active,
+        "expires_at": user.expires_at.isoformat() + "Z" if user.expires_at else None,
         "zentao_account": user.zentao_account,
         "created_at": user.created_at.isoformat(),
     }
@@ -116,6 +119,8 @@ class UserService:
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+        if user.account_type == "external":
+            raise HTTPException(status_code=400, detail="外部账号不能修改为平台管理角色")
         old_role = user.role.value
         user.role = role
         db.commit()
@@ -156,6 +161,9 @@ class UserService:
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         username = user.username
+        from app.models.bugly import BuglyGrant
+        # Do not leave grants behind if SQLite later reuses a deleted user's id.
+        db.query(BuglyGrant).filter(BuglyGrant.user_id == user_id).delete(synchronize_session=False)
         db.delete(user)
         db.commit()
         audit(db, action="user.delete", target_type="user", actor_id=actor_id, target_id=str(user_id), detail=f"username={username}")

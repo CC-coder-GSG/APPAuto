@@ -4,6 +4,10 @@ from app.models.audit import AuditLog
 from app.models.browser_sync_event import BrowserSyncEvent
 from app.models.build_record import BuildRecord
 from app.models.bug import BugTracking
+from app.models.bugly import (
+    BuglyApplication, BuglyIssue, BuglyReport, BuglyReportRevision,
+    BuglyImportBatch, BuglyGrant, BuglyPublication,
+)
 from app.models.cad_test import CadAttachment, CadBoard, CadCustomColumn, CadItem, CadItemFile, CadItemFolder, CadRecord, CadVersion
 from app.models.case_review import TestCaseReview
 from app.models.competitor_analysis import CompetitorAnalysisReport
@@ -73,6 +77,8 @@ from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.models.zentao_testcase_mirror import ZentaoTestCaseMirror
 
 __all__ = [
+    "BuglyApplication", "BuglyIssue", "BuglyReport", "BuglyReportRevision",
+    "BuglyImportBatch", "BuglyGrant", "BuglyPublication",
     "AuditLog",
     "BrowserSyncEvent",
     "BuildRecord",

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Bugly 问题中心 · 测试管理平台</title>
+  <link rel="stylesheet" href="/static/bugly/style.css?v=20261009-1">
+</head>
+<body>
+  <header class="header">
+    <a class="brand" href="/bugly"><span class="brand-mark">B</span><span>Bugly <small>问题中心</small></span></a>
+    <nav><a id="platformLink" href="/dashboard">返回测试平台</a><span id="me"></span><button class="quiet" id="passwordBtn">修改密码</button><button class="quiet" id="logoutBtn">退出</button></nav>
+  </header>
+  <main>
+    <div class="heading"><div><p class="eyebrow" id="eyebrow">QUALITY / CRASH INSIGHTS</p><h1 id="pageTitle">从异常现场，到问题结论</h1><p class="muted" id="pageDescription">集中整理 Bugly 采集资料，查看堆栈、设备与版本，追踪每一次上报。</p></div>
+      <div class="actions" id="internalActions" hidden><button id="applicationsBtn" class="secondary" hidden>应用管理</button><button id="permissionsBtn" class="secondary" hidden>权限管理</button><button id="historyBtn" class="secondary">导入记录</button><button id="newIssueBtn" class="secondary">＋ 新增问题</button><button id="importBtn">导入文件</button></div>
+    </div>
+    <div id="notice" role="status" hidden></div>
+    <section id="listView">
+      <div class="metrics"><div><span id="issueTotalLabel">符合筛选的问题</span><strong id="issueTotal">—</strong></div><div><span id="reportTotalLabel">当前页已导入上报</span><strong id="reportTotal">—</strong></div><div><span id="thirdMetricLabel">当前页已发布问题</span><strong id="publishedTotal">—</strong></div><p id="coverageNote">数据范围为已采集并导入的记录。可在问题详情中查看每条上报的堆栈与现场。</p></div>
+      <section class="panel">
+        <form id="filterForm" class="filters">
+          <label class="internal-filter">查看方式<select name="view"><option value="issues">按问题聚合</option><option value="reports">逐条上报</option></select></label>
+          <label>所属应用<select id="applicationFilter" name="application_id"><option value="">全部授权应用</option></select></label>
+          <label class="grow">搜索<input name="q" placeholder="问题标题、编号或堆栈关键词" maxlength="200"></label>
+          <label class="internal-filter">处理状态<select name="status"><option value="">全部状态</option><option value="pending">待分析</option><option value="processing">处理中</option><option value="verifying">待验证</option><option value="closed">已关闭</option><option value="ignored">忽略</option></select></label>
+          <label class="internal-filter">应用版本<input name="app_version" placeholder="例如 1.2.3"></label>
+          <label class="internal-filter">设备<input name="device" placeholder="设备机型"></label>
+          <label class="internal-filter">发生时间从<input type="datetime-local" name="since"></label>
+          <label class="internal-filter">发生时间至<input type="datetime-local" name="until"></label>
+          <label class="internal-filter check"><input name="include_archived" type="checkbox">包含归档问题</label>
+          <button type="submit">查询</button><button type="button" class="quiet" id="resetBtn">重置</button>
+        </form>
+        <div class="table-wrap"><table><thead id="issueHead"></thead><tbody id="issueRows"><tr><td>正在加载…</td></tr></tbody></table></div>
+        <footer class="pagination"><span id="pageLabel"></span><div><button class="secondary" id="previousPage">上一页</button><button class="secondary" id="nextPage">下一页</button><select id="pageSize" aria-label="每页条数"><option value="20">每页 20 条</option><option value="50">每页 50 条</option><option value="100">每页 100 条</option></select></div></footer>
+      </section>
+    </section>
+    <section id="detailView" hidden></section>
+  </main>
+  <dialog id="modal"><div class="modal-head"><h2 id="modalTitle"></h2><button id="modalClose" class="quiet" aria-label="关闭">✕</button></div><div id="modalNotice" role="status" hidden></div><div id="modalBody"></div></dialog>
+  <script type="module" src="/static/bugly/app.js?v=20261009-1"></script>
+</body>
+</html>

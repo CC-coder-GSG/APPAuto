@@ -20,7 +20,12 @@ async function login(){
  const fd=new URLSearchParams();fd.set('username',u.value);fd.set('password',p.value);
  const r=await fetch('/auth/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:fd});
  if(!r.ok){msg.innerText='\u767b\u5f55\u5931\u8d25';return}
- const data=await r.json();localStorage.setItem('token',data.access_token);location.href='/dashboard';
+ const data=await r.json();localStorage.setItem('token',data.access_token);
+ const me=await fetch('/auth/me',{headers:{Authorization:`Bearer ${data.access_token}`}});
+ if(!me.ok){localStorage.removeItem('token');msg.innerText='账号验证失败，请重试';return}
+ const user=await me.json();
+ const next=new URLSearchParams(location.search).get('next');
+ location.href=user.account_type==='external'?'/bugly/external':(next&&/^\/bugly(?:\?|$)/.test(next)?next:'/dashboard');
 }
 </script>
 </body>

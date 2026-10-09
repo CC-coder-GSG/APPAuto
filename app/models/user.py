@@ -24,6 +24,9 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(SAEnum(UserRole), default=UserRole.USER, nullable=False)
     is_team_member: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     tab_permissions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    account_type: Mapped[str] = mapped_column(String(20), default="internal", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     session_token: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     # 移动端会话令牌，与 web 端 session_token 独立，实现"不同终端并存、相同终端互斥"。
     session_token_mobile: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)

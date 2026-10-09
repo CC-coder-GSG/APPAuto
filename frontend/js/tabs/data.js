@@ -2,6 +2,7 @@
 import { state } from '../state.js';
 import { withPrefix, renderBugLink, renderCaseLink } from '../utils.js';
 const TAB_PERMISSION_OPTIONS = [
+  { key: 'bugly', label: 'Bugly 问题中心' },
   { key: 'assign', label: '任务分配台' },
   { key: 'mine', label: '我的工作台' },
   { key: 'task-board', label: '任务看板' },
