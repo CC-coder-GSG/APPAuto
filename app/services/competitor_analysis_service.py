@@ -9,6 +9,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.models import CompetitorAnalysisReport, User
+from app.services.permission_service import ensure_tab_access
 from app.utils.time_utils import local_now
 
 
@@ -70,6 +71,7 @@ class CompetitorAnalysisService:
         }
 
     def get_report(self, user: User) -> dict[str, Any]:
+        ensure_tab_access(user, "competitor-analysis")
         return self._response(self._get_or_create(user))
 
     def save_report(
@@ -78,6 +80,7 @@ class CompetitorAnalysisService:
         base_version: int,
         user: User,
     ) -> dict[str, Any]:
+        ensure_tab_access(user, "competitor-analysis")
         self._get_or_create(user)
         now = local_now()
         result = self.db.execute(

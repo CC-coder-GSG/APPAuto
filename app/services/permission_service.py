@@ -10,6 +10,7 @@ from app.core.exceptions import PermissionDenied
 # without a data migration.
 ALL_TAB_KEYS = [
     "bugly",
+    "competitor-analysis",
     "assign",
     "mine",
     "task-board",

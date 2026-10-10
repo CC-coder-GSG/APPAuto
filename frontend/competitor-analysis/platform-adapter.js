@@ -26,6 +26,7 @@
       },
     });
     if (response.status === 401) redirectToLogin();
+    if (response.status === 403) window.location.replace('/dashboard');
     if (!response.ok) {
       let message = `请求失败 (HTTP ${response.status})`;
       try {

@@ -760,7 +760,7 @@
 </div></div></div>
 <div class="modal" id="simpleModal"><div class="modal-card"><div class="modal-head"><b id="simpleModalTitle"></b><button class="tiny-btn" data-close>✕</button></div><div class="modal-body" id="simpleModalBody"></div><div class="modal-foot"><button class="btn" data-close>取消</button><button class="btn primary" id="simpleModalSave">保存</button></div></div></div>
 <div class="toast" id="toast"></div>
-<script src="/static/competitor-analysis/platform-adapter.js"></script>
+<script src="/static/competitor-analysis/platform-adapter.js?v=20261010-1"></script>
 <script>
 const CURRENT_SCHEMA_VERSION=8;
 const LEGACY_TIMESTAMP_FALLBACK='2026-08-25T03:49:10.000Z';
@@ -905,6 +905,7 @@ async function bootstrap(){
       setSyncState('平台未接入 · 当前会话');
     }
   }catch(e){
+    if(e&&(e.status===401||e.status===403))return;
     console.error('Platform bootstrap failed',e);platformMeta.connected=false;setSyncState('平台连接失败 · 当前会话');
   }
   filters.softwareIds=new Set(state.softwares.map(s=>s.id));updateUndoRedo();render();
