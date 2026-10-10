@@ -14,7 +14,7 @@ from app.api.deps import get_current_user, get_db
 from app.api.routes import auth, bugly, users
 from app.core.exceptions import AppError
 from app.models import User, UserRole
-from app.models.bugly import BuglyGrant, BuglyIssue, BuglyReport, BuglyReportRevision, BuglyImportBatch
+from app.models.bugly import BuglyGrant, BuglyIssue, BuglyReport, BuglyReportRevision, BuglyImportBatch, BuglyPublication
 from app.services.auth_service import AuthService
 from app.services.permission_service import get_allowed_tabs
 from app.utils.time_utils import utc_now_naive
@@ -410,3 +410,93 @@ def test_sensitive_values_inside_stack_are_masked_for_internal_reader(context):
     r=client.get(f'/api/bugly/reports/{report.id}',headers=people['reader'][1])
     assert r.status_code==200
     assert 'secret-user-998' not in r.json()['stack_text']
+
+
+@pytest.mark.parametrize("name", ["manager", "reader"])
+def test_user_ids_are_hidden_even_with_raw_data_permission_and_in_revisions(context, name):
+    app_id = application(context)
+    data = envelope(("1001",), stack="Exception for secret-user-998 and diagnostic-secret\n at Main.java:23")
+    capture = data["reports"][0]
+    capture["listFields"]["USER_ID"] = "list-secret"
+    capture["rawDetailText"] = "用户ID\nraw-secret\n设备：Pixel 9\n版本：1.2.3\n"
+    capture["captureDiagnostics"] = {
+        "domWaitTimedOut": False, "userId": "diagnostic-secret",
+        "nested": [{"用户 ID": "nested-secret", "frameCount": 2}],
+        "fields": [{"label": "userId", "value": "field-secret"}, {"label": "设备", "value": "Pixel 9"}],
+        "log": "Captured list-secret, raw-secret, nested-secret, field-secret",
+    }
+    capture["visibleTabs"] = {"user_id": "tab-secret", "stack": True}
+    batch, issue = imported(context, app_id, data)
+    grant(context, app_id, "reader", can_sensitive=True)
+    client, people, db = context
+    report = db.query(BuglyReport).filter_by(issue_id=issue.id).one()
+    original_payload = json.dumps(report.payload, sort_keys=True)
+    original_hash = report.content_hash
+    headers = people[name][1]
+    response = client.get(f'/api/bugly/reports/{report.id}', headers=headers)
+    assert response.status_code == 200, response.text
+    detail = response.json()
+    assert detail["payload"]["detailFields"] == {"系统版本": "Android 15"}
+    assert detail["payload"]["listFields"] == {"版本": "1.2.3", "设备": "Pixel 9", "异常上报时间": "2026-10-08 12:00:00"}
+    assert detail["payload"]["rawDetailText"] == "设备：Pixel 9\n版本：1.2.3"
+    assert detail["payload"]["captureDiagnostics"]["nested"] == [{"frameCount": 2}]
+    assert detail["payload"]["captureDiagnostics"]["fields"] == [{"label": "设备", "value": "Pixel 9"}]
+    assert detail["payload"]["captureDiagnostics"]["domWaitTimedOut"] is False
+    assert detail["payload"]["visibleTabs"] == {"stack": True}
+    assert 'Main.java:23' in detail["stack_text"]
+    revisions = client.get(f'/api/bugly/reports/{report.id}/revisions', headers=headers)
+    assert revisions.status_code == 200, revisions.text
+    assert revisions.json()[0]["payload"] == detail["payload"]
+    for secret in ("secret-user-998", "list-secret", "raw-secret", "diagnostic-secret", "nested-secret", "field-secret", "tab-secret"):
+        assert secret not in json.dumps(detail)
+        assert secret not in json.dumps(revisions.json())
+
+    # Hiding is applied to responses, including captures stored before the change.
+    db.refresh(report)
+    assert json.dumps(report.payload, sort_keys=True) == original_payload
+    assert report.content_hash == original_hash
+    repeat, _ = imported(context, app_id, data)
+    assert repeat["result"]["skipped"] == 1
+    assert db.query(BuglyReportRevision).filter_by(report_id=report.id).count() == 1
+
+
+def test_user_ids_are_hidden_in_import_diagnostics_and_history(context):
+    app_id = application(context)
+    data = envelope(("1001",))
+    data["failures"] = [{"reportId": "1009", "userId": "failed-user-secret", "reason": "Timeout for failed-user-secret"}]
+    response = preview(context, app_id, data)
+    assert response.status_code == 200, response.text
+    batch_id = response.json()["id"]
+    client, people, db = context
+    headers = people["manager"][1]
+    assert response.json()["diagnostics"]["failures"] == [{"reportId": "1009", "reason": "Timeout for [已脱敏]"}]
+    for result in (client.get(f'/api/bugly/imports/{batch_id}', headers=headers),
+                   client.post(f'/api/bugly/imports/{batch_id}/confirm', headers=headers),
+                   client.get('/api/bugly/imports', headers=headers)):
+        assert result.status_code == 200, result.text
+        assert "failed-user-secret" not in result.text
+    assert db.get(BuglyImportBatch, batch_id).diagnostics["failures"][0]["userId"] == "failed-user-secret"
+
+
+def test_user_ids_are_hidden_in_publication_and_existing_snapshots(context):
+    app_id = application(context)
+    _, issue = imported(context, app_id)
+    grant(context, app_id)
+    client, people, db = context
+    headers = people["manager"][1]
+    candidate = client.get(f'/api/bugly/issues/{issue.id}/publication-preview', headers=headers).json()
+    candidate["snapshot"]["reports"][0]["stack_text"] = "User ID: reviewed-user-secret\n at Main.java:23"
+    response = client.post(f'/api/bugly/issues/{issue.id}/publication', headers=headers, json=candidate)
+    assert response.status_code == 200, response.text
+    publication = db.get(BuglyPublication, issue.id)
+    assert "reviewed-user-secret" not in json.dumps(publication.snapshot)
+
+    # Historical approved snapshots receive the same hiding without republishing them.
+    legacy = json.loads(json.dumps(publication.snapshot))
+    legacy["reports"][0]["stack_text"] = "用户ID：legacy-user-secret\n at Main.java:23"
+    publication.snapshot = legacy
+    db.commit()
+    response = client.get(f'/api/bugly/external/issues/{issue.id}', headers=people["partner"][1])
+    assert response.status_code == 200, response.text
+    assert "legacy-user-secret" not in response.text
+    assert 'Main.java:23' in response.json()["reports"][0]["stack_text"]

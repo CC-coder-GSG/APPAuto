@@ -18,6 +18,7 @@ from app.models.bugly import (
     BuglyImportBatch, BuglyGrant, BuglyPublication,
 )
 from app.services.permission_service import ensure_admin, ensure_tab_access, get_allowed_tabs, serialize_tab_permissions
+from app.services.bugly_privacy import hide_user_ids, user_id_values
 from app.services.bugly_import import (
     digest, merge_payload, normalize_report, parse_file, report_columns, source_zone, utc_expiry,
 )
@@ -48,6 +49,7 @@ def sensitive_values(payload):
             canonical = re.sub(r"[\s_]", "", key).lower()
             if canonical in {"用户id", "userid", "设备id", "deviceid", "token", "password", "secret", "authorization"}:
                 values.append(value)
+    values.extend(user_id_values(payload))
     return values
 
 
@@ -279,18 +281,19 @@ class BuglyService:
 
     def report_dict(self, row, sensitive=False):
         payload = row.payload
+        display = hide_user_ids({"payload": payload, "stack_text": row.stack_text})
         hidden_values = sensitive_values(payload)
         if sensitive:
-            safe = payload
+            safe = display["payload"]
         else:
             safe = {"listFields": {}, "detailFields": {}}
             allowed = {"版本", "应用版本", "异常上报时间", "发生时间", "设备", "设备机型", "系统版本", "CPU架构", "ROM", "前后台状态", "网络类型"}
             for key in ("listFields", "detailFields"):
-                safe[key] = {k: redact(v, hidden_values) for k, v in payload.get(key, {}).items() if k.replace(" ", "") in allowed}
+                safe[key] = {k: redact(v, hidden_values) for k, v in display["payload"].get(key, {}).items() if k.replace(" ", "") in allowed}
         return {"id": row.id, "source_report_id": row.source_report_id, "app_version": row.app_version,
                 "device": row.device, "os_version": row.os_version, "occurred_at": iso(row.occurred_at),
                 "occurred_at_raw": row.occurred_at_raw, "collected_at": iso(row.collected_at),
-                "stack_text": row.stack_text if sensitive else redact(row.stack_text, hidden_values), "stack_mode": row.stack_mode,
+                "stack_text": display["stack_text"] if sensitive else redact(display["stack_text"], hidden_values), "stack_mode": row.stack_mode,
                 "frame_count": row.frame_count, "revision": row.revision, "payload": safe}
 
     def detail(self, issue_id):
@@ -327,7 +330,7 @@ class BuglyService:
             raise HTTPException(404, "上报不存在")
         self.issue(row.issue_id, "sensitive")
         return [{"revision": revision.revision, "created_at": iso(revision.created_at),
-                 "payload": revision.payload, "batch_id": revision.batch_id}
+                 "payload": hide_user_ids(revision.payload), "batch_id": revision.batch_id}
                 for revision in self.db.query(BuglyReportRevision).filter_by(report_id=row.id).order_by(BuglyReportRevision.id.desc()).limit(50)]
 
     def update_issue(self, issue_id, data, expected_version):
@@ -434,10 +437,10 @@ class BuglyService:
         return self.batch_dict(batch)
 
     def batch_dict(self, row):
-        return {"id": row.id, "filename": row.filename, "status": row.status, "created_at": iso(row.created_at),
+        return hide_user_ids({"id": row.id, "filename": row.filename, "status": row.status, "created_at": iso(row.created_at),
                 "expires_at": iso(row.expires_at), "application_id": row.application_id,
                 "diagnostics": row.diagnostics, "result": row.result,
-                "items": [{key: value for key, value in item.items() if key not in {"payload", "existing_hash"}} for item in row.items]}
+                "items": [{key: value for key, value in item.items() if key not in {"payload", "existing_hash"}} for item in row.items]})
 
     def batch(self, batch_id):
         self.internal()
@@ -521,12 +524,12 @@ class BuglyService:
                                      "app_version": redact(row.app_version, sensitive), "device": redact(row.device, sensitive),
                                      "os_version": redact(row.os_version, sensitive), "occurred_at": iso(row.occurred_at),
                                      "stack_text": redact(row.stack_text, sensitive), "stack_mode": row.stack_mode})
-        return {"source_version": issue.version, "snapshot": {
+        return hide_user_ids({"source_version": issue.version, "snapshot": {
             "title": redact(issue.title, sensitive), "source_issue_id": issue.source_issue_id,
             "application_name": redact(self.application(issue.application_id).name, sensitive),
             "exception_type": redact(issue.exception_type, sensitive), "external_note": redact(issue.external_note, sensitive),
             "reports": snapshot_reports,
-        }}
+        }})
 
     def publish(self, issue_id, source_version, snapshot):
         self.internal()
@@ -537,6 +540,7 @@ class BuglyService:
         ids = [r["id"] for r in snapshot["reports"]]
         if not set(ids).issubset(valid_ids) or len(ids) != len(set(ids)):
             raise HTTPException(422, "发布快照包含无效或重复的上报记录")
+        snapshot = hide_user_ids(snapshot)
         publication = self.db.get(BuglyPublication, issue.id)
         if publication:
             publication.snapshot, publication.source_version = snapshot, source_version
@@ -571,7 +575,7 @@ class BuglyService:
         self.audit("external.view", issue.id)
         self.commit()
         return {"id": issue.id, "application_id": issue.application_id, "publication_version": publication.version,
-                "published_at": iso(publication.published_at), **publication.snapshot}
+                "published_at": iso(publication.published_at), **hide_user_ids(publication.snapshot)}
 
     def external_applications(self):
         query = self.db.query(BuglyIssue).join(BuglyPublication).filter(self.visible_clause(), BuglyPublication.active.is_(True), BuglyIssue.archived.is_(False))
