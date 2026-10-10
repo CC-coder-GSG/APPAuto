@@ -329,6 +329,29 @@ def test_empty_tab_permissions_do_not_restore_default_access(context):
     assert context[0].get('/api/bugly/issues',headers=context[1]['reader'][1]).status_code==403
 
 
+def test_data_console_can_grant_and_revoke_bugly_page_access(context):
+    app_id = application(context)
+    _, issue = imported(context, app_id)
+    grant(context, app_id, "reader")
+    client, people, db = context
+    reader, reader_headers = people["reader"]
+    manager_headers = people["manager"][1]
+    permission_url = f"/users/{reader.id}/tab-permissions"
+
+    for tabs, expected_status in ((["mine"], 403), (["mine", "bugly"], 200), (["mine"], 403), ([], 403)):
+        response = client.put(permission_url, headers=manager_headers, json={"allowed_tabs": tabs})
+        assert response.status_code == 200, response.text
+        assert response.json()["allowed_tabs"] == tabs
+        assert client.get('/auth/me', headers=reader_headers).json()["allowed_tabs"] == tabs
+        assert json.loads(db.get(User, reader.id).tab_permissions) == tabs
+        assert client.get('/api/bugly/issues', headers=reader_headers).status_code == expected_status
+        assert client.get(f'/api/bugly/issues/{issue.id}', headers=reader_headers).status_code == expected_status
+
+    response = client.put(permission_url, headers=reader_headers, json={"allowed_tabs": ["bugly"]})
+    assert response.status_code == 403
+    assert get_allowed_tabs(reader) == []
+
+
 def test_global_report_view_and_revision_permissions(context):
     app_id=application(context)
     imported(context,app_id)
