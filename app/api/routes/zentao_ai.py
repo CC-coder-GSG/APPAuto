@@ -38,6 +38,12 @@ from app.schemas.zentao_ai import (
 from app.services import story_ai_result_service, zentao_ai_service
 from app.services.permission_service import ensure_tab_access
 from app.services.zentao_ai_service import ZentaoAIServiceError
+from app.services import zentao_ai_case_service as case_service
+from app.schemas.zentao_ai_case import (
+    AddSourcesRequest, EditDraftRequest, DraftSelectionRequest,
+    DraftActionRequest, PushCasesRequest, ReconcileCaseRequest,
+)
+from app.models.zentao_ai_case import AICasePushBatch, AICasePushItem
 
 logger = logging.getLogger(__name__)
 
@@ -227,3 +233,90 @@ def batch_status(
         pending=summary["pending"],
         results=[StoryAIResultSummary.model_validate(r) for r in rows],
     )
+
+
+@router.post("/results/{result_id}/workspace")
+def open_case_workspace(result_id: int, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    _gate(current_user)
+    return case_service.open_workspace(db, current_user.id, result_id)
+
+
+@router.get("/workspaces/{workspace_id}")
+def get_case_workspace(workspace_id: str, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    _gate(current_user)
+    row = case_service.get_workspace(db, current_user.id, workspace_id)
+    case_service.recover_stale_items(db)
+    return case_service.workspace_view(db, row)
+
+
+@router.post("/workspaces/{workspace_id}/sources")
+def add_case_sources(workspace_id: str, payload: AddSourcesRequest, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    _gate(current_user)
+    row = case_service.get_workspace(db, current_user.id, workspace_id)
+    return case_service.add_sources(db, row, payload.revision, payload.source_indexes)
+
+
+@router.patch("/workspaces/{workspace_id}/drafts/{draft_id}")
+def edit_case_draft(workspace_id: str, draft_id: str, payload: EditDraftRequest, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    _gate(current_user)
+    row = case_service.get_workspace(db, current_user.id, workspace_id)
+    return case_service.edit_draft(db, row, payload.revision, draft_id, payload.content)
+
+
+@router.post("/workspaces/{workspace_id}/merge")
+def merge_case_drafts(workspace_id: str, payload: DraftSelectionRequest, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    _gate(current_user)
+    row = case_service.get_workspace(db, current_user.id, workspace_id)
+    return case_service.merge_drafts(db, row, payload.revision, [str(x) for x in payload.draft_ids])
+
+
+@router.post("/workspaces/{workspace_id}/drafts/{draft_id}/action")
+def change_case_draft(workspace_id: str, draft_id: str, payload: DraftActionRequest, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    _gate(current_user)
+    row = case_service.get_workspace(db, current_user.id, workspace_id)
+    return case_service.draft_action(db, row, payload.revision, draft_id, payload.action)
+
+
+@router.post("/workspaces/{workspace_id}/push")
+def push_case_drafts(workspace_id: str, payload: PushCasesRequest, background_tasks: BackgroundTasks,
+                     current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    _gate(current_user)
+    row = case_service.get_workspace(db, current_user.id, workspace_id)
+    batch = case_service.push_cases(db, current_user.id, row, payload.revision, str(payload.request_id), [str(x) for x in payload.draft_ids])
+    if batch["queued"]:
+        background_tasks.add_task(case_service.run_batch, batch["id"])
+    return batch
+
+
+@router.get("/push-batches/{batch_id}")
+def get_case_push_batch(batch_id: str, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    _gate(current_user)
+    case_service.recover_stale_items(db)
+    return case_service.batch_view(db, current_user.id, batch_id)
+
+
+@router.post("/workspaces/{workspace_id}/resume")
+def resume_case_push(workspace_id: str, background_tasks: BackgroundTasks, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    _gate(current_user)
+    row = case_service.get_workspace(db, current_user.id, workspace_id)
+    case_service.recover_stale_items(db)
+    batches = db.query(AICasePushBatch).join(AICasePushItem, AICasePushItem.batch_id == AICasePushBatch.id).filter(
+        AICasePushBatch.workspace_id == row.id, AICasePushBatch.user_id == current_user.id, AICasePushItem.status == "queued").all()
+    for batch in batches:
+        background_tasks.add_task(case_service.run_batch, batch.id)
+    return case_service.workspace_view(db, row)
+
+
+@router.post("/workspaces/{workspace_id}/drafts/{draft_id}/reconcile")
+def reconcile_case_push(workspace_id: str, draft_id: str, payload: ReconcileCaseRequest,
+                        current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    _gate(current_user)
+    row = case_service.get_workspace(db, current_user.id, workspace_id)
+    return case_service.reconcile(db, current_user.id, row, draft_id, payload.case_id)
+
+
+@router.post("/workspaces/{workspace_id}/drafts/{draft_id}/sync")
+def sync_case_push(workspace_id: str, draft_id: str, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    _gate(current_user)
+    row = case_service.get_workspace(db, current_user.id, workspace_id)
+    return case_service.reconcile(db, current_user.id, row, draft_id)

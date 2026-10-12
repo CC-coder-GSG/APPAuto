@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { mapZentaoStatus } from '../zentao-status-map.js';
+import { openCaseEditor } from './ai-case-editor.js';
 
 const MODAL_ID = 'aiResultModal';
 
@@ -247,6 +248,7 @@ function render(data) {
     </div>` : ''}
 
     <div style="display:flex; gap:8px; justify-content:flex-end; border-top:1px solid #e2e8f0; padding-top:12px;">
+      <button type="button" data-ai-organize style="border:1px solid #2563eb; background:#fff; color:#2563eb; border-radius:6px; padding:6px 14px; cursor:pointer;">整理并提交禅道</button>
       <button type="button" data-ai-copy="zentao" style="border:1px solid #2563eb; background:#2563eb; color:#fff; border-radius:6px; padding:6px 14px; cursor:pointer;">${testCases.length ? '复制全部用例' : '复制禅道模板'}</button>
     </div>
   `;
@@ -258,6 +260,7 @@ function render(data) {
       else if (kind === 'zentao') copyToClipboard(template);
     });
   });
+  body.querySelector('[data-ai-organize]')?.addEventListener('click', () => openCaseEditor(data.id));
   body.querySelectorAll('[data-ai-copy-case]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const index = Number(btn.getAttribute('data-ai-copy-case'));

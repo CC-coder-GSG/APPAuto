@@ -62,6 +62,7 @@ from app.models.requirement_status_history import RequirementStatusHistory
 from app.models.software import SoftwareProduct
 from app.models.stage5 import BugStage5Record
 from app.models.story_ai_result import StoryAIResult
+from app.models.zentao_ai_case import AICaseWorkspace, AICaseDraft, AICasePushBatch, AICasePushItem
 from app.models.sync_lock import SyncLock
 from app.models.task_board import TaskBoardTask, TaskBoardUpdate
 from app.models.terminal_device import TerminalDevice
@@ -77,6 +78,7 @@ from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.models.zentao_testcase_mirror import ZentaoTestCaseMirror
 
 __all__ = [
+    "AICaseWorkspace", "AICaseDraft", "AICasePushBatch", "AICasePushItem",
     "BuglyApplication", "BuglyIssue", "BuglyReport", "BuglyReportRevision",
     "BuglyImportBatch", "BuglyGrant", "BuglyPublication",
     "AuditLog",

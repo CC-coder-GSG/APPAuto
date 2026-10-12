@@ -372,6 +372,35 @@ class ZentaoClient:
     def get_testcase(self, case_id: int) -> dict | None:
         return self.get(f"testcases/{case_id}")
 
+    def create_testcase(self, product_id: int, payload: dict) -> dict:
+        """Strict write parsing: never infer a created case ID from an HTML page."""
+        url = f"{self._api_base}/products/{product_id}/testcases"
+        try:
+            resp = httpx.post(url, json=payload, headers=self._headers(), timeout=_DEFAULT_TIMEOUT)
+        except Exception as exc:
+            raise ZentaoAPIError(0, "禅道创建请求未取得响应，请核实是否已创建") from exc
+        if resp.status_code not in (200, 201):
+            raise ZentaoAPIError(resp.status_code, resp.text[:500])
+        try:
+            result = _loads_lenient(resp.text)
+        except (ValueError, TypeError) as exc:
+            raise ZentaoAPIError(502, "禅道返回非 JSON 或空响应，创建结果待核实") from exc
+        if not isinstance(result, dict):
+            raise ZentaoAPIError(502, "禅道创建响应缺少用例编号，创建结果待核实")
+        if result.get("status") in ("fail", "failed", "error") or result.get("error") or result.get("errors"):
+            raise ZentaoAPIError(422, str(result.get("message") or result.get("error") or result.get("errors") or result)[:500])
+        case = result.get("data") if isinstance(result.get("data"), dict) else result
+        try:
+            case_id = int(case.get("id") or 0)
+        except (TypeError, ValueError):
+            case_id = 0
+        if case_id <= 0:
+            raise ZentaoAPIError(502, "禅道创建响应缺少用例编号，创建结果待核实")
+        return {**case, "id": case_id}
+
+    def get_create_testcase_meta(self, product_id: int) -> dict | None:
+        return self.get_page(f"testcase-create-{product_id}.json")
+
     def get_build(self, build_id: int) -> dict | None:
         return self.get(f"builds/{build_id}")
 
