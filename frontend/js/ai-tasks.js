@@ -64,6 +64,7 @@ function injectChipStyles() {
       transition: transform .12s ease, box-shadow .12s ease;
     }
     button.ai-generate-chip::before { content: '+'; font-weight: 800; }
+    button.ai-generate-chip[hidden] { display: none !important; }
     button.ai-generate-chip:hover:not(:disabled) {
       background: #ffedd5 !important;
       transform: translateY(-1px);
@@ -169,7 +170,8 @@ const state = {
   hostEl: null,
   toastHostEl: null,
   latestCache: new Map(),   // story_id → {ai_status, id, updated_at}
-  lookupsInFlight: new Set(),
+  lookupsInFlight: new Map(), // story_id → shared latest-result request
+  latestCacheVersions: new Map(),
   pollInFlight: new Set(),  // batch_ids currently being polled — avoid stacking
   submittingStories: new Set(),
 };
@@ -408,8 +410,9 @@ function finishBatch(batchId, payload, { silent = false } = {}) {
   if (!silent) {
     showCompletionToast({ batch_id: batchId, success: payload.success, failed: payload.failed, error: payload.error });
   }
-  if (info && Array.isArray(info.story_ids)) {
-    invalidateLatestCache(info.story_ids);
+  const storyIds = info?.story_ids || payload?.story_ids;
+  if (Array.isArray(storyIds)) {
+    invalidateLatestCache(storyIds);
     refreshSlots();
   }
   refreshGenerationButtons();
@@ -442,8 +445,11 @@ function isStoryGenerating(storyId) {
 
 function refreshGenerationButtons(root = document) {
   root.querySelectorAll('[data-ai-generate-story-id]').forEach((button) => {
-    const pending = isStoryGenerating(button.dataset.aiGenerateStoryId);
-    button.disabled = pending || !Number(button.dataset.aiExecutionId);
+    const storyId = Number(button.dataset.aiGenerateStoryId);
+    const pending = isStoryGenerating(storyId);
+    const generated = button.classList.contains('ai-generate-chip') && state.latestCache.get(storyId)?.ai_status === 'success';
+    button.hidden = generated;
+    button.disabled = generated || pending || !Number(button.dataset.aiExecutionId);
     button.textContent = pending ? '正在生成…' : button.hasAttribute('data-ai-regenerate') ? '重新生成' : '生成用例';
   });
 }
@@ -486,6 +492,7 @@ function subscribeSSE() {
       success: payload.success,
       failed: payload.failed,
       error: payload.error,
+      story_ids: payload.story_ids,
     });
   });
 }
@@ -493,31 +500,49 @@ function subscribeSSE() {
 // ─── Slot injector ──────────────────────────────────────────────────────────
 
 function invalidateLatestCache(storyIds) {
-  for (const sid of storyIds) state.latestCache.delete(Number(sid));
+  for (const sid of storyIds) {
+    const id = Number(sid);
+    state.latestCache.delete(id);
+    state.latestCacheVersions.set(id, (state.latestCacheVersions.get(id) || 0) + 1);
+  }
   persistLatestCache();
 }
 
 async function fetchLatestFor(storyIds) {
   const unique = Array.from(new Set(storyIds.map(Number).filter(Boolean)));
-  const missing = unique.filter((sid) => !state.latestCache.has(sid) && !state.lookupsInFlight.has(sid));
+  const inFlight = unique.map((sid) => state.lookupsInFlight.get(sid)).filter(Boolean);
+  if (inFlight.length) {
+    await Promise.all(inFlight);
+    return fetchLatestFor(unique);
+  }
+  const missing = unique.filter((sid) => !state.latestCache.has(sid));
   if (!missing.length) return;
-  missing.forEach((sid) => state.lookupsInFlight.add(sid));
-  try {
-    const res = await api('/zentao/ai/story/batch-latest', {
-      method: 'POST',
-      body: { story_ids: missing },
-    });
-    const data = await res.json();
-    const latest = (data && data.latest) || {};
-    for (const sid of missing) {
-      const entry = latest[sid] || latest[String(sid)] || null;
-      state.latestCache.set(sid, entry ? { ai_status: entry.ai_status, id: entry.id, updated_at: entry.updated_at } : null);
+  const versions = new Map(missing.map((sid) => [sid, state.latestCacheVersions.get(sid) || 0]));
+  const lookup = (async () => {
+    try {
+      const res = await api('/zentao/ai/story/batch-latest', {
+        method: 'POST',
+        body: { story_ids: missing },
+      });
+      const data = await res.json();
+      const latest = (data && data.latest) || {};
+      for (const sid of missing) {
+        // A completion event invalidates responses started before that event.
+        if (versions.get(sid) !== (state.latestCacheVersions.get(sid) || 0)) continue;
+        const entry = latest[sid] || latest[String(sid)] || null;
+        state.latestCache.set(sid, entry ? { ai_status: entry.ai_status, id: entry.id, updated_at: entry.updated_at } : null);
+      }
+      persistLatestCache();
+    } catch {
+      // don't poison the cache — leave unknown so the button still works
+    } finally {
+      missing.forEach((sid) => state.lookupsInFlight.delete(sid));
     }
-    persistLatestCache();
-  } catch {
-    // don't poison the cache — leave unknown so the button still works
-  } finally {
-    missing.forEach((sid) => state.lookupsInFlight.delete(sid));
+  })();
+  missing.forEach((sid) => state.lookupsInFlight.set(sid, lookup));
+  await lookup;
+  if (missing.some((sid) => versions.get(sid) !== (state.latestCacheVersions.get(sid) || 0))) {
+    return fetchLatestFor(unique);
   }
 }
 
@@ -554,6 +579,7 @@ function refreshSlots(root) {
       const entry = state.latestCache.get(sid);
       el.innerHTML = chipHtml(sid, entry);
     });
+    refreshGenerationButtons(scope);
   });
 }
 

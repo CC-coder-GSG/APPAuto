@@ -15,6 +15,9 @@ const root = path.resolve(__dirname, '..');
     const dialogs = [];
     let acceptConfirmation = false;
     let failSubmission = false;
+    let holdPendingLookup = false;
+    let releasePendingLookup;
+    let pendingLookupStarted;
     page.on('pageerror', error => errors.push(error.stack));
     page.on('dialog', async dialog => {
       dialogs.push(dialog.message());
@@ -70,7 +73,13 @@ const root = path.resolve(__dirname, '..');
         return route.fulfill({ contentType: 'text/javascript', body: fs.readFileSync(path.join(root, 'frontend', url.pathname.slice(8)), 'utf8') });
       }
       if (url.pathname.endsWith('/batch-latest')) {
-        return send({ latest: Object.fromEntries(results) });
+        const body = JSON.stringify({ latest: Object.fromEntries(results) });
+        if (holdPendingLookup && results.get(43)?.ai_status === 'pending' && route.request().postDataJSON().story_ids.includes(43)) {
+          holdPendingLookup = false;
+          pendingLookupStarted();
+          await new Promise(resolve => { releasePendingLookup = resolve; });
+        }
+        return route.fulfill({ contentType: 'application/json', body });
       }
       const latest = url.pathname.match(/\/story\/(\d+)\/latest$/);
       if (latest) return send(results.get(Number(latest[1])) || null);
@@ -85,7 +94,7 @@ const root = path.resolve(__dirname, '..');
         }));
         return send({ batch_id, story_ids: data.story_ids, status: 'pending', expected_duration_seconds: 300 });
       }
-      const batch = url.pathname.match(/\/batch\/(batch-\d+)$/);
+      const batch = url.pathname.match(/\/batch\/([^/]+)$/);
       if (batch) {
         const rows = [...results.values()].filter(row => row.batch_id === batch[1]);
         return send({ results: rows, pending: rows.filter(row => row.ai_status === 'pending').length,
@@ -110,8 +119,11 @@ const root = path.resolve(__dirname, '..');
     assert.equal(requests.length, 0, 'Cancellation must not submit');
     assert.equal(await card.evaluate(element => element.open), wasOpen, 'Clicking the chip must not toggle the requirement card');
     acceptConfirmation = true;
+    holdPendingLookup = true;
+    const pendingLookup = new Promise(resolve => { pendingLookupStarted = resolve; });
     await generate.click();
     await page.waitForFunction(() => document.querySelector('#aiTaskBanner')?.textContent.includes('用例正在生成，请稍后'));
+    await pendingLookup;
     assert.deepEqual(requests[0], { execution_id: 99, story_ids: [43], select_all: false, user_note: '' });
     assert.equal(await generate.isDisabled(), true);
     await page.evaluate(() => window.OmniQAMineTab.renderMineCards());
@@ -123,11 +135,19 @@ const root = path.resolve(__dirname, '..');
     results.get(43).test_cases = cases;
     await page.evaluate(() => handlers.zentao_ai_batch_completed({ payload: { batch_id: 'batch-1', success: 1, failed: 0 } }));
     await page.getByText('AI 用例生成完成，成功 1 条', { exact: true }).waitFor();
+    releasePendingLookup();
+    await generate.waitFor({ state: 'hidden', timeout: 2000 });
+    await page.evaluate(() => window.OmniQAMineTab.renderMineCards());
+    assert.equal(await generate.isVisible(), false, 'Rerender must keep the generation chip hidden after success');
     await page.getByRole('button', { name: '查看结果' }).click();
     await page.locator('#aiResultRegenerate').waitFor({ state: 'visible' });
     assert.equal((await page.locator('#aiResultModalTitle').innerText()).trim(), 's#43');
     assert.equal(await page.locator('#aiResultRegenerate').isEnabled(), true);
     await page.evaluate(() => window.OmniQAStoryAI.closeModal());
+    await page.reload();
+    await page.waitForFunction(() => window.ready);
+    await generate.waitFor({ state: 'hidden', timeout: 2000 });
+    assert.equal(await page.locator('[data-req-id="2"] .ai-generate-chip').isVisible(), true, 'Failed generation must keep the retry action');
 
     // Both failed and successful result dialogs allow regeneration with confirmation.
     await page.evaluate(() => window.OmniQAStoryAI.openForStory(42));
@@ -189,8 +209,26 @@ const root = path.resolve(__dirname, '..');
     assert.doesNotMatch(await page.evaluate(() => JSON.stringify(messages)), /大约需要|分钟/);
     await page.evaluate(() => window.OmniQAStoryAI.startBatchWatch({ batch_id: 'long-running', story_ids: [46], started_at: Date.now() - 3600000 }));
     assert.doesNotMatch(await page.locator('#aiTaskBanner').innerText(), /预估|剩余/);
+
+    // Polling completion must hide the chip as well, while preserving regeneration.
+    results.get(42).ai_status = 'pending';
+    results.get(42).batch_id = 'poll-only';
+    await page.evaluate(() => window.OmniQAStoryAI.startBatchWatch({ batch_id: 'poll-only', story_ids: [42] }));
+    await page.locator('[data-req-id="2"] .ai-result-chip--pending').waitFor();
+    results.get(42).ai_status = 'success';
+    await page.locator('[data-ai-batch-poll="poll-only"]').click();
+    await page.locator('[data-req-id="2"] .ai-generate-chip').waitFor({ state: 'hidden', timeout: 2000 });
+    await page.evaluate(() => window.OmniQAStoryAI.openForStory(42));
+    assert.equal(await page.locator('#aiResultRegenerate').isVisible(), true);
+    assert.equal(await page.locator('#aiResultRegenerate').isEnabled(), true);
+    await page.evaluate(() => window.OmniQAStoryAI.closeModal());
+
+    // Completion from another tab or a dismissed banner still updates the action.
+    results.set(44, { id: 44, story_id: 44, ai_status: 'success', execution_id: 99 });
+    await page.evaluate(() => handlers.zentao_ai_batch_completed({ payload: { batch_id: 'untracked', story_ids: [44], success: 1, failed: 0 } }));
+    await page.locator('[data-req-id="4"] .ai-generate-chip').waitFor({ state: 'hidden', timeout: 2000 });
     assert.deepEqual(errors, []);
-    console.log('AI generation UI passed: scroll retention, confirmations, retries, background operations, completion notifications and shared waiting notice.');
+    console.log('AI generation UI passed: success hides chips across SSE, polling, rerenders and reloads; stale responses, retries, regeneration, scroll retention and background operations verified.');
   } finally {
     await browser.close();
   }

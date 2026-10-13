@@ -13,7 +13,7 @@ import './components/ai-result-modal.js?v=20261013-1';
 import './components/ai-config-modal.js?v=20260422-3';
 import './components/entity-preview-modal.js?v=20260727-1';
 import './components/effort-modal.js?v=20260730-1';
-import './ai-tasks.js?v=20261013-2';
+import './ai-tasks.js?v=20261013-3';
 import { resizeAllCharts } from './components/charts.js?v=20260706-2';
 import { runGuardrails } from './guardrails.js?v=20260716-1';
 
