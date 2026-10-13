@@ -13,12 +13,12 @@ import './components/ai-result-modal.js?v=20261013-1';
 import './components/ai-config-modal.js?v=20260422-3';
 import './components/entity-preview-modal.js?v=20260727-1';
 import './components/effort-modal.js?v=20260730-1';
-import './ai-tasks.js?v=20261013-1';
+import './ai-tasks.js?v=20261013-2';
 import { resizeAllCharts } from './components/charts.js?v=20260706-2';
 import { runGuardrails } from './guardrails.js?v=20260716-1';
 
 const OPTIONAL_TAB_MODULES = [
-  { name: 'mine', path: './tabs/mine.js?v=20261013-1' },
+  { name: 'mine', path: './tabs/mine.js?v=20261013-2' },
   { name: 'review-workbench', path: './tabs/review-workbench.js?v=20260720-2' },
   { name: 'task-workbench', path: './tabs/task-workbench.js?v=20260724-1' },
   { name: 'task-board', path: './tabs/task-board.js?v=20260724-1' },

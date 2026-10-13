@@ -42,6 +42,41 @@ function injectChipStyles() {
     .ai-result-chip--pending:hover { transform: none; filter: none; box-shadow: none; }
     .ai-result-chip__dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .85; box-shadow: 0 0 0 2px rgba(255,255,255,0.45); }
 
+    button.ai-generate-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: 6px;
+      font-size: 11px !important;
+      font-weight: 600 !important;
+      line-height: 1 !important;
+      padding: 3px 9px !important;
+      border-radius: 999px !important;
+      background: #fff7ed !important;
+      color: #9a3412 !important;
+      border: 1px dashed #fdba74 !important;
+      min-height: 0 !important;
+      box-shadow: none !important;
+      vertical-align: middle;
+      white-space: nowrap;
+      letter-spacing: 0.3px;
+      cursor: pointer;
+      transition: transform .12s ease, box-shadow .12s ease;
+    }
+    button.ai-generate-chip::before { content: '+'; font-weight: 800; }
+    button.ai-generate-chip:hover:not(:disabled) {
+      background: #ffedd5 !important;
+      transform: translateY(-1px);
+      box-shadow: 0 3px 8px rgba(154,52,18,0.12) !important;
+    }
+    button.ai-generate-chip:focus-visible { outline: 2px solid #f59e0b; outline-offset: 2px; }
+    button.ai-generate-chip:disabled {
+      background: #f8fafc !important;
+      color: #64748b !important;
+      border: 1px dashed #cbd5e1 !important;
+      cursor: default;
+    }
+
     button.aiqa-btn {
       font-size: 12px !important;
       font-weight: 600 !important;

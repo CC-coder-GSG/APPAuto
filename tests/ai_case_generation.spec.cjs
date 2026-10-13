@@ -37,7 +37,7 @@ const root = path.resolve(__dirname, '..');
       drafts: [{ id: 'draft', sources: [0], content: cases[0], submit_status: 'draft', parents: [] }],
     };
     const html = `<!doctype html><meta charset="utf-8"><style>.hidden{display:none!important}</style>
-      <div id="mineCards"></div><button id="other" onclick="window.otherActions++">其他操作</button>
+      <section id="tab-mine"><div id="mineCards"></div></section><button id="other" onclick="window.otherActions++">其他操作</button>
       <select id="zentaoAiExecutionSelect"><option value="99">执行</option></select>
       <input type="checkbox" id="zentaoAiSelectAll"><textarea id="zentaoAiUserNote"></textarea>
       <div id="zentaoAiSubmitState"></div><div id="zentaoAiResult"></div>
@@ -50,14 +50,15 @@ const root = path.resolve(__dirname, '..');
       <script type="module">
         import '/static/js/ai-tasks.js';
         import '/static/js/components/ai-result-modal.js';
+        import '/static/js/components/entity-preview-modal.js';
         import '/static/js/tabs/mine.js';
         import '/static/js/tabs/zentao-ai.js';
         import {state} from '/static/js/state.js';
         state.currentMineData=[
-          {id:1,title:'已有用例',zentao_story_id:41,zentao_execution_id:99,test_cases:[{id:1,zentao_case_id:'u#100'}]},
+          {id:1,title:'已有用例',zentao_req_id:'r#41',zentao_story_id:41,zentao_execution_id:99,test_cases:[{id:1,zentao_case_id:'u#100'}]},
           {id:2,title:'失败需求',zentao_req_id:'r#42',zentao_execution_id:99,test_cases:[]},
-          {id:3,title:'新需求',zentao_story_id:43,zentao_execution_id:99,test_cases:[]},
-          {id:4,title:'未关联执行',zentao_story_id:44,test_cases:[]}
+          {id:3,title:'新需求',zentao_req_id:'r#43',zentao_story_id:43,zentao_execution_id:99,test_cases:[]},
+          {id:4,title:'未关联执行',zentao_req_id:'r#44',zentao_story_id:44,test_cases:[]}
         ];
         window.OmniQAMineTab.renderMineCards(); window.ready=true;
       </script>`;
@@ -94,11 +95,20 @@ const root = path.resolve(__dirname, '..');
     });
     await page.goto('http://app.test/');
     await page.waitForFunction(() => window.ready);
+    for (const name of ['frontend/style.css', 'frontend/css/main.css', 'frontend/css/weave.css']) {
+      await page.addStyleTag({ content: fs.readFileSync(path.join(root, name), 'utf8').replace(/@import[^;]+;/g, '') });
+    }
     const generate = page.locator('[data-ai-generate-story-id="43"]');
+    assert.equal(await page.locator('[data-req-id="3"] summary .ai-generate-chip').count(), 1);
+    assert.equal(await generate.evaluate(element => element.previousElementSibling.classList.contains('ai-result-slot')), true);
+    const card = page.locator('[data-req-id="3"]');
+    const wasOpen = await card.evaluate(element => element.open);
+    if (process.env.AI_UI_SCREENSHOT) await page.screenshot({ path: process.env.AI_UI_SCREENSHOT });
     assert.equal(await page.locator('[data-req-id="1"] [data-ai-generate-story-id]').count(), 0);
     assert.equal(await page.locator('[data-ai-generate-story-id="44"]').isDisabled(), true);
     await generate.click();
     assert.equal(requests.length, 0, 'Cancellation must not submit');
+    assert.equal(await card.evaluate(element => element.open), wasOpen, 'Clicking the chip must not toggle the requirement card');
     acceptConfirmation = true;
     await generate.click();
     await page.waitForFunction(() => document.querySelector('#aiTaskBanner')?.textContent.includes('用例正在生成，请稍后'));

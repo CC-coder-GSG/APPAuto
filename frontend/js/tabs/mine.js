@@ -1333,6 +1333,9 @@ export function renderMineCards() {
     const ztStoryId = String(req.zentao_story_id || req.zentao_req_id || '').replace(/\D/g, '');
     const ztStorySlot = ztStoryId ? `<span class="zt-story-slot" data-zt-story-id="${ztStoryId}" style="margin-left:6px; vertical-align:middle;"></span>` : '';
     const aiResultSlot = ztStoryId ? `<span class="ai-result-slot" data-story-id="${ztStoryId}" style="margin-left:6px; vertical-align:middle;"></span>` : '';
+    const generateCaseChip = !caseHtml && ztStoryId && window.canAccessRawTab?.('zentao-ai')
+      ? `<button type="button" class="ai-generate-chip" data-ai-generate-story-id="${ztStoryId}" data-ai-execution-id="${Number(req.zentao_execution_id) || ''}" title="${req.zentao_execution_id ? '为该需求生成 AI 测试用例' : '该需求所属大版本尚未关联禅道执行'}" ${req.zentao_execution_id ? '' : 'disabled'}>生成用例</button>`
+      : '';
     const reqIdHtml = ztStoryId
       ? `<span class="qa-story-id-nohref" data-zt-story-id="${ztStoryId}">${req.zentao_req_id}</span>`
       : (req.zentao_req_id || '');
@@ -1347,7 +1350,7 @@ export function renderMineCards() {
     return `
       <details class="mine-req-card" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; ${retestFailBorder} transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
-          <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${renderStoryTaskChips(req.story_tasks, 'mine', req.id)}</div>
+          <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${generateCaseChip}${renderStoryTaskChips(req.story_tasks, 'mine', req.id)}</div>
           ${isFullyCompleted ? '<span style="color:#16a34a; font-size:14px; background:#f0fdf4; padding:4px 8px; border-radius:4px; border:1px solid #bbf7d0;">✅ 测试已完成</span>' : '<span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开卡片)</span>'}
         </summary>
         <div style="margin-top: 12px;">
@@ -1365,7 +1368,7 @@ export function renderMineCards() {
             <button class="secondary" style="padding:2px 8px; font-size:12px;" onclick="openReqTestNotesModal(${req.id})">${req.test_notes ? '查看/编辑测试要点' : '填写测试要点'}</button>
             ${syncSummary}
           </div>
-          <div>${caseHtml || (ztStoryId && window.canAccessRawTab?.('zentao-ai') ? `<button type="button" class="secondary" style="padding:2px 8px; font-size:12px;" data-ai-generate-story-id="${ztStoryId}" data-ai-execution-id="${Number(req.zentao_execution_id) || ''}" title="${req.zentao_execution_id ? '为该需求生成 AI 测试用例' : '该需求所属大版本尚未关联禅道执行'}" ${req.zentao_execution_id ? '' : 'disabled'}>生成用例</button>` : '')}</div>
+          <div>${caseHtml}</div>
           <div class="free-bug-box"><div><b>自由Bug</b></div><div style="margin-top:6px;">${freeBugHtml}</div></div>
           <div class="muted" style="margin-top:10px; font-size:12px; padding:6px 10px; background:#f8fafc; border-left:3px solid #94a3b8; border-radius:4px;">
             用例与 Bug 已改为按禅道 story / testcase 自动归集，不再需要手工录入。如需补救异常归属，请到“同步中心”由管理员处理。
