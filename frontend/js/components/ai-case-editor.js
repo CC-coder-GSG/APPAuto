@@ -48,7 +48,7 @@ function sourceList() {
   return `<h3 style="margin:0">AI 原始小用例 <span class="ace-muted">${w.sources.length} 条</span></h3>
     <div class="ace-toolbar"><input aria-label="搜索原始用例" data-source-search value="${esc(state.search)}" placeholder="搜索小用例标题"></div>
     <div class="ace-toolbar"><button data-action="source-all">选择筛选结果</button><button data-action="source-clear">清空</button></div>
-    <div style="max-height:540px;overflow:auto">${visible.map((s) => `<label class="ace-card" style="display:block;background:${used.has(s.index) ? '#f8fafc' : '#fff'}"><input type="checkbox" data-source="${s.index}" ${state.sources.has(s.index) ? 'checked' : ''} ${used.has(s.index) ? 'disabled' : ''}> <b>${s.index + 1}. ${esc(s.content.title || '未命名用例')}</b><div class="ace-muted" style="margin-top:5px">${esc(w.context.types[s.content.case_type] || '类型待选择')} · ${s.content.steps.length} 步${used.has(s.index) ? ' · 已加入草稿' : ''}</div></label>`).join('') || '<p class="ace-muted">没有匹配的小用例</p>'}</div>
+    <div data-source-scroll style="max-height:540px;overflow:auto">${visible.map((s) => `<label class="ace-card" style="display:block;background:${used.has(s.index) ? '#f8fafc' : '#fff'}"><input type="checkbox" data-source="${s.index}" ${state.sources.has(s.index) ? 'checked' : ''} ${used.has(s.index) ? 'disabled' : ''}> <b>${s.index + 1}. ${esc(s.content.title || '未命名用例')}</b><div class="ace-muted" style="margin-top:5px">${esc(w.context.types[s.content.case_type] || '类型待选择')} · ${s.content.steps.length} 步${used.has(s.index) ? ' · 已加入草稿' : ''}</div></label>`).join('') || '<p class="ace-muted">没有匹配的小用例</p>'}</div>
     <div class="ace-toolbar"><button data-action="prev" ${state.page === 0 ? 'disabled' : ''}>上一页</button><span class="ace-muted">${state.page + 1} / ${pages}</span><button data-action="next" ${state.page >= pages - 1 ? 'disabled' : ''}>下一页</button></div>
     <button class="primary" data-action="add" ${state.sources.size && !state.busy && !state.editing ? '' : 'disabled'}>加入 ${state.sources.size} 条到草稿</button>`;
 }
@@ -94,14 +94,21 @@ function renderPreview() {
     <p class="ace-muted">将创建 ${drafts.length} 条新用例并关联上述需求。成功项保留禅道编号，失败项可修改后重新提交，超时项需先核实。</p><div class="ace-toolbar"><button data-action="send" class="primary" ${state.busy ? 'disabled' : ''}>确认创建 ${drafts.length} 条</button><button data-action="cancel-preview" ${state.busy ? 'disabled' : ''}>返回整理</button></div></div>`;
 }
 
-function render() {
+function render({ resetSourceScroll = false } = {}) {
   const root = ensureRoot();
   if (!state?.workspace) return;
+  const sourceScroller = root.querySelector('[data-source-scroll]');
+  if (sourceScroller) state.sourceScrollTop = sourceScroller.scrollTop;
+  if (resetSourceScroll) state.sourceScrollTop = 0;
+  const scrollTop = root.scrollTop;
   const w = state.workspace;
   root.innerHTML = `<div class="ace-panel"><div style="display:flex;align-items:center;gap:12px"><div style="flex:1"><h2 style="font-size:20px;margin:0">整理 AI 用例并提交禅道</h2><div class="ace-muted" style="margin-top:6px">${esc(w.context.product_name)} · 需求 #${w.context.story_id} ${esc(w.context.story_title)} · 保存后可关闭或刷新继续整理</div></div><button data-action="close" ${state.busy ? 'disabled' : ''}>关闭</button></div>
     <div class="ace-notice" style="margin:14px 0">先加入需要的小用例，再选择单独提交或合并，编辑保存后预览提交。${!w.context.module_options_complete ? '<br>当前仅取得根模块和需求模块；其他模块暂不可选。' : ''}</div>
     ${state.notice ? `<div role="alert" class="ace-error" style="margin-bottom:12px">${esc(state.notice)}</div>` : ''}
     ${state.preview ? renderPreview() : `<div class="ace-grid"><aside>${sourceList()}</aside><main>${draftList()}</main></div>`}</div>`;
+  const replacement = root.querySelector('[data-source-scroll]');
+  if (replacement) replacement.scrollTop = state.sourceScrollTop || 0;
+  root.scrollTop = scrollTop;
 }
 
 function template(c) {
@@ -117,7 +124,7 @@ function onInput(event) {
     state.search = target.value;
     state.page = 0;
     const start = target.selectionStart;
-    render();
+    render({ resetSourceScroll: true });
     const replacement = ensureRoot().querySelector('[data-source-search]');
     replacement.focus();
     replacement.setSelectionRange(start, start);
@@ -134,6 +141,9 @@ function onInput(event) {
 function onChange(event) {
   if (!state || state.busy) return;
   const target = event.target;
+  // Search is already handled by input; handling its blur-time change would
+  // redraw the list again while the focused input is being replaced.
+  if (target.hasAttribute('data-source-search')) return;
   const set = target.hasAttribute('data-source') ? state.sources : target.hasAttribute('data-draft') ? state.drafts : null;
   if (set) {
     const key = set === state.sources ? Number(target.dataset.source) : target.dataset.draft;
@@ -261,7 +271,7 @@ async function onClick(event) {
     }
   }
   if (state) {
-    render();
+    render({ resetSourceScroll: action === 'prev' || action === 'next' });
     if (state.editing) ensureRoot().querySelector('#aceEditing')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     schedulePoll();
   }

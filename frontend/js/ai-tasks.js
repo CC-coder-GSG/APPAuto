@@ -1,5 +1,5 @@
 // Global coordinator for zentao-ai batch tasks.
-// - Countdown toast stays visible regardless of which tab the user is on.
+// - Generation notice stays visible regardless of which tab the user is on.
 // - State persists in localStorage so page reloads can resume awareness.
 // - Listens to SSE `zentao_ai_batch_completed` to clear pending tasks.
 // - Provides a slot injector: any `<span class="ai-result-slot" data-story-id="123">` gets an "AI结果" button.
@@ -136,10 +136,11 @@ const state = {
   latestCache: new Map(),   // story_id → {ai_status, id, updated_at}
   lookupsInFlight: new Set(),
   pollInFlight: new Set(),  // batch_ids currently being polled — avoid stacking
+  submittingStories: new Set(),
 };
 
 // Fallback polling interval (ms). 防止 SSE 事件丢失（断线重连缝隙、handler 异常等）
-// 导致倒计时永远停不下来。SSE 仍是主通道，这只是兜底。
+// 导致生成提示永远停不下来。SSE 仍是主通道，这只是兜底。
 const FALLBACK_POLL_MS = 20000;
 
 function now() { return Date.now(); }
@@ -229,14 +230,6 @@ function showTopToast({ tone = 'success', message, actionLabel, onAction, durati
   setTimeout(dismiss, Math.max(1500, durationMs));
 }
 
-function fmtSeconds(sec) {
-  const s = Math.max(0, Math.round(sec));
-  const mm = Math.floor(s / 60);
-  const ss = s % 60;
-  if (mm <= 0) return `${ss}s`;
-  return `${mm}m${String(ss).padStart(2, '0')}s`;
-}
-
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -249,20 +242,11 @@ function escapeHtml(value) {
 function render() {
   const host = ensureHost();
   host.innerHTML = '';
-  const tNow = now();
-  for (const [batch_id, info] of state.batches.entries()) {
-    const elapsed = (tNow - info.started_at) / 1000;
-    const expected = Math.max(60, Number(info.expected_seconds) || 300);
-    const remaining = Math.max(0, expected - elapsed);
-    const overdue = elapsed > expected + 60;
+  for (const batch_id of state.batches.keys()) {
     const card = document.createElement('div');
-    card.style.cssText = `padding:12px 14px; border-radius:10px; box-shadow:0 6px 18px rgba(15,23,42,0.18); background:${overdue ? '#fff7ed' : '#ffffff'}; border:1px solid ${overdue ? '#fdba74' : '#e2e8f0'};`;
+    card.style.cssText = 'padding:12px 14px; border-radius:10px; box-shadow:0 6px 18px rgba(15,23,42,0.18); background:#ffffff; border:1px solid #e2e8f0;';
     card.innerHTML = `
-      <div style="font-size:12px; color:#64748b; margin-bottom:2px;">禅道 AI 处理中</div>
-      <div style="font-weight:600; color:#0f172a;">${info.story_ids.length} 条需求</div>
-      <div style="margin-top:4px; font-size:12px; color:${overdue ? '#b45309' : '#475569'};">
-        ${overdue ? '已超过预估时长，AI 可能仍在处理…' : `剩余约 ${fmtSeconds(remaining)}`}
-      </div>
+      <div role="status" style="font-weight:600; color:#0f172a;">用例正在生成，请稍后</div>
       <div style="margin-top:8px; display:flex; gap:8px; justify-content:flex-end;">
         <button type="button" class="aiqa-btn aiqa-btn--secondary" data-ai-batch-dismiss="${escapeHtml(batch_id)}">稍后再说</button>
         <button type="button" class="aiqa-btn aiqa-btn--primary" data-ai-batch-poll="${escapeHtml(batch_id)}">立即查询</button>
@@ -393,6 +377,7 @@ function finishBatch(batchId, payload, { silent = false } = {}) {
     invalidateLatestCache(info.story_ids);
     refreshSlots();
   }
+  refreshGenerationButtons();
 }
 
 function startBatchWatch(info) {
@@ -409,6 +394,50 @@ function startBatchWatch(info) {
   persist();
   render();
   startTicking();
+  invalidateLatestCache(info.story_ids || []);
+  refreshSlots();
+  refreshGenerationButtons();
+}
+
+function isStoryGenerating(storyId) {
+  const id = Number(storyId);
+  return state.submittingStories.has(id) || Array.from(state.batches.values())
+    .some((batch) => batch.story_ids.some((sid) => Number(sid) === id));
+}
+
+function refreshGenerationButtons(root = document) {
+  root.querySelectorAll('[data-ai-generate-story-id]').forEach((button) => {
+    const pending = isStoryGenerating(button.dataset.aiGenerateStoryId);
+    button.disabled = pending || !Number(button.dataset.aiExecutionId);
+    button.textContent = pending ? '正在生成…' : button.hasAttribute('data-ai-regenerate') ? '重新生成' : '生成用例';
+  });
+}
+
+async function generateForStory(storyId, executionId, { regenerate = false } = {}) {
+  const id = Number(storyId);
+  const execution = Number(executionId);
+  if (!id || !execution) {
+    window.showMessage?.('该需求所属大版本尚未关联禅道执行，无法生成用例', 'error');
+    return false;
+  }
+  if (isStoryGenerating(id)) return false;
+  if (!window.confirm(regenerate ? '是否重新生成该需求的用例？' : '是否为该需求生成用例？')) return false;
+  state.submittingStories.add(id);
+  refreshGenerationButtons();
+  try {
+    const data = await (await api('/zentao/ai/generate-and-save', {
+      method: 'POST',
+      body: { execution_id: execution, story_ids: [id], select_all: false, user_note: '' },
+    })).json();
+    startBatchWatch({ ...data, started_at: now() });
+    return true;
+  } catch (error) {
+    window.showMessage?.(error.message || '提交失败', 'error');
+    return false;
+  } finally {
+    state.submittingStories.delete(id);
+    refreshGenerationButtons();
+  }
 }
 
 function subscribeSSE() {
@@ -474,6 +503,7 @@ function chipHtml(storyId, cacheEntry) {
 
 function refreshSlots(root) {
   const scope = root || document;
+  refreshGenerationButtons(scope);
   const slots = scope.querySelectorAll('.ai-result-slot[data-story-id]');
   if (!slots.length) return;
   const ids = [];
@@ -494,6 +524,22 @@ function refreshSlots(root) {
 
 function bindDelegatedClicks() {
   document.addEventListener('click', (e) => {
+    const generateButton = e.target.closest?.('[data-ai-generate-story-id]');
+    if (generateButton) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!generateButton.disabled) {
+        generateForStory(generateButton.dataset.aiGenerateStoryId, generateButton.dataset.aiExecutionId, {
+          regenerate: generateButton.hasAttribute('data-ai-regenerate'),
+        }).then((submitted) => {
+          const modal = document.getElementById('aiResultModal');
+          if (submitted && modal?.dataset.storyId === generateButton.dataset.aiGenerateStoryId) {
+            window.OmniQAStoryAI.closeModal?.();
+          }
+        });
+      }
+      return;
+    }
     const el = e.target && e.target.closest ? e.target.closest(`.${CHIP_CLASS}[data-ai-story-id]`) : null;
     if (!el) return;
     const sid = Number(el.getAttribute('data-ai-story-id'));
@@ -571,4 +617,6 @@ window.OmniQAStoryAI = Object.assign(window.OmniQAStoryAI || {}, {
   startBatchWatch,
   refreshSlots,
   invalidateLatestCache,
+  generateForStory,
+  refreshGenerationButtons,
 });

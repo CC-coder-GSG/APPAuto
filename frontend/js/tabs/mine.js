@@ -1330,7 +1330,7 @@ export function renderMineCards() {
 
     const freeBugHtml = (req.free_bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无自由Bug</span>';
 
-    const ztStoryId = (req.zentao_req_id || '').replace(/\D/g, '');
+    const ztStoryId = String(req.zentao_story_id || req.zentao_req_id || '').replace(/\D/g, '');
     const ztStorySlot = ztStoryId ? `<span class="zt-story-slot" data-zt-story-id="${ztStoryId}" style="margin-left:6px; vertical-align:middle;"></span>` : '';
     const aiResultSlot = ztStoryId ? `<span class="ai-result-slot" data-story-id="${ztStoryId}" style="margin-left:6px; vertical-align:middle;"></span>` : '';
     const reqIdHtml = ztStoryId
@@ -1365,7 +1365,7 @@ export function renderMineCards() {
             <button class="secondary" style="padding:2px 8px; font-size:12px;" onclick="openReqTestNotesModal(${req.id})">${req.test_notes ? '查看/编辑测试要点' : '填写测试要点'}</button>
             ${syncSummary}
           </div>
-          <div>${caseHtml}</div>
+          <div>${caseHtml || (ztStoryId && window.canAccessRawTab?.('zentao-ai') ? `<button type="button" class="secondary" style="padding:2px 8px; font-size:12px;" data-ai-generate-story-id="${ztStoryId}" data-ai-execution-id="${Number(req.zentao_execution_id) || ''}" title="${req.zentao_execution_id ? '为该需求生成 AI 测试用例' : '该需求所属大版本尚未关联禅道执行'}" ${req.zentao_execution_id ? '' : 'disabled'}>生成用例</button>` : '')}</div>
           <div class="free-bug-box"><div><b>自由Bug</b></div><div style="margin-top:6px;">${freeBugHtml}</div></div>
           <div class="muted" style="margin-top:10px; font-size:12px; padding:6px 10px; background:#f8fafc; border-left:3px solid #94a3b8; border-radius:4px;">
             用例与 Bug 已改为按禅道 story / testcase 自动归集，不再需要手工录入。如需补救异常归属，请到“同步中心”由管理员处理。

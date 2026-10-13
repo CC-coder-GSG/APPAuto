@@ -90,6 +90,7 @@ def test_upsert_record_rejected_when_disabled(db_session):
 
 def test_workbench_final_test_shows_all_reqs_with_user_state(db_session):
     major = _major(db_session, "V9004")
+    major.zentao_execution_id = 1645
     admin = _user(db_session, "ft_admin4", role=UserRole.ADMIN)
     owner = _user(db_session, "ft_owner4")
     viewer = _user(db_session, "ft_viewer4")  # 非负责人
@@ -104,6 +105,7 @@ def test_workbench_final_test_shows_all_reqs_with_user_state(db_session):
     # 非负责人也能看到该版本全部需求
     assert {row["id"] for row in rows} == {r1.id, r2.id}
     assert all(row["final_test"] is True for row in rows)
+    assert all(row["zentao_execution_id"] == 1645 for row in rows)
     by_id = {row["id"]: row for row in rows}
     assert by_id[r1.id]["test_completed"] is True
     assert by_id[r2.id]["test_completed"] is False  # 未勾选默认 False
@@ -132,6 +134,7 @@ def test_workbench_mine_exposes_zentao_task_linkage(db_session):
     """回归：/workbench/mine 必须返回禅道子任务关联字段，否则已建任务的需求
     会在需求工作台错误显示为「未关联禅道任务」。"""
     major = _major(db_session, "V9007")
+    major.zentao_execution_id = 1647
     owner = _user(db_session, "ft_owner7")
     linked = _req(db_session, major.id, "r#9401", owner_id=owner.id)
     unlinked = _req(db_session, major.id, "r#9402", owner_id=owner.id)
@@ -145,6 +148,7 @@ def test_workbench_mine_exposes_zentao_task_linkage(db_session):
         current_user=owner, major_version_id=major.id, mode="version"
     )
     by_id = {row["id"]: row for row in rows}
+    assert all(row["zentao_execution_id"] == 1647 for row in rows)
     # 关联了禅道任务的需求应带出 task id / 状态 / 预计用时
     assert by_id[linked.id]["zentao_task_id"] == 17196
     assert by_id[linked.id]["zentao_task_status"] == "wait"

@@ -1,8 +1,9 @@
 import { api } from '../api.js';
 import { mapZentaoStatus } from '../zentao-status-map.js';
-import { openCaseEditor } from './ai-case-editor.js';
+import { openCaseEditor } from './ai-case-editor.js?v=20261013-1';
 
 const MODAL_ID = 'aiResultModal';
+let latestRequest = 0;
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -27,6 +28,7 @@ function ensureModalRoot() {
           <div id="aiResultModalTitle" style="font-size:18px; font-weight:700; color:#0f172a; margin-bottom:4px;"></div>
           <div id="aiResultModalMeta" style="font-size:12px; color:#64748b;"></div>
         </div>
+        <button type="button" id="aiResultRegenerate" data-ai-generate-story-id="" data-ai-execution-id="" data-ai-regenerate disabled class="aiqa-btn aiqa-btn--secondary">重新生成</button>
         <button type="button" onclick="window.OmniQAStoryAI && window.OmniQAStoryAI.closeModal()" style="border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; padding:4px 12px; cursor:pointer;">关闭</button>
       </div>
       <div id="aiResultModalBody" style="margin-top:16px;"></div>
@@ -183,6 +185,13 @@ function render(data) {
   const meta = root.querySelector('#aiResultModalMeta');
   const body = root.querySelector('#aiResultModalBody');
 
+  const regenerateButton = root.querySelector('#aiResultRegenerate');
+  regenerateButton.dataset.aiGenerateStoryId = String(data.story_id);
+  regenerateButton.dataset.aiExecutionId = String(data.execution_id || '');
+  regenerateButton.disabled = !data.execution_id;
+  regenerateButton.title = data.execution_id ? '重新生成该需求的 AI 测试用例' : '该结果缺少禅道执行信息，无法重新生成';
+  window.OmniQAStoryAI?.refreshGenerationButtons?.(root);
+
   const statusLabel = mapZentaoStatus(data.ai_status);
   const statusColor = data.ai_status === 'success' ? '#166534' : data.ai_status === 'failed' ? '#b91c1c' : '#475569';
   const testCases = getTestCases(data);
@@ -278,6 +287,7 @@ function openModal() {
 }
 
 function closeModal() {
+  latestRequest++;
   const root = document.getElementById(MODAL_ID);
   if (!root) return;
   root.classList.add('hidden');
@@ -288,6 +298,13 @@ async function openForStory(storyId) {
   const id = Number(storyId);
   if (!id) return;
   const root = ensureModalRoot();
+  const request = ++latestRequest;
+  root.dataset.storyId = String(id);
+  const regenerateButton = root.querySelector('#aiResultRegenerate');
+  regenerateButton.dataset.aiGenerateStoryId = String(id);
+  regenerateButton.dataset.aiExecutionId = '';
+  regenerateButton.disabled = true;
+  regenerateButton.textContent = '重新生成';
   const body = root.querySelector('#aiResultModalBody');
   const title = root.querySelector('#aiResultModalTitle');
   const meta = root.querySelector('#aiResultModalMeta');
@@ -298,12 +315,14 @@ async function openForStory(storyId) {
   try {
     const res = await api(`/zentao/ai/story/${id}/latest`);
     const data = await res.json();
+    if (request !== latestRequest) return;
     if (!data || !data.id) {
       body.innerHTML = '<div class="muted" style="padding:24px; text-align:center;">暂无 AI 处理结果</div>';
       return;
     }
     render(data);
   } catch (err) {
+    if (request !== latestRequest) return;
     body.innerHTML = `<div style="padding:16px; color:#b91c1c;">${escapeHtml(err.message || '加载失败')}</div>`;
   }
 }

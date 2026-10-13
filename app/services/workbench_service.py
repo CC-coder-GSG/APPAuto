@@ -226,6 +226,7 @@ class WorkbenchService:
                 "major_version_id": r.major_version_id,
                 "major_version_name": r.major_version.version_no if r.major_version else "",
                 "zentao_story_id": r.zentao_story_id,
+                "zentao_execution_id": r.major_version.zentao_execution_id if r.major_version else None,
                 # 禅道子任务关联信息：前端据此显示「禅道子任务 #」标签 / 「开始」按钮，
                 # 缺失会导致已建任务的需求错误显示为「未关联禅道任务」。
                 "zentao_task_id": r.zentao_task_id,

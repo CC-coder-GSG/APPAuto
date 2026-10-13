@@ -191,7 +191,7 @@ async function submit() {
       },
     });
     const data = await res.json();
-    toast(`已提交 ${data.story_ids.length} 条需求，AI 处理大约需要 ${Math.round((data.expected_duration_seconds || 300) / 60)} 分钟`, 'success');
+    toast('用例正在生成，请稍后', 'success');
     if (window.OmniQAStoryAI?.startBatchWatch) {
       window.OmniQAStoryAI.startBatchWatch({
         batch_id: data.batch_id,
