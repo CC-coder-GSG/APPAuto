@@ -4,13 +4,13 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261014-2">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261014-3">
   <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261014-2"></script>
+  <script type="module" src="/static/js/app.js?v=20261014-3"></script>
   <script src="/static/js/weave-motion.js?v=20260703-1" defer></script>
   <style>
     /* Header layout */
@@ -288,9 +288,11 @@
     <details id="assignCreateBlock" open style="border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; background:#fff;">
       <summary style="cursor:pointer; font-weight:700; color:#0f172a; list-style:none;">任务创建台<span id="assignReqCount" class="badge" style="margin-left:8px; font-weight:600; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe;">共 0 个需求</span></summary>
       <div style="margin-top:10px;">
-      <div class="row"><label>大版本</label><select id="assignMajorSelect" onchange="loadAssignBoard()"></select><button onclick="loadAssignBoard()">加载</button><button class="secondary" onclick="syncAssignRequirementsFromZentao()">同步禅道需求</button><button onclick="publishAssign()">一键发布（更新分配）</button><button class="secondary" onclick="createZentaoTasks()" title="仅在禅道创建/改派测试任务，不发送企微通知；用于创建失败后重试" style="color:#7c3aed; border-color:#c4b5fd;">🔧 禅道创建任务</button><button id="finalTestToggleBtn" class="secondary" onclick="toggleFinalTest()">最终测试</button></div>
-      <div class="row" style="margin-top:6px;"><label>禅道任务起止</label><input type="date" id="assignTaskStartDate" title="测试任务开始日期"><span style="color:#64748b;">至</span><input type="date" id="assignTaskDeadline" title="测试任务截止日期"><span class="muted" style="font-size:12px;">发布时在禅道按执行创建测试任务，预计工时=工作日×8h（跳周末/节假日）</span></div>
-        <table><thead><tr><th>需求</th><th>负责人</th></tr></thead><tbody id="assignTable"></tbody></table>
+      <div class="row" style="flex-wrap:wrap;"><label>大版本</label><select id="assignMajorSelect" onchange="loadAssignBoard()"></select><button data-assign-lock onclick="loadAssignBoard()">加载</button><button data-assign-lock class="secondary" onclick="syncAssignRequirementsFromZentao()">同步禅道需求</button><button data-assign-action onclick="publishAssign()" disabled>一键发布（所选需求）</button><button data-assign-action class="secondary" onclick="createZentaoTasks()" title="仅创建/改派所选需求的测试任务，不发送企微通知；已有任务不重复创建" disabled>更新禅道任务（所选需求）</button><button data-assign-action class="secondary" onclick="updateZentaoTaskDates()" disabled>修改预计起止时间</button><button id="finalTestToggleBtn" class="secondary" onclick="toggleFinalTest()">最终测试</button></div>
+      <div class="row" style="margin-top:6px; flex-wrap:wrap;"><label>禅道任务起止</label><input type="date" id="assignTaskStartDate" title="预计开始日期" aria-label="禅道任务预计开始日期"><span style="color:#64748b;">至</span><input type="date" id="assignTaskDeadline" title="预计结束日期" aria-label="禅道任务预计结束日期"><span class="muted" style="font-size:12px;">操作前需设置有效日期；修改起止时间仅更新已有子任务。</span></div>
+      <div class="assign-selection-bar"><span id="assignSelectionCount">已选 0 个需求</span><span class="muted">已有任务不重复创建，保留改派和取消任务重建逻辑。</span></div>
+      <div id="assignBatchResult" class="assign-batch-result" hidden></div>
+      <div style="overflow-x:auto;"><table class="assign-requirements"><thead><tr><th style="width:48px;"><input type="checkbox" id="assignSelectAll" aria-label="全选当前版本需求" onchange="toggleAssignSelectAll(this.checked)" disabled></th><th>需求</th><th>负责人</th><th>禅道子任务 / 预计起止</th></tr></thead><tbody id="assignTable"></tbody></table></div>
       </div>
     </details>
 

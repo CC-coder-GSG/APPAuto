@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from app.models import Requirement, User, Version
 from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.services.holiday_service import get_holiday_map
+from app.services.assignment_validation import validate_assignments
 from app.services.sse_service import sse_publish
 from app.services.zentao_system_client import (
     get_system_zentao_client,
@@ -281,6 +282,7 @@ class ZentaoTaskSyncService:
             "parent_task_id": None,
             "reused_parent": False,  # True=挂进执行下已有的同名父任务（增量分配）
             "created_tasks": [],
+            "adopted_tasks": [],
             "reassigned_tasks": [],
             "retained_closed_tasks": [],
             "unassigned": [],   # [{requirement_id, owner_name}] 解析不到禅道账号
@@ -294,6 +296,8 @@ class ZentaoTaskSyncService:
         if not major.zentao_execution_id:
             out["errors"].append("该大版本未绑定禅道执行，无法创建禅道任务")
             return out
+
+        assignments = validate_assignments(self.db, major_version_id, assignments)
 
         client = get_system_zentao_client(self.db)
         if not client:
@@ -322,7 +326,7 @@ class ZentaoTaskSyncService:
         req_ids = [a.get("requirement_id") for a in assignments if a.get("requirement_id")]
         req_map = {
             r.id: r
-            for r in self.db.query(Requirement).filter(Requirement.id.in_(req_ids)).all()
+            for r in self.db.query(Requirement).filter(Requirement.id.in_(req_ids), Requirement.major_version_id == major_version_id).all()
         }
         owner_ids = {a.get("owner_id") for a in assignments if a.get("owner_id")}
         user_map = {
@@ -406,6 +410,7 @@ class ZentaoTaskSyncService:
             if not tid:
                 continue
             req.zentao_task_id = tid
+            out["adopted_tasks"].append(tid)
             pid = _coerce_int(t.get("parent"))
             if pid:
                 req.zentao_parent_task_id = pid

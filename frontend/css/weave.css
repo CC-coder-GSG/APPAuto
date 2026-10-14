@@ -1660,3 +1660,28 @@ button.qa-story-change-confirm:disabled {
   .mine-req-card > summary .qa-story-change-badge__task,
   .mine-req-card > summary .qa-story-change-badge__arrow { display: none; }
 }
+
+/* Assignment batch selection and persistent, readable per-item results. */
+.assign-selection-bar { display:flex; flex-wrap:wrap; gap:8px 20px; align-items:center; margin:14px 0 8px; font-size:13px; }
+#assignSelectionCount { font-weight:600; color:#334155; }
+.assign-requirements input[type="checkbox"] { width:16px; height:16px; padding:0; accent-color:#57534e; cursor:pointer; }
+.assign-requirements select { min-width:130px; }
+.assign-task-dates { min-width:185px; font-size:12px; }
+.assign-task-dates small, .assign-result-content small { display:block; margin-top:4px; color:#78716c; font-size:12px; }
+.assign-batch-result { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:10px 0; padding:10px 12px; background:#f5f5f4; border:1px solid #e7e5e4; border-radius:8px; font-size:13px; }
+.assign-batch-result[hidden] { display:none; }
+dialog.assign-result-modal { width:min(900px, calc(100vw - 32px)); max-height:85vh; box-sizing:border-box; padding:22px; border:1px solid #e7e5e4; border-radius:14px; background:#fff; color:#292524; box-shadow:0 24px 80px #0003; }
+.assign-result-modal::backdrop { background:rgba(28,25,23,.38); }
+.assign-result-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.assign-result-heading h3 { margin:0; font-size:18px; }
+.assign-result-modal p { font-size:13px; line-height:1.7; }
+.assign-result-content { overflow:auto; }
+.assign-result-content table { min-width:530px; font-size:13px; }
+.assign-result-content td { vertical-align:top; }
+.assign-result-status { display:inline-block; padding:3px 8px; border-radius:5px; white-space:nowrap; font-size:12px; }
+.assign-result-status.updated { background:#ecfdf5; color:#047857; }
+.assign-result-status.unchanged, .assign-result-status.skipped { background:#f5f5f4; color:#57534e; }
+.assign-result-status.failed { background:#fef2f2; color:#b91c1c; }
+.assign-result-status.unverified { background:#fffbeb; color:#a16207; }
+.assign-result-warning, .assign-result-content small.assign-result-warning { color:#b45309; }
+#assignCreateBlock button:disabled { opacity:.45; cursor:not-allowed; }

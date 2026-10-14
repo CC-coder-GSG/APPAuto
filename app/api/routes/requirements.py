@@ -11,11 +11,14 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user, get_db
 from app.models import BugSourceType, BugTracking, Requirement, User, Version, VersionType
+from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.integrations.wecom import send_markdown
 from app.services.activity_service import ActivityService
 from app.services.permission_service import ensure_admin, ensure_tab_access
 from app.services.requirement_service import RequirementService
 from app.services.zentao_task_sync_service import ZentaoTaskSyncService
+from app.services.assignment_validation import validate_assignments, validate_task_dates
+from app.services.zentao_task_schedule_service import ZentaoTaskScheduleService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -51,10 +54,18 @@ class AssignItemPayload(BaseModel):
 class AssignPublishPayload(BaseModel):
     major_version_id: int
     assignments: list[AssignItemPayload]
-    # 禅道任务联动（2026-06-29）：父任务起止日期；提供则在禅道建测试任务。
+    # 禅道联动操作要求完整、有效的预计起止日期。
     task_start_date: Optional[str] = None
     task_deadline: Optional[str] = None
     create_zentao_tasks: bool = True
+
+
+class TaskDatesPayload(BaseModel):
+    major_version_id: int
+    requirement_ids: list[int]
+    task_start_date: Optional[str] = None
+    task_deadline: Optional[str] = None
+
 
 class LinkMajorPayload(BaseModel):
     target_major_version_id: int
@@ -138,10 +149,12 @@ def admin_list_requirements(
     )
     if major_version_id:
         q = q.filter(Requirement.major_version_id == major_version_id)
-    elif software_id:
+    if software_id:
         q = q.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
 
     rows = q.all()
+    task_ids = {r.zentao_task_id for r in rows if r.zentao_task_id}
+    mirrors = {m.task_id: m for m in db.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id.in_(task_ids)).all()} if task_ids else {}
     return [
         {
             "id": r.id,
@@ -149,6 +162,10 @@ def admin_list_requirements(
             "title": r.title,
             "owner": r.owner.shown_name if r.owner else None,
             "owner_id": r.owner_id,
+            "zentao_task_id": r.zentao_task_id,
+            "task_dates_synced": r.zentao_task_id in mirrors,
+            "task_start_date": mirrors[r.zentao_task_id].est_started.isoformat() if r.zentao_task_id in mirrors and mirrors[r.zentao_task_id].est_started else None,
+            "task_deadline": mirrors[r.zentao_task_id].deadline.isoformat() if r.zentao_task_id in mirrors and mirrors[r.zentao_task_id].deadline else None,
             "case_completed": r.case_completed,
             "test_completed": r.test_completed,
             "retest_completed": r.retest_completed,
@@ -511,11 +528,13 @@ def delete_case(case_id: int, current_user: User = Depends(get_current_user), db
 @router.post("/requirements/assign-and-publish")
 async def assign_and_publish(payload: AssignPublishPayload, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     ensure_tab_access(current_user, "assign")
+    validate_task_dates(payload.task_start_date, payload.task_deadline, required=payload.create_zentao_tasks)
+    assignments = validate_assignments(db, payload.major_version_id, [item.model_dump() for item in payload.assignments])
     service = RequirementService(db)
     users_map = {u.id: u.shown_name for u in db.query(User).all()}
     result = service.assign_and_publish(
         payload.major_version_id,
-        [{"requirement_id": item.requirement_id, "owner_id": item.owner_id} for item in payload.assignments],
+        assignments,
         users_map,
         actor_id=current_user.id,
     )
@@ -529,7 +548,7 @@ async def assign_and_publish(payload: AssignPublishPayload, current_user=Depends
             task_service = ZentaoTaskSyncService(db)
             zentao_result = task_service.create_tasks_for_assignment(
                 payload.major_version_id,
-                [{"requirement_id": item.requirement_id, "owner_id": item.owner_id} for item in payload.assignments],
+                assignments,
                 est_started=payload.task_start_date,
                 deadline=payload.task_deadline,
                 actor=current_user,
@@ -560,11 +579,13 @@ def create_zentao_tasks(payload: AssignPublishPayload, current_user=Depends(get_
     禅道侧已取消的会重建；已关闭的是有效终态，会保留关联且不重复创建。
     """
     ensure_tab_access(current_user, "assign")
+    validate_task_dates(payload.task_start_date, payload.task_deadline)
+    assignments = validate_assignments(db, payload.major_version_id, [item.model_dump() for item in payload.assignments])
     task_service = ZentaoTaskSyncService(db)
     try:
         zentao_result = task_service.create_tasks_for_assignment(
             payload.major_version_id,
-            [{"requirement_id": item.requirement_id, "owner_id": item.owner_id} for item in payload.assignments],
+            assignments,
             est_started=payload.task_start_date,
             deadline=payload.task_deadline,
             actor=current_user,
@@ -573,6 +594,15 @@ def create_zentao_tasks(payload: AssignPublishPayload, current_user=Depends(get_
         logger.warning("create_zentao_tasks failed: %s", exc)
         zentao_result = {"ok": False, "errors": [str(exc)]}
     return {"message": "禅道任务创建已执行", "zentao": zentao_result}
+
+
+@router.post("/requirements/update-zentao-task-dates")
+def update_zentao_task_dates(payload: TaskDatesPayload, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    ensure_tab_access(current_user, "assign")
+    return ZentaoTaskScheduleService(db).update_dates(
+        payload.major_version_id, payload.requirement_ids, start=payload.task_start_date,
+        deadline=payload.task_deadline, actor=current_user,
+    )
 
 
 @router.patch("/requirements/{requirement_id}/status")

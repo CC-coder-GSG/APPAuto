@@ -1,10 +1,52 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { renderPreviewBtn } from '../utils.js';
+import { renderPreviewBtn, escapeHtml } from '../utils.js?v=20261014-2';
 import { showLoading, hideLoading } from '../components/common.js';
 
 function getUsers() {
   return window.users || state.users || [];
+}
+
+let selectedRequirements = new Set();
+let boardContext = '';
+let loadedContext = '';
+let loadSequence = 0;
+let boardLoading = false;
+let assignBusy = false;
+let lastBatchResult = null;
+
+function currentAssignContext() {
+  return `${Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0)}:${Number(document.getElementById('assignMajorSelect')?.value || 0)}`;
+}
+
+function updateAssignSelectionUI() {
+  const rows = Array.isArray(state.assignReqs) ? state.assignReqs : [];
+  const ready = !assignBusy && !boardLoading && loadedContext === currentAssignContext()
+    && !!Number(document.getElementById('assignMajorSelect')?.value || 0);
+  const all = document.getElementById('assignSelectAll');
+  if (all) {
+    all.disabled = !ready || !rows.length;
+    all.checked = rows.length > 0 && selectedRequirements.size === rows.length;
+    all.indeterminate = selectedRequirements.size > 0 && selectedRequirements.size < rows.length;
+  }
+  const count = document.getElementById('assignSelectionCount');
+  if (count) count.textContent = boardLoading ? '正在加载需求…' : `已选 ${selectedRequirements.size} / ${rows.length} 个需求${ready ? '' : '（当前不可操作）'}`;
+  document.querySelectorAll('[data-assign-action]').forEach(el => { el.disabled = !ready || !selectedRequirements.size; });
+  document.querySelectorAll('#assignTable input[type="checkbox"], #assignTable select').forEach(el => { el.disabled = !ready; });
+  document.querySelectorAll('[data-assign-lock], #assignMajorSelect, #assignTaskStartDate, #assignTaskDeadline').forEach(el => { el.disabled = assignBusy; });
+}
+
+export function toggleAssignSelectAll(checked) {
+  if (assignBusy || boardLoading || loadedContext !== currentAssignContext()) return;
+  selectedRequirements = new Set(checked ? (state.assignReqs || []).map(r => Number(r.id)) : []);
+  document.querySelectorAll('#assignTable [data-assign-id]').forEach(el => { el.checked = checked; });
+  updateAssignSelectionUI();
+}
+
+export function toggleAssignRequirement(id, checked) {
+  if (assignBusy || boardLoading || loadedContext !== currentAssignContext()) return;
+  if (checked) selectedRequirements.add(Number(id)); else selectedRequirements.delete(Number(id));
+  updateAssignSelectionUI();
 }
 
 function isPendingReq(req) {
@@ -139,62 +181,101 @@ function renderAssignProgress(data) {
   window.OmniQAZentao?.hydrateContainer?.(area);
 }
 
-export async function loadAssignBoard() {
+export async function loadAssignBoard(options = {}) {
+  if (assignBusy && !options.afterAction) return;
+  const sequence = ++loadSequence;
   const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
   const sid = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
-  syncLinkSourceMajorOptions();
-
-  if (majorId) {
-    await syncAssignRequirementsFromZentao({ silent: true });
+  const context = currentAssignContext();
+  const sameContext = boardContext === context;
+  const ownerDrafts = new Map(sameContext ? (state.assignReqs || [])
+    .map(r => [Number(r.id), document.getElementById('o_' + r.id)?.value, String(r.owner_id || '')])
+    .filter(([, value, original]) => value !== undefined && value !== original)
+    .map(([id, value]) => [id, value]) : []);
+  if (!sameContext) {
+    selectedRequirements.clear();
+    boardContext = context;
+    const result = document.getElementById('assignBatchResult');
+    if (result) result.hidden = true;
   }
+  boardLoading = true;
+  updateAssignSelectionUI();
+  try {
+    syncLinkSourceMajorOptions();
 
-  if (getUsers().length === 0 && typeof window.loadUsers === 'function') {
-    await window.loadUsers();
+    if (majorId && !options.skipSync) {
+      await syncAssignRequirementsFromZentao({ silent: true });
+    }
+
+    if (getUsers().length === 0 && typeof window.loadUsers === 'function') {
+      await window.loadUsers();
+    }
+
+    let reqUrl = '/requirements/admin/list';
+    const reqParams = [];
+    if (majorId) reqParams.push('major_version_id=' + majorId);
+    if (sid) reqParams.push('software_id=' + sid);
+    if (reqParams.length) reqUrl += '?' + reqParams.join('&');
+
+    const reqs = await (await api(reqUrl)).json();
+    if (sequence !== loadSequence || currentAssignContext() !== context) return;
+    if (!Array.isArray(reqs)) throw new Error('需求列表返回格式错误，请重新加载');
+    state.assignReqs = reqs;
+    loadedContext = context;
+    selectedRequirements = new Set(reqs.filter(r => selectedRequirements.has(Number(r.id))).map(r => Number(r.id)));
+    window.assignReqs = state.assignReqs;
+
+    const countEl = document.getElementById('assignReqCount');
+    if (countEl) {
+      const total = Array.isArray(state.assignReqs) ? state.assignReqs.length : 0;
+      countEl.textContent = majorId ? `共 ${total} 个需求` : `全部版本共 ${total} 个需求`;
+    }
+
+    const assignTable = document.getElementById('assignTable');
+    if (!assignTable) return;
+    const users = getUsers();
+    assignTable.innerHTML = state.assignReqs.map((r) => {
+      const sid = String(r.zentao_req_id || '').replace(/\D/g, '');
+      const idHtml = sid
+        ? `<span class="qa-story-id-nohref" data-zt-story-id="${sid}">${escapeHtml(r.zentao_req_id)}</span>`
+        : escapeHtml(r.zentao_req_id || '');
+      const ztSlot = sid ? ` <span class="zt-story-slot" data-zt-story-id="${sid}" style="margin-left:4px;"></span>` : '';
+      const aiSlot = sid ? ` <span class="ai-result-slot" data-story-id="${sid}"></span>` : '';
+      return `
+      <tr>
+        <td><input type="checkbox" data-assign-id="${r.id}" aria-label="选择需求 ${escapeHtml(r.zentao_req_id || r.id)}" ${selectedRequirements.has(Number(r.id)) ? 'checked' : ''} onchange="toggleAssignRequirement(${r.id}, this.checked)"></td>
+        <td>${idHtml} ${escapeHtml(r.title || '')}${ztSlot}${renderPreviewBtn('story', sid)}${aiSlot}</td>
+        <td>
+          <select id='o_${r.id}'>
+            <option value=''>未分配</option>
+            ${(r.owner_id && !users.some((u) => Number(u.id) === Number(r.owner_id))) ? `<option value='${r.owner_id}' selected>原负责人(账号不存在 #${r.owner_id})</option>` : ''}
+            ${users.map((u) => `<option value='${u.id}' ${u.id === r.owner_id ? 'selected' : ''}>${escapeHtml(u.display_name || u.username)}</option>`).join('')}
+          </select>
+        </td>
+        <td class="assign-task-dates">${r.zentao_task_id ? `<span>任务 #${Number(r.zentao_task_id)}</span><small>${r.task_dates_synced === false ? '日期待同步' : `${escapeHtml(r.task_start_date || '未设置')} → ${escapeHtml(r.task_deadline || '未设置')}`}</small>` : '<span class="muted">未创建子任务</span>'}</td>
+      </tr>`;
+    }).join('');
+    ownerDrafts.forEach((value, id) => {
+      const select = document.getElementById('o_' + id);
+      if (select && value !== undefined && Array.from(select.options).some(o => o.value === value)) select.value = value;
+    });
+    window.OmniQAStoryAI?.refreshSlots?.(assignTable);
+    window.OmniQAZentao?.hydrateContainer?.(assignTable);
+
+    await loadAssignProgress();
+    await loadLinkCandidates();
+    await refreshFinalTestState();
+  } catch (err) {
+    if (sequence === loadSequence) {
+      loadedContext = '';
+      window.showMessage?.(err.message || '需求加载失败，请重试', 'error');
+    }
+  } finally {
+    if (sequence === loadSequence) {
+      boardLoading = false;
+      updateAssignSelectionUI();
+    }
   }
-
-  let reqUrl = '/requirements/admin/list';
-  const reqParams = [];
-  if (majorId) reqParams.push('major_version_id=' + majorId);
-  if (sid) reqParams.push('software_id=' + sid);
-  if (reqParams.length) reqUrl += '?' + reqParams.join('&');
-
-  state.assignReqs = await (await api(reqUrl)).json();
-  window.assignReqs = state.assignReqs;
-
-  const countEl = document.getElementById('assignReqCount');
-  if (countEl) {
-    const total = Array.isArray(state.assignReqs) ? state.assignReqs.length : 0;
-    countEl.textContent = majorId ? `共 ${total} 个需求` : `全部版本共 ${total} 个需求`;
-  }
-
-  const assignTable = document.getElementById('assignTable');
-  if (!assignTable) return;
-  const users = getUsers();
-  assignTable.innerHTML = state.assignReqs.map((r) => {
-    const sid = String(r.zentao_req_id || '').replace(/\D/g, '');
-    const idHtml = sid
-      ? `<span class="qa-story-id-nohref" data-zt-story-id="${sid}">${r.zentao_req_id}</span>`
-      : (r.zentao_req_id || '');
-    const ztSlot = sid ? ` <span class="zt-story-slot" data-zt-story-id="${sid}" style="margin-left:4px;"></span>` : '';
-    const aiSlot = sid ? ` <span class="ai-result-slot" data-story-id="${sid}"></span>` : '';
-    return `
-    <tr>
-      <td>${idHtml} ${r.title || ''}${ztSlot}${renderPreviewBtn('story', sid)}${aiSlot}</td>
-      <td>
-        <select id='o_${r.id}'>
-          <option value=''>未分配</option>
-          ${(r.owner_id && !users.some((u) => Number(u.id) === Number(r.owner_id))) ? `<option value='${r.owner_id}' selected>原负责人(账号不存在 #${r.owner_id})</option>` : ''}
-          ${users.map((u) => `<option value='${u.id}' ${u.id === r.owner_id ? 'selected' : ''}>${u.display_name || u.username}</option>`).join('')}
-        </select>
-      </td>
-    </tr>`;
-  }).join('');
-  window.OmniQAStoryAI?.refreshSlots?.(assignTable);
-  window.OmniQAZentao?.hydrateContainer?.(assignTable);
-
-  await loadAssignProgress();
-  await loadLinkCandidates();
-  await refreshFinalTestState();
 }
 
 export async function refreshFinalTestState() {
@@ -312,6 +393,7 @@ export async function toggleFinalTest() {
 }
 
 export async function loadAssignProgress() {
+  const context = currentAssignContext();
   const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
   const sid = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
   let url = '/requirements/admin/progress';
@@ -321,6 +403,7 @@ export async function loadAssignProgress() {
   if (params.length) url += '?' + params.join('&');
 
   const data = await (await api(url)).json();
+  if (context !== currentAssignContext()) return;
   state.assignProgressData = data;
   renderAssignProgress(data);
 }
@@ -330,95 +413,142 @@ export function toggleAssignProgressPendingOnly() {
 }
 
 export async function publishAssign() {
-  if (!(window.confirmPush && window.confirmPush())) return;
-  const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
-  if (!majorId) {
-    window.showMessage && window.showMessage('“全部版本”仅用于查看；发布分配前请先选择一个具体大版本', 'error');
-    return;
-  }
-  const assignments = state.assignReqs.map((r) => ({
-    requirement_id: r.id,
-    owner_id: Number(document.getElementById('o_' + r.id)?.value || 0) || null,
-  }));
-  const taskStart = document.getElementById('assignTaskStartDate')?.value || null;
-  const taskDeadline = document.getElementById('assignTaskDeadline')?.value || null;
-  showLoading('正在分配并在禅道创建任务，请稍候…');
-  try {
-    const res = await api('/requirements/assign-and-publish', {
-      method: 'POST',
-      headers: window.H,
-      body: ({
-        major_version_id: majorId,
-        assignments,
-        task_start_date: taskStart,
-        task_deadline: taskDeadline,
-      }),
-    });
-    let zentao = null;
-    try { zentao = (await res.json())?.zentao; } catch (_) { /* ignore */ }
-    showPublishResult(zentao);
-  } finally {
-    hideLoading();
-  }
+  await runAssignAction('publish');
 }
 
 // 仅在禅道创建/改派任务，不发企微、不改本地负责人。用于「发布」后创建失败时单独重试。
 export async function createZentaoTasks() {
-  const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
-  if (!majorId) {
-    window.showMessage && window.showMessage('“全部版本”仅用于查看；请先选择一个具体大版本', 'error');
-    return;
+  await runAssignAction('create');
+}
+
+export async function updateZentaoTaskDates() {
+  await runAssignAction('dates');
+}
+
+function selectedAssignPayload() {
+  if (assignBusy || boardLoading || loadedContext !== currentAssignContext()) {
+    throw new Error('需求仍在加载或操作中，请稍候');
   }
-  const assignments = state.assignReqs.map((r) => ({
+  const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
+  if (!majorId) throw new Error('“全部版本”仅用于查看；请先选择一个具体大版本');
+  const selected = (state.assignReqs || []).filter(r => selectedRequirements.has(Number(r.id)));
+  if (!selected.length) throw new Error('请至少勾选一个需求');
+  const taskStart = document.getElementById('assignTaskStartDate')?.value || '';
+  const taskDeadline = document.getElementById('assignTaskDeadline')?.value || '';
+  const validDate = value => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value && !value.startsWith('0000');
+  };
+  if (!taskStart || !taskDeadline) throw new Error('请设置完整的禅道任务预计开始和预计结束日期');
+  if (!validDate(taskStart) || !validDate(taskDeadline)) throw new Error('禅道任务日期非法，请重新设置');
+  if (taskStart > taskDeadline) throw new Error('预计开始日期不能晚于预计结束日期');
+  return {
+    major_version_id: majorId,
+    assignments: selected.map(r => ({
     requirement_id: r.id,
     owner_id: Number(document.getElementById('o_' + r.id)?.value || 0) || null,
-  }));
-  const taskStart = document.getElementById('assignTaskStartDate')?.value || null;
-  const taskDeadline = document.getElementById('assignTaskDeadline')?.value || null;
-  showLoading('正在禅道创建/改派测试任务，请稍候…');
+    })),
+    task_start_date: taskStart,
+    task_deadline: taskDeadline,
+  };
+}
+
+async function runAssignAction(kind) {
+  let payload;
+  try { payload = selectedAssignPayload(); }
+  catch (err) { window.showMessage?.(err.message, 'error'); return; }
+  if (kind === 'publish' && !(window.confirmPush && window.confirmPush())) return;
+  const selected = (state.assignReqs || []).filter(r => selectedRequirements.has(Number(r.id)));
+  const context = currentAssignContext();
+  const majorName = document.getElementById('assignMajorSelect')?.selectedOptions[0]?.textContent || '';
+  const urls = { publish: '/requirements/assign-and-publish', create: '/requirements/create-zentao-tasks', dates: '/requirements/update-zentao-task-dates' };
+  const body = kind === 'dates' ? {
+    major_version_id: payload.major_version_id,
+    requirement_ids: payload.assignments.map(a => a.requirement_id),
+    task_start_date: payload.task_start_date,
+    task_deadline: payload.task_deadline,
+  } : payload;
+  assignBusy = true;
+  updateAssignSelectionUI();
+  showLoading(kind === 'dates' ? '正在更新所选子任务的预计起止日期…' : '正在处理所选需求的分配及禅道任务…');
   try {
-    const res = await api('/requirements/create-zentao-tasks', {
-      method: 'POST',
-      headers: window.H,
-      body: ({
-        major_version_id: majorId,
-        assignments,
-        task_start_date: taskStart,
-        task_deadline: taskDeadline,
-      }),
-    });
-    let zentao = null;
-    try { zentao = (await res.json())?.zentao; } catch (_) { /* ignore */ }
-    showPublishResult(zentao, { taskOnly: true });
+    const data = await (await api(urls[kind], { method: 'POST', headers: window.H, body })).json();
+    if (kind === 'dates') showDatesResult(data, majorName, context);
+    else showPublishResult(data.zentao, { taskOnly: kind === 'create', selected, payload, majorName, context });
+    await loadAssignBoard({ skipSync: true, afterAction: true });
+  } catch (err) {
+    window.showMessage?.(err.message || '操作失败，请检查后重试', 'error');
   } finally {
+    assignBusy = false;
+    updateAssignSelectionUI();
     hideLoading();
   }
 }
 
-// 把禅道建任务结果汇总成一条提示（成功/部分失败/未能指派）
+function showBatchResult(title, summary, details, context) {
+  lastBatchResult = { title, summary, details };
+  const area = document.getElementById('assignBatchResult');
+  if (area && currentAssignContext() === context) {
+    area.hidden = false;
+    area.innerHTML = `<span>${escapeHtml(summary)}</span> <button class="secondary" onclick="openAssignBatchResult()">查看处理结果</button>`;
+  }
+  openAssignBatchResult();
+}
+
+export function openAssignBatchResult() {
+  if (!lastBatchResult) return;
+  let dialog = document.getElementById('assignResultDialog');
+  if (!dialog) {
+    dialog = document.createElement('dialog');
+    dialog.id = 'assignResultDialog';
+    dialog.className = 'assign-result-modal';
+    dialog.setAttribute('aria-labelledby', 'assignResultTitle');
+    document.body.appendChild(dialog);
+  }
+  const { title, summary, details } = lastBatchResult;
+  dialog.innerHTML = `<div class="assign-result-heading"><h3 id="assignResultTitle">${escapeHtml(title)}</h3><button class="secondary" aria-label="关闭处理结果" onclick="document.getElementById('assignResultDialog').close()">关闭</button></div><p>${escapeHtml(summary)}</p><div class="assign-result-content">${details}</div>`;
+  if (!dialog.open) dialog.showModal();
+}
+
+function showDatesResult(data, majorName, context) {
+  const counts = data.counts || {};
+  const labels = { updated: '已更新', unchanged: '无需修改', skipped: '已跳过', failed: '失败', unverified: '待核实' };
+  const summary = `所选 ${data.total || 0} 个需求：更新 ${counts.updated || 0}，日期一致 ${counts.unchanged || 0}，跳过 ${counts.skipped || 0}，失败 ${counts.failed || 0}，待核实 ${counts.unverified || 0}`;
+  const details = `<p class="muted">${escapeHtml(majorName)} · ${escapeHtml(data.task_start_date)} 至 ${escapeHtml(data.task_deadline)}</p><table><thead><tr><th>需求 / 子任务</th><th>结果</th><th>说明</th></tr></thead><tbody>${(data.results || []).map(row => `<tr><td>${escapeHtml(row.zentao_req_id || '#' + row.requirement_id)} ${escapeHtml(row.title)}<small>${row.task_id ? '任务 #' + Number(row.task_id) : '未创建子任务'}</small></td><td><span class="assign-result-status ${escapeHtml(row.status)}">${labels[row.status] || '未知'}</span></td><td>${escapeHtml(row.reason)}${row.warning ? `<small class="assign-result-warning">${escapeHtml(row.warning)}</small>` : ''}</td></tr>`).join('')}</tbody></table>`;
+  showBatchResult('预计起止时间更新结果', summary, details, context);
+}
+
 function showPublishResult(zentao, opts = {}) {
-  const lead = opts.taskOnly ? '禅道任务创建完成' : '分配发布成功';
+  const lead = opts.taskOnly ? '禅道任务处理完成' : '分配发布完成';
   if (!zentao) {
-    window.showMessage && window.showMessage(lead, 'success');
+    showBatchResult(lead, '本地分配已更新，未执行禅道任务联动', '', opts.context);
     return;
   }
-  const created = (zentao.created_tasks || []).length;
+  const adoptedIds = new Set(zentao.adopted_tasks || []);
+  const created = (zentao.created_tasks || []).filter(id => !adoptedIds.has(id)).length;
   const reassigned = (zentao.reassigned_tasks || []).length;
   const retainedClosed = (zentao.retained_closed_tasks || []).length;
   const unassigned = zentao.unassigned || [];
   const errors = zentao.errors || [];
-  const parts = [lead];
+  const parts = [`所选 ${opts.selected.length} 个需求`];
   if (created) parts.push(`禅道新建子任务 ${created} 个`);
+  if (adoptedIds.size) parts.push(`认领已有子任务 ${adoptedIds.size} 个（未重复创建）`);
   if (reassigned) parts.push(`改派 ${reassigned} 个`);
   if (retainedClosed) parts.push(`已存在关闭任务 ${retainedClosed} 个（未重复创建）`);
   if (unassigned.length) {
     const names = unassigned.map((u) => u.owner_name).filter(Boolean).join('、');
     parts.push(`未能指派（缺禅道账号）：${names}`);
   }
-  const level = (errors.length || unassigned.length) ? 'error' : 'success';
-  let msg = parts.join('；');
-  if (errors.length) msg += `；禅道异常 ${errors.length} 条：${errors.slice(0, 2).join('；')}`;
-  window.showMessage && window.showMessage(msg, level);
+  const noOwner = opts.payload.assignments.filter(a => !a.owner_id).map(a => opts.selected.find(r => r.id === a.requirement_id));
+  if (noOwner.length) parts.push(`未设置负责人 ${noOwner.length} 个，已跳过禅道建任务`);
+  if (errors.length) parts.push(`禅道异常 ${errors.length} 条`);
+  const details = `<p class="muted">${escapeHtml(opts.majorName)} · ${escapeHtml(opts.payload.task_start_date)} 至 ${escapeHtml(opts.payload.task_deadline)}</p>${!opts.taskOnly ? '<p>本地分配已更新并发布通知；禅道处理结果如下。</p>' : ''}<ul>${[
+    ...errors.map(e => `<li class="assign-result-warning">${escapeHtml(e)}</li>`),
+    ...unassigned.map(u => `<li>需求 #${Number(u.requirement_id)}：${escapeHtml(u.owner_name)} 缺少可用禅道账号，无法指派</li>`),
+    ...noOwner.map(r => `<li>${escapeHtml(r.zentao_req_id)} ${escapeHtml(r.title)}：未设置负责人，跳过禅道任务创建</li>`),
+  ].join('')}</ul>`;
+  showBatchResult(lead, parts.join('；'), details, opts.context);
 }
 
 export async function loadLinkCandidates() {
@@ -537,6 +667,10 @@ window.OmniQAAssignTab = {
   toggleAssignProgressPendingOnly,
   publishAssign,
   createZentaoTasks,
+  updateZentaoTaskDates,
+  toggleAssignSelectAll,
+  toggleAssignRequirement,
+  openAssignBatchResult,
   syncAssignRequirementsFromZentao,
   loadLinkCandidates,
   toggleLinkSelectAll,
@@ -547,3 +681,7 @@ window.OmniQAAssignTab = {
 window.toggleAssignProgressPendingOnly = toggleAssignProgressPendingOnly;
 window.syncAssignRequirementsFromZentao = syncAssignRequirementsFromZentao;
 window.toggleFinalTest = toggleFinalTest;
+window.updateZentaoTaskDates = updateZentaoTaskDates;
+window.toggleAssignSelectAll = toggleAssignSelectAll;
+window.toggleAssignRequirement = toggleAssignRequirement;
+window.openAssignBatchResult = openAssignBatchResult;

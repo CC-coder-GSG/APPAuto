@@ -647,6 +647,10 @@ class ZentaoClient:
         """PUT /v1/tasks/{id} —— 改派(assignedTo)/设父子(parent)/改 estimate 等。"""
         return self.put(f"tasks/{task_id}", data)
 
+    def update_task_dates(self, task_id: int, *, est_started: str, deadline: str) -> dict | None:
+        """Update only the planned dates; preserve task lifecycle, owner and efforts."""
+        return self.put(f"tasks/{task_id}", {"estStarted": est_started, "deadline": deadline})
+
     def link_task_parent(self, child_task_id: int, parent_task_id: int) -> dict | None:
         """把子任务挂到父任务下（create 不认 parent，须事后 PUT）。"""
         return self.put(f"tasks/{child_task_id}", {"parent": parent_task_id})

@@ -1266,6 +1266,8 @@ class ZentaoTaskMirrorService:
             # 完成态任务的空 finishedDate（left=0 自动完成）不冲掉已兜底的完成时间
             if _fin is not None or str(t.get("status") or "").strip().lower() not in {"done", "closed"}:
                 row.finished_date = _fin
+        if t.get("estStarted") is not None:
+            row.est_started = _parse_date(t.get("estStarted"))
         if t.get("deadline") is not None:
             row.deadline = _parse_date(t.get("deadline"))
         row.synced_at = local_now()
