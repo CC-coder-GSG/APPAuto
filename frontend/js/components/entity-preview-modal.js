@@ -8,6 +8,8 @@ import { api } from '../api.js';
 const MODAL_ID = 'entityPreviewModal';
 const CACHE_TTL_MS = 60_000;
 const _cache = { story: new Map(), bug: new Map(), testcase: new Map(), task: new Map() };
+let _previewGeneration = 0;
+const _storyChangeSubmitting = new Set();
 
 function _cacheGet(type, id) {
   const entry = _cache[type].get(id);
@@ -233,6 +235,7 @@ function openModal() {
 }
 
 function close() {
+  _previewGeneration++;
   const root = document.getElementById(MODAL_ID);
   if (!root) return;
   root.classList.add('hidden');
@@ -431,6 +434,7 @@ function _renderTestcase(data) {
 
 // ─── Public open functions ──────────────────────────────────────────────────
 async function _genericOpen(kind, id, url, renderFn) {
+  const generation = ++_previewGeneration;
   const numericId = Number(id);
   if (!numericId) return;
   _renderLoading(kind, numericId);
@@ -442,6 +446,7 @@ async function _genericOpen(kind, id, url, renderFn) {
   try {
     const res = await api(url);
     const data = await res.json();
+    if (generation !== _previewGeneration) return;
     if (!data || data.error) {
       _renderError(escapeHtml(data?.message || '加载失败'));
       return;
@@ -449,6 +454,7 @@ async function _genericOpen(kind, id, url, renderFn) {
     _cacheSet(kind, numericId, data);
     renderFn(data);
   } catch (err) {
+    if (generation !== _previewGeneration) return;
     _renderError(escapeHtml(err?.message || '加载失败'));
   }
 }
@@ -496,6 +502,7 @@ function _renderTask(data) {
     : '';
   body.innerHTML = `
     ${ztBtn}
+    ${data.task_story_change_pending ? `<button type="button" style="background:#fff7ed; color:#9a3412; border:2px solid #f97316; padding:8px 12px; border-radius:6px; margin-bottom:12px; font-weight:700;" onclick="window.OmniQAPreview.openTaskStoryChange(${Number(data.id)})">⚠ 研发需求变更 · 待确认 — 查看需求内容并确认</button>` : ''}
     <div style="border:1px solid #e2e8f0; border-radius:10px; padding:8px 12px; background:#f8fafc;">
       <table style="width:100%; border-collapse:collapse; font-size:14px;">
         ${row('预计工时', data.estimate != null ? data.estimate + ' h' : '')}
@@ -520,6 +527,101 @@ function _renderTask(data) {
 
 function openTask(id) {
   return _genericOpen('task', id, `/zentao/task/${Number(id)}/detail`, _renderTask);
+}
+
+function _storyChangeContent(story) {
+  if (!story) return '<p class="muted">旧版需求内容暂不可用</p>';
+  const files = (story.files || []).map((file) => `<a href="${escapeHtml(file.url)}" data-filename="${escapeHtml(file.title)}" target="_blank" rel="noopener noreferrer">📎 ${escapeHtml(file.title)}</a>`).join(' · ');
+  return `<h4>需求描述</h4><div class="entity-preview-rich">${_sanitize(story.spec) || '<span class="muted">暂无需求描述</span>'}</div>
+    <h4>验收标准</h4><div class="entity-preview-rich">${_sanitize(story.verify) || '<span class="muted">暂无验收标准</span>'}</div>${files ? `<h4>附件</h4>${files}` : ''}`;
+}
+
+function _renderTaskStoryChange(data, generation) {
+  _setHeader('story', { ...data.latest_story, id: data.story_id });
+  const body = document.getElementById('entityPreviewBody');
+  const meta = document.getElementById('entityPreviewMeta');
+  const pending = !!data.task_story_change_pending;
+  const version = Number(data.task_latest_story_version);
+  const previous = Number(data.task_story_version);
+  meta.textContent = `禅道任务 #${data.task_id} · ${data.task_name || ''} · 任务已记录 v${previous} → 最新 v${version}`;
+  const story = data.latest_story || {};
+  const who = typeof data.assigned_to === 'object' ? (data.assigned_to?.realname || data.assigned_to?.account || '') : data.assigned_to;
+  const changed = [story.changed_by, _fmtDate(story.changed_date)].filter(Boolean).join(' · ');
+  const compare = data.previous_story ? `<details style="margin:16px 0; border:1px solid #cbd5e1; border-radius:8px; padding:12px;">
+      <summary style="cursor:pointer; color:#1d4ed8; font-weight:600;">与任务已记录版本 v${previous} 对比</summary>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr)); gap:16px; margin-top:12px;">
+        <section style="min-width:0; background:#f8fafc; padding:12px; border-radius:6px;"><h3>原需求 v${previous}</h3>${_storyChangeContent(data.previous_story)}</section>
+        <section style="min-width:0; background:#f0fdf4; padding:12px; border-radius:6px;"><h3>最新需求 v${version}</h3>${_storyChangeContent(story)}</section>
+      </div></details>` : data.previous_error ? `<p style="color:#b45309;">${escapeHtml(data.previous_error)}</p>` : '';
+  const canConfirm = pending && data.can_confirm && !_storyChangeSubmitting.has(data.task_id);
+  body.innerHTML = `<div role="status" style="padding:12px 16px; background:${pending ? '#fff7ed' : '#f0fdf4'}; color:${pending ? '#9a3412' : '#166534'}; border:1px solid ${pending ? '#fdba74' : '#bbf7d0'}; border-radius:8px;">
+      <b>${pending ? '⚠ 研发需求变更 · 待确认' : `✅ 已确认需求版本 v${version}`}</b>
+      <div style="margin-top:5px;">当前指派：${escapeHtml(who || '未指派')}${changed ? ` · 需求变更：${escapeHtml(changed)}` : ''}</div>
+    </div>
+    <section style="padding:14px 16px; margin-top:12px; border:1px solid #e2e8f0; border-radius:8px;"><h3>最新版需求 v${version}</h3>${_storyChangeContent(story)}</section>
+    ${compare}
+    <div id="storyChangeResult" role="status" style="margin:12px 0; color:#9a3412;"></div>
+    <div style="position:sticky; bottom:0; background:#fff; border-top:1px solid #e2e8f0; padding:12px 0; display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+      <button type="button" id="confirmTaskStoryChange" ${canConfirm ? '' : 'disabled'} style="background:#c2410c; color:#fff; border-radius:6px; padding:8px 14px; font-weight:600;">${pending ? '确认已阅读需求变更' : '已确认'}</button>
+      <button type="button" id="refreshTaskStoryChange" class="secondary">刷新内容</button>
+      <span style="font-size:12px; color:#64748b;">${escapeHtml(pending && !data.can_confirm ? data.confirm_disabled_reason : '确认仅记录已阅读变更；需要重新测试时，请另行重新激活任务。')}</span>
+    </div>`;
+  body.querySelector('#refreshTaskStoryChange').addEventListener('click', () => openTaskStoryChange(data.task_id));
+  body.querySelector('#confirmTaskStoryChange').addEventListener('click', async (event) => {
+    if (!canConfirm || _storyChangeSubmitting.has(data.task_id)) return;
+    const button = event.currentTarget;
+    const message = body.querySelector('#storyChangeResult');
+    const refresh = body.querySelector('#refreshTaskStoryChange');
+    _storyChangeSubmitting.add(data.task_id);
+    button.disabled = true;
+    refresh.disabled = true;
+    button.textContent = '正在确认…';
+    try {
+      const response = await api(`/zentao/tasks/${data.task_id}/confirm-story-change`, { method: 'POST', body: {
+        story_id: data.story_id, expected_story_version: previous, expected_latest_story_version: version,
+      } });
+      const result = await response.json();
+      _cache.task.delete(Number(data.task_id));
+      _cache.story.delete(Number(data.story_id));
+      document.dispatchEvent(new CustomEvent('zentao-story-change-confirmed', { detail: result }));
+      if (generation !== _previewGeneration) return;
+      if (result.version_changed_during_confirm) {
+        message.textContent = result.message;
+        button.textContent = '请刷新后查看最新内容';
+      } else {
+        message.style.color = '#166534';
+        message.textContent = result.message;
+        button.textContent = '已确认';
+      }
+    } catch (err) {
+      if (generation !== _previewGeneration) return;
+      message.textContent = `${err.message || '确认失败'}。请刷新内容后核对确认状态。`;
+      button.textContent = '请刷新后核对状态';
+    } finally {
+      _storyChangeSubmitting.delete(data.task_id);
+      refresh.disabled = false;
+    }
+  });
+  _loadProxyImages(body);
+  _wireProxyDownloads(body);
+}
+
+async function openTaskStoryChange(id) {
+  const taskId = Number(id);
+  if (!taskId) return;
+  const generation = ++_previewGeneration;
+  _renderLoading('task', taskId);
+  openModal();
+  try {
+    // This workflow always fetches fresh content rather than using preview TTL.
+    const response = await api(`/zentao/tasks/${taskId}/story-change`, { cache: 'no-store' });
+    const data = await response.json();
+    if (generation !== _previewGeneration) return;
+    _renderTaskStoryChange(data, generation);
+  } catch (err) {
+    if (generation !== _previewGeneration) return;
+    _renderError(escapeHtml(err.message || '无法读取需求变更内容'));
+  }
 }
 
 (function injectStyles() {
@@ -550,6 +652,6 @@ function openTask(id) {
   document.head.appendChild(style);
 })();
 
-window.OmniQAPreview = { openStory, openBug, openTestcase, openTask, close };
+window.OmniQAPreview = { openStory, openBug, openTestcase, openTask, openTaskStoryChange, close };
 // Backwards-compat: original story-only API still works.
 window.OmniQAStoryPreview = { open: openStory, closeModal: close };

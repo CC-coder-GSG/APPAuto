@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { escapeHtml, renderPreviewBtn } from '../utils.js';
+import { escapeHtml, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-1';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 
 // 任务工作台：展示当前账号名下的禅道任务。
@@ -33,12 +33,17 @@ function taskMatchesFilter(t) {
 // 关联需求的任务在「已完成」状态下也允许关闭（后端按指派人放行）。
 // 父任务与禅道一致：子任务未全部完成前不能关闭，只有 done 状态才可关。
 function isBatchClosable(t) {
+  if (t.task_story_change_pending) return false;
   const s = String(t.status || '');
   if (s === 'closed' || s === 'cancel') return false;
   if (t.is_parent && s !== 'done') return false;
   if (t.can_operate) return true;
   return !!t.show_jump && s === 'done' && !!t.assigned_to_me;
 }
+
+document.addEventListener('zentao-story-change-confirmed', () => {
+  if (window.isWorkbenchSubtabActive?.('task')) loadTaskWorkbench().catch(() => {});
+});
 
 function statusBadge(status) {
   const zh = TASK_STATUS_ZH[status] || status || '未知';
@@ -64,6 +69,7 @@ function renderTaskActions(t) {
   const effortBtn = `<button class="secondary" style="padding:2px 10px; font-size:12px; color:#0f766e; border-color:#99f6e4;"
     onclick="event.stopPropagation(); window.openTaskEffortModal(${t.task_id})" title="查看、修改或删除该任务已提交的禅道工时记录">🕒 工时记录</button>`;
   const wrap = (parts) => `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>`;
+  if (t.task_story_change_pending) return wrap([renderTaskStoryChangeBadge(t), effortBtn, assignBtn]);
   // 关联需求且该需求归属本人 → 跳转到需求工作台管理，不在此直接操作禅道。
   // 例外：任务已完成时，除跳转外也允许直接关闭（避免只为关闭再绕一圈）。
   if (t.show_jump && link) {
@@ -164,7 +170,7 @@ function renderChildrenList(t) {
     <div style="display:flex; align-items:center; gap:8px; padding:6px 10px; border-bottom:1px dashed #e2e8f0;">
       <span style="color:#1d4ed8; font-size:12px; flex-shrink:0;">#${k.task_id}</span>
       <span style="font-size:13px; color:#334155; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(k.name || '')}</span>
-      ${statusBadge(k.status)}
+      ${renderTaskStoryChangeBadge(k) || statusBadge(k.status)}
       <span class="muted" style="font-size:12px; flex-shrink:0;">👤 ${escapeHtml(k.assigned_to_realname || k.assigned_to || '未指派')}</span>
     </div>`).join('');
   return `<div style="margin-bottom:10px; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden;">
@@ -218,7 +224,7 @@ function renderTaskCard(t) {
           <span style="color:#1d4ed8;">禅道任务 #${t.task_id}</span>
           <span>${escapeHtml(t.name || '')}</span>
           ${previewBtn}
-          ${statusBadge(t.status)}
+          ${renderTaskStoryChangeBadge(t) || statusBadge(t.status)}
           ${hierarchyBadge}
           ${linkedBadge}
         </div>

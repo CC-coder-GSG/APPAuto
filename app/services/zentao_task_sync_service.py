@@ -38,6 +38,9 @@ from app.services.zentao_task_status import (
     effective_task_status,
     raw_task_status,
     task_finish_side_effect_observed,
+    apply_task_story_change,
+    ensure_no_pending_story_change,
+    task_story_change_pending,
 )
 from app.services.zentao_effort_service import AUTO_NOTE, merge_extra_hours, submit_day_efforts
 from app.services.zentao_web_session import (
@@ -150,6 +153,8 @@ class ZentaoTaskSyncService:
         if row is None:
             return
         row.status = status
+        for field in ("task_story_change_pending", "task_story_version", "task_latest_story_version", "task_change_checked_at"):
+            setattr(row, field, getattr(requirement, field, None))
         if assigned_to is not None:
             row.assigned_to = assigned_to or None
             row.assignee_user_id = assignee.id if assignee is not None else None
@@ -358,6 +363,10 @@ class ZentaoTaskSyncService:
                 req.zentao_parent_task_id = None
                 req.zentao_task_status_cache = None
                 req.zentao_task_assigned_to = None
+                req.task_story_change_pending = None
+                req.task_story_version = None
+                req.task_latest_story_version = None
+                req.task_change_checked_at = None
                 pending_items.append((req, owner))
             elif req.zentao_task_id:
                 reassign_items.append((req, owner))
@@ -400,7 +409,8 @@ class ZentaoTaskSyncService:
             pid = _coerce_int(t.get("parent"))
             if pid:
                 req.zentao_parent_task_id = pid
-            req.zentao_task_status_cache = str(t.get("status") or "wait")
+            req.zentao_task_status_cache = effective_task_status(t) or "wait"
+            apply_task_story_change(req, t)
             cur_acc = _task_account(t)
             req.zentao_task_assigned_to = cur_acc  # 先按禅道现值缓存，改派成功后再覆盖
             if _is_closed_task(t):
@@ -579,12 +589,22 @@ class ZentaoTaskSyncService:
             .all()
         )
         changed = False
+        checked = False
+        change_requirements: list[Requirement] = []
         completed_requirements: list[Requirement] = []
         for req in reqs:
             t = by_id.get(int(req.zentao_task_id))
             if not t:
                 continue
             status = effective_task_status(t) or None
+            metadata_changed = apply_task_story_change(req, t)
+            checked = checked or task_story_change_pending(t) is not None
+            mirror = self.db.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == req.zentao_task_id).first()
+            if mirror:
+                apply_task_story_change(mirror, t)
+            if metadata_changed:
+                changed = True
+                change_requirements.append(req)
             acc = _task_account(t)
             if status and req.zentao_task_status_cache != status:
                 req.zentao_task_status_cache = status
@@ -593,7 +613,7 @@ class ZentaoTaskSyncService:
             if acc is not None and req.zentao_task_assigned_to != acc:
                 req.zentao_task_assigned_to = acc
                 changed = True
-            if status == "done" and not req.test_completed:
+            if status == "done" and not req.test_completed and not req.task_story_change_pending:
                 # Zentao is authoritative for the task lifecycle.  It is
                 # already done here, so only reconcile the local requirement;
                 # do not invoke the checkbox path that writes back to Zentao.
@@ -606,13 +626,16 @@ class ZentaoTaskSyncService:
                 ):
                     completed_requirements.append(req)
                     changed = True
-        if changed:
+        if changed or checked:
             try:
                 self.db.commit()
             except Exception as exc:  # noqa: BLE001
                 logger.warning("commit task status sync major %s failed: %s", major_version_id, exc)
                 self.db.rollback()
                 completed_requirements.clear()
+                change_requirements.clear()
+        for req in change_requirements:
+            self._publish_task_change(req, req.zentao_task_status_cache or "", "story_change_sync")
         if completed_requirements:
             from app.services.requirement_service import RequirementService
 
@@ -626,6 +649,26 @@ class ZentaoTaskSyncService:
     # ------------------------------------------------------------------
     # 能力 C：开始 / 完成 / 重新激活
     # ------------------------------------------------------------------
+
+    def _ensure_story_change_confirmed(self, requirement: Requirement, acting_user: Optional[User]) -> None:
+        """Check before any lifecycle or effort side effect, including idempotency."""
+        if not requirement.zentao_task_id:
+            return
+        acting = get_user_zentao_client(acting_user.id, self.db) if acting_user is not None else None
+        system = get_system_zentao_client(self.db)
+        task = None
+        for candidate in (acting, system):
+            if candidate is None:
+                continue
+            try:
+                current = candidate.get_task(int(requirement.zentao_task_id))
+                if isinstance(current, dict) and current:
+                    task = current
+                    apply_task_story_change(requirement, current)
+                    break
+            except Exception:
+                continue
+        ensure_no_pending_story_change(task, requirement.task_story_change_pending)
 
     def _client_or_error(self, out: dict, acting_user: Optional[User] = None):
         """优先用「操作人本人」的禅道客户端（正确记录操作人、保持指派不变）；
@@ -774,6 +817,7 @@ class ZentaoTaskSyncService:
             # or immediate readback failed (notably after a 401). Do not repeat
             # the lifecycle write when this candidate already sees the target.
             before_task = _read_task(client)
+            ensure_no_pending_story_change(before_task, requirement.task_story_change_pending)
             actual = effective_task_status(before_task)
             if _matches(actual):
                 target_status_seen = True
@@ -855,6 +899,7 @@ class ZentaoTaskSyncService:
         out: dict = {"ok": False, "errors": []}
         now = local_now()
         paused = str(requirement.zentao_task_status_cache or "").strip().lower() == "pause"
+        self._ensure_story_change_confirmed(requirement, acting_user)
         confirmed = not requirement.zentao_task_id
         left = hours if hours is not None else (requirement.estimated_test_hours or 4.0)
         if requirement.zentao_task_id:
@@ -912,6 +957,7 @@ class ZentaoTaskSyncService:
         """
         out: dict = {"ok": False, "errors": []}
         now = local_now()
+        self._ensure_story_change_confirmed(requirement, acting_user)
         # Pause is idempotent across both UI entry points.  Check Zentao before
         # creating effort rows: the previous request may already have paused
         # the task even though its response/readback ended with a 401.
@@ -1139,6 +1185,7 @@ class ZentaoTaskSyncService:
         暂停中直接完成时只有累计部分，暂停期不计入。
         """
         out: dict = {"ok": False, "errors": [], "consumed": 0.0}
+        self._ensure_story_change_confirmed(requirement, acting_user)
         now = local_now()
         confirmed = not requirement.zentao_task_id
         if consumed is not None and (consumed <= 0 or consumed > 999):
@@ -1194,6 +1241,7 @@ class ZentaoTaskSyncService:
         out: dict = {"ok": False, "errors": []}
         now = local_now()
         confirmed = not requirement.zentao_task_id
+        self._ensure_story_change_confirmed(requirement, acting_user)
         left = requirement.estimated_test_hours or 4.0
         if requirement.zentao_task_id:
             task_id = int(requirement.zentao_task_id)

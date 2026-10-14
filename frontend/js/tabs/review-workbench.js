@@ -2,11 +2,14 @@
 // 大部分展示逻辑与需求工作台同构（复用 mine-req-card 样式与流光动效），
 // 但不含用例完成/测试完成勾选与 Bug 列表。
 import { api } from '../api.js';
-import { escapeHtml, renderCaseLink, renderPreviewBtn } from '../utils.js';
+import { escapeHtml, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-1';
 import { renderCaseReviewControls } from '../components/case-review.js?v=20260714-1';
 
 let reviewData = [];
 let reviewSseBound = false;
+document.addEventListener('zentao-story-change-confirmed', () => {
+  if (window.isWorkbenchSubtabActive?.('review')) loadReviewWorkbench().catch(() => {});
+});
 
 const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', changed: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
 
@@ -114,7 +117,7 @@ export function renderReviewCards() {
     const previewBtn = renderPreviewBtn('story', ztStoryId);
     const taskZh = TASK_STATUS_ZH[req.zentao_task_status] || req.zentao_task_status || '';
     const taskTag = req.zentao_task_id
-      ? `<span class="badge" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe;">禅道子任务 #${req.zentao_task_id}${taskZh ? '·' + taskZh : ''}</span>${renderPreviewBtn('task', req.zentao_task_id)}${req.zentao_task_assigned_to ? `<span class="badge" style="background:#f1f5f9; color:#475569;">任务指派：${escapeHtml(req.zentao_task_assigned_to)}</span>` : ''}`
+      ? (renderTaskStoryChangeBadge(req) || `<span class="badge" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe;">禅道子任务 #${req.zentao_task_id}${taskZh ? '·' + taskZh : ''}</span>${renderPreviewBtn('task', req.zentao_task_id)}${req.zentao_task_assigned_to ? `<span class="badge" style="background:#f1f5f9; color:#475569;">任务指派：${escapeHtml(req.zentao_task_assigned_to)}</span>` : ''}`)
       : '<span class="badge" style="background:#f1f5f9; color:#94a3b8;">未关联禅道任务</span>';
     const notesTag = `<span class="badge" style="background:${req.test_notes ? '#dcfce7' : '#f1f5f9'}; color:${req.test_notes ? '#166534' : '#64748b'}; border:1px solid ${req.test_notes ? '#bbf7d0' : '#e2e8f0'};">测试要点：${req.test_notes ? '已填写' : '未填写'}</span>`;
     const notesBtn = `<button class="secondary" style="padding:2px 8px; font-size:12px;" onclick="reviewEditTestNotes(${req.id})">${req.test_notes ? '查看/编辑测试要点' : '填写测试要点'}</button>`;
@@ -124,7 +127,7 @@ export function renderReviewCards() {
     return `
       <details class="mine-req-card review-req-card" data-req-id="${req.id}" open style="background:#ffffff; transition:all .3s;">
         <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom:1px solid #e2e8f0; padding-bottom:12px; display:flex; justify-content:space-between; align-items:center; list-style:none;">
-          <div><span class="qa-story-id-nohref" data-zt-story-id="${ztStoryId}">${escapeHtml(req.zentao_req_id || '')}</span> ${escapeHtml(req.title || '')}${previewBtn}</div>
+          <div><span class="qa-story-id-nohref" data-zt-story-id="${ztStoryId}">${escapeHtml(req.zentao_req_id || '')}</span> ${escapeHtml(req.title || '')}${previewBtn}${renderTaskStoryChangeBadge(req)}</div>
           <span class="badge" style="background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; font-weight:normal;">负责人：${escapeHtml(req.owner_name || '未分配')}</span>
         </summary>
         <div style="margin-top:12px;">

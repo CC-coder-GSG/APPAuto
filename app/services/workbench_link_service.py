@@ -483,6 +483,9 @@ class WorkbenchLinkService:
                         "task_id": task.task_id,
                         "name": task.name,
                         "status": task.status,
+                        "task_story_change_pending": task.task_story_change_pending,
+                        "task_story_version": task.task_story_version,
+                        "task_latest_story_version": task.task_latest_story_version,
                         "type": task.type,
                         "assigned_to_name": task.assigned_to_realname or task.assigned_to or None,
                         # 完成者单独给：任务完成后 assignedTo 常被流转给下一环节的人

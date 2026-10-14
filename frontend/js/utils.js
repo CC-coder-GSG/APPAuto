@@ -82,6 +82,17 @@ export function renderPreviewBtn(type, id, opts = {}) {
     onclick="event.preventDefault(); event.stopPropagation(); window.OmniQAPreview && window.OmniQAPreview.${fn}(${numericId})">${_PREVIEW_ICON_SVG}</a>`;
 }
 
+export function renderTaskStoryChangeBadge(task, id = task?.zentao_task_id || task?.task_id) {
+  if (!task?.task_story_change_pending || !Number(id)) return '';
+  const before = Number(task.task_story_version);
+  const latest = Number(task.task_latest_story_version);
+  const versions = before && latest ? `（v${before} → v${latest}）` : '';
+  const kind = task.zentao_task_id || task.parent ? '禅道子任务' : '禅道任务';
+  return `<button type="button" class="qa-story-change-badge" title="查看需求内容和版本变更，并确认已阅读"
+    style="background:#fff7ed; color:#9a3412; border:2px solid #f97316; border-radius:6px; padding:3px 8px; font-size:12px; font-weight:700; cursor:pointer; margin:2px 4px;"
+    onclick="event.preventDefault(); event.stopPropagation(); window.OmniQAPreview.openTaskStoryChange(${Number(id)})">⚠ ${kind} #${Number(id)} · 研发需求变更 · 待确认${versions}</button>`;
+}
+
 window.OmniQAUtils = {
   withPrefix,
   digitsOnlyValue,
@@ -91,4 +102,5 @@ window.OmniQAUtils = {
   renderBugLink,
   renderCaseLink,
   renderPreviewBtn,
+  renderTaskStoryChangeBadge,
 };

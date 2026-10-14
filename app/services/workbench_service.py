@@ -4,7 +4,9 @@ import logging
 import time
 
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
+from app.services.zentao_task_status import serialize_task_story_change
 
 from app.models import FinalTestRecord, Requirement, RequirementRetestRecord, User, Version
 from app.services.case_review_service import CaseReviewService
@@ -125,6 +127,15 @@ class WorkbenchService:
         # 避免「已在禅道完成的任务本地仍显示未开始」以及指派人判定过期。
         if mode == "version" and major_version_id:
             self._maybe_sync_task_status(major_version_id)
+        elif mode == "all_pending":
+            # Include completed tasks that acquired an acknowledgement after completion.
+            major_query = self.db.query(Requirement.major_version_id).filter(
+                Requirement.owner_id == current_user.id, Requirement.zentao_task_id.isnot(None)
+            )
+            if software_id:
+                major_query = major_query.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
+            for (major_id,) in major_query.distinct().all():
+                self._maybe_sync_task_status(major_id)
 
         # 最终测试模式：所选大版本已开启 final_test 时，无视分配，返回该版本全部
         # 需求，且勾选状态改用当前用户独立的 FinalTestRecord。
@@ -146,7 +157,7 @@ class WorkbenchService:
             if mode == "version" and major_version_id:
                 query = query.filter(Requirement.major_version_id == major_version_id)
             elif mode == "all_pending":
-                query = query.filter(Requirement.test_completed.is_(False))
+                query = query.filter(or_(Requirement.test_completed.is_(False), Requirement.task_story_change_pending.is_(True)))
             if software_id:
                 query = query.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
 
@@ -231,6 +242,7 @@ class WorkbenchService:
                 # 缺失会导致已建任务的需求错误显示为「未关联禅道任务」。
                 "zentao_task_id": r.zentao_task_id,
                 "zentao_task_status": r.zentao_task_status_cache,
+                **serialize_task_story_change(r),
                 "task_started_at": r.task_started_at.isoformat() if r.task_started_at else None,
                 "estimated_test_hours": r.estimated_test_hours,
                 "task_has_time_tracking": bool(
@@ -270,6 +282,7 @@ class WorkbenchService:
         """
         if not major_version_id:
             return []
+        self._maybe_sync_task_status(major_version_id)
         query = (
             self.db.query(Requirement)
             .options(
@@ -304,6 +317,7 @@ class WorkbenchService:
                 "zentao_story_id": r.zentao_story_id,
                 "zentao_task_id": r.zentao_task_id,
                 "zentao_task_status": r.zentao_task_status_cache,
+                **serialize_task_story_change(r),
                 "zentao_task_assigned_to": r.zentao_task_assigned_to,
                 "test_notes": r.test_notes,
                 "test_notes_html": r.test_notes_html,

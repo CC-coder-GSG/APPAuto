@@ -22,7 +22,10 @@ from app.services.zentao_system_client import (
     get_user_zentao_client,
     get_user_zentao_web_login,
 )
-from app.services.zentao_task_status import effective_task_status, task_finish_side_effect_observed
+from app.services.zentao_task_status import (
+    effective_task_status, task_finish_side_effect_observed, apply_task_story_change,
+    serialize_task_story_change, ensure_no_pending_story_change,
+)
 from app.services.zentao_effort_service import AUTO_NOTE, merge_extra_hours, submit_day_efforts
 from app.services.zentao_web_session import (
     ZentaoWebSessionError,
@@ -95,6 +98,16 @@ def _response_confirms_status(response, expected: str) -> bool:
 class ZentaoTaskMirrorService:
     def __init__(self, db: Session):
         self.db = db
+        self._story_change_task_ids: set[int] = set()
+
+    def _publish_story_change_sync(self) -> None:
+        if not self._story_change_task_ids:
+            return
+        task_ids = sorted(self._story_change_task_ids)
+        self._story_change_task_ids.clear()
+        sse_publish("zentao_task_changed", {
+            "task_id": task_ids[0], "task_ids": task_ids, "action": "story_change_sync",
+        }, channels=["global"])
 
     def _linked_requirement(self, task_id: int) -> Optional[Requirement]:
         return (
@@ -119,6 +132,9 @@ class ZentaoTaskMirrorService:
     ) -> bool:
         if requirement is None:
             return False
+        if row.task_story_change_pending is not None:
+            for field in ("task_story_change_pending", "task_story_version", "task_latest_story_version", "task_change_checked_at"):
+                setattr(requirement, field, getattr(row, field, None))
         requirement.zentao_task_status_cache = row.status
         requirement.zentao_task_assigned_to = row.assigned_to
         requirement.task_started_at = row.local_started_at
@@ -129,7 +145,7 @@ class ZentaoTaskMirrorService:
             requirement.task_finished_at = row.finished_date
         elif status in {"doing", "changed"}:
             requirement.task_finished_at = None
-        if status != "done" or requirement.test_completed:
+        if status != "done" or requirement.test_completed or requirement.task_story_change_pending:
             return False
 
         from app.services.requirement_service import RequirementService
@@ -214,6 +230,7 @@ class ZentaoTaskMirrorService:
                 logger.warning("mirror sync exec %s failed: %s", major.zentao_execution_id, exc)
                 errors.append(f"执行 {major.zentao_execution_id}: {exc}")
         self.db.commit()
+        self._publish_story_change_sync()
         return {"ok": not errors, "synced": synced, "executions": len(majors), "errors": errors}
 
     def sync_mine(self, current_user: User) -> dict[str, Any]:
@@ -249,6 +266,7 @@ class ZentaoTaskMirrorService:
                 logger.warning("sync_mine exec %s failed: %s", major.zentao_execution_id, exc)
                 errors.append(str(exc))
         self.db.commit()
+        self._publish_story_change_sync()
         return {"ok": not errors, "synced": synced, "executions": len(majors), "errors": errors}
 
     def sync_one_major(self, major_version_id: int) -> dict[str, Any]:
@@ -262,6 +280,7 @@ class ZentaoTaskMirrorService:
         try:
             n = self._sync_execution(client, major, by_account, by_name)
             self.db.commit()
+            self._publish_story_change_sync()
             return {"ok": True, "synced": n}
         except Exception as exc:  # noqa: BLE001
             self.db.rollback()
@@ -303,6 +322,11 @@ class ZentaoTaskMirrorService:
             row.name = str(t.get("name") or "")[:255]
             row.type = t.get("type")
             row.status = effective_task_status(t)
+            metadata_changed = apply_task_story_change(row, t)
+            if linked_requirement:
+                metadata_changed = apply_task_story_change(linked_requirement, t) or metadata_changed
+            if metadata_changed:
+                self._story_change_task_ids.add(tid)
             row.pri = _coerce_int(t.get("pri"))
             row.story = _coerce_int(t.get("story"))
             row.assigned_to = account
@@ -697,6 +721,15 @@ class ZentaoTaskMirrorService:
         if not candidates:
             raise HTTPException(status_code=502, detail="找不到可用的禅道账号绑定")
 
+        if action not in {"assign", "set_time"}:
+            live = None
+            for _, candidate in candidates:
+                live = self._fetch_one_task(candidate, task_id)
+                if live:
+                    apply_task_story_change(row, live)
+                    break
+            ensure_no_pending_story_change(live, row.task_story_change_pending)
+
         if action == "set_time" and (hours is None or hours <= 0 or hours > 999):
             raise HTTPException(status_code=400, detail="工时需在 0~999 小时之间")
         if action == "finish" and consumed is not None and (consumed <= 0 or consumed > 999):
@@ -736,6 +769,7 @@ class ZentaoTaskMirrorService:
                 if not current:
                     continue
                 current_status = effective_task_status(current)
+                ensure_no_pending_story_change(current, row.task_story_change_pending)
                 if _status_matches(current_status):
                     self._apply_task_data(row, current)
                     if action == "pause":
@@ -1205,6 +1239,7 @@ class ZentaoTaskMirrorService:
         return t
 
     def _apply_task_data(self, row: ZentaoTaskMirror, t: dict) -> None:
+        apply_task_story_change(row, t)
         account, realname = _account_of(t.get("assignedTo"))
         by_account, by_name = self._build_user_maps()
         if t.get("status") is not None:
@@ -1253,6 +1288,7 @@ class ZentaoTaskMirrorService:
             "name": r.name,
             "type": r.type,
             "status": r.status,
+            **serialize_task_story_change(r),
             "pri": r.pri,
             "story": r.story,
             "assigned_to": r.assigned_to,

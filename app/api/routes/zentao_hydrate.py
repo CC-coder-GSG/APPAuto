@@ -39,6 +39,7 @@ import re
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_user, get_db
 from app.models.bug import BugTracking
@@ -52,7 +53,7 @@ from app.services.zentao_normalizer import (
     normalize_story_detail,
     normalize_testcase_detail,
 )
-from app.services.zentao_task_status import effective_task_status
+from app.services.zentao_task_status import effective_task_status, task_story_change_pending
 
 # Rewrite Zentao file URLs inside rich-text HTML to the local /zentao/files/{id}
 # proxy so the browser can load them without a direct Zentao session. Mirrors
@@ -70,6 +71,25 @@ def _rewrite_file_urls(html: str | None) -> str:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/zentao", tags=["zentao_hydrate"])
+
+
+class StoryChangeConfirmPayload(BaseModel):
+    story_id: int = Field(gt=0)
+    expected_story_version: int = Field(gt=0)
+    expected_latest_story_version: int = Field(gt=0)
+
+
+@router.get("/tasks/{task_id}/story-change")
+def preview_task_story_change(task_id: int, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.zentao_story_change_service import ZentaoStoryChangeService
+    return ZentaoStoryChangeService(db).preview(task_id, current_user)
+
+
+@router.post("/tasks/{task_id}/confirm-story-change")
+def confirm_task_story_change(task_id: int, payload: StoryChangeConfirmPayload,
+                              current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.zentao_story_change_service import ZentaoStoryChangeService
+    return ZentaoStoryChangeService(db).confirm(task_id, current_user, **payload.model_dump())
 
 # Hard cap: don't let a single request fan out to an unbounded number of
 # upstream calls.  Stage5 now supports configurable page sizes, so the cap is
@@ -337,6 +357,9 @@ def get_task_detail(
         "name": raw.get("name"),
         "type": raw.get("type"),
         "status": effective_task_status(raw),
+        "task_story_change_pending": task_story_change_pending(raw),
+        "task_story_version": raw.get("storyVersion"),
+        "task_latest_story_version": raw.get("latestStoryVersion"),
         "pri": raw.get("pri"),
         "story": raw.get("story"),
         "story_title": raw.get("storyTitle"),

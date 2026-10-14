@@ -286,6 +286,132 @@ def _logout_quietly(client: httpx.Client, base: str) -> None:
         pass
 
 
+class ZentaoStoryChangeError(ZentaoWebSessionError):
+    def __init__(self, message: str, status_code: int = 502):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _read_story_change_page(client: httpx.Client, base: str, path: str) -> dict:
+    response = client.get(f"{base}/{path}")
+    try:
+        payload = _loads_lenient(response.text)
+        if payload.get("status") != "success":
+            raise ValueError("not a page response")
+        data = payload.get("data")
+        data = _loads_lenient(data) if isinstance(data, str) else data
+        if not isinstance(data, dict) or data.get("loginExpired"):
+            raise ValueError("no page data")
+        return data
+    except (ValueError, AttributeError, TypeError):
+        raise ZentaoStoryChangeError("无法读取禅道需求变更内容，请检查账号权限或重新绑定禅道账号")
+
+
+def _story_change_account(task: dict) -> str:
+    account = task.get("assignedTo")
+    if isinstance(account, dict):
+        account = account.get("account")
+    return str(account or "").strip().lower()
+
+
+def _check_single_story_change_task(task: dict) -> None:
+    # Team acknowledgement is per member; a task-level cache cannot represent it.
+    if task.get("team") or task.get("mode") in {"linear", "multi"}:
+        raise ZentaoStoryChangeError("多人任务请在禅道中按成员确认需求变更", 409)
+    if not task.get("story"):
+        raise ZentaoStoryChangeError("该任务未关联研发需求", 409)
+
+
+def get_task_story_change_via_web(login: ZentaoWebLogin, task_id: int) -> dict:
+    """Read the task and versioned story in the caller's web session. No writes."""
+    base = login.base_url.rstrip("/")
+    client = _open_web_session(login)
+    try:
+        task = _read_story_change_page(client, base, f"task-view-{task_id}.json").get("task")
+        if not isinstance(task, dict) or str(task.get("id")) != str(task_id):
+            raise ZentaoStoryChangeError("禅道任务不存在或无权访问", 404)
+        _check_single_story_change_task(task)
+        story_id = int(task["story"])
+        latest = int(task.get("latestStoryVersion") or 0)
+        version = int(task.get("storyVersion") or 0)
+        if not latest or not version:
+            raise ZentaoStoryChangeError("禅道未返回需求版本，暂时无法确认", 409)
+        page = _read_story_change_page(client, base, f"story-view-{story_id}-{latest}.json")
+        story = page.get("story")
+        if not isinstance(story, dict) or str(story.get("id")) != str(story_id) or int(page.get("version") or 0) != latest:
+            raise ZentaoStoryChangeError("读取的需求版本已发生变化，请刷新后查看", 409)
+        previous = None
+        previous_error = None
+        if version != latest:
+            try:
+                old = _read_story_change_page(client, base, f"story-view-{story_id}-{version}.json")
+                if int(old.get("version") or 0) != version or str((old.get("story") or {}).get("id")) != str(story_id):
+                    raise ZentaoStoryChangeError("旧版需求内容暂不可用")
+                previous = old["story"]
+            except (ZentaoWebSessionError, httpx.HTTPError):
+                previous_error = "旧版需求内容暂不可用，请查看最新版及禅道中的变更记录"
+        return {"task": task, "story": story, "previous_story": previous, "previous_error": previous_error,
+                "can_confirm": _story_change_account(task) == login.account.strip().lower(),
+                "story_version": version, "latest_story_version": latest}
+    finally:
+        _logout_quietly(client, base)
+        client.close()
+
+
+def confirm_task_story_change_via_web(
+    login: ZentaoWebLogin, task_id: int, *, story_id: int,
+    expected_story_version: int, expected_latest_story_version: int,
+) -> dict:
+    """Precheck, acknowledge once, then read back in the same personal session.
+
+    The upstream endpoint itself mutates on GET. Never use the form helper,
+    whose initial GET would confirm before validating what the user read.
+    """
+    from app.services.zentao_task_status import task_story_change_pending
+
+    base = login.base_url.rstrip("/")
+    client = _open_web_session(login)
+    try:
+        task = _read_story_change_page(client, base, f"task-view-{task_id}.json").get("task")
+        if not isinstance(task, dict) or str(task.get("id")) != str(task_id):
+            raise ZentaoStoryChangeError("禅道任务不存在或无权访问", 404)
+        _check_single_story_change_task(task)
+        if _story_change_account(task) != login.account.strip().lower():
+            raise ZentaoStoryChangeError("该禅道任务当前未指派给你，无法确认需求变更", 403)
+        if int(task.get("story") or 0) != story_id or int(task.get("latestStoryVersion") or 0) != expected_latest_story_version:
+            raise ZentaoStoryChangeError("需求关联或最新版本已发生变化，请刷新并阅读最新内容后再确认", 409)
+        if task_story_change_pending(task) is False and int(task.get("storyVersion") or 0) == expected_latest_story_version:
+            return {"task": task, "already_confirmed": True, "version_changed_during_confirm": False}
+        if int(task.get("storyVersion") or 0) != expected_story_version:
+            raise ZentaoStoryChangeError("任务已记录的需求版本发生变化，请刷新后再确认", 409)
+        write_error = None
+        try:
+            response = client.get(f"{base}/task-confirmStoryChange-{task_id}.html",
+                                  headers={"X-Requested-With": "XMLHttpRequest"})
+            payload = _loads_lenient(response.text)
+            if payload.get("result") != "success":
+                write_error = "禅道未接受确认，请检查确认权限"
+        except (httpx.HTTPError, ValueError, AttributeError):
+            write_error = "确认响应未收到"
+        # A failed or timed-out write may have taken effect. Do not send again.
+        try:
+            fresh = _read_story_change_page(client, base, f"task-view-{task_id}.json").get("task")
+        except (ZentaoWebSessionError, httpx.HTTPError):
+            raise ZentaoStoryChangeError("确认结果待核实，请刷新查看任务状态，勿重复提交")
+        if not isinstance(fresh, dict) or str(fresh.get("id")) != str(task_id) or int(fresh.get("story") or 0) != story_id:
+            raise ZentaoStoryChangeError("确认结果待核实：任务关联已发生变化，请刷新查看")
+        confirmed_version = int(fresh.get("storyVersion") or 0)
+        if confirmed_version < expected_latest_story_version:
+            raise ZentaoStoryChangeError(write_error or "需求确认未生效，请刷新后查看")
+        return {"task": fresh, "already_confirmed": False,
+                "version_changed_during_confirm": confirmed_version != expected_latest_story_version
+                or int(fresh.get("latestStoryVersion") or 0) != expected_latest_story_version
+                or task_story_change_pending(fresh) is not False}
+    finally:
+        _logout_quietly(client, base)
+        client.close()
+
+
 def _parse_page_data(text: str) -> dict:
     """禅道页面 .json 响应：{"status":"success","data":"<json字符串>"} → data dict。"""
     payload = _loads_lenient(text)

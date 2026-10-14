@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -39,6 +39,10 @@ class ZentaoTaskMirror(Base):
     status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
     pri: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     story: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    task_story_change_pending: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True, index=True)
+    task_story_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    task_latest_story_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    task_change_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # 禅道账号 + 映射回的本地用户（映射不到则为空）
     assigned_to: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)

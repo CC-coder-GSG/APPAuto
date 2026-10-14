@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { renderTaskStoryChangeBadge } from '../utils.js?v=20261014-1';
 import { showLoading, hideLoading } from '../components/common.js';
 
 const STATUS_META = {
@@ -1012,6 +1013,7 @@ function renderMonthView() {
 // 开始/暂停/完成/重新激活仅指派人本人；关闭已完成任务额外放开给管理员
 // （与后端 /workbench/tasks/{id}/operate 权限一致）。
 function ztActionsHtml(t) {
+  if (t.task_story_change_pending) return renderTaskStoryChangeBadge(t);
   const mine = ztIsMine(t);
   const isAdmin = !!(window.currentUser && window.currentUser.role === 'admin');
   const id = t.task_id;

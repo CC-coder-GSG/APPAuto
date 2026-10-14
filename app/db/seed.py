@@ -425,6 +425,15 @@ def ensure_requirement_schema_compat(db: Session) -> None:
     if "task_efforts_submitted" not in req_cols:
         db.execute(text("ALTER TABLE requirements ADD COLUMN task_efforts_submitted FLOAT NOT NULL DEFAULT 0"))
         db.commit()
+    for column, ddl in (
+        ("task_story_change_pending", "BOOLEAN"),
+        ("task_story_version", "INTEGER"),
+        ("task_latest_story_version", "INTEGER"),
+        ("task_change_checked_at", "DATETIME"),
+    ):
+        if column not in req_cols:
+            db.execute(text(f"ALTER TABLE requirements ADD COLUMN {column} {ddl}"))
+            db.commit()
     if "test_completed_at" not in req_cols:
         db.execute(text("ALTER TABLE requirements ADD COLUMN test_completed_at DATETIME"))
         # Backfill existing test_completed=True rows with their updated_at as a
@@ -471,6 +480,10 @@ def ensure_requirement_schema_compat(db: Session) -> None:
                     test_notes TEXT,
                     test_notes_updated_at DATETIME,
                     test_notes_updated_by_id INTEGER,
+                    task_story_change_pending BOOLEAN,
+                    task_story_version INTEGER,
+                    task_latest_story_version INTEGER,
+                    task_change_checked_at DATETIME,
                     status VARCHAR(50) NOT NULL DEFAULT 'pending',
                     created_at DATETIME NOT NULL,
                     updated_at DATETIME NOT NULL,
@@ -492,6 +505,7 @@ def ensure_requirement_schema_compat(db: Session) -> None:
                     case_completed, test_completed, retest_completed,
                     retested_by_id, retested_at, retest_minor_version_id, retest_passed,
                     test_notes, test_notes_updated_at, test_notes_updated_by_id,
+                    task_story_change_pending, task_story_version, task_latest_story_version, task_change_checked_at,
                     status, created_at, updated_at
                 )
                 SELECT
@@ -499,6 +513,7 @@ def ensure_requirement_schema_compat(db: Session) -> None:
                     case_completed, test_completed, retest_completed,
                     retested_by_id, retested_at, retest_minor_version_id, retest_passed,
                     test_notes, test_notes_updated_at, test_notes_updated_by_id,
+                    task_story_change_pending, task_story_version, task_latest_story_version, task_change_checked_at,
                     status, created_at, updated_at
                 FROM requirements_old
                 """
@@ -668,6 +683,15 @@ def ensure_zentao_task_mirror_schema_compat(db: Session) -> None:
     if "efforts_submitted" not in cols:
         db.execute(text("ALTER TABLE zentao_task_mirror ADD COLUMN efforts_submitted FLOAT NOT NULL DEFAULT 0"))
         db.commit()
+    for column, ddl in (
+        ("task_story_change_pending", "BOOLEAN"),
+        ("task_story_version", "INTEGER"),
+        ("task_latest_story_version", "INTEGER"),
+        ("task_change_checked_at", "DATETIME"),
+    ):
+        if column not in cols:
+            db.execute(text(f"ALTER TABLE zentao_task_mirror ADD COLUMN {column} {ddl}"))
+            db.commit()
 
 
 def ensure_zentao_testcase_mirror_schema_compat(db: Session) -> None:

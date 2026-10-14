@@ -64,6 +64,11 @@ class Requirement(Base):
     zentao_task_status_cache: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     # 禅道子任务当前指派人账号缓存；用于「仅指派人本人可开始/完成禅道任务」的权限判定。
     zentao_task_assigned_to: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    # Requirement acknowledgement is independent of task/test completion.
+    task_story_change_pending: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True, index=True)
+    task_story_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    task_latest_story_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    task_change_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, onupdate=local_now, nullable=False)

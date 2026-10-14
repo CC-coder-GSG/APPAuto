@@ -3,7 +3,7 @@ import { state } from '../state.js';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 import { closeModal, openModal } from '../components/modal.js';
 import { renderCaseReviewControls } from '../components/case-review.js?v=20260714-1';
-import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, sourceTypeZh } from '../utils.js';
+import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge, sourceTypeZh } from '../utils.js?v=20261014-1';
 
 const RESULT_OPTIONS = [
   { value: 'passed', label: '通过' },
@@ -97,6 +97,7 @@ function renderStoryTaskChips(tasks, domScope, reqId) {
   if (!tasks || !tasks.length) return '';
   const MAX_INLINE = 3;
   const chip = (t) => {
+    if (t.task_story_change_pending) return renderTaskStoryChangeBadge(t);
     const tone = TASK_CHIP_TONE[t.status] || TASK_CHIP_TONE.wait;
     const struck = t.status === 'cancel' || t.status === 'closed' ? ' qa-task-chip--closed' : '';
     const assignee = t.assigned_to_name ? `<span class="qa-task-chip-assignee">👤${escapeHtml(t.assigned_to_name)}</span>` : '';
@@ -1213,14 +1214,16 @@ export async function loadMyWorkbench() {
   state.currentDispatchHtml = ddata.length > 0 ? renderDispatchPanel(ddata) : '';
   state.currentMineData = mineData;
   const summaryEl = document.getElementById('mineSummaryText');
-  const pendingCount = state.currentMineData.filter((r) => !r.test_completed || !r.case_completed).length;
+  const pendingCount = state.currentMineData.filter((r) => !r.test_completed || !r.case_completed || r.task_story_change_pending).length;
+  const incompleteCount = state.currentMineData.filter((r) => !r.test_completed || !r.case_completed).length;
+  const changeCount = state.currentMineData.filter((r) => r.task_story_change_pending).length;
   if (summaryEl) {
     if (mode === 'version') {
       const select = document.getElementById('mineMajorSelect');
       const vName = select?.options?.[select.selectedIndex]?.text || '当前大版本';
-      summaryEl.innerHTML = `📢 <b>${vName}</b> 剩余 <b style="color:#dc2626; font-size:18px;">${pendingCount}</b> 个需求未完成测试！`;
+      summaryEl.innerHTML = `📢 <b>${vName}</b> 剩余 <b style="color:#dc2626; font-size:18px;">${incompleteCount}</b> 个需求未完成测试！${changeCount ? ` 另有 <b style="color:#c2410c;">${changeCount}</b> 项需求变更待确认。` : ''}`;
     } else {
-      summaryEl.innerHTML = `📢 跨版本汇总：您共有 <b style="color:#dc2626; font-size:18px;">${pendingCount}</b> 个待办测试需求！`;
+      summaryEl.innerHTML = `📢 跨版本汇总：您共有 <b style="color:#dc2626; font-size:18px;">${pendingCount}</b> 个待处理需求！${changeCount ? ` 其中 <b style="color:#c2410c;">${changeCount}</b> 项需求变更待确认。` : ''}`;
     }
     summaryEl.style.display = 'block';
   }
@@ -1235,6 +1238,7 @@ const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', changed: '进行
 //   done（测试完成）→「任务已完成」禁用
 function renderTaskStartControl(req) {
   if (!req.zentao_task_id) return '';
+  if (req.task_story_change_pending) return '<span class="muted" style="color:#9a3412; font-size:12px;">请先查看并确认需求变更</span>';
   const status = String(req.zentao_task_status || '').toLowerCase();
   // 需求工作台的完成态优先于禅道完成后的指派流转。
   if (status === 'done' || status === 'closed' || req.test_completed) {
@@ -1257,6 +1261,7 @@ function renderTaskStartControl(req) {
 // 非指派人只读展示子任务状态与指派人，避免误操作他人任务。
 function renderTaskMeta(req) {
   if (req.zentao_task_id) {
+    if (req.task_story_change_pending) return renderTaskStoryChangeBadge(req);
     const rawStatus = String(req.zentao_task_status || '').toLowerCase();
     const effectiveStatus = req.test_completed ? 'done' : rawStatus;
     const zh = TASK_STATUS_ZH[effectiveStatus] || effectiveStatus || '';
@@ -1307,7 +1312,8 @@ export function renderMineCards() {
     const caseDisabled = req.case_completed ? 'disabled' : '';
     const testDisabled = req.test_completed ? 'disabled' : '';
     const isFullyCompleted = req.test_completed && req.case_completed;
-    const isOpen = Object.prototype.hasOwnProperty.call(foldStateMap, String(req.id)) ? !!foldStateMap[String(req.id)] : !isFullyCompleted;
+    const isOpen = Object.prototype.hasOwnProperty.call(foldStateMap, String(req.id)) ? !!foldStateMap[String(req.id)] : (!isFullyCompleted || req.task_story_change_pending);
+    const taskChangeDisabled = req.task_story_change_pending && (!req.final_test || req.task_assigned_to_me) ? 'disabled title="请先查看并确认研发需求变更"' : '';
     const vTag = mode === 'all_pending' && req.major_version_name
       ? `<span class="badge" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; margin-right:8px; padding:2px 6px;">🏷️${req.major_version_name}</span>`
       : '';
@@ -1350,7 +1356,7 @@ export function renderMineCards() {
     return `
       <details class="mine-req-card" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; ${retestFailBorder} transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
-          <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${generateCaseChip}${renderStoryTaskChips(req.story_tasks, 'mine', req.id)}</div>
+          <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${renderTaskStoryChangeBadge(req)}${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${generateCaseChip}${renderStoryTaskChips(req.story_tasks, 'mine', req.id)}</div>
           ${isFullyCompleted ? '<span style="color:#16a34a; font-size:14px; background:#f0fdf4; padding:4px 8px; border-radius:4px; border:1px solid #bbf7d0;">✅ 测试已完成</span>' : '<span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开卡片)</span>'}
         </summary>
         <div style="margin-top: 12px;">
@@ -1358,9 +1364,9 @@ export function renderMineCards() {
             ${renderTaskStartControl(req)}
             ${req.final_test
               ? `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'case_completed', this.checked, this)">✅用例完成</label>
-            <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'test_completed', this.checked, this)">✅测试完成</label>`
+            <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="setFinalTestStatus(${req.id}, 'test_completed', this.checked, this)">✅测试完成</label>`
               : `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked).then(()=>loadMyWorkbench())">✅用例完成</label>
-            <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">✅测试完成</label>`}
+            <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">✅测试完成</label>`}
             ${renderTaskMeta(req)}
             <span class="badge" style="background:${req.test_notes ? '#dcfce7' : '#f1f5f9'}; color:${req.test_notes ? '#166534' : '#64748b'}; border:1px solid ${req.test_notes ? '#bbf7d0' : '#e2e8f0'};">
               测试要点：${req.test_notes ? '已填写' : '未填写'}
@@ -1386,7 +1392,9 @@ export function renderMineCards() {
 
   const mineCards = document.getElementById('mineCards');
   if (mineCards) {
-    mineCards.innerHTML = finalTestBanner + (state.currentFeedbackTodoHtml || '') + state.currentDispatchHtml + reqsHtml;
+    const pendingCount = filteredData.filter((r) => r.task_story_change_pending).length;
+    const changeBanner = pendingCount ? `<div role="status" style="background:#fff7ed; color:#9a3412; border:1px solid #fdba74; padding:10px 14px; border-radius:8px; margin-bottom:12px;">⚠ 有 ${pendingCount} 项研发需求变更待确认，请点击需求卡片上的橙色标签查看内容并确认。</div>` : '';
+    mineCards.innerHTML = changeBanner + finalTestBanner + (state.currentFeedbackTodoHtml || '') + state.currentDispatchHtml + reqsHtml;
     window.OmniQAZentao?.hydrateContainer(mineCards);
     window.OmniQAStoryAI?.refreshSlots?.(mineCards);
   }
@@ -1398,6 +1406,10 @@ export function renderMineCards() {
     });
   }
 }
+
+document.addEventListener('zentao-story-change-confirmed', () => {
+  if (window.isWorkbenchSubtabActive?.('demand')) loadMyWorkbench().catch(() => {});
+});
 
 function bindMineSSE() {
   if (mineSseBound) return;

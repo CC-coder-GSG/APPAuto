@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn } from '../utils.js';
+import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-1';
 let retestSseBound = false;
 let retestPreflightPromise = null;
 let retestPreflightKey = '';
@@ -42,6 +42,7 @@ function renderStoryTaskChips(tasks, domScope, reqId) {
   if (!tasks || !tasks.length) return '';
   const MAX_INLINE = 3;
   const chip = (t) => {
+    if (t.task_story_change_pending) return renderTaskStoryChangeBadge(t);
     const tone = TASK_CHIP_TONE[t.status] || TASK_CHIP_TONE.wait;
     const struck = t.status === 'cancel' || t.status === 'closed' ? ' qa-task-chip--closed' : '';
     const assignee = t.assigned_to_name ? `<span class="qa-task-chip-assignee">👤${escapeHtml(t.assigned_to_name)}</span>` : '';
