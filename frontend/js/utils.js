@@ -86,11 +86,18 @@ export function renderTaskStoryChangeBadge(task, id = task?.zentao_task_id || ta
   if (!task?.task_story_change_pending || !Number(id)) return '';
   const before = Number(task.task_story_version);
   const latest = Number(task.task_latest_story_version);
-  const versions = before && latest ? `（v${before} → v${latest}）` : '';
+  const versions = before && latest ? `v${before} → v${latest}` : '';
   const kind = task.zentao_task_id || task.parent ? '禅道子任务' : '禅道任务';
-  return `<button type="button" class="qa-story-change-badge" title="查看需求内容和版本变更，并确认已阅读"
-    style="background:#fff7ed; color:#9a3412; border:2px solid #f97316; border-radius:6px; padding:3px 8px; font-size:12px; font-weight:700; cursor:pointer; margin:2px 4px;"
-    onclick="event.preventDefault(); event.stopPropagation(); window.OmniQAPreview.openTaskStoryChange(${Number(id)})">⚠ ${kind} #${Number(id)} · 研发需求变更 · 待确认${versions}</button>`;
+  const label = `${kind} #${Number(id)} · 研发需求变更 · 待确认${versions ? `（${versions}）` : ''}，点击查看内容并确认`;
+  return `<button type="button" class="qa-story-change-badge" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"
+    onclick="event.preventDefault(); event.stopPropagation(); window.OmniQAPreview.openTaskStoryChange(${Number(id)})">
+    <svg class="qa-story-change-badge__icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M7.1 2.4a1 1 0 0 1 1.8 0l5.3 9.8a1 1 0 0 1-.9 1.5H2.7a1 1 0 0 1-.9-1.5z"/><path d="M8 6v3.1"/><circle cx="8" cy="11.2" r=".65" fill="currentColor" stroke="none"/></svg>
+    <span class="qa-story-change-badge__task">#${Number(id)}</span>
+    <span class="qa-story-change-badge__label">研发需求变更</span>
+    <span class="qa-story-change-badge__pending">待确认</span>
+    ${versions ? `<span class="qa-story-change-badge__version">${versions}</span>` : ''}
+    <svg class="qa-story-change-badge__arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg>
+  </button>`;
 }
 
 window.OmniQAUtils = {

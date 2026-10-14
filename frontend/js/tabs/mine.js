@@ -3,7 +3,7 @@ import { state } from '../state.js';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 import { closeModal, openModal } from '../components/modal.js';
 import { renderCaseReviewControls } from '../components/case-review.js?v=20260714-1';
-import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge, sourceTypeZh } from '../utils.js?v=20261014-1';
+import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge, sourceTypeZh } from '../utils.js?v=20261014-2';
 
 const RESULT_OPTIONS = [
   { value: 'passed', label: '通过' },
@@ -1261,7 +1261,7 @@ function renderTaskStartControl(req) {
 // 非指派人只读展示子任务状态与指派人，避免误操作他人任务。
 function renderTaskMeta(req) {
   if (req.zentao_task_id) {
-    if (req.task_story_change_pending) return renderTaskStoryChangeBadge(req);
+    if (req.task_story_change_pending) return `<span style="font-size:12px; color:var(--w-ink-soft, #64748b);">禅道子任务 #${Number(req.zentao_task_id)}</span>`;
     const rawStatus = String(req.zentao_task_status || '').toLowerCase();
     const effectiveStatus = req.test_completed ? 'done' : rawStatus;
     const zh = TASK_STATUS_ZH[effectiveStatus] || effectiveStatus || '';

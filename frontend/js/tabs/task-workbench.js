@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { escapeHtml, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-1';
+import { escapeHtml, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 
 // 任务工作台：展示当前账号名下的禅道任务。

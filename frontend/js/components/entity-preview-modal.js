@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
 
 // Unified preview modal for Zentao stories / bugs / testcases.
 // Exposes:
@@ -502,7 +503,7 @@ function _renderTask(data) {
     : '';
   body.innerHTML = `
     ${ztBtn}
-    ${data.task_story_change_pending ? `<button type="button" style="background:#fff7ed; color:#9a3412; border:2px solid #f97316; padding:8px 12px; border-radius:6px; margin-bottom:12px; font-weight:700;" onclick="window.OmniQAPreview.openTaskStoryChange(${Number(data.id)})">⚠ 研发需求变更 · 待确认 — 查看需求内容并确认</button>` : ''}
+    ${renderTaskStoryChangeBadge(data, data.id)}
     <div style="border:1px solid #e2e8f0; border-radius:10px; padding:8px 12px; background:#f8fafc;">
       <table style="width:100%; border-collapse:collapse; font-size:14px;">
         ${row('预计工时', data.estimate != null ? data.estimate + ' h' : '')}
@@ -562,7 +563,7 @@ function _renderTaskStoryChange(data, generation) {
     ${compare}
     <div id="storyChangeResult" role="status" style="margin:12px 0; color:#9a3412;"></div>
     <div style="position:sticky; bottom:0; background:#fff; border-top:1px solid #e2e8f0; padding:12px 0; display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
-      <button type="button" id="confirmTaskStoryChange" ${canConfirm ? '' : 'disabled'} style="background:#c2410c; color:#fff; border-radius:6px; padding:8px 14px; font-weight:600;">${pending ? '确认已阅读需求变更' : '已确认'}</button>
+      <button type="button" id="confirmTaskStoryChange" class="qa-story-change-confirm" ${canConfirm ? '' : 'disabled'} style="border-radius:6px; padding:8px 14px; font-weight:600;">${pending ? '确认已阅读需求变更' : '已确认'}</button>
       <button type="button" id="refreshTaskStoryChange" class="secondary">刷新内容</button>
       <span style="font-size:12px; color:#64748b;">${escapeHtml(pending && !data.can_confirm ? data.confirm_disabled_reason : '确认仅记录已阅读变更；需要重新测试时，请另行重新激活任务。')}</span>
     </div>`;

@@ -1611,3 +1611,52 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
 .qa-task-chip--closed .qa-task-chip-title { text-decoration: line-through; }
 .qa-task-chip-more { background: var(--w-surface, #fff); color: var(--w-ink-faint, #64748b); border-color: var(--w-hairline-strong, #d8dce4); }
 .qa-task-chips-rest { display: contents; }
+
+/* 需求变更入口是状态标签；显式覆盖全局墨色按钮与 hover 动效。 */
+button.qa-story-change-badge {
+  display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  max-width: 100%; min-width: 0; box-sizing: border-box; vertical-align: middle;
+  padding: 3px 8px !important; margin: 2px 4px;
+  background: #fff7e6 !important; color: #96520e !important;
+  border: 1px solid #efd3a4 !important; border-radius: 999px !important;
+  font-size: 12px !important; font-weight: 500 !important; line-height: 1.5;
+  letter-spacing: normal !important; text-align: left; white-space: normal;
+  box-shadow: none !important; transform: none !important; cursor: pointer;
+  transition: background .15s ease, border-color .15s ease !important;
+}
+button.qa-story-change-badge:hover {
+  background: #ffedcf !important; color: #85480d !important;
+  border-color: #e8b66b !important; box-shadow: none !important; transform: none !important;
+}
+button.qa-story-change-badge:active {
+  background: #ffe5b5 !important; transform: none !important; box-shadow: none !important;
+}
+button.qa-story-change-badge:focus-visible {
+  outline: 2px solid #d97706 !important; outline-offset: 3px;
+}
+.qa-story-change-badge__icon { width: 14px; height: 14px; flex: none; color: #c77712; }
+.qa-story-change-badge__task { color: #8c6228; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.qa-story-change-badge__label { font-weight: 600; white-space: nowrap; }
+.qa-story-change-badge__pending {
+  padding: 0 5px; border-radius: 999px; background: #ffebc6; color: #9a580e;
+  font-size: 10px; font-weight: 600; line-height: 1.8; white-space: nowrap;
+}
+.qa-story-change-badge__version { color: #8c6228; font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.qa-story-change-badge__arrow { width: 12px; height: 12px; flex: none; color: #b4782c; }
+button.qa-story-change-confirm {
+  background: #c77712 !important; color: #fff !important;
+  border: 1px solid #c77712 !important; box-shadow: none !important;
+}
+button.qa-story-change-confirm:hover:not(:disabled) {
+  background: #ab610b !important; border-color: #ab610b !important;
+  box-shadow: none !important; transform: none !important;
+}
+button.qa-story-change-confirm:disabled {
+  background: #f6ead7 !important; color: #8a6a39 !important;
+  border-color: #eedfc9 !important; opacity: 1; cursor: not-allowed;
+}
+@media (max-width: 600px) {
+  .qa-story-change-badge__version { display: none; }
+  .mine-req-card > summary .qa-story-change-badge__task,
+  .mine-req-card > summary .qa-story-change-badge__arrow { display: none; }
+}

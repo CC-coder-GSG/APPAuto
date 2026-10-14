@@ -2,7 +2,7 @@
 // 大部分展示逻辑与需求工作台同构（复用 mine-req-card 样式与流光动效），
 // 但不含用例完成/测试完成勾选与 Bug 列表。
 import { api } from '../api.js';
-import { escapeHtml, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-1';
+import { escapeHtml, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
 import { renderCaseReviewControls } from '../components/case-review.js?v=20260714-1';
 
 let reviewData = [];

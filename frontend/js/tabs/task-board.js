@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { renderTaskStoryChangeBadge } from '../utils.js?v=20261014-1';
+import { renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
 import { showLoading, hideLoading } from '../components/common.js';
 
 const STATUS_META = {

@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-1';
+import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
 let retestSseBound = false;
 let retestPreflightPromise = null;
 let retestPreflightKey = '';
