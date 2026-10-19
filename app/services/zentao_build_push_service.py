@@ -132,7 +132,8 @@ def _resolve_execution_context(
     - project_id：用于项目范围查询；v2 通过 POST /builds 创建。
     - product_id：禅道写 build 需要的 product 外键。GET /executions/{id} 用的
       字段名是 `products`（复数列表），`product`（单数）只在老/IPD fork 上出现，
-      留作 fallback。两个都拿不到 → 兜底再调 get_execution_context()。
+      留作 fallback。两个都拿不到 → get_execution_context() 核对执行页面的产品关联，
+      兼容 IPD 5.6 中 product='single'、products 缺失的返回。
     - builder：尽量从 PM / openedBy 里取一个有意义的禅道账号名。
     """
     try:
@@ -146,7 +147,8 @@ def _resolve_execution_context(
     if not isinstance(exec_obj, dict):
         return None, None, None, None
 
-    project_id = _coerce_int(exec_obj.get("project"))
+    project = exec_obj.get("project")
+    project_id = _coerce_int(project.get('id') if isinstance(project, dict) else project)
     execution_name = exec_obj.get("name") if isinstance(exec_obj.get("name"), str) else None
 
     pid = _extract_first_product_id(exec_obj.get("products"))

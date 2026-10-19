@@ -27,6 +27,26 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TIMEOUT = 15.0
 
 
+def _positive_object_id(value: Any) -> int | None:
+    if isinstance(value, dict):
+        value = value.get('id')
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        return None
+    text = str(value).strip()
+    return int(text) if text.isascii() and text.isdecimal() and int(text) > 0 else None
+
+
+def _extract_product_ids(raw: Any) -> list[int]:
+    """Read product objects, ID lists, or product-ID-keyed page dictionaries."""
+    if isinstance(raw, dict):
+        values = [raw] if 'id' in raw else list(raw)
+    elif isinstance(raw, list):
+        values = raw
+    else:
+        values = [raw]
+    return list(dict.fromkeys(pid for value in values if (pid := _positive_object_id(value)) is not None))
+
+
 def _coerce_int_str(value: Any) -> str | None:
     try:
         text = str(int(value))
@@ -805,53 +825,37 @@ class ZentaoClient:
 
 
     def get_execution_context(self, execution_id: int) -> dict:
+        """Read execution links, retaining page recovery for IPD v2 field gaps.
+
+        IPD 5.6 returns product='single' (a mode, not an ID) and omits
+        products. The verified execution page contains the linked product map.
         """
-        Return {product_ids: [...], project_id: int|None} for the given execution.
-        Uses GET /v2/executions/{id}.
-        """
+        product_ids: list[int] = []
+        project_id = None
         try:
             resp = self.get_execution(execution_id)
-            if not resp:
-                return {"product_ids": [], "project_id": None}
-            execution = resp.get("execution") or resp
+            execution = resp.get('execution', resp) if isinstance(resp, dict) else None
             if not isinstance(execution, dict):
-                return {"product_ids": [], "project_id": None}
-
-            # Extract product IDs
-            products_raw = execution.get("products") or []
-            product_ids: list[int] = []
-            if isinstance(products_raw, list):
-                for p in products_raw:
-                    if isinstance(p, dict):
-                        pid = p.get("id")
-                        if pid:
-                            product_ids.append(int(pid))
-                    elif p:
-                        try:
-                            product_ids.append(int(p))
-                        except (TypeError, ValueError):
-                            pass
-            elif isinstance(products_raw, dict):
-                for pid in products_raw:
-                    try:
-                        product_ids.append(int(pid))
-                    except (TypeError, ValueError):
-                        pass
-
-            # Extract project ID
-            project_raw = execution.get("project") or {}
-            project_id = None
-            if isinstance(project_raw, dict):
-                project_id = project_raw.get("id")
-            elif project_raw:
-                try:
-                    project_id = int(project_raw)
-                except (TypeError, ValueError):
-                    pass
-
-            return {"product_ids": product_ids, "project_id": project_id}
-        except Exception:
-            return {"product_ids": [], "project_id": None}
+                return {'product_ids': [], 'project_id': None}
+            project_id = _positive_object_id(execution.get('project'))
+            product_ids = (_extract_product_ids(execution.get('products'))
+                           or _extract_product_ids(execution.get('product')))
+            if not product_ids:
+                page = self.get_page(f'execution-view-{int(execution_id)}.json')
+                page_execution = page.get('execution') if isinstance(page, dict) else None
+                if isinstance(page_execution, dict) and _positive_object_id(page_execution) == int(execution_id):
+                    page_project = _positive_object_id(page_execution.get('project'))
+                    if project_id and page_project and project_id != page_project:
+                        logger.warning('Execution #%s page project differs from v2; ignoring page links', execution_id)
+                    else:
+                        product_ids = (_extract_product_ids(page.get('products'))
+                                       or _extract_product_ids(page_execution.get('products'))
+                                       or _extract_product_ids(page_execution.get('product')))
+                        project_id = project_id or page_project
+        except Exception as exc:
+            # An unavailable fallback must not discard a known project anchor.
+            logger.warning('Cannot fully resolve execution #%s links: %s', execution_id, type(exc).__name__)
+        return {'product_ids': product_ids, 'project_id': project_id}
 
     def get_execution_build_ids(self, execution_id: int) -> list[str]:
         """

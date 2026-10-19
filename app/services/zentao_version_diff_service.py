@@ -714,53 +714,9 @@ def _find_builds_by_name_in_project(client, project_id: int, name: str) -> list[
 def _resolve_target_exec_meta(
     client, exec_id: int
 ) -> tuple[Optional[str], Optional[int], Optional[int], Optional[str]]:
-    """读一次执行 detail，取 (execution_name, project_id, product_id, builder)。
-
-    GET /v2/executions/{id} 解包后的字段：name、project、products、PM/openedBy。
-    解析失败的字段返回 None；调用方自己判断够不够用。
-
-    builder：v2 POST /builds 的必填字段。
-    "构建者不能为空"，所以 reassign 走 create 分支前必须先把它解出来。
-    """
-    try:
-        detail = client.get(f"executions/{exec_id}")
-    except Exception as exc:
-        logger.warning("resolve target execution(%s) detail failed: %s", exec_id, exc)
-        return None, None, None, None
-    if not isinstance(detail, dict):
-        return None, None, None, None
-    exec_obj = detail.get("execution") if isinstance(detail.get("execution"), dict) else detail
-    if not isinstance(exec_obj, dict):
-        return None, None, None, None
-    exec_name = exec_obj.get("name") if isinstance(exec_obj.get("name"), str) else None
-    project_id = _coerce_int(exec_obj.get("project"))
-    product_id = None
-    products = exec_obj.get("products")
-    if isinstance(products, list):
-        for item in products:
-            if isinstance(item, dict):
-                product_id = _coerce_int(item.get("id"))
-                if product_id:
-                    break
-    if product_id is None:
-        product_id = _coerce_int(exec_obj.get("product"))
-
-    builder: Optional[str] = None
-    raw_builder = exec_obj.get("PM") or exec_obj.get("openedBy")
-    if isinstance(raw_builder, dict):
-        builder = raw_builder.get("account") or raw_builder.get("realname")
-    elif isinstance(raw_builder, str):
-        builder = raw_builder
-    # PM/openedBy 都空时使用当前绑定的禅道账号。
-    # 否则 create build 会被禅道挡为 400 "构建者不能为空"。
-    if not builder:
-        try:
-            me = client.get("user")
-            profile = me.get("profile") if isinstance(me, dict) else None
-            if isinstance(profile, dict):
-                builder = profile.get("account") or profile.get("realname")
-        except Exception as exc:
-            logger.warning("fallback resolve current user account failed: %s", exc)
+    """Use the same verified execution/product recovery as automatic build push."""
+    from app.services.zentao_build_push_service import _resolve_execution_context
+    project_id, product_id, builder, exec_name = _resolve_execution_context(client, exec_id)
     return exec_name, project_id, product_id, builder
 
 
