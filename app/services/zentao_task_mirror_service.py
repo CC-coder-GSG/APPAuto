@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.models import Requirement, User, Version, VersionType
 from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.services.holiday_service import get_holiday_map
+from app.services.assignment_validation import validate_task_dates
 from app.services.sse_service import sse_publish
 from app.utils import work_hours
 from app.services.zentao_system_client import (
@@ -566,6 +567,7 @@ class ZentaoTaskMirrorService:
         name = (name or "").strip()
         if not name:
             raise HTTPException(status_code=400, detail="任务名称不能为空")
+        validate_task_dates(est_started, deadline)
         # 命名规范（2026-07-08）：测试相关任务统一 [测试] 前缀（已带则不重复）
         name = ensure_test_prefix(name)[:255]
         if task_type not in self._CREATE_TASK_TYPES:
@@ -608,6 +610,8 @@ class ZentaoTaskMirrorService:
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("create board task in exec %s failed: %s", exec_id, exc)
+                if getattr(exc, 'outcome_unknown', False):
+                    raise HTTPException(409, "禅道创建任务结果不明，已停止其他账号重建，请先刷新核实") from exc
                 errors.append(str(exc))
                 continue
             if isinstance(created, dict) and _coerce_int(created.get("id")):
@@ -924,6 +928,14 @@ class ZentaoTaskMirrorService:
                     }
             except Exception as exc:  # noqa: BLE001 — REST 失败/未生效都尝试网页会话
                 logger.warning("%s via REST (%s) task %s failed: %s", action, label, task_id, exc)
+                if getattr(exc, "outcome_unknown", False):
+                    verified = self._fetch_one_task(cli, row.task_id)
+                    if _status_matches(verified):
+                        return verified
+                    raise
+            if isinstance(resp, dict) and resp.get("status") == "success":
+                from app.services.zentao_client_service import ZentaoAPIError
+                raise ZentaoAPIError(502, "禅道已接收操作，但回读未确认，已停止重复提交", outcome_unknown=True)
             web = web_logins.get(label)
             if web is not None:
                 return _web(web)
@@ -960,6 +972,8 @@ class ZentaoTaskMirrorService:
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
                 logger.warning("operate task %s action=%s via %s failed: %s", task_id, action, label, exc)
+                if getattr(exc, "outcome_unknown", False):
+                    break
                 continue
             if action == "finish" and isinstance(last_resp, dict) and last_resp.get("_omniqa_partial_finish"):
                 finish_partially_applied = True
@@ -1159,6 +1173,8 @@ class ZentaoTaskMirrorService:
         try:
             return submit_day_efforts(login, row.task_id, day_rows, left_before=float(row.left or 0.0), note=AUTO_NOTE)
         except Exception as exc:  # noqa: BLE001 — 提交失败退回本地累计，不阻塞暂停
+            if getattr(exc, 'outcome_unknown', False):
+                raise HTTPException(409, "禅道工时提交结果不明，已停止自动补交，请先刷新核实") from exc
             logger.warning("task %s pause: submit efforts failed, fall back to local accum: %s", row.task_id, exc)
             return None
 
@@ -1188,6 +1204,8 @@ class ZentaoTaskMirrorService:
                     row.local_started_at = None
                     return max(remainder, 0.1)
                 except Exception as exc:  # noqa: BLE001 — 拆分提交失败退回一次性
+                    if getattr(exc, 'outcome_unknown', False):
+                        raise HTTPException(409, "禅道工时提交结果不明，已停止自动补交，请先刷新核实") from exc
                     logger.warning("task %s finish: pre-submit efforts failed, fall back to lump sum: %s", row.task_id, exc)
             total = round(remainder + sum(h for _, h in prev_rows), 2)
         else:

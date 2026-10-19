@@ -436,7 +436,7 @@ def test_delete_effort_via_web_uses_confirm_and_verifies_absence(monkeypatch):
 
         def get(self, url, **kwargs):
             self.urls.append(url)
-            if "task-deleteWorkhour-9-yes.html" in url:
+            if "effort-delete-9-yes-.html" in url:
                 self.deleted = True
             return Resp()
 
@@ -451,7 +451,7 @@ def test_delete_effort_via_web_uses_confirm_and_verifies_absence(monkeypatch):
 
     efforts = zws.delete_task_effort_via_web(_login(), 42, 9)
     assert efforts == []
-    assert client.urls == ["http://z/task-deleteWorkhour-9-yes.html"]
+    assert client.urls == ["http://z/effort-delete-9-yes-.html"]
 
 
 def test_delete_effort_via_web_fails_when_all_routes_leave_record(monkeypatch):
@@ -477,6 +477,6 @@ def test_delete_effort_via_web_fails_when_all_routes_leave_record(monkeypatch):
     with pytest.raises(ZentaoWebSessionError, match="回读后仍存在"):
         zws.delete_task_effort_via_web(_login(), 42, 9)
     assert client.urls == [
+        "http://z/effort-delete-9-yes-.html",
         "http://z/task-deleteWorkhour-9-yes.html",
-        "http://z/effort-delete-9.html",
     ]

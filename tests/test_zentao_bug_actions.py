@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from datetime import datetime
+import pytest
 
 from app.api.deps import get_current_user, get_db
 from app.api.routes import zentao_bug_actions
@@ -162,6 +163,7 @@ def test_create_bug_returns_diagnostic_when_empty_success_has_no_id(db_session, 
         "product_id": 15,
         "execution_id": 1647,
         "title": "probe bug",
+        "deadline": "2026-10-20",
         "severity": 3,
         "pri": 3,
         "steps": "<p>probe</p>",
@@ -180,6 +182,53 @@ def test_create_bug_returns_diagnostic_when_empty_success_has_no_id(db_session, 
     finally:
         app = client.app
         app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize('deadline', [None, '', '2026-02-30', 'not-a-date'])
+def test_create_bug_rejects_missing_or_invalid_deadline_before_remote_write(db_session, monkeypatch, deadline):
+    user = _create_user(db_session)
+    client = _make_client(db_session, user)
+    monkeypatch.setattr(zentao_bug_actions, '_get_client', lambda *a: pytest.fail('no remote access on invalid dates'))
+    payload = {'product_id': 15, 'title': 'date validation'}
+    if deadline is not None:
+        payload['deadline'] = deadline
+    try:
+        assert client.post('/zentao/bugs', json=payload).status_code == 422
+    finally:
+        client.app.dependency_overrides.clear()
+        client.close()
+
+
+def test_create_bug_forwards_deadline_and_records_returned_id(db_session, monkeypatch):
+    user = _create_user(db_session)
+    _bind_user(db_session, user.id)
+    major = Version(version_no='IPD56-deadline', version_type=VersionType.MAJOR)
+    db_session.add(major)
+    db_session.commit()
+    client = _make_client(db_session, user)
+    requests = []
+
+    class Client:
+        def create_bug(self, product_id, body):
+            requests.append((product_id, body))
+            return {'id': 99001}
+
+    monkeypatch.setattr(zentao_bug_actions, '_get_client', lambda *a: Client())
+    try:
+        response = client.post('/zentao/bugs', json={
+            'product_id': 15, 'execution_id': 1289, 'title': 'deadline forwarded',
+            'deadline': '2026-10-20', 'opened_build': ['4398'],
+            'major_version_id': major.id,
+        })
+        assert response.status_code == 200
+        assert response.json()['zentao_bug_id'] == '99001'
+        assert len(requests) == 1
+        assert requests[0][1]['deadline'] == '2026-10-20'
+        assert requests[0][1]['execution'] == 1289
+        assert db_session.query(BugTracking).filter_by(zentao_bug_id='99001').one().zentao_bug_title == 'deadline forwarded'
+    finally:
+        client.app.dependency_overrides.clear()
+        client.close()
 
 
 class _ActivateClient:

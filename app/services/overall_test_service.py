@@ -1333,7 +1333,7 @@ class OverallTestService:
         if not token:
             return None
         base_url = binding.base_url.rstrip("/")
-        return ZentaoClient(base_url=base_url, token=token), base_url
+        return ZentaoClient.from_binding(binding, token), base_url
 
     def _resolve_execution_id_for_major(self, client: ZentaoClient, major: Version) -> int | None:
         if major.zentao_execution_id:
@@ -1352,12 +1352,10 @@ class OverallTestService:
         if major.zentao_project_id:
             project_ids.append(int(major.zentao_project_id))
         else:
-            projects_data = client.get("projects", params={"limit": 100}) or {}
-            project_ids.extend(int(p["id"]) for p in projects_data.get("projects", []) if p.get("id"))
+            project_ids.extend(int(p["id"]) for p in client.list_projects() if p.get("id"))
 
         for project_id in project_ids:
-            data = client.get(f"projects/{project_id}/executions", params={"limit": 200}) or {}
-            for exc_row in data.get("executions", []):
+            for exc_row in client.list_project_executions(project_id):
                 exec_id = exc_row.get("id")
                 exec_name = str(exc_row.get("name") or "").strip()
                 if not exec_id or not exec_name:
@@ -1382,8 +1380,7 @@ class OverallTestService:
         )
 
         build_ids: list[int] = []
-        remote_builds = client.get(f"executions/{execution_id}/builds", params={"limit": 200}) or {}
-        for build in self._extract_build_rows(remote_builds):
+        for build in client.list_execution_builds(execution_id):
             build_id = build.get("id")
             if build_id:
                 build_ids.append(int(build_id))

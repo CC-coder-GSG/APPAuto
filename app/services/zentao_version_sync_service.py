@@ -92,7 +92,7 @@ class ZentaoVersionSyncService:
         if not client:
             return []
         try:
-            data = client.get('projects', params={'limit': 100}) or {}
+            projects = client.list_projects()
             return [
                 {
                     'id': p['id'],
@@ -100,7 +100,7 @@ class ZentaoVersionSyncService:
                     'code': p.get('code', ''),
                     'status': p.get('status', ''),
                 }
-                for p in data.get('projects', [])
+                for p in projects
                 if p.get('id') and p.get('name')
             ]
         except Exception as exc:
@@ -546,7 +546,7 @@ class ZentaoVersionSyncService:
         token = get_valid_token(user_id, self.db)
         if not token:
             return None
-        return ZentaoClient(base_url=binding.base_url, token=token)
+        return ZentaoClient.from_binding(binding, token)
 
 
 __all__ = ['ZentaoVersionSyncService', 'VersionSyncResult']

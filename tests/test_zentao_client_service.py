@@ -14,7 +14,7 @@ class _FakeResponse:
         return json.loads(self.text)
 
 
-def test_get_page_uses_follow_redirects(monkeypatch):
+def test_token_page_does_not_forward_token_to_redirect(monkeypatch):
     captured = {}
 
     def _fake_get(url, **kwargs):
@@ -28,10 +28,10 @@ def test_get_page_uses_follow_redirects(monkeypatch):
     result = client.get_page("bug-create-15-1647.json")
 
     assert result == {"users": {"chenwenbo": "陈文博"}}
-    assert captured["kwargs"]["follow_redirects"] is True
+    assert captured["kwargs"]["follow_redirects"] is False
 
 
-def test_get_page_text_uses_follow_redirects(monkeypatch):
+def test_token_html_does_not_forward_token_to_redirect(monkeypatch):
     captured = {}
 
     def _fake_get(url, **kwargs):
@@ -44,12 +44,10 @@ def test_get_page_text_uses_follow_redirects(monkeypatch):
     result = client.get_page_text("bug-create-15-1647.html")
 
     assert result == "ok"
-    assert captured["kwargs"]["follow_redirects"] is True
+    assert captured["kwargs"]["follow_redirects"] is False
 
 
-def test_create_execution_build_posts_to_projects_endpoint():
-    """禅道 IPD 4.3 实测：/v1/executions/{id}/builds 静默不写库，必须走
-    /v1/projects/{project_id}/builds，body 里带 execution=exec_id。"""
+def test_create_execution_build_uses_v2_required_fields():
     captured = {}
     client = ZentaoClient("http://zentao.example/zentao", "token")
 
@@ -67,10 +65,12 @@ def test_create_execution_build_posts_to_projects_endpoint():
         product_id=15,
         builder="chenwenbo",
         date="2026-05-15",
+        system_id=8,
     )
 
-    assert captured["path"] == "projects/134/builds"
-    assert captured["body"]["execution"] == 1647
+    assert captured["path"] == "builds"
+    assert captured["body"]["executionID"] == 1647
+    assert captured["body"]["system"] == 8
     assert captured["body"]["product"] == 15
     assert captured["body"]["name"] == "4.0.3.1.260514(40301051)(64-bit)"
     assert captured["body"]["builder"] == "chenwenbo"
@@ -78,12 +78,14 @@ def test_create_execution_build_posts_to_projects_endpoint():
     assert result == {"id": 4591, "name": "4.0.3.1.260514(40301051)(64-bit)"}
 
 
-def test_create_execution_build_requires_project_id():
-    """没解析到 project_id 不能继续 —— 否则禅道会静默吞掉请求，调用方拿不到任何信号。"""
+def test_create_execution_build_requires_product_and_builder_before_write():
     import pytest
 
     client = ZentaoClient("http://zentao.example/zentao", "token")
-    with pytest.raises(ValueError, match="project_id"):
+    from app.services.zentao_client_service import ZentaoAPIError
+    with pytest.raises(ZentaoAPIError, match="产品"):
+        client.create_execution_build(1647, "x", builder="alice")
+    with pytest.raises(ZentaoAPIError, match="构建者"):
         client.create_execution_build(1647, "x", product_id=15)
 
 
@@ -103,6 +105,7 @@ def test_create_execution_build_defaults_date_to_today():
     client.create_execution_build(
         1647, "build-x",
         project_id=134, product_id=15, builder="chenwenbo",
+        system_id=8,
         # date omitted on purpose
     )
     assert captured["body"]["date"] == datetime.now().strftime("%Y-%m-%d")

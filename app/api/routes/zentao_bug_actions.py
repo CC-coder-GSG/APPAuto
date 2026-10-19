@@ -24,14 +24,15 @@ import logging
 import mimetypes
 import re
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urljoin, urlsplit
 
 import httpx as _httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
@@ -78,6 +79,7 @@ class CreateBugPayload(BaseModel):
     project_id: Optional[int] = None
     execution_id: Optional[int] = None
     title: str
+    deadline: date = Field(description="截止日期，格式 YYYY-MM-DD")
     severity: int = 3
     pri: int = 3
     steps: str = ""
@@ -103,7 +105,7 @@ def _create_access_message(probe: dict | None, *, binding: UserZentaoBinding | N
         return f"当前禅道{account_part}无权访问{product_part}，该实例会对创建接口返回空成功但不真正落库，请联系禅道管理员开通该产品的访问或提 Bug 权限。"
     if reason == "login_required":
         return "当前禅道 token 无法访问创建页，请先刷新禅道绑定后再试。"
-    return "禅道创建接口返回空成功响应，但未查询到新建 Bug。经排查该 IPD 实例的 v1 创建接口未真正落库，请联系禅道管理员检查接口配置。"
+    return "禅道未返回可确认的创建结果，请先在禅道核实是否已创建，避免重复提交。"
 
 
 def _find_option_by_label(options: dict[str, str], keyword: str) -> str | None:
@@ -419,6 +421,7 @@ def create_zentao_bug(
 
     body: dict = {
         "title": payload.title,
+        "deadline": payload.deadline.isoformat(),
         "severity": payload.severity,
         "pri": payload.pri,
         "type": payload.bug_type,
@@ -510,10 +513,12 @@ def create_zentao_bug(
         zentao_opened_by_name=(current_user.display_name or current_user.username or (binding.zentao_account if binding else None)),
         zentao_creator_name=(current_user.display_name or current_user.username or (binding.zentao_account if binding else None)),
         zentao_live_status="active",
-        zentao_assigned_to_account=payload.assigned_to or None,
-        zentao_assigned_to_name=payload.assigned_to or None,
+        zentao_assigned_to_account=(result.get('verified_fields', {}).get('assignedTo')
+                                   if 'assignedTo' in result.get('verified_fields', {}) else payload.assigned_to) or None,
+        zentao_assigned_to_name=(result.get('verified_fields', {}).get('assignedTo')
+                                if 'assignedTo' in result.get('verified_fields', {}) else payload.assigned_to) or None,
         zentao_sync_status="synced",
-        zentao_sync_message="通过测试管理系统创建",
+        zentao_sync_message=result.get('compat_warning') or "通过测试管理系统创建",
         last_zentao_synced_at=local_now(),
         last_zentao_checked_at=local_now(),
     )
@@ -528,7 +533,8 @@ def create_zentao_bug(
     audit(db, action="zentao_bug.create", target_type="bug", actor_id=current_user.id,
           target_id=zentao_bug_id, detail=f"title={payload.title}")
     return {
-        "message": "禅道Bug创建成功",
+        "message": result.get('compat_warning') or "禅道Bug创建成功",
+        "warning": result.get('compat_warning'),
         "zentao_bug_id": zentao_bug_id,
         "local_id": local_row.id if local_row.id else None,
         "bug_id": bug_id_str,
@@ -606,25 +612,30 @@ def proxy_zentao_file(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Proxy a Zentao file/image through OmniQA using Token auth (v1 API)."""
-    binding = db.query(UserZentaoBinding).filter(UserZentaoBinding.user_id == current_user.id).first()
-    if not binding or not binding.base_url:
-        raise HTTPException(status_code=400, detail="未配置禅道绑定")
-    token = get_valid_token(current_user.id, db)
-    if not token:
-        raise HTTPException(status_code=400, detail="禅道 token 无效，请重新登录禅道")
-    base_url = binding.base_url.rstrip("/")
-    url = f"{base_url}/api.php/v1/files/{file_id}"
+    """Proxy the retained authenticated file resource; REST v1 is never used."""
+    if file_id <= 0:
+        raise HTTPException(status_code=400, detail="附件编号无效")
+    client = _get_client(current_user.id, db)
+    if client is None:
+        raise HTTPException(status_code=400, detail="未配置可用的禅道绑定")
     try:
-        resp = _httpx.get(url, headers={"Token": token}, timeout=15)
-        if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail="禅道文件获取失败")
+        try:
+            resp = client.get_file(file_id)
+        except ZentaoAPIError as exc:
+            if exc.status_code != 401:
+                raise
+            invalidate_token(current_user.id, db)
+            refreshed = _get_client(current_user.id, db)
+            if refreshed is None:
+                raise HTTPException(status_code=400, detail="禅道认证刷新失败")
+            resp = refreshed.get_file(file_id)
         content_type = resp.headers.get("content-type", "application/octet-stream")
         return StreamingResponse(iter([resp.content]), media_type=content_type)
     except HTTPException:
         raise
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+    except ZentaoAPIError as exc:
+        raise HTTPException(status_code=exc.status_code if exc.status_code in (401, 403, 404) else 502,
+                            detail=exc.message)
 
 
 # Directory used to persist inline images when the user's Zentao rejects our
@@ -741,7 +752,9 @@ async def upload_inline_bug_image(
         base_url = (binding.base_url or "").rstrip("/") if binding else ""
         file_id = int(info.get("id"))
         extension = str(info.get("extension") or "").lstrip(".").lower() or derived_ext
-        zentao_url = f"{base_url}/file-read-{file_id}.{extension}" if base_url else ""
+        zentao_url = urljoin(base_url + '/', str(info.get("url") or "")) if info.get('url') else ''
+        if not zentao_url or urlsplit(zentao_url).scheme not in {'http', 'https'}:
+            zentao_url = f"{base_url}/file-read-{file_id}.{extension}" if base_url else ""
         audit(db, action="zentao_bug.upload_inline_image", target_type="bug",
               actor_id=current_user.id, target_id=str(file_id),
               detail=f"filename={file.filename}, size={len(data)}, storage=zentao")
@@ -1138,7 +1151,7 @@ def _get_client(user_id: int, db: Session) -> ZentaoClient | None:
     token = get_valid_token(user_id, db)
     if not token:
         return None
-    return ZentaoClient(base_url=binding.base_url.rstrip("/"), token=token)
+    return ZentaoClient.from_binding(binding, token)
 
 
 def _fetch_live_status(client: ZentaoClient, zt_id: int) -> str:

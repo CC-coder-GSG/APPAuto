@@ -129,10 +129,8 @@ def _resolve_execution_context(
     """
     抓一次 execution detail，返回 (project_id, product_id, builder_account, execution_name)。
 
-    - project_id：MUST。`POST /v1/projects/{project_id}/builds` 是禅道 IPD 4.3 下
-      实测唯一会真正落库的"创建 build"入口；`/executions/{id}/builds` 是空头允诺
-      （200 + 空 body + 不写）。
-    - product_id：禅道写 build 需要的 product 外键。v1 GET /executions/{id} 用的
+    - project_id：用于项目范围查询；v2 通过 POST /builds 创建。
+    - product_id：禅道写 build 需要的 product 外键。GET /executions/{id} 用的
       字段名是 `products`（复数列表），`product`（单数）只在老/IPD fork 上出现，
       留作 fallback。两个都拿不到 → 兜底再调 get_execution_context()。
     - builder：尽量从 PM / openedBy 里取一个有意义的禅道账号名。
@@ -171,7 +169,7 @@ def _resolve_execution_context(
         builder = raw_builder.get("account") or raw_builder.get("realname")
     elif isinstance(raw_builder, str):
         builder = raw_builder
-    # 兜底：PM/openedBy 都拿不到 ⇒ 用 token 对应的账号（/v1/user.profile.account），
+    # PM/openedBy 都拿不到时使用当前绑定的禅道账号，
     # 否则 create build 会被禅道挡为 400 "构建者不能为空"。
     if not builder:
         try:
@@ -221,11 +219,6 @@ def _safe_create_build(
 
     返回 (new_build_id, error)。
     """
-    if project_id is None:
-        return None, (
-            f"未能解析到执行 {exec_id} 的 project_id —— 无法走 "
-            f"/v1/projects/{{project}}/builds 入口，禅道侧不会真正落库"
-        )
     today = datetime.now().strftime("%Y-%m-%d")
     raw_response = None
     try:

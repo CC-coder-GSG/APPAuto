@@ -10,7 +10,7 @@
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261014-3"></script>
+  <script type="module" src="/static/js/app.js?v=20261019-1"></script>
   <script src="/static/js/weave-motion.js?v=20260703-1" defer></script>
   <style>
     /* Header layout */
@@ -545,12 +545,12 @@
           <input id="taskBoardZtName" maxlength="255" style="width:100%;" placeholder="禅道任务名称（必填）">
         </div>
         <div>
-          <label style="display:block; margin-bottom:4px;">日程规划 · 预计开始</label>
-          <input type="date" id="taskBoardZtEstStarted" style="width:100%;">
+          <label style="display:block; margin-bottom:4px;">日程规划 · 预计开始 <span style="color:#dc2626;">*</span></label>
+          <input type="date" id="taskBoardZtEstStarted" required style="width:100%;">
         </div>
         <div>
-          <label style="display:block; margin-bottom:4px;">日程规划 · 截止日期</label>
-          <input type="date" id="taskBoardZtDeadline" style="width:100%;">
+          <label style="display:block; margin-bottom:4px;">日程规划 · 截止日期 <span style="color:#dc2626;">*</span></label>
+          <input type="date" id="taskBoardZtDeadline" required style="width:100%;">
         </div>
         <div>
           <label style="display:block; margin-bottom:4px;">优先级</label>
@@ -2072,6 +2072,10 @@
           <select id="s5CreateBugBuild" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
             <option value="">-- 请选择版本 --</option>
           </select>
+        </div>
+        <div>
+          <label for="s5CreateBugDeadline" style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">截止日期 *</label>
+          <input type="date" id="s5CreateBugDeadline" required style="width:100%; box-sizing:border-box; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
         </div>
         <div>
           <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:5px;">严重程度</label>

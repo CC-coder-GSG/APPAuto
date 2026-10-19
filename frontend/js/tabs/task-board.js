@@ -480,6 +480,15 @@ async function submitZentao() {
   }
   const estStarted = document.getElementById('taskBoardZtEstStarted')?.value || null;
   const deadline = document.getElementById('taskBoardZtDeadline')?.value || null;
+  if (!estStarted || !deadline) {
+    window.showMessage && window.showMessage('请填写预计开始和截止日期', 'error');
+    return;
+  }
+  if (!document.getElementById('taskBoardZtEstStarted').checkValidity()
+      || !document.getElementById('taskBoardZtDeadline').checkValidity()) {
+    window.showMessage && window.showMessage('请选择有效的预计开始和截止日期', 'error');
+    return;
+  }
   if (estStarted && deadline && estStarted > deadline) {
     window.showMessage && window.showMessage('预计开始不能晚于截止日期', 'error');
     return;

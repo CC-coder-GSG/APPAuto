@@ -129,7 +129,7 @@ class ZentaoTestCaseService:
             return None
 
         base_url = binding.base_url.rstrip("/")
-        return ZentaoClient(base_url=base_url, token=token), base_url
+        return ZentaoClient.from_binding(binding, token), base_url
 
     def _collect_zentao_product_ids_for_software(self, software_id: int, software: SoftwareProduct) -> list[int]:
         ids: list[int] = []

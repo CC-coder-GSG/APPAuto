@@ -769,25 +769,25 @@ def test_operate_pause_falls_back_to_web_when_rest_noop(db_session, monkeypatch)
     assert row.status == "pause"
 
 
-def test_pause_and_close_always_send_nonempty_body(monkeypatch):
-    # ipd4.3 空 body 的任务动作会被静默忽略 → pause/close 必须始终带 comment 字段
+def test_pause_is_retained_and_close_uses_v2_put(monkeypatch):
     import httpx as _httpx
-    from app.services.zentao_client_service import ZentaoClient
+    from app.services.zentao_client_service import ZentaoAPIError, ZentaoClient
 
     sent = []
 
-    def fake_post(url, json=None, headers=None, timeout=None):
+    def fake_put(url, json=None, **kwargs):
         sent.append((url, json))
-        return _httpx.Response(200, json={"id": 1, "status": "x"}, request=_httpx.Request("POST", url))
+        return _httpx.Response(200, json={"status": "success"})
 
-    monkeypatch.setattr(_httpx, "post", fake_post)
+    monkeypatch.setattr(_httpx, "put", fake_put)
     cli = ZentaoClient(base_url="http://z/zentao", token="t")
-    cli.pause_task(1)
+    with pytest.raises(ZentaoAPIError) as error:
+        cli.pause_task(1)
+    assert error.value.status_code == 501
     cli.close_task(1)
-    cli.pause_task(1, comment="备注")
-    assert sent[0][1] == {"comment": ""}
-    assert sent[1][1] == {"comment": ""}
-    assert sent[2][1] == {"comment": "备注"}
+    cli.close_task(1, comment="备注")
+    assert sent == [("http://z/zentao/api.php/v2/tasks/1/close", {"comment": ""}),
+                    ("http://z/zentao/api.php/v2/tasks/1/close", {"comment": "备注"})]
 
 
 def test_ensure_test_prefix_variants():
@@ -821,6 +821,7 @@ def test_create_board_task_adds_test_prefix(db_session, monkeypatch):
 
     res = ZentaoTaskMirrorService(db_session).create_board_task(
         current_user=alice, major_version_id=major.id, name="外业回归验证",
+        est_started="2026-10-19", deadline="2026-10-20",
     )
     assert res["ok"] is True
     assert client.created[0]["name"] == "[测试]外业回归验证"
@@ -828,8 +829,46 @@ def test_create_board_task_adds_test_prefix(db_session, monkeypatch):
     # 用户自己带了前缀 → 不重复
     ZentaoTaskMirrorService(db_session).create_board_task(
         current_user=alice, major_version_id=major.id, name="[测试]外业回归验证2",
+        est_started="2026-10-19", deadline="2026-10-20",
     )
     assert client.created[1]["name"] == "[测试]外业回归验证2"
+
+
+def test_lost_task_creation_does_not_retry_with_system_identity(db_session, monkeypatch):
+    from app.services.zentao_client_service import ZentaoAPIError
+    actor = _user(db_session, 'v2_lost_creation', account='alice')
+    major = _major(db_session, 'V-V2-CREATE')
+    calls = []
+    class Client:
+        def create_execution_task(self, *a, **k):
+            calls.append('self')
+            raise ZentaoAPIError(0, 'lost response', outcome_unknown=True)
+    class System:
+        def create_execution_task(self, *a, **k):
+            pytest.fail('must not create a second task')
+    monkeypatch.setattr(tms, 'get_user_zentao_client', lambda *a: Client())
+    monkeypatch.setattr(tms, 'get_system_zentao_client', lambda *a: System())
+    with pytest.raises(HTTPException) as error:
+        ZentaoTaskMirrorService(db_session).create_board_task(current_user=actor, major_version_id=major.id, name='Test',
+                                                          est_started="2026-10-19", deadline="2026-10-20")
+    assert error.value.status_code == 409
+    assert calls == ['self']
+
+
+@pytest.mark.parametrize('start,end', [
+    (None, None), ('2026-10-19', None), (None, '2026-10-20'),
+    ('2026-02-30', '2026-10-20'), ('19/10/2026', '2026-10-20'),
+    ('2026-10-21', '2026-10-20'),
+])
+def test_create_board_task_validates_dates_before_remote_access(db_session, monkeypatch, start, end):
+    actor = _user(db_session, 'invalid_task_dates', account='alice')
+    monkeypatch.setattr(tms, 'get_user_zentao_client', lambda *a: pytest.fail('no remote access'))
+    monkeypatch.setattr(tms, 'get_system_zentao_client', lambda *a: pytest.fail('no remote access'))
+    with pytest.raises(HTTPException) as error:
+        ZentaoTaskMirrorService(db_session).create_board_task(
+            current_user=actor, major_version_id=1, name='date validation', est_started=start, deadline=end,
+        )
+    assert error.value.status_code == 400
 
 
 def test_operate_task_set_time_validates(db_session, monkeypatch):
@@ -1142,6 +1181,38 @@ def test_operate_finish_does_not_repeat_when_rest_confirms_done_but_readback_is_
     assert system.calls == []
     assert row.status == "done"
     assert row.efforts_submitted == 2.0
+
+
+@pytest.mark.parametrize('lost', [True, False])
+def test_v2_unconfirmed_finish_stops_other_transports_and_accounts(db_session, monkeypatch, lost):
+    from app.services.zentao_client_service import ZentaoAPIError
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    actor = _user(db_session, 'v2_board_actor', account='alice')
+    _major(db_session, 'V-V2-ONCE')
+    row = _mirror(db_session, 1103, actor.id, account='alice', status='doing')
+
+    class Unconfirmed(FakeClient):
+        def finish_task(self, task_id, **kwargs):
+            self.calls.append(('finish', task_id))
+            if lost:
+                raise ZentaoAPIError(0, 'lost response', outcome_unknown=True)
+            return {'status': 'success'}
+
+    client, system = Unconfirmed(), FakeClient()
+    task = {'id': 1103, 'status': 'doing', 'assignedTo': {'account': 'alice'}}
+    client.set_task(1103, task)
+    system.set_task(1103, task)
+    monkeypatch.setattr(tms, 'get_user_zentao_client', lambda *a: client)
+    monkeypatch.setattr(tms, 'get_system_zentao_client', lambda *a: system)
+    monkeypatch.setattr(tms, 'get_user_zentao_web_login', lambda *a: ZentaoWebLogin('http://z', 'alice', 'p'))
+    monkeypatch.setattr(tms, 'get_system_zentao_web_login', lambda *a: None)
+    monkeypatch.setattr(tms, 'finish_task_via_web', lambda *a, **k: pytest.fail('must not repeat effort'))
+    result = ZentaoTaskMirrorService(db_session).operate_task(task_id=1103, action='finish', current_user=actor, consumed=1.5)
+    assert not result['ok']
+    assert client.calls == [('finish', 1103)]
+    assert not system.calls
+    assert row.status == 'doing'
 
 
 def test_operate_finish_repairs_partial_rest_write_without_repeating_effort(db_session, monkeypatch):

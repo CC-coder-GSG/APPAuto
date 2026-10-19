@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.user_zentao_binding import UserZentaoBinding
 from app.utils.time_utils import utc_now_naive
+from app.services.zentao_v2_protocol import ZentaoAPIError, decode_v2, normalize_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +65,12 @@ def decrypt_password(ciphertext: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 _TOKEN_BUFFER_SECONDS = 60  # refresh when fewer than this many seconds remain
+_V2_REFRESH_STATUS = "ok_v2"  # Existing 'ok' tokens came from REST v1; refresh once.
 
 
 def _is_token_valid(binding: UserZentaoBinding) -> bool:
-    if not binding.token_value or not binding.token_expires_at:
+    if (binding.last_refresh_status != _V2_REFRESH_STATUS
+            or not binding.token_value or not binding.token_expires_at):
         return False
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     remaining = (binding.token_expires_at - now).total_seconds()
@@ -76,7 +79,7 @@ def _is_token_valid(binding: UserZentaoBinding) -> bool:
 
 def _fetch_new_token(binding: UserZentaoBinding) -> tuple[str, datetime] | None:
     """
-    POST /v1/tokens to Zentao and return (token_value, expires_at).
+    POST /v2/users/login; expiry is a local refresh deadline, not a server TTL.
     Returns None on failure.
     """
     plain_password = decrypt_password(binding.zentao_password_ciphertext or '')
@@ -84,34 +87,25 @@ def _fetch_new_token(binding: UserZentaoBinding) -> tuple[str, datetime] | None:
         logger.warning("zentao_auth: cannot decrypt password for user_id=%s", binding.user_id)
         return None
 
-    base_url = (binding.base_url or '').rstrip('/')
-    url = f"{base_url}/api.php/v1/tokens"
     try:
+        base_url = normalize_base_url(binding.base_url or '')
+        url = f"{base_url}/api.php/v2/users/login"
         resp = httpx.post(
             url,
             json={"account": binding.zentao_account, "password": plain_password},
             timeout=10.0,
             headers={"Content-Type": "application/json"},
+            follow_redirects=False,
         )
-        if resp.status_code not in (200, 201):
-            resp.raise_for_status()
-        data = resp.json()
-        token = data.get("token") or data.get("data", {}).get("token") if isinstance(data, dict) else None
-        if not token:
-            logger.warning("zentao_auth: no token in response for user_id=%s body=%s", binding.user_id, str(data)[:200])
+        data = decode_v2(resp)
+        token = data.get("token")
+        if not isinstance(token, str) or not token.strip():
+            logger.warning("zentao_auth: no token in v2 response for user_id=%s", binding.user_id)
             return None
-        # Zentao tokens typically last ~2 hours; default 7200 s if not provided
-        expired_at_ts = data.get("expired") or data.get("data", {}).get("expired") if isinstance(data, dict) else None
-        if expired_at_ts:
-            try:
-                expires_at = datetime.utcfromtimestamp(int(expired_at_ts))
-            except Exception:
-                expires_at = utc_now_naive().replace(microsecond=0)
-                from datetime import timedelta
-                expires_at += timedelta(seconds=7200)
-        else:
-            from datetime import timedelta
-            expires_at = utc_now_naive().replace(microsecond=0) + timedelta(seconds=7200)
+        # v2 documents no expiry field. Use a conservative local refresh budget;
+        # upstream 401 is still handled independently by business retry paths.
+        from datetime import timedelta
+        expires_at = utc_now_naive().replace(microsecond=0) + timedelta(seconds=3600)
         return token, expires_at
     except httpx.HTTPStatusError as e:
         logger.warning("zentao_auth: HTTP error for user_id=%s status=%s", binding.user_id, e.response.status_code)
@@ -158,7 +152,7 @@ def get_valid_token(user_id: int, db: Session) -> str | None:
         binding.token_value = token_value
         binding.token_expires_at = expires_at
         binding.last_refresh_at = now
-        binding.last_refresh_status = "ok"
+        binding.last_refresh_status = _V2_REFRESH_STATUS
         binding.last_error_message = None
         db.commit()
         return token_value
@@ -175,21 +169,19 @@ def test_connection(base_url: str, account: str, plain_password: str) -> tuple[b
     Test a Zentao credential by attempting to fetch a token.
     Returns (success: bool, message: str).
     """
-    url = f"{base_url.rstrip('/')}/api.php/v1/tokens"
     try:
+        url = f"{normalize_base_url(base_url)}/api.php/v2/users/login"
         resp = httpx.post(
             url,
             json={"account": account, "password": plain_password},
             timeout=10.0,
             headers={"Content-Type": "application/json"},
+            follow_redirects=False,
         )
-        if resp.status_code in (200, 201):
-            data = resp.json()
-            token = data.get("token") or (data.get("data", {}) or {}).get("token")
-            if token:
-                return True, "连接成功，Token 已获取"
-            return False, f"服务器返回 {resp.status_code} 但未找到 token，响应：{str(data)[:200]}"
-        return False, f"HTTP {resp.status_code}：{resp.text[:200]}"
+        data = decode_v2(resp)
+        if isinstance(data.get("token"), str) and data["token"].strip():
+            return True, "连接成功，v2 Token 已获取"
+        return False, "禅道 v2 登录未返回 Token"
     except Exception as e:
         return False, f"连接异常：{e}"
 

@@ -177,6 +177,36 @@ def test_finish_computes_consumed_from_worktime(db_session, monkeypatch, req):
     assert finish_call[2] == 2.0  # current_consumed
 
 
+@pytest.mark.parametrize('lost', [True, False])
+def test_v2_finish_unknown_or_acknowledged_never_replays_through_web(db_session, monkeypatch, req, lost):
+    from app.models import User, UserRole
+    from app.services.zentao_client_service import ZentaoAPIError
+    from app.services.zentao_web_session import ZentaoWebLogin
+
+    actor = User(username='v2_finish_actor', password_hash='x', role=UserRole.USER)
+    db_session.add(actor)
+    db_session.commit()
+
+    class Unconfirmed(FakeClient):
+        def finish_task(self, task_id, **kwargs):
+            self.calls.append(('finish', task_id))
+            if lost:
+                raise ZentaoAPIError(0, 'lost response', outcome_unknown=True)
+            return {'status': 'success'}
+
+    client, system = Unconfirmed(status='doing'), FakeClient(status='doing')
+    monkeypatch.setattr(tss, 'get_user_zentao_client', lambda *args: client)
+    monkeypatch.setattr(tss, 'get_system_zentao_client', lambda *args: system)
+    monkeypatch.setattr(tss, 'get_user_zentao_web_login', lambda *args: ZentaoWebLogin('http://z', 'alice', 'p'))
+    monkeypatch.setattr(tss, 'get_system_zentao_web_login', lambda *args: None)
+    monkeypatch.setattr(tss, 'finish_task_via_web', lambda *a, **k: pytest.fail('must not repeat effort'))
+    result = ZentaoTaskSyncService(db_session).finish_requirement_task(req, acting_user=actor, consumed=1.5)
+    assert not result['ok']
+    assert client.calls == [('finish', 777)]
+    assert not system.calls
+    assert req.zentao_task_status_cache != 'done'
+
+
 def test_finish_does_not_repeat_when_rest_confirms_done_but_readback_is_stale(db_session, monkeypatch, req):
     """REST 已确认完成时，旧状态回读不能再触发相同工时的网页 finish。"""
     from app.models import User, UserRole

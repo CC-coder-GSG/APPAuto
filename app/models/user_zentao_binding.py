@@ -40,7 +40,7 @@ class UserZentaoBinding(Base):
 
     # Refresh tracking
     last_refresh_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    last_refresh_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # ok | error
+    last_refresh_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # ok_v2 | error; legacy ok refreshes once
     last_error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)

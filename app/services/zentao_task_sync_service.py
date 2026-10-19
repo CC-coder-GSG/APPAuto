@@ -545,7 +545,7 @@ class ZentaoTaskSyncService:
             rows = client.list_execution_tasks(exec_id) or []
         except Exception as exc:  # noqa: BLE001
             logger.warning("index existing tasks exec %s failed: %s", exec_id, exc)
-            return {}, {}
+            raise HTTPException(502, "无法完整读取禅道现有任务，已停止创建以避免重复任务") from exc
         by_id: dict[int, dict] = {}
         by_story: dict[int, dict] = {}
         for t in rows:
@@ -818,6 +818,7 @@ class ZentaoTaskSyncService:
 
         for label, client in candidates:
             response = None
+            uncertain_write = False
             # A previous attempt may have reached Zentao even if its response
             # or immediate readback failed (notably after a 401). Do not repeat
             # the lifecycle write when this candidate already sees the target.
@@ -833,6 +834,7 @@ class ZentaoTaskSyncService:
                 response = op(client)
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
+                uncertain_write = bool(getattr(exc, "outcome_unknown", False))
                 logger.warning("%s task %s via %s REST failed: %s", zh, task_id, label, exc)
             # finish writes currentConsumed. When REST explicitly confirms the
             # final status, an immediately stale GET must not trigger a second
@@ -870,6 +872,9 @@ class ZentaoTaskSyncService:
                     "禅道已写入本次工时，但任务状态未能切换为已完成；平台已停止重试以避免重复工时"
                 )
                 return False
+            if uncertain_write or (isinstance(response, dict) and response.get("status") == "success"):
+                out["errors"].append("禅道已接收请求或请求结果不明，回读未能确认；已停止重复提交，请刷新核实")
+                return False
             # REST 未生效 → 同账号网页 cookie 会话兜底（操作人归属不变）
             web = web_logins.get(label)
             if web_op is not None and web is not None:
@@ -877,6 +882,7 @@ class ZentaoTaskSyncService:
                     web_op(web)
                 except Exception as exc:  # noqa: BLE001
                     last_err = exc
+                    uncertain_write = bool(getattr(exc, "outcome_unknown", False)) or isinstance(exc, (TimeoutError, ConnectionError))
                     logger.warning("%s task %s via %s web session failed: %s", zh, task_id, label, exc)
                 actual = _readback(client)
                 if _matches(actual):
@@ -884,6 +890,9 @@ class ZentaoTaskSyncService:
                     if _succeed(client, actual):
                         return True
                     continue
+                if uncertain_write:
+                    out["errors"].append("禅道网页操作结果不明，已停止重复提交，请刷新核实")
+                    return False
         if desired_assignee and target_status_seen:
             detail = f"：{last_err}" if last_err else ""
             current = f"（当前指派人：{last_assignee or '未知'}）"
@@ -1123,6 +1132,8 @@ class ZentaoTaskSyncService:
                 note=AUTO_NOTE,
             )
         except Exception as exc:  # noqa: BLE001 — 提交失败退回本地累计，不阻塞暂停
+            if getattr(exc, 'outcome_unknown', False):
+                raise HTTPException(409, "禅道工时提交结果不明，已停止自动补交，请先刷新核实") from exc
             logger.warning("requirement %s pause: submit efforts failed, fall back to local accum: %s", requirement.id, exc)
             return None
 
@@ -1163,6 +1174,8 @@ class ZentaoTaskSyncService:
                     requirement.task_started_at = None
                     return max(remainder, 0.1)
                 except Exception as exc:  # noqa: BLE001 — 拆分提交失败退回一次性
+                    if getattr(exc, 'outcome_unknown', False):
+                        raise HTTPException(409, "禅道工时提交结果不明，已停止自动补交，请先刷新核实") from exc
                     logger.warning("requirement %s finish: pre-submit efforts failed, fall back to lump sum: %s", requirement.id, exc)
         total = round(remainder + sum(h for _, h in prev_rows), 2)
         if total > 0:

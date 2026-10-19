@@ -40,7 +40,7 @@ def _try_user(user_id: int, db: Session) -> Optional[ZentaoClient]:
     token = get_valid_token(user_id, db)
     if not token:
         return None
-    return ZentaoClient(base_url=binding.base_url, token=token)
+    return ZentaoClient.from_binding(binding, token)
 
 
 def get_user_zentao_client(user_id: int, db: Session) -> Optional[ZentaoClient]:

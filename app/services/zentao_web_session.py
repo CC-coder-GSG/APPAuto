@@ -21,13 +21,20 @@ import hashlib
 import json
 import logging
 import re
-from dataclasses import dataclass
+import time
+from collections import Counter
+from dataclasses import dataclass, field
+from urllib.parse import urlsplit, unquote
 
 import httpx
+
+from app.services.zentao_v2_protocol import ZentaoAPIError, normalize_base_url, relative_path
 
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 15.0
+_EFFORT_WRITE_TIMEOUT = httpx.Timeout(45.0, connect=10.0)
+_EFFORT_POLL_DELAYS = (0.0, 0.5, 1.0)
 # 禅道登录对非浏览器 UA 直接打回登录页（无错误提示），必须伪装浏览器。
 _BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -39,11 +46,16 @@ _BROWSER_UA = (
 class ZentaoWebLogin:
     base_url: str
     account: str
-    password: str  # 明文（来自绑定密文解密）
+    password: str = field(repr=False)
+
+    def __post_init__(self):
+        self.base_url = normalize_base_url(self.base_url)
 
 
 class ZentaoWebSessionError(Exception):
-    pass
+    def __init__(self, message: str, *, outcome_unknown: bool = False):
+        super().__init__(message)
+        self.outcome_unknown = outcome_unknown
 
 
 def _md5(text: str) -> str:
@@ -57,6 +69,17 @@ def _loads_lenient(text: str):
 def _form(fields: dict[str, str]) -> dict:
     """httpx 的 multipart 字段格式（禅道网页表单为 multipart/form-data）。"""
     return {k: (None, v) for k, v in fields.items()}
+
+
+def _guarded_form_post(client, url: str, **kwargs):
+    try:
+        response = client.post(url, **kwargs)
+    except Exception as exc:
+        raise ZentaoWebSessionError("禅道表单请求结果不明，请刷新核实，停止重复提交", outcome_unknown=True) from exc
+    if response.status_code != 200:
+        raise ZentaoWebSessionError(f"禅道表单 HTTP {response.status_code}",
+                                   outcome_unknown=response.status_code >= 500 or response.status_code == 408)
+    return response
 
 
 def _fail_reason(payload) -> str:
@@ -106,9 +129,10 @@ def _task_action_via_web(login: ZentaoWebLogin, task_id: int, *, action: str, st
         timeout=_TIMEOUT,
         follow_redirects=True,
         headers={"User-Agent": _BROWSER_UA, "Referer": f"{base}/"},
+        event_hooks={"request": [_same_site_request(base)]},
     ) as client:
         _login(client, login)
-        resp = client.post(
+        resp = _guarded_form_post(client,
             f"{base}/task-{action}-{task_id}.html",
             # status 是动作弹窗的隐藏字段，缺了服务端只当作渲染表单页，不执行动作
             files=_form({"comment": comment or "", "uid": "", "status": status}),
@@ -117,9 +141,10 @@ def _task_action_via_web(login: ZentaoWebLogin, task_id: int, *, action: str, st
         try:
             payload = _loads_lenient(resp.text)
         except Exception:
-            raise ZentaoWebSessionError(f"禅道{zh}返回非 JSON：{(resp.text or '')[:200]}")
+            raise ZentaoWebSessionError(f"禅道{zh}返回非 JSON，结果待核实", outcome_unknown=True)
         if not (isinstance(payload, dict) and payload.get("result") == "success"):
-            raise ZentaoWebSessionError(f"禅道{zh}未执行：{_fail_reason(payload)}")
+            raise ZentaoWebSessionError(f"禅道{zh}未确认成功：{_fail_reason(payload)}",
+                                       outcome_unknown=not isinstance(payload, dict) or payload.get('result') != 'fail')
         try:
             client.get(f"{base}/user-logout.html")
         except Exception:
@@ -180,6 +205,7 @@ def _task_form_action_via_web(
         timeout=_TIMEOUT,
         follow_redirects=True,
         headers={"User-Agent": _BROWSER_UA, "Referer": f"{base}/"},
+        event_hooks={"request": [_same_site_request(base)]},
     ) as client:
         _login(client, login)
         page = client.get(f"{base}/task-{action}-{task_id}.html")
@@ -191,7 +217,7 @@ def _task_form_action_via_web(
         for k, v in overrides.items():
             if v is not None:
                 fields[k] = str(v)
-        resp = client.post(
+        resp = _guarded_form_post(client,
             f"{base}/task-{action}-{task_id}.html",
             files=_form(fields),
             headers={"X-Requested-With": "XMLHttpRequest", "X-Zui-Modal": "true"},
@@ -199,9 +225,10 @@ def _task_form_action_via_web(
         try:
             payload = _loads_lenient(resp.text)
         except Exception:
-            raise ZentaoWebSessionError(f"禅道{zh}返回非 JSON：{(resp.text or '')[:200]}")
+            raise ZentaoWebSessionError(f"禅道{zh}返回非 JSON，结果待核实", outcome_unknown=True)
         if not (isinstance(payload, dict) and payload.get("result") == "success"):
-            raise ZentaoWebSessionError(f"禅道{zh}未执行：{_fail_reason(payload)}")
+            raise ZentaoWebSessionError(f"禅道{zh}未确认成功：{_fail_reason(payload)}",
+                                       outcome_unknown=not isinstance(payload, dict) or payload.get('result') != 'fail')
         try:
             client.get(f"{base}/user-logout.html")
         except Exception:  # noqa: BLE001
@@ -270,6 +297,7 @@ def _open_web_session(login: ZentaoWebLogin) -> httpx.Client:
         timeout=_TIMEOUT,
         follow_redirects=True,
         headers={"User-Agent": _BROWSER_UA, "Referer": f"{login.base_url.rstrip('/')}/"},
+        event_hooks={"request": [_same_site_request(login.base_url)]},
     )
     try:
         _login(client, login)
@@ -277,6 +305,88 @@ def _open_web_session(login: ZentaoWebLogin) -> httpx.Client:
         client.close()
         raise
     return client
+
+
+def _same_site_request(base: str):
+    expected = urlsplit(base)
+
+    def check(request):
+        actual = urlsplit(str(request.url))
+        decoded = unquote(actual.path).lower()
+        if ((actual.scheme, actual.netloc) != (expected.scheme, expected.netloc)
+                or not actual.path.startswith(expected.path.rstrip('/') + '/')
+                or 'api.php' in decoded):
+            raise ZentaoWebSessionError("禅道页面跳转超出站点范围")
+    return check
+
+
+def request_page_via_web(login: ZentaoWebLogin, path: str, *, params=None, data=None):
+    """One authenticated page request. An uncertain write is never replayed here."""
+    path = relative_path(path, page=True)
+    base = login.base_url
+    client = _open_web_session(login)
+    writing = data is not None
+    try:
+        try:
+            if writing:
+                fields = {}
+                for key, value in data.items():
+                    if isinstance(value, (list, tuple)):
+                        for index, item in enumerate(value):
+                            fields[f"{key}[{index}]"] = str(item)
+                    elif value is not None:
+                        fields[key] = str(value)
+                response = client.post(f"{base}/{path}", files=_form(fields),
+                                       headers={"X-Requested-With": "XMLHttpRequest"})
+            else:
+                response = client.get(f"{base}/{path}", params=params)
+        except Exception as exc:
+            raise ZentaoAPIError(0, "禅道页面请求结果待核实", outcome_unknown=writing) from exc
+        if response.status_code != 200:
+            raise ZentaoAPIError(response.status_code, "禅道页面请求失败",
+                                 outcome_unknown=writing and response.status_code >= 500)
+        try:
+            payload = _loads_lenient(response.text)
+        except Exception as exc:
+            raise ZentaoAPIError(502, "禅道页面未返回 JSON", outcome_unknown=writing) from exc
+        if not isinstance(payload, dict):
+            raise ZentaoAPIError(502, "禅道页面响应无效", outcome_unknown=writing)
+        if payload.get('loginExpired') or payload.get('title') == '用户登录':
+            raise ZentaoAPIError(401, "禅道网页会话已失效")
+        if writing:
+            if payload.get('result') == 'success' or payload.get('status') == 'success':
+                return payload
+            raise ZentaoAPIError(422, "禅道表单未确认成功",
+                                 outcome_unknown=payload.get('result') != 'fail' and payload.get('status') != 'fail')
+        if payload.get('status') == 'fail' or payload.get('result') == 'fail':
+            raise ZentaoAPIError(403, "禅道页面拒绝访问")
+        nested = payload.get('data')
+        if isinstance(nested, str):
+            try:
+                nested = _loads_lenient(nested)
+            except Exception as exc:
+                raise ZentaoAPIError(502, "禅道页面 data 无效") from exc
+        return nested if isinstance(nested, dict) else payload
+    finally:
+        _logout_quietly(client, base)
+        client.close()
+
+
+def fetch_file_via_web(login: ZentaoWebLogin, file_id: int):
+    if int(file_id) <= 0:
+        raise ZentaoAPIError(400, "附件编号无效")
+    client = _open_web_session(login)
+    try:
+        response = client.get(f"{login.base_url}/file-read-{int(file_id)}.html")
+        if response.status_code != 200:
+            raise ZentaoAPIError(response.status_code, "禅道附件获取失败")
+        if 'text/html' in response.headers.get('content-type', '').lower():
+            raise ZentaoAPIError(502, "禅道附件返回了页面，请检查权限")
+        response.read()
+        return response
+    finally:
+        _logout_quietly(client, login.base_url)
+        client.close()
 
 
 def _logout_quietly(client: httpx.Client, base: str) -> None:
@@ -448,12 +558,79 @@ def _normalize_efforts(raw) -> list[dict]:
 
 
 def _fetch_efforts(client: httpx.Client, base: str, task_id: int) -> list[dict]:
-    resp = client.get(f"{base}/effort-createForObject-task-{task_id}.json")
-    data = _parse_page_data(resp.text)
-    if "efforts" not in data:
+    try:
+        resp = client.get(f"{base}/effort-createForObject-task-{task_id}.json")
+    except httpx.HTTPError as exc:
+        raise ZentaoWebSessionError('禅道工时读取失败，请稍后刷新') from exc
+    if getattr(resp, 'status_code', 200) != 200:
+        raise ZentaoWebSessionError("禅道工时读取失败，无法核对操作结果")
+    try:
+        data = _parse_page_data(resp.text)
+    except (ValueError, TypeError) as exc:
+        raise ZentaoWebSessionError('禅道工时响应格式异常，无法核对操作结果') from exc
+    if ("efforts" not in data or data.get('denyType') or data.get('loginExpired')
+            or data.get('title') == '用户登录'):
         # denyPage（无权限）或版本差异：明确报错，调用方走兜底
         raise ZentaoWebSessionError(f"禅道工时页面无 efforts 数据：{str({k: data.get(k) for k in ('title', 'denyType', 'module', 'method')})}")
-    return _normalize_efforts(data.get("efforts"))
+    raw = data['efforts']
+    if not isinstance(raw, (dict, list)):
+        raise ZentaoWebSessionError('禅道工时列表格式异常，无法核对操作结果')
+    rows = _normalize_efforts(raw)
+    ids = [row['id'] for row in rows]
+    if len(rows) != len(raw) or any(oid <= 0 for oid in ids) or len(ids) != len(set(ids)):
+        raise ZentaoWebSessionError('禅道工时列表存在无效记录，无法核对操作结果')
+    return rows
+
+
+def _poll_efforts(client, base, task_id, matches):
+    """Only retry reads. A failed read never establishes absence or success."""
+    latest = None
+    for delay in _EFFORT_POLL_DELAYS:
+        if delay:
+            time.sleep(delay)
+        try:
+            latest = _fetch_efforts(client, base, task_id)
+        except Exception:
+            latest = None
+            continue
+        if matches(latest):
+            return latest, True
+    return latest, False
+
+
+def _effort_signature(row, account):
+    return (str(row.get('account', account) or '').strip().lower(), str(row['date'])[:10],
+            round(float(row['consumed']), 2), round(float(row.get('left') or 0), 2),
+            str(row.get('work') or ''))
+
+
+def _post_effort_and_reconcile(client, base, task_id, path, fields, matches, action):
+    """Send once, including on timeout; confirm the requested state by reading."""
+    write_error = None
+    try:
+        resp = _guarded_form_post(
+            client, f'{base}/{path}', files=_form(fields), timeout=_EFFORT_WRITE_TIMEOUT,
+            headers={"X-Requested-With": "XMLHttpRequest", "X-Zui-Modal": "true"},
+        )
+    except ZentaoWebSessionError as exc:
+        if not exc.outcome_unknown:
+            raise
+        write_error = exc
+    else:
+        try:
+            payload = _loads_lenient(resp.text)
+        except Exception:
+            payload = None
+        if isinstance(payload, dict) and any(payload.get(k) in ('fail', 'failed', 'error')
+                                             for k in ('result', 'status')):
+            raise ZentaoWebSessionError(f'禅道拒绝{action}，请检查记录内容和账号权限')
+    after, confirmed = _poll_efforts(client, base, task_id, matches)
+    if confirmed:
+        return after
+    raise ZentaoWebSessionError(
+        f'禅道{action}结果待核实，回读尚未确认；请先刷新工时记录，勿重复提交',
+        outcome_unknown=True,
+    ) from write_error
 
 
 def list_task_efforts_via_web(login: ZentaoWebLogin, task_id: int) -> list[dict]:
@@ -472,8 +649,8 @@ def record_task_efforts_via_web(login: ZentaoWebLogin, task_id: int, rows: list[
 
     rows: [{"date": "YYYY-MM-DD", "consumed": float, "left": float, "work": str}]。
     任务类型的日志「剩余 left」必填（缺了报"剩余不能为空"），禅道会把 consumed
-    累加进任务总消耗。以「回读记录条数确实增加」为准判定生效，未生效抛
-    ZentaoWebSessionError。返回提交后的完整记录列表。
+    累加进任务总消耗。只提交一次，超时后仍按新增 ID、本人、日期、工时、
+    剩余和内容核对；未能确认时保留结果未知标记，禁止调用方自动补交。
     """
     rows = [r for r in rows if float(r.get("consumed") or 0.0) > 0]
     if not rows:
@@ -491,23 +668,18 @@ def record_task_efforts_via_web(login: ZentaoWebLogin, task_id: int, rows: list[
             fields[f"work[{i}]"] = str(r.get("work") or "")
             fields[f"consumed[{i}]"] = str(r["consumed"])
             fields[f"left[{i}]"] = str(r.get("left") if r.get("left") is not None else 0)
-        resp = client.post(
-            f"{base}/effort-createForObject-task-{task_id}.html",
-            files=_form(fields),
-            headers={"X-Requested-With": "XMLHttpRequest", "X-Zui-Modal": "true"},
+        before_ids = {item['id'] for item in before}
+        expected = Counter(_effort_signature(row, login.account) for row in rows)
+
+        def matches(after):
+            actual = Counter(_effort_signature(item, login.account) for item in after
+                             if item['id'] > 0 and item['id'] not in before_ids)
+            return all(actual[signature] == count for signature, count in expected.items())
+
+        return _post_effort_and_reconcile(
+            client, base, task_id, f'effort-createForObject-task-{task_id}.html',
+            fields, matches, '新增工时',
         )
-        # zui2 表单的成功响应格式有版本差异（result/load/messages），统一以回读为准
-        after = _fetch_efforts(client, base, task_id)
-        if len(after) < len(before) + len(rows):
-            try:
-                payload = _loads_lenient(resp.text)
-                reason = _fail_reason(payload)
-            except Exception:
-                reason = (resp.text or "")[:200]
-            raise ZentaoWebSessionError(
-                f"禅道记录工时未生效：提交 {len(rows)} 条，记录数 {len(before)} → {len(after)}；响应：{reason}"
-            )
-        return after
     finally:
         _logout_quietly(client, base)
         client.close()
@@ -530,6 +702,9 @@ def edit_task_effort_via_web(
     base = login.base_url.rstrip("/")
     client = _open_web_session(login)
     try:
+        before = _fetch_efforts(client, base, task_id)
+        if not any(row['id'] == int(effort_id) for row in before):
+            raise ZentaoWebSessionError('工时记录不属于当前任务或已被删除')
         fields = {
             "date": str(date)[:10],
             "objectType": "task",
@@ -538,21 +713,15 @@ def edit_task_effort_via_web(
             "left": str(left),
             "work": work,
         }
-        resp = client.post(
-            f"{base}/effort-edit-{effort_id}.html",
-            files=_form(fields),
-            headers={"X-Requested-With": "XMLHttpRequest", "X-Zui-Modal": "true"},
+        expected = _effort_signature(fields, login.account)
+
+        def matches(after):
+            hit = next((row for row in after if row['id'] == int(effort_id)), None)
+            return hit is not None and _effort_signature(hit, login.account) == expected
+
+        return _post_effort_and_reconcile(
+            client, base, task_id, f'effort-edit-{effort_id}.html', fields, matches, '修改工时',
         )
-        after = _fetch_efforts(client, base, task_id)
-        hit = next((r for r in after if r["id"] == int(effort_id)), None)
-        if hit and hit["date"] == str(date)[:10] and abs(hit["consumed"] - float(consumed)) < 0.005:
-            return after
-        try:
-            payload = _loads_lenient(resp.text)
-            reason = _fail_reason(payload)
-        except Exception:
-            reason = (resp.text or "")[:200]
-        raise ZentaoWebSessionError(f"禅道编辑工时未生效（当前：{hit}）；响应：{reason}")
     finally:
         _logout_quietly(client, base)
         client.close()
@@ -565,9 +734,8 @@ def delete_task_effort_via_web(
 ) -> list[dict]:
     """删除一条工时记录，并以禅道回读结果作为唯一成功依据。
 
-    官方 task-deleteWorkhour 在删除任务最后一条工时时会要求二次确认，因此直接带
-    confirm=yes；部分 IPD 版本把工时操作迁到了 effort 模块，官方路由未生效时再尝试
-    effort-delete。两个路由都只操作同一个 effort_id。目标记录回读后仍存在则抛错，
+    优先使用 IPD 5.6 effort 删除页的完整二次确认地址；旧版 task-deleteWorkhour
+    作为兼容路径。两条路径始终只操作同一个 effort_id。目标记录仍存在则抛错，
     调用方绝不能把它当作删除成功。
     """
     base = login.base_url.rstrip("/")
@@ -578,27 +746,38 @@ def delete_task_effort_via_web(
             return before
 
         urls = [
+            f"{base}/effort-delete-{effort_id}-yes-.html",
             f"{base}/task-deleteWorkhour-{effort_id}-yes.html",
-            f"{base}/effort-delete-{effort_id}.html",
         ]
-        reasons: list[str] = []
+        uncertain = False
         for url in urls:
-            resp = client.get(
-                url,
-                headers={"X-Requested-With": "XMLHttpRequest", "X-Zui-Modal": "true"},
-            )
-            after = _fetch_efforts(client, base, task_id)
-            if not any(r["id"] == int(effort_id) for r in after):
-                return after
             try:
-                payload = _loads_lenient(resp.text)
-                reason = _fail_reason(payload)
+                resp = client.get(
+                    url, timeout=_EFFORT_WRITE_TIMEOUT,
+                    headers={"X-Requested-With": "XMLHttpRequest", "X-Zui-Modal": "true"},
+                )
+                try:
+                    payload = _loads_lenient(resp.text)
+                except Exception:
+                    payload = None
+                rejected = isinstance(payload, dict) and any(payload.get(k) in ('fail', 'failed', 'error')
+                                                            for k in ('result', 'status'))
+                status = getattr(resp, 'status_code', 200)
+                uncertain = uncertain or status >= 500 or (not rejected and status < 400)
             except Exception:
-                reason = (resp.text or "")[:200]
-            reasons.append(f"{url.rsplit('/', 1)[-1]}：{reason or '记录仍存在'}")
+                uncertain = True
+            after, confirmed = _poll_efforts(
+                client, base, task_id, lambda rows: all(row['id'] != int(effort_id) for row in rows),
+            )
+            if confirmed:
+                return after
+            if after is None:
+                raise ZentaoWebSessionError('禅道删除工时后无法回读，请刷新核实，勿重复提交', outcome_unknown=True)
+            # A compatible delete may be attempted only for this exact same ID,
+            # after a successful read still shows it. Never target another row.
 
         raise ZentaoWebSessionError(
-            f"禅道删除工时未生效，记录 #{effort_id} 回读后仍存在；" + "；".join(reasons)
+            f"禅道删除工时未确认，记录 #{effort_id} 回读后仍存在，请刷新核实", outcome_unknown=uncertain,
         )
     finally:
         _logout_quietly(client, base)

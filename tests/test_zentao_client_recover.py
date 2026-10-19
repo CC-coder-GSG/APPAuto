@@ -5,7 +5,8 @@
 """
 from __future__ import annotations
 
-from app.services.zentao_client_service import ZentaoClient
+import pytest
+from app.services.zentao_client_service import ZentaoAPIError, ZentaoClient
 
 
 def test_create_task_recovers_id_when_response_has_no_id(monkeypatch):
@@ -21,9 +22,10 @@ def test_create_task_recovers_id_when_response_has_no_id(monkeypatch):
             {"id": 30, "name": "别的任务", "type": "test", "assignedTo": {"account": "alice"}},
         ],
     )
-    out = cli.create_execution_task(99, name="需求一", assigned_to="alice", story=6706)
-    # 取名称(+指派人/需求)匹配里 id 最大（最新建）的一条
-    assert out and out.get("id") == 22
+    # A same-title task is not evidence that this request created it.
+    with pytest.raises(ZentaoAPIError) as error:
+        cli.create_execution_task(99, name="需求一", assigned_to="alice", story=6706)
+    assert error.value.outcome_unknown
 
 
 def test_create_task_uses_direct_id_without_recovery(monkeypatch):
@@ -45,6 +47,6 @@ def test_create_task_recovery_returns_none_when_no_match(monkeypatch):
     cli = ZentaoClient(base_url="http://z", token="t")
     monkeypatch.setattr(cli, "post", lambda path, body=None: {"message": "success"})
     monkeypatch.setattr(cli, "list_execution_tasks", lambda execution_id, limit=500: [])
-    out = cli.create_execution_task(99, name="需求一", assigned_to="alice")
-    # 找不回时退回原响应（无 id），交由上层报错
-    assert out == {"message": "success"}
+    with pytest.raises(ZentaoAPIError) as error:
+        cli.create_execution_task(99, name="需求一", assigned_to="alice")
+    assert error.value.outcome_unknown

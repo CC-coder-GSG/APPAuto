@@ -37,6 +37,8 @@ class Settings(BaseSettings):
 
     # Zentao background sync (workbench bug mirror reconciliation)
     zentao_background_sync_enabled: bool = Field(default_factory=lambda: os.getenv('APP_ZENTAO_BACKGROUND_SYNC_ENABLED', os.getenv('ZENTAO_BACKGROUND_SYNC_ENABLED', 'true')).lower() == 'true')
+    # Optional product-ID -> system-ID mapping for v2 build creation.
+    zentao_build_system_mapping_json: str = ''
     zentao_background_sync_username: str = Field(default_factory=lambda: os.getenv('APP_ZENTAO_BACKGROUND_SYNC_USERNAME', os.getenv('ZENTAO_BACKGROUND_SYNC_USERNAME', '')).strip())
     zentao_workbench_recent_sync_interval_minutes: int = Field(default_factory=lambda: int(os.getenv('APP_ZENTAO_WORKBENCH_RECENT_SYNC_INTERVAL_MINUTES', os.getenv('ZENTAO_WORKBENCH_RECENT_SYNC_INTERVAL_MINUTES', '10'))))
     # On-enter freshness thresholds. If the local mirror has not been touched

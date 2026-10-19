@@ -540,7 +540,7 @@ def _get_client_ctx(user_id: int, db: Session) -> tuple[ZentaoClient, str] | Non
         return None
 
     base_url = binding.base_url.rstrip('/')
-    return ZentaoClient(base_url=base_url, token=token), base_url
+    return ZentaoClient.from_binding(binding, token), base_url
 
 
 def _writeback_bug_fields(db: Session, result: dict, base_url: str) -> None:

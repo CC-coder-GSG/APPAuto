@@ -160,14 +160,23 @@ def test_stage5_overview_contains_field_test_source_type(db_session):
 
 
 class _FakeZentaoClient:
-    def __init__(self, payload_map):
-        self.payload_map = payload_map
+    def __init__(self, payload_map=None):
+        self.payload_map = payload_map or {}
 
     def get(self, path, params=None):
         return self.payload_map.get(path)
 
+    def list_projects(self):
+        return (self.get('projects') or {}).get('projects', [])
 
-class _Fake401ZentaoClient:
+    def list_project_executions(self, project_id):
+        return (self.get(f'projects/{project_id}/executions') or {}).get('executions', [])
+
+    def list_execution_builds(self, execution_id):
+        return (self.get(f'executions/{execution_id}/builds') or {}).get('builds', [])
+
+
+class _Fake401ZentaoClient(_FakeZentaoClient):
     def get(self, path, params=None):
         raise overall_test_service.ZentaoAPIError(401, '{"error":"Unauthorized"}')
 

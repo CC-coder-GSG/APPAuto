@@ -45,7 +45,7 @@ def _get_client(user_id: int, db: Session) -> ZentaoClient | None:
     token = get_valid_token(user_id, db)
     if not token:
         return None
-    return ZentaoClient(base_url=binding.base_url.rstrip("/"), token=token)
+    return ZentaoClient.from_binding(binding, token)
 
 
 def _call_with_401_retry(user_id: int, db: Session, fn):

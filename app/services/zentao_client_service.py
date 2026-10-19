@@ -1,7 +1,7 @@
 """
 Zentao API HTTP client service.
 
-Provides a thin, authenticated wrapper around the Zentao v1 REST API.
+Provides a v2 REST client with explicitly retained page/form compatibility.
 All requests are made with the token belonging to the calling user.
 
 Usage:
@@ -17,6 +17,10 @@ import re
 from typing import Any
 
 import httpx
+
+from app.services.zentao_v2_protocol import (
+    ZentaoAPIError, decode_v2, normalize_base_url, relative_path, unwrap_resource, v2_params,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +60,6 @@ def _extract_build_ids(raw: Any) -> list[str]:
     return [bid] if bid else []
 
 
-class ZentaoAPIError(Exception):
-    def __init__(self, status_code: int, message: str):
-        self.status_code = status_code
-        self.message = message
-        super().__init__(f"ZentaoAPI {status_code}: {message}")
-
-
 def _loads_lenient(text: str) -> Any:
     """
     json.loads that tolerates a leading UTF-8 BOM (﻿) and surrounding
@@ -77,40 +74,33 @@ def _loads_lenient(text: str) -> Any:
 
 
 def _parse_write_response(resp: "httpx.Response") -> dict | list:
-    """
-    Parse body of a POST/PUT response defensively.
-
-    Zentao v1 write endpoints are inconsistent: some return full JSON,
-    some return an empty body on success, some return `id=xxx` plain
-    text, and PHP warnings can leak HTML with a 200 status.
-    """
-    text = (resp.text or "").lstrip("﻿").strip()
-    if not text:
-        return {"message": "success"}
-    try:
-        return _loads_lenient(text)
-    except ValueError:
-        lowered = text.lower()
-        if "fatal error" in lowered:
-            raise ZentaoAPIError(500, "禅道服务器内部错误（PHP Fatal Error）")
-        m = re.search(r'(?:bugid|id)[=:"\s]*(\d+)', text, re.IGNORECASE)
-        if m:
-            return {"id": int(m.group(1))}
-        raise ZentaoAPIError(502, f"禅道返回了非 JSON 响应: {text[:200]}")
+    """Only an explicit v2 success envelope is a successful REST write."""
+    return decode_v2(resp, write=True)
 
 
 class ZentaoClient:
     """
-    Authenticated Zentao v1 API client.
+    Authenticated Zentao v2 API client; no REST v1 transport exists.
 
     base_url: e.g. "http://192.168.2.148:81/zentao"
     token: Zentao API token (short-lived, managed by zentao_auth_service)
     """
 
-    def __init__(self, base_url: str, token: str):
-        self.base_url = base_url.rstrip('/')
+    def __init__(self, base_url: str, token: str, *, account: str = "", web_login=None):
+        self.base_url = normalize_base_url(base_url)
         self.token = token
-        self._api_base = f"{self.base_url}/api.php/v1"
+        self.account = account
+        self.web_login = web_login
+        self._api_base = f"{self.base_url}/api.php/v2"
+
+    @classmethod
+    def from_binding(cls, binding, token: str):
+        from app.services.zentao_auth_service import decrypt_password
+        from app.services.zentao_web_session import ZentaoWebLogin
+        account = binding.zentao_account or ""
+        password = decrypt_password(binding.zentao_password_ciphertext or "")
+        login = ZentaoWebLogin(binding.base_url, account, password) if password else None
+        return cls(binding.base_url, token, account=account, web_login=login)
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -118,100 +108,230 @@ class ZentaoClient:
             "Content-Type": "application/json",
         }
 
-    def get(self, path: str, params: dict | None = None) -> dict | list | None:
-        """
-        GET /v1/{path}
-
-        Returns parsed JSON body, or raises ZentaoAPIError.
-        Returns None if the server returns 404.
-        """
-        url = f"{self._api_base}/{path.lstrip('/')}"
+    def _request(self, method: str, path: str, *, params=None, body=None):
+        path = relative_path(path)
+        kwargs = {"headers": self._headers(), "timeout": _DEFAULT_TIMEOUT, "follow_redirects": False}
+        if method == "get":
+            kwargs["params"] = v2_params(path, params)
+        elif method in {"post", "put"}:
+            kwargs["json"] = body or {}
         try:
-            resp = httpx.get(url, params=params, headers=self._headers(), timeout=_DEFAULT_TIMEOUT)
-            if resp.status_code == 404:
-                return None
-            if resp.status_code not in (200, 201):
-                raise ZentaoAPIError(resp.status_code, resp.text[:500])
-            body = resp.text or ""
-            # 禅道 IPD 对某些异常 Bug 的 v1 接口会返回 200 + 仅一个 UTF-8 BOM
-            # （3 字节、无 JSON 正文）。这种"空响应"等同于拿不到数据，返回 None
-            # 让上层走页面 JSON 兜底，而不是当成"非 JSON 响应"直接报错。
-            if not body.strip("﻿ \t\r\n"):
-                return None
-            try:
-                # 优先用宽松解析（剥 BOM），失败再退回 httpx 的 .json()
-                return _loads_lenient(body)
-            except Exception:
-                try:
-                    return resp.json()
-                except Exception:
-                    pass
-                if "Fatal error" in body or "fatal error" in body:
-                    raise ZentaoAPIError(500, "禅道服务器内部错误（PHP Fatal Error），该 Bug 数据可能存在异常，请联系禅道管理员检查。")
-                raise ZentaoAPIError(502, f"禅道返回了非 JSON 响应: {body.lstrip(chr(0xFEFF)).strip()[:200]}")
-        except ZentaoAPIError:
-            raise
-        except Exception as e:
-            logger.warning("ZentaoClient.get error path=%s: %s", path, e)
-            raise ZentaoAPIError(0, str(e))
+            resp = getattr(httpx, method)(f"{self._api_base}/{path}", **kwargs)
+        except Exception as exc:
+            raise ZentaoAPIError(0, "禅道请求未取得响应，请核实操作结果", outcome_unknown=method != "get") from exc
+        if method == "get" and resp.status_code == 404:
+            return None
+        return decode_v2(resp, write=method != "get")
+
+    def get(self, path: str, params: dict | None = None) -> dict | list | None:
+        path = relative_path(path)
+        # Legacy internal accessor, never an outbound /v2/user guess.
+        if path == "user":
+            if self.account:
+                return {"profile": {"account": self.account}}
+            page = self.get_page("my-index.json") or {}
+            person = page.get("user") or page.get("profile")
+            if not isinstance(person, dict) or not person.get("account"):
+                raise ZentaoAPIError(502, "无法确认当前禅道账号")
+            return {"profile": person}
+        match = re.fullmatch(r"builds/(\d+)(/bugs)?", path)
+        if match:
+            if match.group(2):
+                page = self.get_page(f"build-view-{match[1]}.json") or {}
+                rows = page.get("bugs")
+                if not isinstance(rows, (dict, list)):
+                    raise ZentaoAPIError(502, "禅道构建页面未返回 Bug 列表")
+                rows = list(rows.values()) if isinstance(rows, dict) else rows
+                pager = page.get('pager') if isinstance(page.get('pager'), dict) else {}
+                if pager.get('recTotal') is not None and int(pager['recTotal']) > len(rows):
+                    raise ZentaoAPIError(502, '禅道构建页面 Bug 列表不完整，未标记同步完成')
+                size = max(1, int((params or {}).get('limit', 100)))
+                offset = (max(1, int((params or {}).get('page', 1))) - 1) * size
+                return {"bugs": rows[offset:offset + size], 'total': len(rows)}
+            return self.get_build(int(match[1]))
+        payload = self._request("get", path, params=params)
+        if payload is None:
+            return None
+        return unwrap_resource(path, payload)
 
     def post(self, path: str, body: dict | None = None) -> dict | list | None:
-        """POST /v1/{path}"""
-        url = f"{self._api_base}/{path.lstrip('/')}"
-        try:
-            resp = httpx.post(url, json=body or {}, headers=self._headers(), timeout=_DEFAULT_TIMEOUT)
-            if resp.status_code not in (200, 201):
-                raise ZentaoAPIError(resp.status_code, resp.text[:500])
-            return _parse_write_response(resp)
-        except ZentaoAPIError:
-            raise
-        except Exception as e:
-            logger.warning("ZentaoClient.post error path=%s: %s", path, e)
-            raise ZentaoAPIError(0, str(e))
+        return self._request("post", path, body=body)
 
     def put(self, path: str, body: dict | None = None) -> dict | list | None:
-        """PUT /v1/{path}"""
-        url = f"{self._api_base}/{path.lstrip('/')}"
-        try:
-            resp = httpx.put(url, json=body or {}, headers=self._headers(), timeout=_DEFAULT_TIMEOUT)
-            if resp.status_code not in (200, 201):
-                raise ZentaoAPIError(resp.status_code, resp.text[:500])
-            return _parse_write_response(resp)
-        except ZentaoAPIError:
-            raise
-        except Exception as e:
-            logger.warning("ZentaoClient.put error path=%s: %s", path, e)
-            raise ZentaoAPIError(0, str(e))
+        return self._request("put", path, body=body)
 
     def delete(self, path: str) -> dict | None:
-        """DELETE /v1/{path}"""
-        url = f"{self._api_base}/{path.lstrip('/')}"
+        return self._request("delete", path)
+
+    @staticmethod
+    def _created(result, label: str) -> dict:
         try:
-            resp = httpx.delete(url, headers=self._headers(), timeout=_DEFAULT_TIMEOUT)
-            if resp.status_code == 404:
-                return None
-            if resp.status_code not in (200, 201):
-                raise ZentaoAPIError(resp.status_code, resp.text[:500])
-            text = resp.text.strip()
-            return resp.json() if text else {"message": "success"}
-        except ZentaoAPIError:
-            raise
-        except Exception as e:
-            logger.warning("ZentaoClient.delete error path=%s: %s", path, e)
-            raise ZentaoAPIError(0, str(e))
+            object_id = int(result.get("id")) if isinstance(result, dict) else 0
+        except (TypeError, ValueError):
+            object_id = 0
+        if object_id <= 0:
+            raise ZentaoAPIError(502, f"禅道创建{label}未返回编号，结果待核实", outcome_unknown=True)
+        return {**result, "id": object_id}
+
+    def _resource(self, collection: str, object_id: int, page_module: str) -> dict | None:
+        """Retain read-only page recovery for documented v2 detail gaps."""
+        try:
+            obj = self.get(f"{collection}/{int(object_id)}")
+            if isinstance(obj, dict) and str(obj.get("id")) == str(object_id):
+                return obj
+        except ZentaoAPIError as exc:
+            if exc.status_code not in {404, 500, 501, 502}:
+                raise
+        page = self.get_page(f"{page_module}-view-{int(object_id)}.json")
+        obj = page.get(page_module) if isinstance(page, dict) else None
+        if isinstance(obj, dict) and str(obj.get("id")) == str(object_id):
+            # Actions live at page level on some IPD versions.
+            if "actions" in page and "actions" not in obj:
+                obj = {**obj, "actions": page["actions"]}
+            return obj
+        raise ZentaoAPIError(502, f"无法通过 v2 或页面核对禅道 {page_module} #{object_id}")
+
+    def _list_all(self, path: str, key: str, limit: int = 500, params: dict | None = None) -> list[dict]:
+        limit = max(1, min(int(limit), 1000))
+        rows: list[dict] = []
+        seen: set[str] = set()
+        expected_total = None
+        for page in range(1, 1001):
+            data = self.get(path, {**(params or {}), "limit": limit, "page": page})
+            bucket = data.get(key) if isinstance(data, dict) else None
+            if not isinstance(bucket, list):
+                raise ZentaoAPIError(502, f"禅道列表缺少 {key}，同步未完成")
+            if not bucket:
+                if expected_total is not None and len(rows) < expected_total:
+                    raise ZentaoAPIError(502, '禅道列表提前结束，同步完整性待核实')
+                return rows
+            added = 0
+            for item in bucket:
+                if not isinstance(item, dict) or not item.get("id"):
+                    raise ZentaoAPIError(502, f"禅道 {key} 返回无编号记录")
+                oid = str(item["id"])
+                if oid not in seen:
+                    rows.append(item)
+                    seen.add(oid)
+                    added += 1
+            pager = data.get("pager") if isinstance(data.get("pager"), dict) else {}
+            total = data.get("total", pager.get("recTotal"))
+            if total is not None:
+                try:
+                    expected_total = int(total)
+                    if len(rows) >= int(total):
+                        return rows
+                except (TypeError, ValueError):
+                    raise ZentaoAPIError(502, "禅道分页总数无效")
+            if not added:
+                raise ZentaoAPIError(502, "禅道重复返回同一页，同步完整性待核实")
+            if len(bucket) < limit and total is None:
+                return rows
+        raise ZentaoAPIError(502, "禅道列表超出分页上限，同步未完成")
+
+    def _build_system(self, product_id: int) -> int:
+        if not product_id:
+            raise ZentaoAPIError(422, "缺少构建所属产品，未提交写入")
+        data = self.get(f"products/{product_id}/systems")
+        systems = data.get("systems") if isinstance(data, dict) else None
+        if isinstance(systems, list):
+            try:
+                ids = {int(s["id"]) for s in systems if isinstance(s, dict) and s.get("id")}
+            except (ValueError, TypeError) as exc:
+                raise ZentaoAPIError(502, '禅道应用列表包含无效编号') from exc
+            from app.core.config import settings
+            try:
+                mapping = json.loads(settings.zentao_build_system_mapping_json or '{}')
+                selected = mapping.get(str(product_id))
+                selected = int(selected) if selected is not None else None
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ZentaoAPIError(422, '禅道构建应用映射 JSON 配置无效') from exc
+            if selected is not None:
+                if selected not in ids:
+                    raise ZentaoAPIError(422, '配置的禅道应用不属于该产品或当前账号不可访问')
+                return selected
+            if len(ids) == 1:
+                return ids.pop()
+        raise ZentaoAPIError(422, "无法唯一确定禅道产品应用，请配置 APP_ZENTAO_BUILD_SYSTEM_MAPPING_JSON 中的 system 编号")
+
+    @staticmethod
+    def _field_value(key, value):
+        if isinstance(value, dict):
+            value = value.get('account') if key == 'assignedTo' else value.get('id')
+        if isinstance(value, list):
+            return ','.join(str(v) for v in value)
+        return '' if value is None else str(value)
+
+    def _complete_created_fields(self, result, module: str, desired: dict, form: dict, getter):
+        """Complete documented v2 gaps on the known ID; never repeat creation.
+
+        Even a 401/timeout in this second step must return the created ID, so
+        callers cannot mistake it for a failed POST and create another object.
+        """
+        desired = {k: v for k, v in desired.items() if v not in (None, '', [], 0)}
+        if not desired:
+            return result
+        object_id = result['id']
+        observed = {}
+        try:
+            observed = getter(object_id) or {}
+            missing = [key for key, value in desired.items()
+                       if self._field_value(key, observed.get(key)) != self._field_value(key, value)]
+            if missing:
+                # Keep values not edited by this request, including owner and
+                # product references, while excluding unrelated page metadata.
+                keys = {'title', 'product', 'branch', 'module', 'story', 'project', 'execution', 'pri', 'type',
+                        'severity', 'assignedTo', 'openedBuild', 'steps', 'expects', 'stepType', 'precondition',
+                        'keywords', 'stage', 'os', 'browser', 'color', 'deadline', 'mailto'}
+                snapshot = {k: v for k, v in observed.items() if k in keys and v is not None}
+                for key, value in list(snapshot.items()):
+                    if isinstance(value, dict):
+                        snapshot[key] = value.get('account') if key == 'assignedTo' else value.get('id')
+                fields = {**snapshot, **form, **desired}
+                if isinstance(fields.get('stage'), str):
+                    fields['stage'] = [s for s in fields['stage'].split(',') if s]
+                self.post_page(f'{module}-edit-{object_id}.json', fields)
+                observed = getter(object_id) or {}
+                missing = [key for key, value in desired.items()
+                           if self._field_value(key, observed.get(key)) != self._field_value(key, value)]
+                if missing:
+                    raise ZentaoAPIError(502, '补充字段回读未一致', outcome_unknown=True)
+        except Exception:
+            logger.warning('Created %s #%s; supplemental fields pending verification: %s',
+                           module, object_id, ','.join(desired))
+            result = {**result, 'compat_warning': f'已创建 #{object_id}，补充字段待核实：' + ', '.join(desired)}
+        return {**result, 'verified_fields': {key: self._field_value(key, observed.get(key)) for key in desired}}
 
     def get_page(self, path: str, params: dict | None = None) -> dict | None:
+        """Keep working Token page reads; use the same user's Cookie on gaps."""
+        path = relative_path(path, page=True)
+        result = self._get_page_with_token(path, params)
+        if (isinstance(result, dict) and result
+                and result.get('status') != 'fail' and result.get('result') != 'fail'
+                and not result.get('loginExpired') and not result.get('denyType')
+                and result.get('title') != '用户登录'):
+            return result
+        if self.web_login is not None:
+            from app.services.zentao_web_session import request_page_via_web
+            try:
+                return request_page_via_web(self.web_login, path, params=params)
+            except Exception:
+                logger.warning('Zentao page unavailable via Token and same-user Cookie: %s', path)
+        return None
+
+    def _get_page_with_token(self, path: str, params: dict | None = None) -> dict | None:
         """
-        GET a Zentao *page* JSON (not the v1 API), e.g. /bug-activate-{id}.json.
+        GET a Zentao *page* JSON (not the v2 API), e.g. /bug-activate-{id}.json.
         These are the web-app page data endpoints that include users/builds metadata.
         """
-        url = f"{self.base_url}/{path.lstrip('/')}"
+        path = relative_path(path, page=True)
+        url = f"{self.base_url}/{path}"
         headers = {
             "Token": self.token,
             "Accept": "application/json",
         }
         try:
-            resp = httpx.get(url, params=params, headers=headers, timeout=_DEFAULT_TIMEOUT, follow_redirects=True)
+            resp = httpx.get(url, params=params, headers=headers, timeout=_DEFAULT_TIMEOUT, follow_redirects=False)
             if resp.status_code in (401, 403, 404):
                 return None
             if resp.status_code != 200:
@@ -222,6 +342,8 @@ class ZentaoClient:
                 result = resp.json()
             # Zentao page JSON often wraps the actual payload inside:
             # {"status":"success","data":"{\"users\":{...},...}"}
+            if isinstance(result, dict) and isinstance(result.get('data'), dict):
+                return result['data']
             if isinstance(result, dict) and isinstance(result.get("data"), str):
                 try:
                     decoded = _loads_lenient(result["data"])
@@ -235,33 +357,35 @@ class ZentaoClient:
             return None
 
     def post_page(self, path: str, data: dict | None = None) -> dict | None:
-        """POST 到禅道传统页面动作（非 v1 REST），如 task-pause-{id}.json。
+        """提交官方 v2 尚未覆盖的页面表单。
 
-        用于 v1 REST 未开放的状态动作（pause 等）。本部署的传统 .json 页面接受
-        Token 头鉴权（list_assignable_users 即走 get_page + Token）。用表单编码提交，
-        与 Zentao 传统动作读取 $_POST 一致。返回解析后的 JSON（失败/非 JSON 返回原文包裹）。
+        已绑定密码时使用同账号网页会话，仅明确成功的 JSON 响应算成功。
         """
-        url = f"{self.base_url}/{path.lstrip('/')}"
+        path = relative_path(path, page=True)
+        if self.web_login is not None:
+            from app.services.zentao_web_session import request_page_via_web
+            return request_page_via_web(self.web_login, path, data=data or {})
+        url = f"{self.base_url}/{path}"
         headers = {
             "Token": self.token,
             "Accept": "application/json, text/html;q=0.8, */*;q=0.5",
         }
         try:
-            resp = httpx.post(url, data=(data or {}), headers=headers, timeout=_DEFAULT_TIMEOUT, follow_redirects=True)
+            resp = httpx.post(url, data=(data or {}), headers=headers, timeout=_DEFAULT_TIMEOUT, follow_redirects=False)
             if resp.status_code not in (200, 201):
-                raise ZentaoAPIError(resp.status_code, resp.text[:300])
+                raise ZentaoAPIError(resp.status_code, "禅道表单请求失败", outcome_unknown=resp.status_code >= 500)
             text = (resp.text or "").strip()
             if not text:
-                return {"message": "success"}
-            try:
-                return _loads_lenient(text)
-            except Exception:
-                return {"raw": text[:300]}
+                raise ZentaoAPIError(502, "禅道表单返回空响应，结果待核实", outcome_unknown=True)
+            result = _loads_lenient(text)
+            if not isinstance(result, dict) or (result.get("result") != "success" and result.get("status") != "success"):
+                raise ZentaoAPIError(422, "禅道表单未确认成功")
+            return result
         except ZentaoAPIError:
             raise
         except Exception as e:
             logger.warning("ZentaoClient.post_page error path=%s: %s", path, e)
-            raise ZentaoAPIError(0, str(e))
+            raise ZentaoAPIError(0, "禅道表单结果待核实", outcome_unknown=True) from e
 
     def get_page_text(self, path: str, params: dict | None = None) -> str | None:
         """
@@ -272,19 +396,37 @@ class ZentaoClient:
         write endpoint returns an empty success response but the created object
         cannot be found afterwards.
         """
-        url = f"{self.base_url}/{path.lstrip('/')}"
+        path = relative_path(path, page=True)
+        url = f"{self.base_url}/{path}"
         headers = {
             "Token": self.token,
             "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
         }
         try:
-            resp = httpx.get(url, params=params, headers=headers, timeout=_DEFAULT_TIMEOUT, follow_redirects=True)
+            resp = httpx.get(url, params=params, headers=headers, timeout=_DEFAULT_TIMEOUT, follow_redirects=False)
             if resp.status_code != 200:
                 return None
             return resp.text or ""
         except Exception as e:
             logger.warning("ZentaoClient.get_page_text error path=%s: %s", path, e)
             return None
+
+    def get_file(self, file_id: int):
+        """Retained authenticated file resource; no guessed v2 or v1 download."""
+        if int(file_id) <= 0:
+            raise ZentaoAPIError(400, '附件编号无效')
+        path = f"file-read-{int(file_id)}.html"
+        if self.web_login is not None:
+            from app.services.zentao_web_session import fetch_file_via_web
+            return fetch_file_via_web(self.web_login, file_id)
+        try:
+            resp = httpx.get(f"{self.base_url}/{path}", headers={"Token": self.token},
+                             timeout=_DEFAULT_TIMEOUT, follow_redirects=False)
+        except Exception as exc:
+            raise ZentaoAPIError(0, "禅道附件获取失败") from exc
+        if resp.status_code != 200 or "text/html" in resp.headers.get("content-type", "").lower():
+            raise ZentaoAPIError(502, "禅道附件未返回文件内容")
+        return resp
 
     def probe_bug_create_access(self, product_id: int, execution_id: int = 0) -> dict[str, Any]:
         """
@@ -331,20 +473,15 @@ class ZentaoClient:
     # ------------------------------------------------------------------
 
     def get_bug(self, bug_id: int) -> dict | None:
-        return self.get(f"bugs/{bug_id}")
+        return self._resource('bugs', bug_id, 'bug')
 
     def get_bug_with_fallback(self, bug_id: int) -> dict | None:
         """
         Return a bug's raw dict, falling back to the page JSON
-        (`bug-view-{id}.json`) when the v1 API yields no usable body.
+        (`bug-view-{id}.json`) when the v2 API yields no usable body.
 
-        禅道 IPD 对部分异常 Bug 的 v1 接口会返回 200 + 仅一个 UTF-8 BOM（空响应），
-        或直接抛 PHP Fatal Error。这种情况下 v1 拿不到数据，但页面 JSON 接口
-        仍返回完整的 bug（含 assignedTo）+ actions + users，所以统一在这里兜底。
-
-        401（token 失效）会原样抛出，交给调用方刷新 token 后重试——页面 JSON
-        兜底不应吞掉 token 过期信号。页面 JSON 顶层的 actions 会合并进返回的
-        bug dict，供详情 normalizer 使用。
+        401 交给调用方刷新 Token。缺少操作历史时从保留页面补充，
+        页面字段不会覆盖 v2 已返回的字段。
         """
         raw: dict | list | None = None
         try:
@@ -352,200 +489,132 @@ class ZentaoClient:
         except ZentaoAPIError as exc:
             if exc.status_code == 401:
                 raise
-            logger.info("get_bug_with_fallback: v1 失败 bug_id=%s status=%s，回退页面 JSON",
+            logger.info("get_bug_with_fallback: v2 失败 bug_id=%s status=%s，回退页面 JSON",
                         bug_id, exc.status_code)
             raw = None
-        if raw:
+        if raw and 'actions' in raw:
             return raw
 
-        page = self.get_page(f"bug-view-{bug_id}.json")
+        try:
+            page = self.get_page(f"bug-view-{bug_id}.json")
+        except Exception:
+            if not raw:
+                raise
+            logger.warning('Bug #%s page history unavailable; v2 detail remains readable', bug_id)
+            return raw
         if isinstance(page, dict):
             bug = page.get("bug") or page
+            if not isinstance(bug, dict) or str(bug.get('id')) != str(bug_id):
+                return raw or None
+            if isinstance(raw, dict):
+                bug = {**bug, **raw}
             if isinstance(bug, dict) and "actions" not in bug and "actions" in page:
                 bug = {**bug, "actions": page["actions"]}
             return bug
-        return None
+        return raw or None
 
     def get_story(self, story_id: int) -> dict | None:
-        return self.get(f"stories/{story_id}")
+        return self._resource('stories', story_id, 'story')
 
     def get_testcase(self, case_id: int) -> dict | None:
-        return self.get(f"testcases/{case_id}")
+        return self._resource('testcases', case_id, 'testcase')
 
     def create_testcase(self, product_id: int, payload: dict) -> dict:
-        """Strict write parsing: never infer a created case ID from an HTML page."""
-        url = f"{self._api_base}/products/{product_id}/testcases"
-        try:
-            resp = httpx.post(url, json=payload, headers=self._headers(), timeout=_DEFAULT_TIMEOUT)
-        except Exception as exc:
-            raise ZentaoAPIError(0, "禅道创建请求未取得响应，请核实是否已创建") from exc
-        if resp.status_code not in (200, 201):
-            raise ZentaoAPIError(resp.status_code, resp.text[:500])
-        try:
-            result = _loads_lenient(resp.text)
-        except (ValueError, TypeError) as exc:
-            raise ZentaoAPIError(502, "禅道返回非 JSON 或空响应，创建结果待核实") from exc
-        if not isinstance(result, dict):
-            raise ZentaoAPIError(502, "禅道创建响应缺少用例编号，创建结果待核实")
-        if result.get("status") in ("fail", "failed", "error") or result.get("error") or result.get("errors"):
-            raise ZentaoAPIError(422, str(result.get("message") or result.get("error") or result.get("errors") or result)[:500])
-        case = result.get("data") if isinstance(result.get("data"), dict) else result
-        try:
-            case_id = int(case.get("id") or 0)
-        except (TypeError, ValueError):
-            case_id = 0
-        if case_id <= 0:
-            raise ZentaoAPIError(502, "禅道创建响应缺少用例编号，创建结果待核实")
-        return {**case, "id": case_id}
+        body = {k: v for k, v in payload.items() if k not in {'product', 'keywords', 'stage'}}
+        body['productID'] = int(product_id)
+        steps = body.get('steps')
+        if isinstance(steps, list) and steps and all(isinstance(s, dict) for s in steps):
+            body['steps'] = [s.get('desc', s.get('step', '')) for s in steps]
+            body['expects'] = [s.get('expect', s.get('expected', '')) for s in steps]
+            body['stepType'] = [s.get('type') or 'step' for s in steps]
+        result = self._created(self.post('testcases', body), '用例')
+        form = {k: v for k, v in body.items() if k != 'productID'}
+        form['product'] = product_id
+        return self._complete_created_fields(result, 'testcase',
+                                             {k: payload[k] for k in ('keywords', 'stage') if k in payload},
+                                             form, self.get_testcase)
 
     def get_create_testcase_meta(self, product_id: int) -> dict | None:
         return self.get_page(f"testcase-create-{product_id}.json")
 
     def get_build(self, build_id: int) -> dict | None:
-        return self.get(f"builds/{build_id}")
+        # The official v2 catalogue has no single-build GET. Retain page JSON.
+        page = self.get_page(f'build-view-{int(build_id)}.json')
+        if not isinstance(page, dict):
+            raise ZentaoAPIError(502, '无法读取禅道构建详情')
+        build = page.get('build')
+        if not isinstance(build, dict) or str(build.get('id')) != str(build_id):
+            raise ZentaoAPIError(502, '禅道构建详情缺少匹配的编号')
+        return build
 
     def get_execution(self, execution_id: int) -> dict | None:
-        return self.get(f"executions/{execution_id}")
+        return self._resource('executions', execution_id, 'execution')
 
     def get_user(self, user_id: int) -> dict | None:
-        return self.get(f"users/{user_id}")
+        return self._resource('users', user_id, 'user')
 
-    def list_project_executions(self, project_id: int, limit: int = 200, status: str = "all") -> list[dict]:
-        """
-        Return the execution rows visible under a Zentao project.
-
-        禅道默认会过滤掉非 doing/wait 状态的执行（closed/suspended），
-        而我们这边手动同步是要 *所有* 状态都拿到，所以传 status=all。
-        同时翻页直到响应不再带满 limit 为止，避免 100 截断丢数据。
-        """
-        page = 1
-        all_rows: list[dict] = []
-        seen_ids: set[int] = set()
-        while True:
-            params: dict[str, Any] = {"limit": limit, "page": page}
-            if status:
-                params["status"] = status
-            data = self.get(f"projects/{project_id}/executions", params=params) or {}
-            rows = data.get("executions") if isinstance(data, dict) else None
-            if not isinstance(rows, list) or not rows:
-                break
-            added = 0
-            for row in rows:
-                rid = row.get("id") if isinstance(row, dict) else None
-                try:
-                    rid_int = int(rid) if rid is not None else None
-                except (TypeError, ValueError):
-                    rid_int = None
-                if rid_int is None or rid_int in seen_ids:
-                    continue
-                seen_ids.add(rid_int)
-                all_rows.append(row)
-                added += 1
-            # 没新增 = 已经翻完，跳出
-            if added == 0 or len(rows) < limit:
-                break
-            page += 1
-            if page > 50:  # safety cap
-                break
-        return all_rows
+    def list_project_executions(self, project_id: int, limit: int = 200, status: str = 'all') -> list[dict]:
+        return self._list_all(f'projects/{project_id}/executions', 'executions', limit, {'status': status})
 
     def list_execution_stories(self, execution_id: int, limit: int = 500) -> list[dict]:
-        """Return the stories/requirements linked to an execution."""
-        data = self.get(f"executions/{execution_id}/stories", params={"limit": limit}) or {}
-        rows = data.get("stories") if isinstance(data, dict) else []
-        return rows if isinstance(rows, list) else []
+        return self._list_all(f'executions/{execution_id}/stories', 'stories', limit)
 
     def list_projects(self, limit: int = 100) -> list[dict]:
-        """Return the projects visible to the current token."""
-        data = self.get("projects", params={"limit": limit}) or {}
-        rows = data.get("projects") if isinstance(data, dict) else []
-        return rows if isinstance(rows, list) else []
+        return self._list_all('projects', 'projects', limit)
 
     def list_execution_builds(self, execution_id: int, limit: int = 500) -> list[dict]:
-        """Return all builds bound to an execution (raw rows, ordered as returned by 禅道)."""
-        data = self.get(f"executions/{execution_id}/builds", params={"limit": limit}) or {}
-        rows = data.get("builds") if isinstance(data, dict) else []
-        return rows if isinstance(rows, list) else []
+        return self._list_all(f'executions/{execution_id}/builds', 'builds', limit)
 
     def list_project_builds(self, project_id: int, limit: int = 500) -> list[dict]:
-        """Return all builds in a project across all its executions.
-
-        用于"按名字找 build" —— 禅道 v1 没有按 name 的全局搜索 endpoint，
-        只能拉这个项目的全量列表然后客户端过滤。每条 row 带 execution / id /
-        name，足够定位。
-        """
-        data = self.get(f"projects/{project_id}/builds", params={"limit": limit}) or {}
-        rows = data.get("builds") if isinstance(data, dict) else []
-        return rows if isinstance(rows, list) else []
+        return self._list_all(f'projects/{project_id}/builds', 'builds', limit)
 
     # ------------------------------------------------------------------
     # Build write actions
     # ------------------------------------------------------------------
 
-    def create_execution_build(
-        self,
-        execution_id: int,
-        name: str,
-        *,
-        project_id: int | None = None,
-        product_id: int | None = None,
-        builder: str | None = None,
-        date: str | None = None,
-        desc: str | None = None,
-    ) -> dict | None:
-        """
-        Create a build attached to an execution.
-
-        实测：禅道 IPD 4.3 的 `POST /v1/executions/{id}/builds` 永远返回 200 + 空 body
-        且什么都不写（哪怕权限 / 字段全部正确）。但 `POST /v1/projects/{project_id}/builds`
-        在同一 token 下能正常 201 + 完整 body + 真正落库 —— 在 body 里把 `execution`
-        传上就行。所以这里强制走 projects 端点，必须传 project_id。
-
-        date 不传时自动填今天 —— 禅道 IPD 4.3 不传 `date` 会 400 "打包日期不能为空"，
-        所有调用方都得"今天"，没必要让每个调用方各自重复一遍。
-        """
-        if project_id is None:
-            raise ValueError("create_execution_build: project_id is required")
-        from datetime import datetime as _dt
-
-        body: dict[str, Any] = {
-            "name": name,
-            "execution": execution_id,
-            "date": date or _dt.now().strftime("%Y-%m-%d"),
-        }
-        if product_id is not None:
-            body["product"] = product_id
-        if builder:
-            body["builder"] = builder
+    def create_execution_build(self, execution_id: int, name: str, *, project_id: int | None = None,
+                               product_id: int | None = None, builder: str | None = None,
+                               date: str | None = None, desc: str | None = None,
+                               system_id: int | None = None) -> dict:
+        from app.utils.time_utils import local_now
+        if not product_id:
+            raise ZentaoAPIError(422, '创建禅道构建需要产品编号')
+        builder = builder or self.account
+        if not builder:
+            raise ZentaoAPIError(422, '创建禅道构建需要构建者账号')
+        body = {'executionID': execution_id, 'product': product_id, 'name': name,
+                'system': system_id or self._build_system(product_id), 'builder': builder,
+                'date': date or local_now().strftime('%Y-%m-%d')}
         if desc is not None:
-            body["desc"] = desc
-        return self.post(f"projects/{project_id}/builds", body)
+            body['desc'] = desc
+        return self._created(self.post('builds', body), '构建')
 
-    def update_build(
-        self,
-        build_id: int,
-        *,
-        name: str | None = None,
-        execution_id: int | None = None,
-        product_id: int | None = None,
-        desc: str | None = None,
-    ) -> dict | None:
-        """PUT /v1/builds/{id}"""
-        body: dict[str, Any] = {}
-        if name is not None:
-            body["name"] = name
-        if execution_id is not None:
-            body["execution"] = execution_id
-        if product_id is not None:
-            body["product"] = product_id
-        if desc is not None:
-            body["desc"] = desc
-        if not body:
+    def update_build(self, build_id: int, *, name: str | None = None, execution_id: int | None = None,
+                     product_id: int | None = None, desc: str | None = None) -> dict | None:
+        if all(v is None for v in (name, execution_id, product_id, desc)):
             return None
-        return self.put(f"builds/{build_id}", body)
+        snapshot = self.get_build(build_id) or {}
+        keys = ('execution', 'product', 'name', 'system', 'builder', 'date', 'scmPath', 'filePath', 'desc')
+        body = {k: snapshot[k] for k in keys if k in snapshot}
+        changes = {'name': name, 'execution': execution_id, 'product': product_id, 'desc': desc}
+        body.update({k: v for k, v in changes.items() if v is not None})
+        for key in ('execution', 'product', 'system'):
+            value = body.get(key)
+            if isinstance(value, dict):
+                value = value.get('id')
+            if value is not None:
+                body[key] = int(value)
+        if isinstance(body.get('builder'), dict):
+            body['builder'] = body['builder'].get('account')
+        if not body.get('system') or (product_id is not None and str(product_id) != str(snapshot.get('product'))):
+            body['system'] = self._build_system(int(body.get('product') or 0))
+        for key in ('execution', 'product', 'name', 'system', 'builder', 'date'):
+            if not body.get(key):
+                raise ZentaoAPIError(422, f'禅道构建详情缺少 {key}，未发送修改请求')
+        return self.put(f'builds/{build_id}', body)
 
     def delete_build(self, build_id: int) -> dict | None:
-        """DELETE /v1/builds/{id}"""
+        """DELETE /v2/builds/{id}"""
         return self.delete(f"builds/{build_id}")
 
     # ------------------------------------------------------------------
@@ -554,187 +623,103 @@ class ZentaoClient:
     # ------------------------------------------------------------------
 
     def list_execution_tasks(self, execution_id: int, limit: int = 500) -> list[dict]:
-        """GET /v1/executions/{id}/tasks —— 该执行下的任务（含父/子）。"""
-        data = self.get(f"executions/{execution_id}/tasks", params={"limit": limit}) or {}
-        rows = data.get("tasks") if isinstance(data, dict) else []
-        return rows if isinstance(rows, list) else []
+        return self._list_all(f'executions/{execution_id}/tasks', 'tasks', limit, {'status': 'all'})
 
     def get_task(self, task_id: int) -> dict | None:
-        """GET /v1/tasks/{id}"""
-        return self.get(f"tasks/{task_id}")
+        return self._resource('tasks', task_id, 'task')
 
-    def create_execution_task(
-        self,
-        execution_id: int,
-        *,
-        name: str,
-        assigned_to: str | None = None,
-        task_type: str = "test",
-        story: int | None = None,
-        est_started: str | None = None,
-        deadline: str | None = None,
-        estimate: float | None = None,
-        pri: int = 3,
-        desc: str | None = None,
-    ) -> dict | None:
-        """POST /v1/executions/{id}/tasks —— 建任务，返回完整对象(含 id)。
-
-        ⚠️ 实测：`parent` 在 create 时被忽略，建子任务须建完再 PUT 设 parent
-        （见 link_task_parent）。datetime/date 一律按上海本地传，禅道存为 UTC。
-        """
-        body: dict[str, Any] = {"name": name, "type": task_type, "pri": pri}
-        if assigned_to:
-            body["assignedTo"] = assigned_to
-        if story:
-            body["story"] = story
-        if est_started:
-            body["estStarted"] = est_started
-        if deadline:
-            body["deadline"] = deadline
-        if estimate is not None:
-            body["estimate"] = estimate
-        if desc is not None:
-            body["desc"] = desc
-        result = self.post(f"executions/{execution_id}/tasks", body)
-        if isinstance(result, dict) and result.get("id"):
-            return result
-        # 禅道写接口有时建成功却返回空体 / {"message":"success"}（不带 id）。
-        # 回查执行任务列表按名称(+指派人/需求)找回刚建的任务，避免本地写回不到 id。
-        recovered = self._recover_created_task(
-            execution_id, name=name, assigned_to=assigned_to, story=story
-        )
-        return recovered or result
-
-    def _recover_created_task(
-        self,
-        execution_id: int,
-        *,
-        name: str,
-        assigned_to: str | None = None,
-        story: int | None = None,
-    ) -> dict | None:
-        """create 未返回 id 时，从任务列表里按名称找回刚建的任务（取最新一条）。"""
-        try:
-            rows = self.list_execution_tasks(execution_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("_recover_created_task list failed exec=%s: %s", execution_id, exc)
-            return None
-
-        def _acc(v: Any) -> str:
-            if isinstance(v, dict):
-                return str(v.get("account") or "").strip().lower()
-            return str(v or "").strip().lower()
-
-        target = (name or "").strip()
-        cands = [
-            t for t in rows
-            if t.get("id") and str(t.get("name") or "").strip() == target
-        ]
-        if not cands:
-            return None
-        # 尽量用指派人 / 关联需求进一步收窄，再取 id 最大（最新建）的一条。
-        if assigned_to:
-            acc_l = str(assigned_to).strip().lower()
-            narrowed = [t for t in cands if _acc(t.get("assignedTo")) == acc_l]
-            cands = narrowed or cands
-        if story:
-            narrowed = [t for t in cands if str(t.get("story") or "") == str(story)]
-            cands = narrowed or cands
-        cands.sort(key=lambda t: int(t.get("id") or 0))
-        return cands[-1]
+    def create_execution_task(self, execution_id: int, *, name: str, assigned_to: str | None = None,
+                              task_type: str = 'test', story: int | None = None,
+                              est_started: str | None = None, deadline: str | None = None,
+                              estimate: float | None = None, pri: int = 3, desc: str | None = None) -> dict:
+        body = {'executionID': execution_id, 'name': name, 'type': task_type, 'pri': pri}
+        values = {'assignedTo': assigned_to, 'story': story, 'estStarted': est_started,
+                  'deadline': deadline, 'estimate': estimate, 'desc': desc}
+        body.update({k: v for k, v in values.items() if v is not None})
+        return self._created(self.post('tasks', body), '任务')
 
     def update_task(self, task_id: int, data: dict) -> dict | None:
-        """PUT /v1/tasks/{id} —— 改派(assignedTo)/设父子(parent)/改 estimate 等。"""
-        return self.put(f"tasks/{task_id}", data)
+        supported = {'name', 'type', 'assignedTo', 'estStarted', 'deadline', 'pri', 'estimate', 'module', 'story', 'desc'}
+        if set(data) <= supported:
+            return self.put(f'tasks/{task_id}', data)
+        # Parent links and legacy lifecycle repair are not documented v2 fields.
+        # Use the existing edit form, preserving all fields that the user did not edit.
+        task = self.get_task(task_id)
+        if not isinstance(task, dict) or str(task.get('id')) != str(task_id):
+            raise ZentaoAPIError(502, '无法核对禅道任务，未提交表单')
+        # IPD 5.6 validates the execution on retained edit forms as well.
+        form_keys = supported | {'execution', 'parent', 'status', 'left', 'consumed', 'finishedDate', 'realStarted'}
+        fields = {k: v for k, v in task.items() if k in form_keys and v is not None}
+        for key, value in list(fields.items()):
+            if isinstance(value, dict):
+                fields[key] = value.get('account') if key == 'assignedTo' else value.get('id')
+        fields.update(data)
+        return self.post_page(f'task-edit-{task_id}.json', fields)
 
     def update_task_dates(self, task_id: int, *, est_started: str, deadline: str) -> dict | None:
         """Update only the planned dates; preserve task lifecycle, owner and efforts."""
         return self.put(f"tasks/{task_id}", {"estStarted": est_started, "deadline": deadline})
 
     def link_task_parent(self, child_task_id: int, parent_task_id: int) -> dict | None:
-        """把子任务挂到父任务下（create 不认 parent，须事后 PUT）。"""
-        return self.put(f"tasks/{child_task_id}", {"parent": parent_task_id})
+        result = self.update_task(child_task_id, {'parent': parent_task_id})
+        task = self.get_task(child_task_id) or {}
+        if str(task.get('parent')) != str(parent_task_id):
+            raise ZentaoAPIError(502, '禅道父子任务关联结果待核实', outcome_unknown=True)
+        return result
 
     def reassign_task(self, task_id: int, assigned_to: str) -> dict | None:
         """改派任务负责人。"""
         return self.put(f"tasks/{task_id}", {"assignedTo": assigned_to})
 
-    def start_task(self, task_id: int, *, real_started: str | None = None, left: float | None = None, assigned_to: str | None = None) -> dict | None:
-        """POST /v1/tasks/{id}/start —— 开始任务（status→doing）。
-
-        ⚠️ 用系统账号（非指派人本人）调用 start 时，禅道可能把 assignedTo 清空/改掉，
-        故显式回传 assignedTo=当前指派人，保持指派不变。
-        """
-        body: dict[str, Any] = {}
-        if real_started:
-            body["realStarted"] = real_started
+    def start_task(self, task_id: int, *, real_started: str | None = None,
+                   left: float | None = None, assigned_to: str | None = None) -> dict | None:
+        from app.utils.time_utils import local_now
+        body = {'realStarted': real_started or local_now().strftime('%Y-%m-%d %H:%M:%S')}
         if left is not None:
-            body["left"] = left
+            body['left'] = left
         if assigned_to:
-            body["assignedTo"] = assigned_to
-        return self.post(f"tasks/{task_id}/start", body)
+            body['assignedTo'] = assigned_to
+        return self.put(f'tasks/{task_id}/start', body)
 
     def pause_task(self, task_id: int, *, comment: str | None = None) -> dict | None:
-        """POST /v1/tasks/{id}/pause —— 暂停任务（status→pause），之后可再 start 继续。
+        # No documented v2 pause endpoint. Existing callers provide the same-user web action.
+        raise ZentaoAPIError(501, '任务暂停使用保留的网页登录方式')
 
-        ⚠️ 本部署（ipd4.3）任务动作的 REST POST **空 body 会被静默忽略**（返回
-        200 + 任务原样，状态不变），必须至少带 comment 字段（空串即可）。此外
-        token 被当 guest 时同样 200 无效果——调用方必须回读校验状态，未生效时
-        回退 zentao_web_session.pause_task_via_web（网页 cookie 会话）。
-        """
-        return self.post(f"tasks/{task_id}/pause", {"comment": comment or ""})
-
-    def finish_task(
-        self,
-        task_id: int,
-        *,
-        current_consumed: float,
-        finished_date: str | None = None,
-        assigned_to: str | None = None,
-    ) -> dict | None:
-        """POST /v1/tasks/{id}/finish —— 完成任务。
-
-        ⚠️ `currentConsumed`（本次消耗）必须 >0，否则禅道 400。
-        """
-        body: dict[str, Any] = {"currentConsumed": current_consumed}
-        if finished_date:
-            body["finishedDate"] = finished_date
+    def finish_task(self, task_id: int, *, current_consumed: float,
+                    finished_date: str | None = None, assigned_to: str | None = None) -> dict | None:
+        from app.utils.time_utils import local_now
+        task = self.get_task(task_id) or {}
+        started = task.get('realStarted') or task.get('estStarted')
+        if not started:
+            raise ZentaoAPIError(422, '无法确认任务实际开始时间，使用保留表单完成')
+        body = {'currentConsumed': current_consumed, 'realStarted': started,
+                'finishedDate': finished_date or local_now().strftime('%Y-%m-%d %H:%M:%S')}
         if assigned_to:
-            body["assignedTo"] = assigned_to
-        return self.post(f"tasks/{task_id}/finish", body)
+            body['assignedTo'] = assigned_to
+        return self.put(f'tasks/{task_id}/finish', body)
 
-    def restart_task(self, task_id: int, *, consumed: float, left: float, assigned_to: str | None = None) -> dict | None:
-        """POST /v1/tasks/{id}/restart —— 继续暂停/重新激活已完成任务（status→doing）。
-
-        ⚠️ `consumed` 与 `left`(>0) 必填，否则禅道 400。无 /activate 端点。
-        显式回传 assignedTo 保持指派不变（系统账号操作时禅道可能改掉指派人）。
-        """
-        body: dict[str, Any] = {"consumed": consumed, "left": left}
+    def restart_task(self, task_id: int, *, consumed: float, left: float,
+                     assigned_to: str | None = None) -> dict | None:
+        task = self.get_task(task_id) or {}
+        status = str(task.get('rawStatus') or task.get('status') or '').lower()
+        if status not in {'done', 'closed', 'cancel'}:
+            # Resuming a paused task is not assumed equivalent to v2 activate.
+            raise ZentaoAPIError(501, '继续暂停任务使用保留的网页登录方式')
+        body = {'left': left}
         if assigned_to:
-            body["assignedTo"] = assigned_to
-        return self.post(f"tasks/{task_id}/restart", body)
+            body['assignedTo'] = assigned_to
+        return self.put(f'tasks/{task_id}/activate', body)
 
     def close_task(self, task_id: int, *, comment: str | None = None) -> dict | None:
-        """POST /v1/tasks/{id}/close —— 关闭任务（status→closed）。
-
-        ⚠️ 本部署（ipd4.3）空 body 会被静默忽略（200 + 任务原样、状态不变），
-        必须至少带 comment 字段（空串即可）。平台前端点「关闭」不传 comment，
-        曾因此全部静默失败。
-        """
-        return self.post(f"tasks/{task_id}/close", {"comment": comment or ""})
+        return self.put(f'tasks/{task_id}/close', {'comment': comment or ''})
 
     def cancel_task(self, task_id: int, *, comment: str | None = None) -> dict | None:
-        """POST /v1/tasks/{id}/cancel —— 取消任务（status→cancel）。
-
-        与 pause/close 同理：ipd4.3 空 body 会被静默忽略，固定带 comment 字段。
-        REST 未生效时由调用方回退网页 cookie 会话（cancel_task_via_web）。
-        """
-        return self.post(f"tasks/{task_id}/cancel", {"comment": comment or ""})
+        raise ZentaoAPIError(501, '任务取消使用保留的网页登录方式')
 
     def list_assignable_users(self, execution_id: int) -> dict[str, str]:
         """该执行可指派用户 {account: realname}。
 
-        禅道 `/v1/users` 需 company-browse 权限（当前账号 400），改走任务创建页 JSON
+        保留任务创建页的执行级人员过滤。
         `task-create-{execId}.json` 的 `users`/`members` 字典（value 形如 "C:陈文博"）。
         """
         page = self.get_page(f"task-create-{execution_id}.json") or {}
@@ -764,37 +749,33 @@ class ZentaoClient:
     # Bug write actions
     # ------------------------------------------------------------------
 
-    def close_bug(self, bug_id: int, comment: str = "") -> dict | None:
-        """POST /v1/bugs/{id}/close"""
-        body: dict[str, Any] = {}
-        if comment:
-            body["comment"] = comment
-        return self.post(f"bugs/{bug_id}/close", body)
+    def close_bug(self, bug_id: int, comment: str = '') -> dict | None:
+        return self.put(f'bugs/{bug_id}/close', {'comment': comment})
 
-    def active_bug(self, bug_id: int, assigned_to: str = "", opened_build: list[str] | None = None, comment: str = "") -> dict | None:
-        """POST /v1/bugs/{id}/active"""
-        body: dict[str, Any] = {}
+    def active_bug(self, bug_id: int, assigned_to: str = '', opened_build: list[str] | None = None,
+                   comment: str = '') -> dict | None:
+        body = {'comment': comment}
         if assigned_to:
-            body["assignedTo"] = assigned_to
+            body['assignedTo'] = assigned_to
         if opened_build:
-            body["openedBuild"] = opened_build
-        if comment:
-            body["comment"] = comment
-        return self.post(f"bugs/{bug_id}/active", body)
+            body['openedBuild'] = opened_build
+        return self.put(f'bugs/{bug_id}/activate', body)
 
-    def assign_bug(self, bug_id: int, assigned_to: str, comment: str = "") -> dict | None:
-        """POST /v1/bugs/{id}/assign"""
-        body: dict[str, Any] = {"assignedTo": assigned_to}
-        if comment:
-            body["comment"] = comment
-        return self.post(f"bugs/{bug_id}/assign", body)
+    def assign_bug(self, bug_id: int, assigned_to: str, comment: str = '') -> dict | None:
+        result = self.post_page(f'bug-assignTo-{bug_id}.json', {'assignedTo': assigned_to, 'comment': comment})
+        bug = self.get_bug(bug_id) or {}
+        actual = bug.get('assignedTo')
+        actual = actual.get('account') if isinstance(actual, dict) else actual
+        if actual != assigned_to:
+            raise ZentaoAPIError(502, '禅道 Bug 改派结果待核实', outcome_unknown=True)
+        return result
 
     def delete_bug(self, bug_id: int) -> dict | None:
-        """DELETE /v1/bugs/{id}"""
+        """DELETE /v2/bugs/{id}"""
         return self.delete(f"bugs/{bug_id}")
 
     def update_bug(self, bug_id: int, data: dict) -> dict | None:
-        """PUT /v1/bugs/{id}"""
+        """PUT /v2/bugs/{id}"""
         return self.put(f"bugs/{bug_id}", data)
 
     # ------------------------------------------------------------------
@@ -811,107 +792,25 @@ class ZentaoClient:
         path = f"bug-{action}-{bug_id}.json"
         return self.get_page(path)
 
-    def create_bug(self, product_id: int, data: dict) -> dict | None:
-        """
-        Create a new bug in Zentao.
+    def create_bug(self, product_id: int, data: dict) -> dict:
+        body = {k: v for k, v in data.items() if k not in {'product', 'module', 'assignedTo'}}
+        body['productID'] = int(product_id)
+        result = self._created(self.post('bugs', body), 'Bug')
+        form = {k: v for k, v in body.items() if k != 'productID'}
+        form['product'] = product_id
+        return self._complete_created_fields(result, 'bug',
+                                             {k: data[k] for k in ('module', 'assignedTo') if k in data},
+                                             form, self.get_bug)
 
-        Uses the product-scoped REST endpoint, which is the stable path
-        across Zentao 18.x: POST /v1/products/{productID}/bugs. The
-        'product' key is stripped from the body since it goes in the URL.
 
-        Some Zentao deployments respond with HTTP 201 + empty body to bug
-        creation. When that happens we can't rely on the JSON body for the
-        new bug ID; instead we:
-          1) look at the Location header for a `/bugs/{id}` pointer, and
-          2) failing that, query the newest bugs for the product and match
-             by title to locate the row we just created.
-        """
-        body = {k: v for k, v in data.items() if k != "product"}
-        url = f"{self._api_base}/products/{product_id}/bugs"
-        try:
-            resp = httpx.post(url, json=body, headers=self._headers(), timeout=_DEFAULT_TIMEOUT)
-            if resp.status_code not in (200, 201):
-                raise ZentaoAPIError(resp.status_code, resp.text[:500])
-            result = _parse_write_response(resp)
-        except ZentaoAPIError:
-            raise
-        except Exception as e:
-            logger.warning("ZentaoClient.create_bug error: %s", e)
-            raise ZentaoAPIError(0, str(e))
-
-        if self._extract_bug_id_from_result(result):
-            return result
-
-        location = resp.headers.get("Location") or resp.headers.get("location") or ""
-        m = re.search(r'/bugs?/(\d+)', location)
-        if m:
-            return {"id": int(m.group(1))}
-
-        # Fallback: fetch newest bugs for this product and match title.
-        title = str(body.get("title") or "").strip()
-        if title:
-            latest = self._find_latest_bug_by_title(product_id, title)
-            if latest:
-                logger.info("ZentaoClient.create_bug: recovered id via title lookup: %s", latest.get("id"))
-                return latest
-
-        return result
-
-    @staticmethod
-    def _extract_bug_id_from_result(result: Any) -> int | None:
-        if not isinstance(result, dict):
-            return None
-        for candidate in (
-            result,
-            result.get("bug") if isinstance(result.get("bug"), dict) else None,
-            result.get("data") if isinstance(result.get("data"), dict) else None,
-        ):
-            if not isinstance(candidate, dict):
-                continue
-            for key in ("id", "bugID", "bug_id"):
-                val = candidate.get(key)
-                try:
-                    iv = int(val) if val is not None else None
-                except (TypeError, ValueError):
-                    iv = None
-                if iv:
-                    return iv
-        return None
-
-    def _find_latest_bug_by_title(self, product_id: int, title: str) -> dict | None:
-        """
-        Return the most recently created bug in the given product whose
-        title matches `title`. Used to recover the bug ID when the
-        create-bug response had an empty body.
-        """
-        try:
-            resp = self.get(f"products/{product_id}/bugs", params={"orderBy": "id_desc", "limit": 30})
-        except ZentaoAPIError:
-            return None
-        if not isinstance(resp, dict):
-            return None
-        bugs = resp.get("bugs") if isinstance(resp.get("bugs"), list) else None
-        if not bugs:
-            data = resp.get("data")
-            if isinstance(data, list):
-                bugs = data
-        if not bugs:
-            return None
-        target = title.strip()
-        for b in bugs:
-            if not isinstance(b, dict):
-                continue
-            if str(b.get("title") or "").strip() == target:
-                return b
-        return None
 
     def get_execution_context(self, execution_id: int) -> dict:
         """
         Return {product_ids: [...], project_id: int|None} for the given execution.
-        Uses GET /v1/executions/{id}.
+        Uses GET /v2/executions/{id}.
         """
         try:
-            resp = self.get(f"executions/{execution_id}")
+            resp = self.get_execution(execution_id)
             if not resp:
                 return {"product_ids": [], "project_id": None}
             execution = resp.get("execution") or resp
@@ -958,7 +857,7 @@ class ZentaoClient:
         """
         Return the build IDs bound to a given execution.
 
-        Primary source: GET /v1/executions/{id}/builds — the same endpoint
+        Primary source: GET /v2/executions/{id}/builds — the same endpoint
         used by overall_test_service and zentao_version_sync_service, so
         we know it is the reliable shape on this Zentao version.
 
@@ -966,23 +865,14 @@ class ZentaoClient:
         payload for `build/builds/openedBuild/openedBuilds` keys.
         """
         try:
-            resp = self.get(f"executions/{execution_id}/builds", params={"limit": 500})
-            if isinstance(resp, dict):
-                rows = resp.get("builds")
-                if isinstance(rows, list):
-                    ids: list[str] = []
-                    for r in rows:
-                        if isinstance(r, dict):
-                            bid = _coerce_int_str(r.get("id"))
-                            if bid:
-                                ids.append(bid)
-                    if ids:
-                        return list(dict.fromkeys(ids))
-        except Exception:
-            pass
+            rows = self.list_execution_builds(execution_id)
+            return list(dict.fromkeys(str(row['id']) for row in rows))
+        except ZentaoAPIError as exc:
+            if exc.status_code not in {404, 501}:
+                raise
 
         try:
-            resp = self.get(f"executions/{execution_id}")
+            resp = self.get_execution(execution_id)
             if not resp:
                 return []
             execution = resp.get("execution") or resp
@@ -995,93 +885,23 @@ class ZentaoClient:
         except Exception:
             return []
 
-    def upload_file(
-        self,
-        file_bytes: bytes,
-        filename: str,
-        content_type: str = "application/octet-stream",
-        object_type: str = "bug",
-        object_id: int = 0,
-    ) -> dict:
-        """
-        Upload a file to Zentao and return metadata describing the uploaded
-        file.
-
-        Zentao v1 accepts multipart POSTs at `/v1/files`. The expected field
-        name varies by version (`files[]` for 18.x, `files` for 16.x, `file`
-        for some IPD forks), so we try them in order on failure.
-
-        Returns a normalized dict with at least: id (int), title, pathname,
-        extension. Raises ZentaoAPIError on failure.
-        """
-        # Ensure filename has a recognizable extension. Zentao rejects uploads
-        # when the extension isn't in its allowed list, and some browsers /
-        # clipboards produce File objects with a bare name (e.g. "blob",
-        # "image"). Derive an extension from the MIME type if missing.
+    def upload_file(self, file_bytes: bytes, filename: str, content_type: str = 'application/octet-stream',
+                     object_type: str = 'bug', object_id: int = 0) -> dict:
         safe_name = self._ensure_filename_extension(filename, content_type)
-
-        url = f"{self._api_base}/files"
-        headers = {"Token": self.token}
-        data = {"objectType": object_type, "objectID": str(object_id)}
-
-        last_error: Exception | None = None
-        last_body: str = ""
-        # Order matters: modern Zentao (18.x+) uses the bracketed form; some
-        # older / IPD forks use the singular forms; `imgFile` is the field
-        # name the legacy `file.ajaxUpload` module expects — some Zentao
-        # deployments route /v1/files through that handler internally.
-        field_candidates = ("files[]", "files", "file", "imgFile")
-        for field_name in field_candidates:
-            files = {field_name: (safe_name, file_bytes, content_type)}
-            try:
-                resp = httpx.post(url, headers=headers, files=files, data=data, timeout=30.0)
-                last_body = (resp.text or "")[:500]
-                logger.info(
-                    "ZentaoClient.upload_file field=%s filename=%s ct=%s "
-                    "status=%s body=%s",
-                    field_name, safe_name, content_type, resp.status_code, last_body,
-                )
-                if resp.status_code not in (200, 201):
-                    last_error = ZentaoAPIError(resp.status_code, last_body)
-                    continue
-                try:
-                    payload = _parse_write_response(resp)
-                except ZentaoAPIError as pe:
-                    last_error = pe
-                    continue
-
-                # Some Zentao versions return HTTP 200 with an `error` field
-                # when the file is rejected (extension check, size limit).
-                if isinstance(payload, dict) and payload.get("error"):
-                    last_error = ZentaoAPIError(400, str(payload.get("error")).strip() or last_body)
-                    continue
-
-                entry = self._extract_uploaded_entry(payload)
-                if not entry or not entry.get("id"):
-                    last_error = ZentaoAPIError(502, f"禅道上传文件返回异常: {str(payload)[:200]}")
-                    continue
-
-                file_id = int(entry.get("id"))
-                pathname = str(entry.get("pathname") or "")
-                title = str(entry.get("title") or entry.get("name") or safe_name)
-                extension = str(entry.get("extension") or "").lstrip(".").lower()
-                if not extension and "." in safe_name:
-                    extension = safe_name.rsplit(".", 1)[-1].lower()
-                return {
-                    "id": file_id,
-                    "title": title,
-                    "pathname": pathname,
-                    "extension": extension,
-                }
-            except ZentaoAPIError as e:
-                last_error = e
-            except Exception as e:
-                logger.warning("ZentaoClient.upload_file field=%s error: %s", field_name, e)
-                last_error = ZentaoAPIError(0, str(e))
-
-        if isinstance(last_error, ZentaoAPIError):
-            raise last_error
-        raise ZentaoAPIError(0, f"禅道文件上传失败（所有字段名都失败）: {last_body}")
+        try:
+            resp = httpx.post(f'{self._api_base}/files', headers={'Token': self.token},
+                              files={'file': (safe_name, file_bytes, content_type)},
+                              data={'objectType': object_type, 'objectID': str(object_id)},
+                              timeout=30.0, follow_redirects=False)
+        except Exception as exc:
+            raise ZentaoAPIError(0, '禅道文件上传结果待核实', outcome_unknown=True) from exc
+        payload = decode_v2(resp, write=True)
+        entry = self._extract_uploaded_entry(payload)
+        if not entry or not entry.get('id'):
+            raise ZentaoAPIError(502, '禅道上传未返回文件编号，结果待核实', outcome_unknown=True)
+        return {'id': int(entry['id']), 'title': entry.get('title') or safe_name,
+                'pathname': entry.get('pathname') or '', 'url': entry.get('url') or '',
+                'extension': entry.get('extension') or (safe_name.rsplit('.', 1)[-1] if '.' in safe_name else '')}
 
     @staticmethod
     def _ensure_filename_extension(filename: str, content_type: str) -> str:

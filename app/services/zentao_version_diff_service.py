@@ -7,7 +7,7 @@
   - build_record_reassign_major(db, build_record_id, target_major_id)
         — 把一条构建记录指向的小版本搬到另一个大版本下；禅道侧也跟着搬
         （禅道 IPD 4.3 不允许 API 删 build，DELETE → 403。所以走 PUT
-          /v1/builds/{id} {execution:new_exec} 直接把原 build 移到目标执行下；
+          /v2/builds/{id} 保留必填字段并修改 execution，将原 build 移到目标执行下；
           只有原本没有 zentao_build_id 时才退回到"在目标执行下新建"。）
 
 注意：所有禅道侧改动都走 get_system_zentao_client（优先 chenwenbo）。
@@ -305,7 +305,7 @@ def build_record_reassign_major(
     禅道侧同步搬迁。
 
     禅道侧策略（基于 IPD 4.3 实测）：
-      - 原 minor 已经有 zentao_build_id ⇒ PUT /v1/builds/{old_bid} {execution:new_exec}
+      - 原 minor 已经有 zentao_build_id ⇒ PUT /v2/builds/{old_bid}，回读并保留必填字段
         把同一个 build 移到目标执行下（不删除、不新建、保留 stories/bugs/history）。
       - 原 minor 没绑过禅道 build ⇒ 在目标执行下新建一条同名 build。
       - API 不支持 DELETE build（403 Access not allowed），所以不再提供"保留原 build"
@@ -685,7 +685,7 @@ def _move_orphans_to_target(
 def _find_builds_by_name_in_project(client, project_id: int, name: str) -> list[dict]:
     """在项目维度（跨所有 execution）按归一化 name 找 build，返回所有匹配。
 
-    禅道 v1 没有 "GET /v1/builds?name=..." 这种全局搜索，但 GET /v1/projects/{id}/builds
+    通过 GET /v2/projects/{id}/builds 分页查询，再按构建名匹配，
     返回的每条 row 已经带 execution 字段。
 
     归一化对比：本地 minor.version_no 是 normalize_version_name 处理过的（剥掉
@@ -716,10 +716,10 @@ def _resolve_target_exec_meta(
 ) -> tuple[Optional[str], Optional[int], Optional[int], Optional[str]]:
     """读一次执行 detail，取 (execution_name, project_id, product_id, builder)。
 
-    禅道 IPD 4.3 GET /v1/executions/{id} 字段：`name`、`project`(标量) + `products`(列表)、PM/openedBy。
+    GET /v2/executions/{id} 解包后的字段：name、project、products、PM/openedBy。
     解析失败的字段返回 None；调用方自己判断够不够用。
 
-    builder：MCP 实测 `POST /v1/projects/{id}/builds` 缺 builder ⇒ 400
+    builder：v2 POST /builds 的必填字段。
     "构建者不能为空"，所以 reassign 走 create 分支前必须先把它解出来。
     """
     try:
@@ -751,7 +751,7 @@ def _resolve_target_exec_meta(
         builder = raw_builder.get("account") or raw_builder.get("realname")
     elif isinstance(raw_builder, str):
         builder = raw_builder
-    # 兜底：PM/openedBy 都空 ⇒ 回退到当前 token 对应的账号（/v1/user.profile.account）。
+    # PM/openedBy 都空时使用当前绑定的禅道账号。
     # 否则 create build 会被禅道挡为 400 "构建者不能为空"。
     if not builder:
         try:

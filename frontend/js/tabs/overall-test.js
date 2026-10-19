@@ -1709,6 +1709,8 @@ function _serializeS5StepsForSubmit() {
 function _resetS5CreateBugForm() {
   const titleEl = document.getElementById('s5CreateBugTitle');
   if (titleEl) titleEl.value = '';
+  const deadlineEl = document.getElementById('s5CreateBugDeadline');
+  if (deadlineEl) deadlineEl.value = '';
   const stepsEl = document.getElementById('s5CreateBugSteps');
   if (stepsEl) stepsEl.innerHTML = S5_STEPS_TEMPLATE_HTML;
   ['s5CreateBugSeverity', 's5CreateBugPri'].forEach((id) => {
@@ -2035,6 +2037,8 @@ export function toggleS5StepsFullscreen() {
 
 export async function submitS5CreateZentaoBug() {
   const title = (document.getElementById('s5CreateBugTitle')?.value || '').trim();
+  const deadlineEl = document.getElementById('s5CreateBugDeadline');
+  const deadline = deadlineEl?.value || '';
   const steps = _serializeS5StepsForSubmit();
   const severity = Number(document.getElementById('s5CreateBugSeverity')?.value || 3);
   const pri = Number(document.getElementById('s5CreateBugPri')?.value || 3);
@@ -2050,6 +2054,11 @@ export async function submitS5CreateZentaoBug() {
 
   if (!title) {
     if (errEl) { errEl.innerText = 'Bug 标题不能为空'; errEl.style.display = 'block'; }
+    return;
+  }
+  if (!deadline || !deadlineEl.checkValidity()) {
+    if (errEl) { errEl.innerText = '请选择有效的截止日期'; errEl.style.display = 'block'; }
+    deadlineEl?.focus();
     return;
   }
   if (!_s5CreateBugMeta || !(_s5CreateBugMeta.product_ids || []).length) {
@@ -2089,6 +2098,7 @@ export async function submitS5CreateZentaoBug() {
   try {
     const body = {
       product_id: Number(productId),
+      deadline,
       project_id: projectId ? Number(projectId) : null,
       execution_id: executionId ? Number(executionId) : null,
       title,

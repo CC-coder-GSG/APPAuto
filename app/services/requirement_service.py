@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime
 
@@ -37,34 +37,10 @@ class RequirementService:
         token = get_valid_token(user_id, self.db)
         if not token:
             return None
-        return ZentaoClient(base_url=binding.base_url.rstrip("/"), token=token)
+        return ZentaoClient.from_binding(binding, token)
 
     def _fetch_execution_story_rows(self, client: ZentaoClient, execution_id: int) -> list[dict]:
-        candidate_paths = [
-            (f"executions/{execution_id}/stories", {"limit": 500}),
-            (f"executions/{execution_id}/requirements", {"limit": 500}),
-            (f"executions/{execution_id}", {"limit": 500}),
-        ]
-        for path, params in candidate_paths:
-            try:
-                data = client.get(path, params=params) or {}
-            except ZentaoAPIError:
-                continue
-            rows = None
-            if isinstance(data, dict):
-                for key in ("stories", "requirements", "data", "items"):
-                    bucket = data.get(key)
-                    if isinstance(bucket, list):
-                        rows = bucket
-                        break
-                    if isinstance(bucket, dict):
-                        rows = [v for v in bucket.values() if isinstance(v, dict)]
-                        break
-            elif isinstance(data, list):
-                rows = [v for v in data if isinstance(v, dict)]
-            if rows:
-                return rows
-        return []
+        return client.list_execution_stories(execution_id)
 
     def sync_zentao_major_requirements(self, major_version_id: int, current_user: User) -> dict:
         major = self.ensure_major_version_exists(major_version_id)

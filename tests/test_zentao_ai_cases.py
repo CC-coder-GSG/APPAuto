@@ -270,13 +270,15 @@ def test_create_client_endpoint_and_step_mapping(monkeypatch):
 
     def post(url, **kwargs):
         captured.update(url=url, **kwargs)
-        return type("Response", (), {"status_code": 201, "text": '{"data":{"id":901}}'})()
+        return type("Response", (), {"status_code": 201, "text": '{"status":"success","id":901}'})()
 
     monkeypatch.setattr("app.services.zentao_client_service.httpx.post", post)
+    monkeypatch.setattr(ZentaoClient, 'get_testcase', lambda *args: {'id': 901, 'keywords': '词'})
     payload = {"title": "用例", "steps": [{"desc": "操作", "expect": "预期"}], "keywords": "词"}
     assert ZentaoClient("http://test", "token").create_testcase(7, payload)["id"] == 901
-    assert captured["url"] == "http://test/api.php/v1/products/7/testcases"
-    assert captured["json"] == payload
+    assert captured["url"] == "http://test/api.php/v2/testcases"
+    assert captured["json"] == {"productID": 7, "title": "用例",
+                                "steps": ["操作"], "expects": ["预期"], "stepType": ["step"]}
 
 
 def test_two_sessions_cannot_queue_the_same_draft(db_session, setup_cases):
