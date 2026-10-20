@@ -76,8 +76,10 @@ from app.models.user_zentao_binding import UserZentaoBinding
 from app.models.version import Version
 from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.models.zentao_testcase_mirror import ZentaoTestCaseMirror
+from app.models.automation import AutomationRepository, AutomationRun, AutomationCaseResult
 
 __all__ = [
+    "AutomationRepository", "AutomationRun", "AutomationCaseResult",
     "AICaseWorkspace", "AICaseDraft", "AICasePushBatch", "AICasePushItem",
     "BuglyApplication", "BuglyIssue", "BuglyReport", "BuglyReportRevision",
     "BuglyImportBatch", "BuglyGrant", "BuglyPublication",

@@ -188,8 +188,7 @@ class JenkinsClient:
                 "tree": (
                     "number,url,result,building,timestamp,duration,displayName,description,"
                     "artifacts[fileName,relativePath],"
-                    "actions[parameters[name,value]],"
-                    "actions[causes[shortDescription,userName]]"
+                    "actions[parameters[name,value],causes[shortDescription,userName]]"
                 )
             },
         )

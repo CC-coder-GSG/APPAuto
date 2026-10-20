@@ -10,7 +10,7 @@
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261019-1"></script>
+  <script type="module" src="/static/js/app.js?v=20261019-testcase-tabs-1"></script>
   <script src="/static/js/weave-motion.js?v=20260703-1" defer></script>
   <style>
     /* Header layout */
@@ -1000,6 +1000,14 @@
 
   <section id="tab-testcase-center" class="hidden card">
     <h2>用例中心</h2>
+    <div id="testcaseCenterTabs" class="workbench-subnav" role="tablist" aria-label="用例中心分页" style="margin-bottom:16px;">
+      <button id="testcaseCenterQueryTab" type="button" class="active" role="tab" aria-selected="true" aria-controls="testcaseCenterQueryPanel" data-testcase-view="query">用例查询</button>
+      <button id="testcaseCenterAutomationTab" type="button" role="tab" aria-selected="false" aria-controls="testcaseCenterAutomationPanel" tabindex="-1" data-testcase-view="automation">自动化测试</button>
+    </div>
+    <div id="testcaseCenterAutomationPanel" class="hidden" role="tabpanel" aria-labelledby="testcaseCenterAutomationTab" hidden>
+      <div id="automationPanel"></div>
+    </div>
+    <div id="testcaseCenterQueryPanel" role="tabpanel" aria-labelledby="testcaseCenterQueryTab">
     <div class="row" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px; align-items: center; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
       <span class="badge" style="background:#eff6ff; color:#1d4ed8;">当前软件范围</span>
       <label>状态</label>
@@ -1041,6 +1049,7 @@
       <button class="secondary" onclick="prevTestcaseCenterPage()">上一页</button>
       <span id="testcaseCenterPagerText" class="muted" style="min-width: 120px; text-align: center;">第 1 页</span>
       <button class="secondary" onclick="nextTestcaseCenterPage()">下一页</button>
+    </div>
     </div>
 
     <div id="testcaseCenterDetailModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: flex-start; justify-content: center; padding: 32px 16px; overflow:auto;">
@@ -2732,6 +2741,10 @@ async function api(url,opt={}){
 }
 
 async function init(){
+  // Deferred module scripts establish OmniQABootReady before DOMContentLoaded.
+  if(document.readyState === 'loading'){
+    await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, {once:true}));
+  }
   if(window.OmniQABootReady){
     try{ await window.OmniQABootReady; }catch(_){}
   }
@@ -2764,7 +2777,9 @@ async function init(){
   fillReportUsers();
   // 回填所有工作页面下拉框记忆的选择（版本已在 fillVersionSelects 中同步回填，这里覆盖静态筛选器）
   if(window.SelectMemory) window.SelectMemory.applyAll();
-  await showTab(getDefaultVisibleTab());
+  const automationLink = new URLSearchParams(location.search).has('automation_repository');
+  const canOpenAutomation = currentUser.role === 'admin' || (currentUser.allowed_tabs || []).includes('testcase-center');
+  await showTab(automationLink && canOpenAutomation ? 'testcase-center' : getDefaultVisibleTab());
 }
 
 async function loadUsers(){

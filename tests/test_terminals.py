@@ -110,6 +110,20 @@ def test_automation_unlock_releases(db_session):
     assert svc.active_lock(device.id) is None
 
 
+def test_other_build_cannot_steal_or_release_automation_lock(db_session):
+    device = _make_device(db_session)
+    svc = DeviceLockService(db_session)
+    svc.automation_lock(device.serial, jenkins_job='SurveyMaster-RF-Test', jenkins_build='18')
+    for job, build in [('SurveyMaster-RF-Test', '19'), ('other-job', '18')]:
+        with pytest.raises(DeviceConflict):
+            svc.automation_lock(device.serial, jenkins_job=job, jenkins_build=build)
+    with pytest.raises(DeviceConflict):
+        svc.automation_unlock(device.serial, jenkins_build='19')
+    lock = svc.active_lock(device.id)
+    assert lock.jenkins_job == 'SurveyMaster-RF-Test' and lock.jenkins_build == '18'
+    assert svc.automation_lock(device.serial, jenkins_job='SurveyMaster-RF-Test', jenkins_build='18')['ok']
+
+
 def test_automation_lock_auto_registers_unknown_device(db_session):
     svc = DeviceLockService(db_session)
     res = svc.automation_lock("NEWSERIAL", jenkins_job="job", jenkins_build="1")

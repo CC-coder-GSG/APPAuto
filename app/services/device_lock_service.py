@@ -278,7 +278,10 @@ class DeviceLockService:
         active = self.active_lock(device.id)
         if active:
             if active.lock_type == TerminalLockType.AUTOMATION.value:
-                # 同一 build 幂等；不同 build 也续用现有自动化锁（更新 build/job）
+                if (str(active.jenkins_build or '') != str(jenkins_build or '')
+                        or str(active.jenkins_job or '') != str(jenkins_job or '')):
+                    raise DeviceConflict(409, {"reason": "automation", "message": "终端正被其他自动化执行占用"})
+                # Only the same build may renew its lock.
                 active.jenkins_job = jenkins_job or active.jenkins_job
                 active.jenkins_build = jenkins_build or active.jenkins_build
                 active.heartbeat_at = local_now()
@@ -309,8 +312,7 @@ class DeviceLockService:
         if not active or active.lock_type != TerminalLockType.AUTOMATION.value:
             return {"ok": True, "note": "not_locked"}
         if jenkins_build and active.jenkins_build and str(jenkins_build) != str(active.jenkins_build):
-            # build 不匹配：可能是上一轮残留，仍按请求释放当前自动化锁
-            logger.info("automation_unlock build 不匹配 serial=%s req=%s cur=%s", serial, jenkins_build, active.jenkins_build)
+            raise DeviceConflict(409, {"reason": "automation", "message": "构建编号不匹配，未释放其他执行的设备锁"})
         self._release_lock(active, TerminalLockReleaseReason.NORMAL)
         self._apply_status(device, None, online=True)
         self._publish(device, "device.lock_changed")

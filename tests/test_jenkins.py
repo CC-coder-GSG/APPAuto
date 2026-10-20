@@ -10,6 +10,23 @@ from app.models.enums import UserRole
 from app.services import jenkins_service
 
 
+def test_build_query_preserves_parameters_and_causes(monkeypatch):
+    import httpx
+    from app.services.jenkins_client import JenkinsClient
+    client = JenkinsClient('http://jenkins.test', 'u', 't')
+    queries = []
+
+    def get(path, params=None):
+        queries.append(params['tree'])
+        return httpx.Response(200, json={'number': 18, 'actions': [{'parameters': [{'name': 'AUTOMATION_RUN_ID', 'value': 'run-18'}]}]})
+
+    monkeypatch.setattr(client, '_get', get)
+    result = client.get_build('SurveyMaster-RF-Test', 18)
+    assert result['actions'][0]['parameters'][0]['value'] == 'run-18'
+    assert queries[0].count('actions[') == 1
+    assert 'parameters[name,value],causes[' in queries[0]
+
+
 def _make_user(db_session) -> User:
     user = User(username="tester", display_name="Tester", password_hash="x", role=UserRole.USER)
     db_session.add(user)

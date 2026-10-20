@@ -23,3 +23,7 @@ android/app/build/
 release/*.apk
 bugly-validation-tmp/
 bugly-backups/
+# Local automation acceptance data, credentials and independent Git checkout.
+.codex-tmp/automation-local-validation/
+.codex-tmp/automation-implementation-20261019/
+.codex-tmp/surveymaster-integration-20261019/

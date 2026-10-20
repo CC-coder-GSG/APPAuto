@@ -1,7 +1,9 @@
 import { api } from '../api.js';
 import { escapeHtml, renderCaseLink } from '../utils.js';
+import { loadAutomationPanel } from '../components/automation-panel.js?v=20261019-tabs-1';
 
 const testcaseCenterState = {
+  view: null,
   page: 1,
   pageSize: 20,
   total: 0,
@@ -9,6 +11,44 @@ const testcaseCenterState = {
   modules: [],
   modulesLoadedFor: 0,
 };
+
+const testcaseCenterViews = ['query', 'automation'];
+
+function applyTestcaseCenterView() {
+  if (!testcaseCenterState.view) {
+    const params = new URLSearchParams(location.search);
+    testcaseCenterState.view = params.has('automation_repository') || params.has('automation_run') ? 'automation' : 'query';
+  }
+  const tabs = document.getElementById('testcaseCenterTabs');
+  tabs?.querySelectorAll('[data-testcase-view]').forEach(button => {
+    const active = button.dataset.testcaseView === testcaseCenterState.view;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+    button.tabIndex = active ? 0 : -1;
+    const panel = document.getElementById(button.getAttribute('aria-controls'));
+    if (panel) {
+      panel.hidden = !active;
+      panel.classList.toggle('hidden', !active);
+    }
+    button.onclick = () => switchTestcaseCenterView(button.dataset.testcaseView)
+      .catch(error => window.showMessage?.(error.message || '加载用例中心失败', 'error'));
+    button.onkeydown = event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const index = testcaseCenterViews.indexOf(button.dataset.testcaseView);
+      const target = event.key === 'Home' ? 'query' : event.key === 'End' ? 'automation'
+        : testcaseCenterViews[(index + (event.key === 'ArrowRight' ? 1 : -1) + testcaseCenterViews.length) % testcaseCenterViews.length];
+      tabs.querySelector(`[data-testcase-view="${target}"]`)?.focus();
+      switchTestcaseCenterView(target).catch(error => window.showMessage?.(error.message || '加载用例中心失败', 'error'));
+    };
+  });
+}
+
+export async function switchTestcaseCenterView(view) {
+  if (!testcaseCenterViews.includes(view)) return;
+  testcaseCenterState.view = view;
+  await loadTestcaseCenter(testcaseCenterState.page);
+}
 
 function currentSoftwareId() {
   return Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
@@ -152,6 +192,11 @@ function renderRows() {
 }
 
 export async function loadTestcaseCenter(page = 1) {
+  applyTestcaseCenterView();
+  if (testcaseCenterState.view === 'automation') {
+    await loadAutomationPanel();
+    return;
+  }
   testcaseCenterState.page = page;
   await refreshModuleOptions();
   // 回填记忆的筛选项（状态 + 模块），再据此查询
@@ -363,6 +408,7 @@ export async function prevTestcaseCenterPage() {
 
 window.OmniQATestcaseCenterTab = {
   loadTestcaseCenter,
+  switchTestcaseCenterView,
   syncTestcaseCenter,
   syncTestcaseCenterRecent,
   openTestcaseCenterDetail,
