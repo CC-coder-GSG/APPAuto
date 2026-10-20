@@ -1,9 +1,12 @@
 import { api } from '../api.js';
 import { escapeHtml as esc } from '../utils.js';
+import { mountAutomationConfiguration } from './automation-config.js?v=20261020-1';
 
 const state = { repositories: [], selected: null, run: null };
 let pendingRequest = null;
 let deepLinkApplied = false;
+let configuration;
+let projectGeneration = 0;
 const labels = {
   created: '已登记', dispatching: '正在提交', queued: '排队中', running: '运行中', completed: '已结束',
   dispatch_unknown: '提交待核实', environment_error: '环境异常', cancelled: '已取消',
@@ -11,7 +14,8 @@ const labels = {
   synced: '已回写', error: '回写失败', unknown: '回写待核实', skipped: '未回写（跳过）',
 };
 const $ = (id) => document.getElementById(id);
-const call = async (path, method = 'GET', body) => (await api('/automation' + path, { method, ...(body === undefined ? {} : { body }) })).json();
+const request = async (path, method = 'GET', body) => (await api(path, { method, ...(body === undefined ? {} : { body }) })).json();
+const call = (path, method, body) => request('/automation' + path, method, body);
 const notice = (error) => window.showMessage?.(error.message || String(error), 'error');
 const action = (fn) => async (event) => { event?.preventDefault(); try { await fn(); } catch (error) { notice(error); } };
 
@@ -33,7 +37,7 @@ function createShell(host) {
     <div id="automationSetup" class="hidden"></div>
     <div id="automationCases"></div>
     <form id="automationRunForm" class="row" style="gap:10px;flex-wrap:wrap;margin:12px 0">
-      <label>测试单 <input id="automationTesttask" type="number" min="1" required style="width:110px"></label>
+      <label>测试单（执行必选）<select id="automationTesttask" required disabled style="min-width:220px"><option value="">先选择自动化项目</option></select></label>
       <label>设备 <input id="automationDevice" required placeholder="设备序列号" style="width:170px"></label>
       <label>APK <input id="automationApk" required placeholder="Jenkins 可访问的 APK 路径" style="min-width:250px"></label>
       <label><input id="automationDryRun" type="checkbox">仅校验脚本（不操作设备、不回写禅道）</label>
@@ -44,26 +48,22 @@ function createShell(host) {
   </div>`;
   $('automationRepository').onchange = action(async () => { state.selected = Number($('automationRepository').value); await renderProject(); });
   $('automationReload').onclick = action(() => loadAutomationPanel(true));
-  $('automationConfigure').onclick = () => $('automationSetup').classList.toggle('hidden');
+  $('automationConfigure').onclick = action(async () => {
+    $('automationSetup').classList.toggle('hidden');
+    if (!$('automationSetup').classList.contains('hidden')) await configuration.load();
+  });
   $('automationRunForm').onsubmit = action(startRun);
   renderSetup();
 }
 
 function renderSetup() {
-  $('automationSetup').innerHTML = `<form id="automationProjectForm" style="padding:12px;border:1px solid #cbd5e1;border-radius:8px">
-    <p>使用 Git 中的脚本关联禅道用例。先绑定 Jenkins 和禅道账号；项目创建后，将集成密钥保存到 Jenkins Credentials。</p>
-    <div class="row" style="gap:10px;flex-wrap:wrap">
-      ${[['name','项目名称','text'],['git_url','Git 仓库地址','text'],['branch','脚本分支','text'],['jenkins_job','Jenkins Job','text'],['zentao_base_url','禅道地址','url'],['product_id','禅道产品 ID','number'],['execution_id','研发执行 ID（可选）','number'],['default_testtask_id','专用测试单 ID','number'],['target_build_id','禅道构建 ID（可选）','number']].map(([key,label,type]) => `<label>${label}<input name="${key}" type="${type}" ${label.includes('可选') ? '' : 'required'} value="${key === 'branch' ? 'main' : key === 'jenkins_job' ? 'SurveyMaster-RF-Test' : ''}" style="display:block;min-width:170px"></label>`).join('')}
-      <button type="submit">保存新项目</button>
-    </div><div id="automationKey"></div>
-  </form>`;
-  $('automationProjectForm').onsubmit = action(async () => {
-    const fields = Object.fromEntries(new FormData($('automationProjectForm')));
-    for (const key of ['product_id','execution_id','default_testtask_id','target_build_id']) fields[key] = fields[key] ? Number(fields[key]) : null;
-    const response = await call('/repositories', 'POST', fields);
-    state.selected = response.repository.id;
-    $('automationKey').textContent = `项目 ID：${response.repository.id}。集成密钥仅显示一次：${response.integration_key}`;
-    await loadAutomationPanel(true);
+  configuration = mountAutomationConfiguration($('automationSetup'), {
+    request, notify: notice,
+    onCreated: async response => {
+      state.selected = response.repository.id;
+      $('automationKey').textContent = `项目 ID：${response.repository.id}。集成密钥仅显示一次，请保存到 Jenkins Secret Text 凭据：${response.integration_key}`;
+      await loadAutomationPanel(true);
+    },
   });
 }
 
@@ -92,15 +92,18 @@ export async function loadAutomationPanel(force = false) {
 }
 
 async function renderProject() {
+  const generation = ++projectGeneration;
   const project = state.repositories.find(x => x.id === state.selected);
-  $('automationStart').disabled = !project;
+  $('automationStart').disabled = true;
+  $('automationTesttask').disabled = true;
+  $('automationTesttask').innerHTML = '<option value="">先选择自动化项目</option>';
   if (!project) {
     $('automationCases').textContent = '配置自动化项目后，可同步脚本关联并执行测试。';
     $('automationHistory').textContent = '';
+    $('automationSetup').classList.remove('hidden');
+    await configuration.load();
     return;
   }
-  $('automationTesttask').value = project.default_testtask_id || '';
-  $('automationTesttask').readOnly = !!project.default_testtask_id;
   $('automationCases').innerHTML = `<p>脚本版本：<code>${esc(project.catalog_revision || '尚未同步')}</code> · 禅道回写：${project.writeback_enabled ? '已启用' : '未启用'}
     <button id="automationWriteback" class="secondary">${project.writeback_enabled ? '停用' : '启用'}回写</button>
     <label style="margin-left:8px">导入脚本目录 <input id="automationCatalogFile" type="file" accept=".json,application/json"></label></p>
@@ -114,12 +117,28 @@ async function renderProject() {
     await call(`/repositories/${project.id}/catalog`, 'POST', JSON.parse(await file.text()));
     await loadAutomationPanel(true);
   });
-  await loadHistory();
+  await Promise.all([loadHistory(), (async () => {
+    $('automationTesttask').innerHTML = '<option value="">正在获取测试单…</option>';
+    try {
+      const { items } = await call(`/repositories/${project.id}/testtasks`);
+      if (generation !== projectGeneration) return;
+      $('automationTesttask').innerHTML = '<option value="">请选择测试单</option>' + items.map(x => `<option value="${x.id}">${esc(x.name)} · #${x.id}</option>`).join('');
+      $('automationTesttask').disabled = !items.length;
+      $('automationStart').disabled = !items.length;
+      if (project.default_testtask_id && items.length) $('automationTesttask').value = project.default_testtask_id;
+      if (!items.length) $('automationTesttask').innerHTML = '<option value="">没有可用测试单，请在禅道确认状态和用例关联</option>';
+    } catch (error) {
+      if (generation !== projectGeneration) return;
+      $('automationTesttask').innerHTML = '<option value="">获取失败，请点击刷新重试</option>';
+      notice(error);
+    }
+  })()]);
 }
 
 async function startRun() {
   const ids = [...document.querySelectorAll('input[name="automationCase"]:checked')].map(x => Number(x.value));
   if (!ids.length) throw new Error('请先选择已关联脚本的用例');
+  if (!$('automationTesttask').value) throw new Error('请选择本次执行归属的禅道测试单');
   $('automationStart').disabled = true;
   try {
     const payload = {
@@ -137,7 +156,9 @@ async function startRun() {
 }
 
 async function loadHistory() {
-  const rows = (await call(`/repositories/${state.selected}/runs`)).items || [];
+  const repositoryId = state.selected;
+  const rows = (await call(`/repositories/${repositoryId}/runs`)).items || [];
+  if (repositoryId !== state.selected) return;
   $('automationHistory').innerHTML = `<h3>执行历史</h3><table class="table"><thead><tr><th>运行</th><th>状态</th><th>测试结论</th><th>Jenkins</th><th>操作</th></tr></thead><tbody>${rows.map(x => `<tr><td>${esc(x.created_at || '')}<br><small>${esc(x.id)}</small></td><td>${esc(labels[x.status] || x.status)}</td><td>通过 ${x.summary.PASS || 0} / 失败 ${x.summary.FAIL || 0} / 跳过 ${x.summary.SKIP || 0} / 异常 ${x.summary.ERROR || 0}</td><td>${x.build_url ? safeLink(x.build_url, '#' + x.build_number) : '尚未开始'}</td><td><button data-automation-run="${esc(x.id)}" class="secondary">详情</button></td></tr>`).join('') || '<tr><td colspan="5">暂无执行记录</td></tr>'}</tbody></table>`;
   $('automationHistory').querySelectorAll('[data-automation-run]').forEach(button => { button.onclick = action(() => showRun(button.dataset.automationRun)); });
 }

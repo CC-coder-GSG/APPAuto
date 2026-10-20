@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Request
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
@@ -54,6 +54,22 @@ def create_repository(payload: RepositoryCreate, user=Depends(automation_user), 
     return service.create_repository(db, user, payload)
 
 
+@router.get('/configuration/bindings')
+def configuration_bindings(user=Depends(automation_user), db: Session = Depends(get_db)):
+    return service.configuration_bindings(db, user)
+
+
+@router.get('/configuration/zentao/{kind}')
+def zentao_options(kind: Literal['products', 'projects', 'executions', 'builds', 'testtasks'],
+                   product_id: int | None = Query(default=None, gt=0),
+                   project_id: int | None = Query(default=None, gt=0),
+                   execution_id: int | None = Query(default=None, gt=0),
+                   build_id: int | None = Query(default=None, gt=0),
+                   user=Depends(automation_user), db: Session = Depends(get_db)):
+    return service.zentao_options(db, user, kind, product_id=product_id, project_id=project_id,
+                                  execution_id=execution_id, build_id=build_id)
+
+
 @router.post('/repositories/{repository_id}/catalog')
 def upload_catalog(repository_id: int, payload: CatalogUpload, user=Depends(automation_user), db: Session = Depends(get_db)):
     repository = service.repository_for_user(db, repository_id, user)
@@ -85,6 +101,12 @@ def runs(repository_id: int, user=Depends(automation_user), db: Session = Depend
     repository = service.repository_for_user(db, repository_id, user)
     items = db.query(AutomationRun).filter_by(repository_id=repository.id).order_by(AutomationRun.created_at.desc()).limit(100).all()
     return {'items': [service.serialize_run(db, x) for x in items]}
+
+
+@router.get('/repositories/{repository_id}/testtasks')
+def repository_testtasks(repository_id: int, user=Depends(automation_user), db: Session = Depends(get_db)):
+    repository = service.repository_for_user(db, repository_id, user)
+    return service.repository_testtasks(db, repository)
 
 
 @router.post('/repositories/{repository_id}/runs', status_code=201)

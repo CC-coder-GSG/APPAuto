@@ -20,7 +20,7 @@ class RepositoryCreate(StrictModel):
     git_url: str = Field(min_length=1, max_length=500)
     branch: str = Field(default='main', min_length=1, max_length=160, pattern=r'^[A-Za-z0-9][A-Za-z0-9._/-]*$')
     jenkins_job: str = Field(min_length=1, max_length=255)
-    zentao_base_url: str = Field(min_length=1, max_length=500)
+    zentao_base_url: str | None = Field(default=None, min_length=1, max_length=500)
     product_id: PositiveID
     execution_id: PositiveID | None = None
     target_build_id: PositiveID | None = None

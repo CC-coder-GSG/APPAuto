@@ -582,6 +582,12 @@ class ZentaoClient:
     def list_projects(self, limit: int = 100) -> list[dict]:
         return self._list_all('projects', 'projects', limit)
 
+    def list_products(self, limit: int = 500) -> list[dict]:
+        return self._list_all('products', 'products', limit)
+
+    def list_product_testtasks(self, product_id: int, limit: int = 500) -> list[dict]:
+        return self._list_all(f'products/{product_id}/testtasks', 'testtasks', limit, {'browseType': 'all'})
+
     def list_execution_builds(self, execution_id: int, limit: int = 500) -> list[dict]:
         return self._list_all(f'executions/{execution_id}/builds', 'builds', limit)
 

@@ -11,10 +11,12 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
 from app.core.exceptions import AppError
-from app.models import AutomationRepository, AutomationRun, AutomationCaseResult
+from app.models import AutomationRepository, AutomationRun, AutomationCaseResult, User, UserZentaoBinding
 from app.schemas.automation import CatalogUpload, RunCreate
 from app.services import jenkins_service, automation_zentao
 from app.services.zentao_v2_protocol import normalize_base_url
+from app.services.zentao_auth_service import get_valid_token
+from app.services.zentao_client_service import ZentaoClient, ZentaoAPIError
 from app.utils.time_utils import utc_now_naive
 
 
@@ -54,13 +56,88 @@ def create_repository(db, user, payload):
     creds = jenkins_service.get_binding_creds(db, user.id)
     if not creds:
         raise AppError('请先保存有效的 Jenkins 账号绑定', status_code=422)
+    binding = _zentao_binding(db, user.id)
+    base_url = normalize_base_url(binding.base_url)
+    if payload.zentao_base_url and normalize_base_url(payload.zentao_base_url) != base_url:
+        raise AppError('自动化项目须使用本人已绑定的禅道地址，请刷新配置后重试', status_code=422)
     key = secrets.token_urlsafe(40)
     row = AutomationRepository(owner_id=user.id, jenkins_base_url=creds[0].rstrip('/'),
-                               integration_key_hash=digest(key), **payload.model_dump())
-    row.zentao_base_url = normalize_base_url(row.zentao_base_url)
+                               zentao_base_url=base_url, integration_key_hash=digest(key),
+                               **payload.model_dump(exclude={'zentao_base_url'}))
     db.add(row)
     db.commit()
     return {'repository': serialize_repository(row), 'integration_key': key}
+
+
+def _zentao_binding(db, user_id):
+    binding = db.query(UserZentaoBinding).filter_by(user_id=user_id).first()
+    if not binding:
+        raise AppError('请先在账号设置中绑定禅道账号', status_code=422)
+    return binding
+
+
+def configuration_bindings(db, user):
+    binding = db.query(UserZentaoBinding).filter_by(user_id=user.id).first()
+    creds = jenkins_service.get_binding_creds(db, user.id)
+    return {'zentao_base_url': normalize_base_url(binding.base_url) if binding else None,
+            'jenkins_base_url': creds[0] if creds else None}
+
+
+def _configuration_client(db, user):
+    binding = _zentao_binding(db, user.id)
+    token = get_valid_token(user.id, db)
+    if not token:
+        raise AppError('禅道认证已失效，请在账号设置中刷新绑定', status_code=422)
+    return ZentaoClient.from_binding(binding, token)
+
+
+def _build_ids(value):
+    if isinstance(value, dict):
+        return {automation_zentao.object_id(value)} if value.get('id') else {
+            automation_zentao.object_id(key) for key in value}
+    if isinstance(value, list):
+        return {automation_zentao.object_id(item) for item in value}
+    return {automation_zentao.object_id(item) for item in str(value or '').split(',')}
+
+
+def zentao_options(db, user, kind, *, product_id=None, project_id=None, execution_id=None, build_id=None):
+    if kind in {'builds', 'testtasks'} and not product_id:
+        raise AppError('请先选择禅道产品', status_code=422)
+    if kind == 'executions' and not project_id:
+        raise AppError('请先选择禅道项目', status_code=422)
+    if kind == 'builds' and not execution_id:
+        raise AppError('请先选择研发执行以获取构建列表', status_code=422)
+    client = _configuration_client(db, user)
+    oid = automation_zentao.object_id
+    try:
+        if kind == 'products':
+            rows = client.list_products()
+        elif kind == 'projects':
+            rows = client.list_projects()
+        elif kind == 'executions':
+            rows = client.list_project_executions(project_id)
+        elif kind == 'builds':
+            rows = [row for row in client.list_execution_builds(execution_id) if oid(row.get('product')) == product_id]
+        else:
+            rows = [row for row in client.list_product_testtasks(product_id)
+                    if str(row.get('status', '')).lower() not in {'closed', 'done', '已关闭', '已完成'}
+                    and (not execution_id or oid(row.get('execution')) == execution_id)
+                    and (not build_id or build_id in _build_ids(row.get('build')))]
+    except ZentaoAPIError as exc:
+        raise AppError(f'获取禅道选项失败：{exc.message}', status_code=502) from exc
+    return {'items': [{'id': oid(row), 'name': str(row.get('name') or row.get('title') or f'#{oid(row)}'),
+                       'status': str(row.get('status') or '')} for row in rows if oid(row)]}
+
+
+def repository_testtasks(db, repository):
+    binding = _zentao_binding(db, repository.owner_id)
+    if normalize_base_url(binding.base_url) != repository.zentao_base_url:
+        raise AppError('项目的禅道地址与账号绑定不一致，请先核对账号设置', status_code=422)
+    result = zentao_options(db, db.get(User, repository.owner_id), 'testtasks', product_id=repository.product_id,
+                            execution_id=repository.execution_id, build_id=repository.target_build_id)
+    if repository.default_testtask_id:
+        result['items'] = [row for row in result['items'] if row['id'] == repository.default_testtask_id]
+    return result
 
 
 def save_catalog(db, repository, payload: CatalogUpload):

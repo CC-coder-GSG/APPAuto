@@ -148,7 +148,7 @@ class JenkinsClient:
             path,
             params={
                 "tree": (
-                    "jobs[name,url,color,buildable,_class,description,"
+                    "jobs[name,fullName,url,color,buildable,_class,description,"
                     "lastBuild[number,result,timestamp,building,duration],"
                     "lastSuccessfulBuild[number,timestamp],"
                     "healthReport[score,description]]"
