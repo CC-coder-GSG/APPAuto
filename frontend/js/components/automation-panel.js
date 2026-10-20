@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { escapeHtml as esc } from '../utils.js';
+import { createRequestId } from '../request-id.js?v=20261020-http-uuid-1';
 import { mountAutomationConfiguration } from './automation-config.js?v=20261020-shared-key-1';
 import { mountAutomationCredentials } from './automation-credentials.js?v=20261020-1';
 
@@ -162,7 +163,7 @@ async function startRun() {
       dry_run: $('automationDryRun').checked,
     };
     const fingerprint = JSON.stringify([state.selected, payload]);
-    if (pendingRequest?.fingerprint !== fingerprint) pendingRequest = { fingerprint, key: crypto.randomUUID() };
+    if (pendingRequest?.fingerprint !== fingerprint) pendingRequest = { fingerprint, key: createRequestId() };
     const run = await call(`/repositories/${state.selected}/runs`, 'POST', { ...payload, idempotency_key: pendingRequest.key });
     pendingRequest = null;
     await loadHistory();
