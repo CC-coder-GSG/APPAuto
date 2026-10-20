@@ -25,12 +25,21 @@ def dump(path, data):
     target.write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
 
 
+def git_output(root, *arguments):
+    executable = os.environ.get('OMNIQA_GIT_EXECUTABLE', '').strip() or 'git'
+    try:
+        return subprocess.check_output([executable, '-C', str(root), *arguments], text=True, encoding='utf-8')
+    except FileNotFoundError as exc:
+        raise RuntimeError('Git executable was not found. Set OMNIQA_GIT_EXECUTABLE to the Jenkins Git tool path '
+                           'or add Git to the Jenkins agent PATH.') from exc
+
+
 def revision(root):
-    value = subprocess.check_output(['git', '-C', str(root), 'rev-parse', '--verify', 'HEAD'], text=True).strip()
+    value = git_output(root, 'rev-parse', '--verify', 'HEAD').strip()
     if not re.fullmatch(r'(?:[0-9a-f]{40}|[0-9a-f]{64})', value):
         raise ValueError('Cannot determine Git revision')
     # Uncommitted scripts must not be reported as the committed revision.
-    dirty = subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain', '--untracked-files=all', '--', 'tests', 'resources'], text=True)
+    dirty = git_output(root, 'status', '--porcelain', '--untracked-files=all', '--', 'tests', 'resources')
     if dirty.strip():
         # Jenkins generates this device config before Robot. It is deliberately
         # ignored in the test repository and therefore absent from this output.

@@ -111,3 +111,48 @@ def test_dry_run_is_explicit_and_does_not_execute_failure_keyword(project):
     argfile.write_text(bridge.make_arguments(frozen, snapshot, project, output), encoding='utf-8')
     assert robot.run_cli(['--log', 'NONE', '--report', 'NONE', '-A', str(argfile)], exit=False) == 0
     assert bridge.parse_results(output / 'output.xml', frozen)[0]['status'] == 'PASS'
+
+
+def test_revision_uses_configured_git_executable(monkeypatch, tmp_path):
+    executable = r'D:\software\Git\bin\git.exe'
+    monkeypatch.setenv('OMNIQA_GIT_EXECUTABLE', executable)
+    commands = []
+    def output(command, **kwargs):
+        commands.append(command)
+        return 'a' * 40 if 'rev-parse' in command else ''
+    monkeypatch.setattr(bridge.subprocess, 'check_output', output)
+    assert bridge.revision(tmp_path) == 'a' * 40
+    assert all(command[0] == executable for command in commands)
+
+
+def test_revision_reports_missing_git_without_ambiguous_windows_error(monkeypatch, tmp_path):
+    def missing(*args, **kwargs):
+        raise FileNotFoundError(2, 'The system cannot find the file specified')
+    monkeypatch.setattr(bridge.subprocess, 'check_output', missing)
+    with pytest.raises(RuntimeError, match='OMNIQA_GIT_EXECUTABLE'):
+        bridge.revision(tmp_path)
+
+
+def test_revision_works_without_git_on_path_and_rejects_changed_tests(monkeypatch, tmp_path):
+    import shutil
+    import subprocess
+    executable = shutil.which('git')
+    if not executable:
+        pytest.skip('Git executable is required for this integration check')
+    root = tmp_path / 'repository'
+    root.mkdir()
+    (root / 'tests').mkdir()
+    case = root / 'tests/example.robot'
+    case.write_text('*** Test Cases ***\nSmoke\n    No Operation\n', encoding='utf-8')
+    def git(*args):
+        return subprocess.check_output([executable, '-C', str(root), *args], text=True).strip()
+    git('init')
+    git('add', 'tests/example.robot')
+    git('-c', 'user.name=Regression', '-c', 'user.email=regression@example.invalid', 'commit', '-m', 'fixture')
+    revision = git('rev-parse', 'HEAD')
+    monkeypatch.setenv('OMNIQA_GIT_EXECUTABLE', executable)
+    monkeypatch.setenv('PATH', '')
+    assert bridge.revision(root) == revision
+    case.write_text('Changed', encoding='utf-8')
+    with pytest.raises(ValueError, match='differ from the Git commit'):
+        bridge.revision(root)

@@ -1,8 +1,15 @@
 diff --git a/ci/ci_piplines b/ci/ci_piplines
-index 309616f..9771833 100644
+index 309616f..840c5dd 100644
 --- a/ci/ci_piplines
 +++ b/ci/ci_piplines
-@@ -14,6 +14,11 @@ pipeline {
+@@ -10,10 +10,18 @@ pipeline {
+ 
+     environment {
+         PATH = "C:\\Windows\\System32;C:\\Windows\\System32\\WindowsPowerShell\\v1.0;${env.PATH}"
++        OMNIQA_GIT_EXECUTABLE = "D:\\software\\Git\\bin\\git.exe"
++        PYTHONUTF8 = "1"
++        PYTHONIOENCODING = "utf-8"
+         APK_DIR = "apk_in"
          ANDROID_HOME_DEFAULT = "D:\\android-sdk"
          TEST_REPO_URL = "git@github.com:CC-coder-GSG/SurveyMasterAutoTesting.git"
          DEFAULT_TEST_BRANCH = "main"
@@ -14,10 +21,45 @@ index 309616f..9771833 100644
          TEST_DIR = "autotest"
          WECHAT_WEBHOOK = credentials('wecom_robot_webhook')
      }
-@@ -50,7 +55,140 @@ pipeline {
-             }
-         }
+@@ -32,25 +40,165 @@ pipeline {
  
+         stage('Prepare workspace') {
+             steps {
+-                powershell """
+-                    \$ErrorActionPreference = 'Stop'
+-                    \$resultsDir = Join-Path '${env.WORKSPACE}' 'results'
+-                    \$apkDir = Join-Path '${env.WORKSPACE}' '${env.APK_DIR}'
++                powershell(script: '''
++                    $ErrorActionPreference = 'Stop'
++                    if ([string]::IsNullOrWhiteSpace($env:WORKSPACE)) { throw 'WORKSPACE is empty' }
++                    $workspaceRoot = [IO.Path]::GetFullPath($env:WORKSPACE).TrimEnd([IO.Path]::DirectorySeparatorChar)
++                    $resultsDir = [IO.Path]::GetFullPath((Join-Path $workspaceRoot 'results'))
++                    $apkDir = [IO.Path]::GetFullPath((Join-Path $workspaceRoot $env:APK_DIR))
++                    foreach ($cleanupPath in @($resultsDir, $apkDir)) {
++                        if ((Split-Path -Parent $cleanupPath) -ne $workspaceRoot) {
++                            throw 'Cleanup target is outside the Jenkins workspace'
++                        }
++                    }
+ 
+                     # 每次构建都清理旧参数和旧报告，避免误跑上一次选择的用例。
+-                    if (Test-Path \$resultsDir) {
+-                        Remove-Item -Recurse -Force \$resultsDir
++                    if (Test-Path -LiteralPath $resultsDir) {
++                        Remove-Item -LiteralPath $resultsDir -Recurse -Force
+                     }
+-                    New-Item -ItemType Directory -Path \$resultsDir | Out-Null
++                    New-Item -ItemType Directory -Path $resultsDir | Out-Null
+ 
+-                    if (Test-Path \$apkDir) {
+-                        Remove-Item -Recurse -Force \$apkDir
++                    if (Test-Path -LiteralPath $apkDir) {
++                        Remove-Item -LiteralPath $apkDir -Recurse -Force
+                     }
+-                """
++                ''')
++            }
++        }
++
 +        stage('Checkout AutoTests') {
 +            options { timeout(time: 10, unit: 'MINUTES') }
 +            steps {
@@ -147,15 +189,15 @@ index 309616f..9771833 100644
 +                        bat '@echo off\r\n"C:\\Python314\\python.exe" ci\\omniqa_robot.py device lock --output-dir "%WORKSPACE%\\results"'
 +                    }
 +                }
-+            }
-+        }
-+
+             }
+         }
+ 
          stage('Copy selected APK') {
 +            when { expression { !(params.OMNIQA_ENABLED && (params.OMNIQA_DRY_RUN || params.OMNIQA_CATALOG_ONLY)) } }
              options { timeout(time: 5, unit: 'MINUTES') }
              steps {
                  script {
-@@ -82,6 +220,7 @@ pipeline {
+@@ -82,6 +230,7 @@ pipeline {
          }
  
          stage('Install APK') {
@@ -163,7 +205,7 @@ index 309616f..9771833 100644
              options { timeout(time: 10, unit: 'MINUTES') }
              steps {
                  powershell """
-@@ -157,113 +296,11 @@ pipeline {
+@@ -157,113 +306,11 @@ pipeline {
              }
          }
  
@@ -278,7 +320,7 @@ index 309616f..9771833 100644
                      $notify = Join-Path $env:WORKSPACE "$env:TEST_DIR\\ci\\wecom_notify.ps1"
                      $plan = Join-Path $env:WORKSPACE 'results\\selected_test_files.txt'
  
-@@ -287,6 +324,7 @@ SKIP_DEVICE_INITIALIZATION: false
+@@ -287,6 +334,7 @@ SKIP_DEVICE_INITIALIZATION: false
          }
  
          stage('Run AutoTests') {
@@ -286,7 +328,7 @@ index 309616f..9771833 100644
              options { timeout(time: 60, unit: 'MINUTES') }
              steps {
                  dir("${env.TEST_DIR}") {
-@@ -295,7 +333,13 @@ SKIP_DEVICE_INITIALIZATION: false
+@@ -295,7 +343,13 @@ SKIP_DEVICE_INITIALIZATION: false
                          "APPIUM_PORT=${params.APPIUM_PORT}",
                          "ANDROID_HOME=${env.ANDROID_HOME_DEFAULT}"
                      ]) {
@@ -301,7 +343,7 @@ index 309616f..9771833 100644
                      }
                  }
              }
-@@ -304,6 +348,23 @@ SKIP_DEVICE_INITIALIZATION: false
+@@ -304,6 +358,23 @@ SKIP_DEVICE_INITIALIZATION: false
  
      post {
          always {
@@ -325,7 +367,7 @@ index 309616f..9771833 100644
              archiveArtifacts(
                  artifacts: 'results/**, appium.log, logcat_*.txt',
                  allowEmptyArchive: true
-@@ -322,6 +383,7 @@ SKIP_DEVICE_INITIALIZATION: false
+@@ -322,6 +393,7 @@ SKIP_DEVICE_INITIALIZATION: false
              }
              powershell(script: '''
                  $ErrorActionPreference = 'Continue'
@@ -333,12 +375,35 @@ index 309616f..9771833 100644
                  $notify = Join-Path $env:WORKSPACE "$env:TEST_DIR\\ci\\wecom_notify.ps1"
  
                  if (-not (Test-Path -LiteralPath $notify)) {
+@@ -352,11 +424,18 @@ SKIP_DEVICE_INITIALIZATION: false
+ 
+                 exit 0
+             ''')
+-            powershell """
+-                if (Test-Path '${env.APK_DIR}') {
+-                    Remove-Item -Recurse -Force '${env.APK_DIR}'
++            powershell(script: '''
++                $ErrorActionPreference = 'Stop'
++                if ([string]::IsNullOrWhiteSpace($env:WORKSPACE)) { throw 'WORKSPACE is empty' }
++                $workspaceRoot = [IO.Path]::GetFullPath($env:WORKSPACE).TrimEnd([IO.Path]::DirectorySeparatorChar)
++                $apkDir = [IO.Path]::GetFullPath((Join-Path $workspaceRoot $env:APK_DIR))
++                if ((Split-Path -Parent $apkDir) -ne $workspaceRoot) {
++                    throw 'APK cleanup target is outside the Jenkins workspace'
++                }
++                if (Test-Path -LiteralPath $apkDir) {
++                    Remove-Item -LiteralPath $apkDir -Recurse -Force
+                 }
+-            """
++            ''')
+         }
+     }
+ }
 diff --git a/ci/omniqa_robot.py b/ci/omniqa_robot.py
 new file mode 100644
-index 0000000..6ad074a
+index 0000000..ec96e99
 --- /dev/null
 +++ b/ci/omniqa_robot.py
-@@ -0,0 +1,303 @@
+@@ -0,0 +1,312 @@
 +#!/usr/bin/env python3
 +"""Robot 7 integration for Jenkins. Parsing does not execute tests or libraries.
 +
@@ -366,12 +431,21 @@ index 0000000..6ad074a
 +    target.write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
 +
 +
++def git_output(root, *arguments):
++    executable = os.environ.get('OMNIQA_GIT_EXECUTABLE', '').strip() or 'git'
++    try:
++        return subprocess.check_output([executable, '-C', str(root), *arguments], text=True, encoding='utf-8')
++    except FileNotFoundError as exc:
++        raise RuntimeError('Git executable was not found. Set OMNIQA_GIT_EXECUTABLE to the Jenkins Git tool path '
++                           'or add Git to the Jenkins agent PATH.') from exc
++
++
 +def revision(root):
-+    value = subprocess.check_output(['git', '-C', str(root), 'rev-parse', '--verify', 'HEAD'], text=True).strip()
++    value = git_output(root, 'rev-parse', '--verify', 'HEAD').strip()
 +    if not re.fullmatch(r'(?:[0-9a-f]{40}|[0-9a-f]{64})', value):
 +        raise ValueError('Cannot determine Git revision')
 +    # Uncommitted scripts must not be reported as the committed revision.
-+    dirty = subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain', '--untracked-files=all', '--', 'tests', 'resources'], text=True)
++    dirty = git_output(root, 'status', '--porcelain', '--untracked-files=all', '--', 'tests', 'resources')
 +    if dirty.strip():
 +        # Jenkins generates this device config before Robot. It is deliberately
 +        # ignored in the test repository and therefore absent from this output.

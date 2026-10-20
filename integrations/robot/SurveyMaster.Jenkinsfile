@@ -10,6 +10,9 @@ pipeline {
 
     environment {
         PATH = "C:\\Windows\\System32;C:\\Windows\\System32\\WindowsPowerShell\\v1.0;${env.PATH}"
+        OMNIQA_GIT_EXECUTABLE = "D:\\software\\Git\\bin\\git.exe"
+        PYTHONUTF8 = "1"
+        PYTHONIOENCODING = "utf-8"
         APK_DIR = "apk_in"
         ANDROID_HOME_DEFAULT = "D:\\android-sdk"
         TEST_REPO_URL = "git@github.com:CC-coder-GSG/SurveyMasterAutoTesting.git"
@@ -37,21 +40,28 @@ pipeline {
 
         stage('Prepare workspace') {
             steps {
-                powershell """
-                    \$ErrorActionPreference = 'Stop'
-                    \$resultsDir = Join-Path '${env.WORKSPACE}' 'results'
-                    \$apkDir = Join-Path '${env.WORKSPACE}' '${env.APK_DIR}'
+                powershell(script: '''
+                    $ErrorActionPreference = 'Stop'
+                    if ([string]::IsNullOrWhiteSpace($env:WORKSPACE)) { throw 'WORKSPACE is empty' }
+                    $workspaceRoot = [IO.Path]::GetFullPath($env:WORKSPACE).TrimEnd([IO.Path]::DirectorySeparatorChar)
+                    $resultsDir = [IO.Path]::GetFullPath((Join-Path $workspaceRoot 'results'))
+                    $apkDir = [IO.Path]::GetFullPath((Join-Path $workspaceRoot $env:APK_DIR))
+                    foreach ($cleanupPath in @($resultsDir, $apkDir)) {
+                        if ((Split-Path -Parent $cleanupPath) -ne $workspaceRoot) {
+                            throw 'Cleanup target is outside the Jenkins workspace'
+                        }
+                    }
 
                     # 每次构建都清理旧参数和旧报告，避免误跑上一次选择的用例。
-                    if (Test-Path \$resultsDir) {
-                        Remove-Item -Recurse -Force \$resultsDir
+                    if (Test-Path -LiteralPath $resultsDir) {
+                        Remove-Item -LiteralPath $resultsDir -Recurse -Force
                     }
-                    New-Item -ItemType Directory -Path \$resultsDir | Out-Null
+                    New-Item -ItemType Directory -Path $resultsDir | Out-Null
 
-                    if (Test-Path \$apkDir) {
-                        Remove-Item -Recurse -Force \$apkDir
+                    if (Test-Path -LiteralPath $apkDir) {
+                        Remove-Item -LiteralPath $apkDir -Recurse -Force
                     }
-                """
+                ''')
             }
         }
 
@@ -414,11 +424,18 @@ SKIP_DEVICE_INITIALIZATION: false
 
                 exit 0
             ''')
-            powershell """
-                if (Test-Path '${env.APK_DIR}') {
-                    Remove-Item -Recurse -Force '${env.APK_DIR}'
+            powershell(script: '''
+                $ErrorActionPreference = 'Stop'
+                if ([string]::IsNullOrWhiteSpace($env:WORKSPACE)) { throw 'WORKSPACE is empty' }
+                $workspaceRoot = [IO.Path]::GetFullPath($env:WORKSPACE).TrimEnd([IO.Path]::DirectorySeparatorChar)
+                $apkDir = [IO.Path]::GetFullPath((Join-Path $workspaceRoot $env:APK_DIR))
+                if ((Split-Path -Parent $apkDir) -ne $workspaceRoot) {
+                    throw 'APK cleanup target is outside the Jenkins workspace'
                 }
-            """
+                if (Test-Path -LiteralPath $apkDir) {
+                    Remove-Item -LiteralPath $apkDir -Recurse -Force
+                }
+            ''')
         }
     }
 }
