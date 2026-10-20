@@ -59,6 +59,7 @@ class BugTracking(Base):
     zentao_project_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     zentao_opened_build_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     zentao_affected_version: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    zentao_resolved_build: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     zentao_bug_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     zentao_source_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     zentao_linked_case_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)

@@ -30,6 +30,7 @@
  */
 
 import { api } from './api.js';
+import { updateBugVersion } from './components/bug-version.js?v=20261020-1';
 
 // ─── One-time style injection ─────────────────────────────────────────────────
 
@@ -458,6 +459,7 @@ async function hydrateContainer(containerEl) {
     el.innerHTML = _renderBugSlot(data, {
       showTitle: !hasTitleTip && !hasNoTitle,
     });
+    updateBugVersion(parent, data);
     el.dataset.ztLoaded = '1';
   }
 

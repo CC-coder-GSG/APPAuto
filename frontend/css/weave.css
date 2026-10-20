@@ -379,6 +379,23 @@ button.secondary:hover {
 button.danger { background: #b4232a !important; }
 button.danger:hover { background: #962129 !important; box-shadow: 0 4px 14px rgba(180, 35, 42, 0.25) !important; }
 button:disabled { opacity: 0.4; transform: none !important; }
+#tab-mine button.qa-bug-version {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin-left: 4px;
+  min-height: 0;
+  font-size: 11px;
+  font-weight: normal !important;
+  line-height: inherit;
+  opacity: 1;
+  color: #64748b !important;
+  cursor: pointer;
+  transform: none !important;
+}
+#tab-mine button.qa-bug-version[data-version-mode="resolved"] { color: #16a34a !important; }
+#tab-mine button.qa-bug-version:disabled { cursor: default; }
 /* 表格/卡片里的小操作按钮保持药丸形 */
 #tab-mine button, #tab-retest button, #tab-feedback button,
 #tab-field-test button, #tab-zentao-sync button, #tab-overall-test button {

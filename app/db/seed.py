@@ -555,6 +555,7 @@ def ensure_bug_schema_compat(db: Session) -> None:
         "zentao_project_name": "VARCHAR(255)",
         "zentao_opened_build_ids": "TEXT",
         "zentao_affected_version": "VARCHAR(255)",
+        "zentao_resolved_build": "TEXT",
         "zentao_bug_title": "TEXT",
         "zentao_source_type": "VARCHAR(30)",
         "zentao_linked_case_id": "VARCHAR(40)",

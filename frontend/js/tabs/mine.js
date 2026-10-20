@@ -3,6 +3,7 @@ import { state } from '../state.js';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 import { closeModal, openModal } from '../components/modal.js';
 import { renderCaseReviewControls } from '../components/case-review.js?v=20260714-1';
+import { renderBugVersion } from '../components/bug-version.js?v=20261020-1';
 import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge, sourceTypeZh } from '../utils.js?v=20261014-2';
 
 const RESULT_OPTIONS = [
@@ -248,9 +249,7 @@ function renderBugChip(req, bug) {
     && Number(bug.major_version_id) !== Number(req.major_version_id) && bug.major_version_no)
     ? `<span title="该Bug记录在其他大版本下" style="background:#ede9fe; color:#6d28d9; padding:1px 5px; border-radius:4px; font-size:10px; font-weight:600; margin-left:4px;">🔀来自 ${escapeHtml(bug.major_version_no)}</span>`
     : '';
-  const verText = bug.fixed_minor_version_no
-    ? `<span style="color:#16a34a; font-size:11px; margin-left:4px;">(✅解决于: 🏷️${bug.fixed_minor_version_no})</span>`
-    : `<span style="color:#94a3b8; font-size:11px; margin-left:4px;">(发现于: 🏷️${bug.found_minor_version_no || '未知'})</span>`;
+  const verText = renderBugVersion(bug);
   const ztBugId = (bug.bug_id || '').replace(/\D/g, '');
   // 用 DB 缓存的状态/指派人预填，先显示出来；hydrator 拉到最新后再覆盖。
   const cachedSlot = renderCachedBugSlot(bug);

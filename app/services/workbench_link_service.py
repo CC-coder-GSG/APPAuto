@@ -118,6 +118,10 @@ class WorkbenchLinkService:
         found_no = minors.get(bug.found_minor_version_id) if bug.found_minor_version_id else None
         if not found_no:
             found_no = (bug.zentao_affected_version or "").strip() or "未知"
+        fixed_no = minors.get(bug.fixed_minor_version_id) if bug.fixed_minor_version_id else None
+        resolved_no = bug.zentao_resolved_build
+        if resolved_no is None:
+            resolved_no = fixed_no
         # 禅道校对：本地挂在某需求下的 Bug，若禅道侧标记了 story 且与该需求
         # 的 story 不一致，前端提示「归属不一致」；禅道已删除的也标出来。
         story_mismatch = bool(
@@ -140,8 +144,11 @@ class WorkbenchLinkService:
             "zentao_bug_id": bug.zentao_bug_id,
             "zentao_bug_url": bug.zentao_bug_url,
             "zentao_bug_title": bug.zentao_bug_title,
+            "zentao_live_status": bug.zentao_live_status,
+            "zentao_assigned_to_name": bug.zentao_assigned_to_name,
             "found_minor_version_no": found_no,
             "fixed_minor_version_no": minors.get(bug.fixed_minor_version_id, "未知") if bug.fixed_minor_version_id else None,
+            "resolved_version_no": resolved_no,
             "dispatched_to_name": bug.dispatched_to.shown_name if getattr(bug, "dispatched_to", None) else None,
             "is_retest_failed": getattr(bug, "is_retest_failed", False),
             "closed": bool(getattr(bug, "closed", False)),

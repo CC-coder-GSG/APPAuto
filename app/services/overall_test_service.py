@@ -28,6 +28,7 @@ from app.services.sse_service import sse_publish
 from app.services.sync_lock_service import acquire_sync_lock, release_sync_lock
 from app.services.zentao_auth_service import get_valid_token, invalidate_token
 from app.services.zentao_client_service import ZentaoAPIError, ZentaoClient
+from app.services.zentao_normalizer import normalize_resolved_build
 from app.utils.time_utils import local_now, parse_external_datetime_to_local_naive
 
 logger = logging.getLogger(__name__)
@@ -1691,6 +1692,8 @@ class OverallTestService:
             "title": str(bug.get("title") or "").strip(),
             "status": status,
             "opened_build_ids": opened_build_ids,
+            # A missing list field must not erase a build cached from bug detail.
+            "resolved_build": normalize_resolved_build(bug["resolvedBuild"]) if "resolvedBuild" in bug else None,
             "url": f"{base_url}/bug-view-{bug_id_str}.html",
             "closed_by_account": closed_by_account,
             "closed_by_name": closed_by_name,
@@ -1857,6 +1860,7 @@ class OverallTestService:
                 bug_row.zentao_opened_build_ids,
                 bug_row.zentao_execution_id,
                 bug_row.zentao_live_status,
+                bug_row.zentao_resolved_build,
                 bug_row.zentao_deleted,
                 bug_row.zentao_opened_at,
                 bug_row.zentao_assigned_to_account,
@@ -1894,6 +1898,8 @@ class OverallTestService:
 
         if normalized.get("status"):
             bug_row.zentao_live_status = normalized["status"]
+        if normalized.get("resolved_build") is not None:
+            bug_row.zentao_resolved_build = normalized["resolved_build"]
 
         # Remote opened timestamp + opener — P0/P1 fix: time statistics and
         # creator attribution now come from real Zentao data.
@@ -1942,6 +1948,7 @@ class OverallTestService:
             bug_row.zentao_opened_build_ids,
             bug_row.zentao_execution_id,
             bug_row.zentao_live_status,
+            bug_row.zentao_resolved_build,
             bug_row.zentao_deleted,
             bug_row.zentao_opened_at,
             bug_row.zentao_assigned_to_account,

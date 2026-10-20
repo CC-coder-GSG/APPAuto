@@ -79,7 +79,7 @@ def normalize_bug(raw: dict) -> dict:
         "assigned_to": _extract_person_name(bug.get("assignedTo")),
         "opened_by": _extract_person_name(bug.get("openedBy")),
         "build": _extract_build_name(bug.get("openedBuild") or bug.get("foundBuild")),
-        "resolved_build": _extract_build_name(bug.get("resolvedBuild")),
+        "resolved_build": normalize_resolved_build(bug.get("resolvedBuild")),
         "closed_date": bug.get("closedDate") or bug.get("resolvedDate") or "",
     }
 
@@ -218,7 +218,7 @@ def normalize_bug_detail(raw: dict, base_url: str = "") -> dict:
         "closed_by": _extract_person_name(bug.get("closedBy")),
         "closed_date": bug.get("closedDate") or "",
         "opened_build": _extract_build_name(bug.get("openedBuild") or bug.get("foundBuild")),
-        "resolved_build": _extract_build_name(bug.get("resolvedBuild")),
+        "resolved_build": normalize_resolved_build(bug.get("resolvedBuild")),
         "steps": bug.get("steps") or "",
         "keywords": _extract_simple_value(bug.get("keywords")),
         "zentao_url": zentao_url,
@@ -424,6 +424,11 @@ def _extract_person_name(val: Any) -> str:
     if isinstance(val, dict):
         return val.get("realname") or val.get("account") or ""
     return str(val)
+
+
+def normalize_resolved_build(value: Any) -> str:
+    # Zentao uses zero as the empty build reference on some API versions.
+    return "" if value in (None, "", "0", 0) else _extract_build_name(value).strip()
 
 
 def _extract_build_name(val: Any) -> str:
