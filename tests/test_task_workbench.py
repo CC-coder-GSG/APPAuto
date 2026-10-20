@@ -907,7 +907,7 @@ def test_pause_submits_day_split_efforts(db_session, monkeypatch):
     monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: _fake_login())
     submitted = []
 
-    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+    def fake_submit(login, task_id, day_rows, *, left_before, note="", task_name=""):
         submitted.append((login.account, task_id, day_rows, left_before))
         return round(sum(h for _, h in day_rows), 2)
 
@@ -945,7 +945,7 @@ def test_pause_merges_legacy_accum_into_today(db_session, monkeypatch):
     monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: _fake_login())
     submitted = []
 
-    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+    def fake_submit(login, task_id, day_rows, *, left_before, note="", task_name=""):
         submitted.append(day_rows)
         return round(sum(h for _, h in day_rows), 2)
 
@@ -1002,7 +1002,7 @@ def test_finish_presubmits_prev_days_and_reports_today_only(db_session, monkeypa
     monkeypatch.setattr(tms, "get_user_zentao_web_login", lambda uid, db: _fake_login())
     submitted = []
 
-    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+    def fake_submit(login, task_id, day_rows, *, left_before, note="", task_name=""):
         submitted.append(day_rows)
         return round(sum(h for _, h in day_rows), 2)
 
@@ -1175,7 +1175,8 @@ def test_operate_finish_does_not_repeat_when_rest_confirms_done_but_readback_is_
 
     assert res["ok"] is True
     assert client.calls == [
-        ("finish", 1103, {"current_consumed": 2.0, "finished_date": "2026-07-20 11:00:00"})
+        ("finish", 1103, {"current_consumed": 2.0, "finished_date": "2026-07-20 11:00:00",
+                          "comment": "测试管理系统自动结算：任务任务1103耗时：2h"})
     ]
     assert web_calls == []
     assert system.calls == []
@@ -1434,7 +1435,7 @@ def test_pause_submits_efforts_before_pausing(db_session, monkeypatch):
     client = SeqClient()
     client.set_task(1201, {"status": "doing", "assignedTo": {"account": "alice"}})
 
-    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+    def fake_submit(login, task_id, day_rows, *, left_before, note="", task_name=""):
         seq.append("submit")
         return round(sum(h for _, h in day_rows), 2)
 

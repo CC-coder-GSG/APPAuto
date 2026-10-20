@@ -71,6 +71,26 @@ def test_submit_day_efforts_skips_zero_rows(monkeypatch):
     assert called == []  # 没有可提交行时不动网页会话
 
 
+@pytest.mark.parametrize('hours, duration', [(1, '1'), (1.5, '1.5'), (0.1, '0.1'), (0.3333, '0.33')])
+def test_automatic_effort_note_uses_task_name_and_submitted_hours(hours, duration):
+    assert zes.auto_effort_note('[测试]登录功能', hours) == f'测试管理系统自动结算：任务[测试]登录功能耗时：{duration}h'
+
+
+def test_automatic_day_efforts_describe_each_days_hours(monkeypatch):
+    sent = []
+    monkeypatch.setattr(zes, 'record_task_efforts_via_web', lambda login, task_id, rows: sent.extend(rows))
+    total = zes.submit_day_efforts(
+        _login(), 42, [(date(2026, 6, 29), 1.0), (date(2026, 6, 30), 1.556)],
+        left_before=4, task_name='[测试]登录功能',
+    )
+    assert total == 2.56
+    assert [row['consumed'] for row in sent] == [1, 1.56]
+    assert [row['work'] for row in sent] == [
+        '测试管理系统自动结算：任务[测试]登录功能耗时：1h',
+        '测试管理系统自动结算：任务[测试]登录功能耗时：1.56h',
+    ]
+
+
 def test_list_efforts_marks_can_edit(db_session, monkeypatch):
     alice = _user(db_session)
     efforts = [

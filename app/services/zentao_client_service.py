@@ -712,7 +712,8 @@ class ZentaoClient:
         raise ZentaoAPIError(501, '任务暂停使用保留的网页登录方式')
 
     def finish_task(self, task_id: int, *, current_consumed: float,
-                    finished_date: str | None = None, assigned_to: str | None = None) -> dict | None:
+                    finished_date: str | None = None, assigned_to: str | None = None,
+                    comment: str | None = None) -> dict | None:
         from app.utils.time_utils import local_now
         task = self.get_task(task_id) or {}
         started = task.get('realStarted') or task.get('estStarted')
@@ -720,6 +721,8 @@ class ZentaoClient:
             raise ZentaoAPIError(422, '无法确认任务实际开始时间，使用保留表单完成')
         body = {'currentConsumed': current_consumed, 'realStarted': started,
                 'finishedDate': finished_date or local_now().strftime('%Y-%m-%d %H:%M:%S')}
+        if comment is not None:
+            body['comment'] = comment
         if assigned_to:
             body['assignedTo'] = assigned_to
         return self.put(f'tasks/{task_id}/finish', body)

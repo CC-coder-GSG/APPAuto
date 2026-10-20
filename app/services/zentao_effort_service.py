@@ -44,7 +44,13 @@ from app.utils.time_utils import local_now
 logger = logging.getLogger(__name__)
 
 # 平台自动结算的工时记录统一带此前缀，便于在禅道里区分手工记录
-AUTO_NOTE = "OmniQA 自动结算"
+AUTO_NOTE = "测试管理系统自动结算"
+
+
+def auto_effort_note(task_name: str, hours: float) -> str:
+    name = str(task_name or "").strip() or "未命名任务"
+    duration = f"{round(float(hours), 2):.2f}".rstrip("0").rstrip(".")
+    return f"{AUTO_NOTE}：任务{name}耗时：{duration}h"
 
 
 def merge_extra_hours(day_rows: list[tuple[date, float]], extra_hours: float, on_day: date) -> list[tuple[date, float]]:
@@ -66,6 +72,7 @@ def submit_day_efforts(
     *,
     left_before: float,
     note: str = "",
+    task_name: str = "",
 ) -> float:
     """把 [(日期, 小时)] 提交为禅道工时记录，left 按行递减（最后一行的 left 会被
     禅道用作任务剩余工时）。返回提交的小时合计；失败抛 ZentaoWebSessionError。
@@ -87,7 +94,7 @@ def submit_day_efforts(
             "date": d.isoformat(),
             "consumed": hours,
             "left": remaining,
-            "work": note or AUTO_NOTE,
+            "work": note or auto_effort_note(task_name or f"#{task_id}", hours),
         })
     if not rows:
         return 0.0
@@ -391,6 +398,7 @@ def delete_effort_for_user(
 
 __all__ = [
     "AUTO_NOTE",
+    "auto_effort_note",
     "merge_extra_hours",
     "submit_day_efforts",
     "list_efforts_for_user",

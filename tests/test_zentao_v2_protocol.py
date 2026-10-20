@@ -306,6 +306,19 @@ def test_finish_uses_v2_put_and_preserves_real_start_time(monkeypatch):
         'realStarted': '2026-10-14 09:00:00', 'finishedDate': '2026-10-15 10:00:00', 'currentConsumed': 1.5})]
 
 
+def test_finish_sends_automatic_effort_description_in_comment(monkeypatch):
+    cli = ZentaoClient('https://z.invalid', 'secret')
+    monkeypatch.setattr(cli, 'get_task', lambda *a: {'id': 8, 'realStarted': '2026-10-14 09:00:00'})
+    calls = []
+    monkeypatch.setattr(cli, 'put', lambda path, body: calls.append((path, body)) or {'status': 'success'})
+    note = '测试管理系统自动结算：任务[测试]登录功能耗时：1.5h'
+    cli.finish_task(8, current_consumed=1.5, finished_date='2026-10-15 10:00:00', comment=note)
+    assert calls == [('tasks/8/finish', {
+        'currentConsumed': 1.5, 'realStarted': '2026-10-14 09:00:00',
+        'finishedDate': '2026-10-15 10:00:00', 'comment': note,
+    })]
+
+
 def test_bug_assignment_keeps_page_and_requires_readback(monkeypatch):
     cli = ZentaoClient('https://z.invalid', 'secret')
     calls = []

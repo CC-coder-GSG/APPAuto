@@ -19,6 +19,7 @@ class FakeClient:
 
     def __init__(self, *, effective=True, status="wait"):
         self.calls = []
+        self.finish_comments = []
         self.effective = effective
         self._task = {"id": 777, "consumed": 2.0, "status": status}
 
@@ -31,8 +32,9 @@ class FakeClient:
         self._apply("doing")
         return {"id": task_id, "status": self._task["status"]}
 
-    def finish_task(self, task_id, *, current_consumed, finished_date=None, assigned_to=None):
+    def finish_task(self, task_id, *, current_consumed, finished_date=None, assigned_to=None, comment=None):
         self.calls.append(("finish", task_id, current_consumed, finished_date))
+        self.finish_comments.append(comment)
         self._apply("done")
         return {"id": task_id, "status": self._task["status"]}
 
@@ -217,7 +219,7 @@ def test_finish_does_not_repeat_when_rest_confirms_done_but_readback_is_stale(db
     db_session.commit()
 
     class StaleReadbackFinishClient(FakeClient):
-        def finish_task(self, task_id, *, current_consumed, finished_date=None, assigned_to=None):
+        def finish_task(self, task_id, *, current_consumed, finished_date=None, assigned_to=None, comment=None):
             self.calls.append(("finish", task_id, current_consumed, finished_date))
             return {"id": task_id, "status": "done"}  # 写响应成功，紧随其后的 GET 仍是 doing
 
@@ -267,7 +269,7 @@ def test_finish_repairs_partial_rest_write_without_web_retry(db_session, monkeyp
             super().__init__(status="doing")
             self._task.update({"consumed": 0.0, "left": 24.0})
 
-        def finish_task(self, task_id, *, current_consumed, finished_date=None, assigned_to=None):
+        def finish_task(self, task_id, *, current_consumed, finished_date=None, assigned_to=None, comment=None):
             self.calls.append(("finish", task_id, current_consumed, finished_date))
             self._task.update({"status": "doing", "consumed": current_consumed, "left": 8.0})
             return dict(self._task)
@@ -612,7 +614,7 @@ def test_finish_accepts_completed_changed_and_never_repeats_effort(
             super().__init__(**kwargs)
             self._task.update({"left": 3.0, "finishedDate": None})
 
-        def finish_task(self, task_id, *, current_consumed, finished_date=None, assigned_to=None):
+        def finish_task(self, task_id, *, current_consumed, finished_date=None, assigned_to=None, comment=None):
             self.calls.append(("finish", task_id, current_consumed, finished_date))
             self._task.update(
                 {
@@ -799,6 +801,68 @@ def test_lifecycle_via_status_choke_point(db_session, monkeypatch, req):
     assert any(c[0] == "restart" for c in client.calls)
 
 
+def test_completion_checkbox_describes_actual_task_and_each_settled_segment(db_session, monkeypatch, req):
+    from app.models import User, UserRole
+    from app.services.requirement_service import RequirementService
+    import app.services.zentao_effort_service as efforts
+
+    actor = User(username='named_effort_actor', password_hash='x', role=UserRole.USER)
+    db_session.add(actor)
+    req.task_started_at = datetime(2026, 6, 29, 23, 0)
+    req.zentao_task_status_cache = 'doing'
+    db_session.commit()
+    client = FakeClient(status='doing')
+    client._task['name'] = '[测试]实际禅道任务名'
+    client._task['left'] = 30
+    monkeypatch.setattr(tss, 'get_system_zentao_client', lambda db: client)
+    monkeypatch.setattr(tss, 'get_user_zentao_client', lambda uid, db: client)
+    monkeypatch.setattr(tss, 'get_user_zentao_web_login', lambda uid, db: _fake_login())
+    monkeypatch.setattr(tss, 'local_now', lambda: datetime(2026, 7, 1, 1, 0))
+    rows = []
+    monkeypatch.setattr(efforts, 'record_task_efforts_via_web', lambda login, task_id, records: rows.extend(records))
+
+    RequirementService(db_session)._mark_test_completed_transition(req, True, acting_user=actor)
+
+    assert req.test_completed
+    assert [row['work'] for row in rows] == [
+        '测试管理系统自动结算：任务[测试]实际禅道任务名耗时：1h',
+        '测试管理系统自动结算：任务[测试]实际禅道任务名耗时：24h',
+    ]
+    assert client.finish_comments == ['测试管理系统自动结算：任务[测试]实际禅道任务名耗时：1h']
+    assert req.task_efforts_submitted == 26
+    assert len([call for call in client.calls if call[0] == 'finish']) == 1
+
+
+def test_finish_web_fallback_uses_same_named_effort_comment(db_session, monkeypatch, req):
+    client = FakeClient(effective=False, status='doing')
+    client._task['name'] = '[测试]网页完成任务'
+    monkeypatch.setattr(tss, 'get_system_zentao_client', lambda db: client)
+    monkeypatch.setattr(tss, 'get_system_zentao_web_login', lambda db: _fake_login())
+    sent = []
+
+    def finish(login, task_id, **kwargs):
+        sent.append(kwargs)
+        client._task['status'] = 'done'
+
+    monkeypatch.setattr(tss, 'finish_task_via_web', finish)
+    result = ZentaoTaskSyncService(db_session).finish_requirement_task(req, consumed=0.75)
+    assert result['ok']
+    expected = '测试管理系统自动结算：任务[测试]网页完成任务耗时：0.75h'
+    assert client.finish_comments == [expected]
+    assert sent[0]['comment'] == expected
+    assert sent[0]['current_consumed'] == 0.75
+
+
+def test_effort_task_name_falls_back_to_mirror_when_remote_name_unavailable(db_session, monkeypatch, req):
+    from app.models.zentao_task_mirror import ZentaoTaskMirror
+
+    db_session.add(ZentaoTaskMirror(task_id=777, execution_id=1, name='[测试]镜像任务名称', status='doing'))
+    db_session.commit()
+    monkeypatch.setattr(tss, 'get_system_zentao_client', lambda db: None)
+    service = ZentaoTaskSyncService(db_session)
+    assert service._requirement_task_name(req, None) == '[测试]镜像任务名称'
+
+
 def test_cancel_test_completed_keeps_local_done_when_zentao_reactivate_fails(
     db_session,
     monkeypatch,
@@ -847,7 +911,7 @@ def test_req_pause_submits_day_split_efforts(db_session, monkeypatch, req):
     monkeypatch.setattr(tss, "get_user_zentao_web_login", lambda uid, db: _fake_login())
     submitted = []
 
-    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+    def fake_submit(login, task_id, day_rows, *, left_before, note="", task_name=""):
         submitted.append((login.account, task_id, day_rows))
         return round(sum(h for _, h in day_rows), 2)
 
@@ -883,7 +947,7 @@ def test_req_finish_presubmits_prev_days_reports_today(db_session, monkeypatch, 
     monkeypatch.setattr(tss, "get_user_zentao_web_login", lambda uid, db: _fake_login())
     submitted = []
 
-    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+    def fake_submit(login, task_id, day_rows, *, left_before, note="", task_name=""):
         submitted.append(day_rows)
         return round(sum(h for _, h in day_rows), 2)
 
@@ -1008,7 +1072,7 @@ def test_req_pause_submits_efforts_before_pausing(db_session, monkeypatch, req):
         lambda uid, db: ZentaoWebLogin(base_url="http://z", account="tester", password="p"),
     )
 
-    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+    def fake_submit(login, task_id, day_rows, *, left_before, note="", task_name=""):
         seq.append("submit")
         return round(sum(h for _, h in day_rows), 2)
 
@@ -1057,7 +1121,7 @@ def test_req_pause_401_after_web_success_is_verified_by_system_client(db_session
         system._task["status"] = "pause"
         return {"result": "success"}
 
-    def fake_submit(login, task_id, day_rows, *, left_before, note=""):
+    def fake_submit(login, task_id, day_rows, *, left_before, note="", task_name=""):
         submitted.append(day_rows)
         return round(sum(hours for _, hours in day_rows), 2)
 

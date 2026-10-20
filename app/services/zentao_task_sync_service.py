@@ -43,7 +43,7 @@ from app.services.zentao_task_status import (
     ensure_no_pending_story_change,
     task_story_change_pending,
 )
-from app.services.zentao_effort_service import AUTO_NOTE, merge_extra_hours, submit_day_efforts
+from app.services.zentao_effort_service import auto_effort_note, merge_extra_hours, submit_day_efforts
 from app.services.zentao_web_session import (
     ZentaoWebSessionError,
     finish_task_via_web,
@@ -1105,6 +1105,27 @@ class ZentaoTaskSyncService:
         except Exception:  # noqa: BLE001
             return fallback
 
+    def _requirement_task_name(self, requirement: Requirement, acting_user: Optional[User]) -> str:
+        """Use the linked task's current name, then its mirror or original naming rule."""
+        task_id = int(requirement.zentao_task_id)
+        acting = get_user_zentao_client(acting_user.id, self.db) if acting_user is not None else None
+        system = get_system_zentao_client(self.db)
+        clients = [acting] if acting is not None else []
+        if system is not None and system is not acting:
+            clients.append(system)
+        for client in clients:
+            try:
+                task = client.get_task(task_id) or {}
+                name = str(task.get("name") or "").strip()
+                if name:
+                    return name
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("read task %s name for automatic effort failed: %s", task_id, exc)
+        mirror = self.db.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == task_id).first()
+        if mirror and (mirror.name or "").strip():
+            return mirror.name.strip()
+        return ensure_test_prefix((requirement.title or f"需求 {requirement.zentao_req_id}")[:180])
+
     def _try_submit_requirement_efforts(self, requirement: Requirement, acting_user: Optional[User], now) -> Optional[float]:
         """暂停：本段（+ 旧口径遗留的未提交累计，补录到今天）按天拆分提交为禅道
         工时记录。成功返回提交小时数（可为 0）；没有任务/无本人网页凭据/提交失败
@@ -1129,7 +1150,7 @@ class ZentaoTaskSyncService:
             return submit_day_efforts(
                 login, task_id, day_rows,
                 left_before=self._task_left_hours(task_id, requirement.estimated_test_hours or 0.0),
-                note=AUTO_NOTE,
+                task_name=self._requirement_task_name(requirement, acting_user),
             )
         except Exception as exc:  # noqa: BLE001 — 提交失败退回本地累计，不阻塞暂停
             if getattr(exc, 'outcome_unknown', False):
@@ -1166,7 +1187,7 @@ class ZentaoTaskSyncService:
                     submitted = submit_day_efforts(
                         login, task_id, prev_rows,
                         left_before=self._task_left_hours(task_id, requirement.estimated_test_hours or 0.0),
-                        note=AUTO_NOTE,
+                        task_name=self._requirement_task_name(requirement, acting_user),
                     )
                     requirement.task_efforts_submitted = round(float(requirement.task_efforts_submitted or 0.0) + submitted, 2)
                     # finish 未生效时 remainder 留在 accum 里可重试；生效后簿记清零
@@ -1217,11 +1238,13 @@ class ZentaoTaskSyncService:
         if requirement.zentao_task_id:
             task_id = int(requirement.zentao_task_id)
 
+            finish_note = auto_effort_note(self._requirement_task_name(requirement, acting_user), consumed_hours)
+
             def _op(client):
-                return client.finish_task(task_id, current_consumed=consumed_hours, finished_date=_fmt_dt(now))
+                return client.finish_task(task_id, current_consumed=consumed_hours, finished_date=_fmt_dt(now), comment=finish_note)
 
             def _web_op(web):
-                finish_task_via_web(web, task_id, current_consumed=consumed_hours, finished_date=_fmt_dt(now))
+                finish_task_via_web(web, task_id, current_consumed=consumed_hours, finished_date=_fmt_dt(now), comment=finish_note)
 
             # 完成后禅道会把指派人转给任务创建者，属预期流转，不做指派校正
             confirmed = self._operate_task_with_verify(

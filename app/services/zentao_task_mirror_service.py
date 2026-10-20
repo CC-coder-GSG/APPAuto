@@ -27,7 +27,7 @@ from app.services.zentao_task_status import (
     effective_task_status, task_finish_side_effect_observed, apply_task_story_change,
     serialize_task_story_change, ensure_no_pending_story_change,
 )
-from app.services.zentao_effort_service import AUTO_NOTE, merge_extra_hours, submit_day_efforts
+from app.services.zentao_effort_service import auto_effort_note, merge_extra_hours, submit_day_efforts
 from app.services.zentao_web_session import (
     ZentaoWebSessionError,
     cancel_task_via_web,
@@ -818,6 +818,9 @@ class ZentaoTaskMirrorService:
                 # account before performing the requested transition.
                 break
         finish_consumed = self._prepare_finish_consumed(row, current_user, op_now, explicit=consumed) if action == "finish" else 0.0
+        finish_note = auto_effort_note(row.name, finish_consumed) if action == "finish" else None
+        if finish_note and comment:
+            finish_note += f"\n{comment}"
 
         # ⚠️ 暂停的分段工时必须在暂停「之前」提交：禅道对 pause 状态任务记工时会把
         # 状态自动置回 doing（2026-07-17 线上实证：暂停几秒后被"自动激活"，动作备注
@@ -863,7 +866,7 @@ class ZentaoTaskMirrorService:
                 if action == "cancel":
                     return cli.cancel_task(task_id, comment=comment)
                 if action == "finish":
-                    return cli.finish_task(task_id, current_consumed=finish_consumed, finished_date=_fmt_now())
+                    return cli.finish_task(task_id, current_consumed=finish_consumed, finished_date=_fmt_now(), comment=finish_note)
                 if action == "reactivate":
                     return cli.restart_task(task_id, consumed=(row.consumed or 0.0), left=react_left, assigned_to=original_account)
                 if action == "close":
@@ -880,7 +883,7 @@ class ZentaoTaskMirrorService:
                 if action == "cancel":
                     return cancel_task_via_web(web, task_id, comment=comment)
                 if action == "finish":
-                    return finish_task_via_web(web, task_id, current_consumed=finish_consumed, finished_date=_fmt_now(), comment=comment)
+                    return finish_task_via_web(web, task_id, current_consumed=finish_consumed, finished_date=_fmt_now(), comment=finish_note)
                 if action == "reactivate":
                     return restart_task_via_web(web, task_id, consumed=(row.consumed or 0.0), left=react_left, assigned_to=original_account, comment=comment)
                 if action == "close":
@@ -1171,7 +1174,7 @@ class ZentaoTaskMirrorService:
             logger.info("task %s pause: no self web login, fall back to local accum", row.task_id)
             return None
         try:
-            return submit_day_efforts(login, row.task_id, day_rows, left_before=float(row.left or 0.0), note=AUTO_NOTE)
+            return submit_day_efforts(login, row.task_id, day_rows, left_before=float(row.left or 0.0), task_name=row.name)
         except Exception as exc:  # noqa: BLE001 — 提交失败退回本地累计，不阻塞暂停
             if getattr(exc, 'outcome_unknown', False):
                 raise HTTPException(409, "禅道工时提交结果不明，已停止自动补交，请先刷新核实") from exc
@@ -1196,7 +1199,7 @@ class ZentaoTaskMirrorService:
             if login is not None:
                 try:
                     submitted = submit_day_efforts(
-                        login, row.task_id, prev_rows, left_before=float(row.left or 0.0), note=AUTO_NOTE
+                        login, row.task_id, prev_rows, left_before=float(row.left or 0.0), task_name=row.name
                     )
                     row.efforts_submitted = round(float(row.efforts_submitted or 0.0) + submitted, 2)
                     # finish 失败时 remainder 留在 accum 里可重试；成功后簿记会清零
