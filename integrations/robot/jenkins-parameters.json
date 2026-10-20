@@ -1,12 +1,12 @@
 {
   "job": "SurveyMaster-RF-Test",
-  "instructions": "Keep existing Job parameters. Add these definitions manually after local acceptance; store the integration key only in Secret Text credential omniqa-surveymaster.",
+  "instructions": "Keep existing Job parameters. Add these definitions manually after local acceptance; store the shared user/Jenkins integration key once in Secret Text credential omniqa-surveymaster. Platform launches supply the repository ID automatically.",
   "parameters": [
     {"name":"OMNIQA_ENABLED","type":"boolean","default":false,"description":"Enable platform integration"},
     {"name":"OMNIQA_DRY_RUN","type":"boolean","default":false,"description":"Validate scripts without devices or Zentao result writeback"},
     {"name":"OMNIQA_CATALOG_ONLY","type":"boolean","default":false,"description":"Publish static script catalogue only"},
     {"name":"OMNIQA_URL","type":"string","default":"","description":"Platform site root reachable from the Jenkins agent; configure before enabling"},
-    {"name":"OMNIQA_REPOSITORY_ID","type":"string","default":"","description":"Platform repository ID; configure before enabling"},
+    {"name":"OMNIQA_REPOSITORY_ID","type":"string","default":"","description":"Platform supplies the project ID for platform launches; choose the target for manual catalogue publishing or direct Jenkins runs"},
     {"name":"AUTOMATION_RUN_ID","type":"string","default":"","description":"Filled by platform; leave empty for direct Jenkins runs"},
     {"name":"TEST_REVISION","type":"string","default":"","description":"Exact Git commit for platform runs"},
     {"name":"ZENTAO_CASE_IDS","type":"string","default":"","description":"Comma-separated mapped case IDs for direct Jenkins runs"},

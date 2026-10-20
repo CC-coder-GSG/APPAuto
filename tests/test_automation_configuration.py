@@ -9,8 +9,8 @@ from pydantic import ValidationError
 from app.api.deps import get_current_user, get_db
 from app.api.routes import automation
 from app.core.exceptions import AppError
-from app.models import AutomationRepository, User, UserRole, UserZentaoBinding
-from app.schemas.automation import RepositoryCreate, RunCreate
+from app.models import AutomationRepository, AutomationIntegrationCredential, User, UserRole, UserZentaoBinding
+from app.schemas.automation import IntegrationKeyConfiguration, RepositoryCreate, RunCreate
 from app.services import automation_service as svc
 from app.services.zentao_client_service import ZentaoClient, ZentaoAPIError
 
@@ -160,3 +160,126 @@ def test_execution_still_requires_testtask():
     with pytest.raises(ValidationError):
         RunCreate.model_validate(dict(case_ids=[1], device_serial='phone', apk_reference='app.apk',
                                       idempotency_key='request-123'))
+
+
+def test_multiple_projects_reuse_one_credential_and_keep_scope(configuration):
+    db, user = configuration
+    first = svc.create_repository(db, user, repository_payload())
+    second = svc.create_repository(db, user, repository_payload(name='Second project'))
+    assert first['integration_key'] and not first['integration_key_reused']
+    assert second['integration_key'] is None and second['integration_key_reused']
+    assert db.query(AutomationIntegrationCredential).count() == 1
+    for result in (first, second):
+        row = svc.repository_for_key(db, result['repository']['id'], first['integration_key'])
+        assert row.integration_key_hash == ''
+    stranger = User(username='other-key-owner', password_hash='x', role=UserRole.USER)
+    db.add(stranger)
+    db.commit()
+    for changes in ({'owner_id': stranger.id}, {'jenkins_base_url': 'http://other-jenkins.test'}):
+        row = AutomationRepository(**(dict(owner_id=user.id, name='Excluded', git_url='git@github.com:org/tests.git',
+            branch='main', jenkins_job='Smoke', jenkins_base_url='http://jenkins.test',
+            zentao_base_url='http://zentao.test/zentao', product_id=15, integration_key_hash='') | changes))
+        db.add(row)
+        db.commit()
+        with pytest.raises(AppError) as rejected:
+            svc.repository_for_key(db, row.id, first['integration_key'])
+        assert rejected.value.status_code == 401
+
+
+def test_existing_project_key_can_be_adopted_then_rotated(configuration):
+    db, user = configuration
+    legacy = AutomationRepository(owner_id=user.id, name='Existing', git_url='git@github.com:org/tests.git',
+        jenkins_job='Smoke', jenkins_base_url='http://jenkins.test', zentao_base_url='http://zentao.test/zentao',
+        product_id=15, integration_key_hash=svc.digest('already-saved-in-jenkins'))
+    db.add(legacy)
+    db.commit()
+    assert svc.integration_key_status(db, user)['legacy_repository_ids'] == [legacy.id]
+    adopted = svc.configure_integration_key(db, user, IntegrationKeyConfiguration(reuse_repository_id=legacy.id))
+    assert adopted['configured'] and adopted['reused_existing_key'] and adopted['integration_key'] is None
+    assert legacy.integration_key_hash == ''
+    new = svc.create_repository(db, user, repository_payload())
+    assert new['integration_key'] is None
+    for rid in (legacy.id, new['repository']['id']):
+        assert svc.repository_for_key(db, rid, 'already-saved-in-jenkins').id == rid
+    with pytest.raises(AppError) as conflict:
+        svc.configure_integration_key(db, user, IntegrationKeyConfiguration())
+    assert conflict.value.status_code == 409
+    rotated = svc.configure_integration_key(db, user, IntegrationKeyConfiguration(rotate=True))['integration_key']
+    for rid in (legacy.id, new['repository']['id']):
+        with pytest.raises(AppError):
+            svc.repository_for_key(db, rid, 'already-saved-in-jenkins')
+        assert svc.repository_for_key(db, rid, rotated).id == rid
+
+
+def test_adoption_does_not_take_another_users_or_servers_key(configuration):
+    db, user = configuration
+    other = User(username='other-key-owner', password_hash='x', role=UserRole.USER)
+    db.add(other)
+    db.commit()
+    user.role = UserRole.ADMIN
+    for changes in ({'owner_id': other.id}, {'jenkins_base_url': 'http://other-jenkins.test'}):
+        row = AutomationRepository(**(dict(owner_id=user.id, name='Other scope', git_url='git@github.com:org/tests.git',
+            jenkins_job='Smoke', jenkins_base_url='http://jenkins.test', zentao_base_url='http://zentao.test/zentao',
+            product_id=15, integration_key_hash=svc.digest('old-key')) | changes))
+        db.add(row)
+        db.commit()
+        with pytest.raises(AppError, match='本人当前 Jenkins'):
+            svc.configure_integration_key(db, user, IntegrationKeyConfiguration(reuse_repository_id=row.id))
+    assert db.query(AutomationIntegrationCredential).count() == 0
+
+
+def test_shared_credentials_do_not_outlive_user_access(configuration):
+    db, user = configuration
+    result = svc.create_repository(db, user, repository_payload())
+    user.is_active = False
+    with pytest.raises(AppError):
+        svc.repository_for_key(db, result['repository']['id'], result['integration_key'])
+    user.is_active = True
+    user.tab_permissions = '["mine"]'
+    with pytest.raises(AppError):
+        svc.repository_for_key(db, result['repository']['id'], result['integration_key'])
+
+
+def test_shared_key_survives_reopening_database_and_status_has_no_secret(configuration):
+    from sqlalchemy.orm import Session
+    db, user = configuration
+    result = svc.create_repository(db, user, repository_payload())
+    with Session(db.get_bind()) as reopened:
+        assert svc.repository_for_key(reopened, result['repository']['id'], result['integration_key']).owner_id == user.id
+        status = svc.integration_key_status(reopened, reopened.get(User, user.id))
+        assert status == {'configured': True, 'jenkins_base_url': 'http://jenkins.test', 'legacy_repository_ids': []}
+        assert result['integration_key'] not in str(status)
+        assert reopened.query(AutomationIntegrationCredential).one().key_hash == svc.digest(result['integration_key'])
+
+
+def test_shared_key_api_and_catalog_authorization(configuration):
+    db, user = configuration
+    app = FastAPI()
+    app.include_router(automation.router)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: user
+
+    @app.exception_handler(AppError)
+    async def error(request, exc):
+        return JSONResponse({'message': exc.message}, status_code=exc.status_code)
+
+    client = TestClient(app)
+    path = '/automation/configuration/integration-key'
+    assert client.get(path).json()['configured'] is False
+    response = client.post(path, json={})
+    assert response.status_code == 200
+    key = response.json()['integration_key']
+    status = client.get(path)
+    assert status.json()['configured'] is True and key not in status.text and 'key_hash' not in status.text
+    assert client.post(path, json={}).status_code == 409
+    assert client.post(path, json={'rotate': True, 'reuse_repository_id': 1}).status_code == 422
+    for name in ('first', 'second'):
+        project = client.post('/automation/repositories', json=repository_payload(name=name).model_dump())
+        assert project.status_code == 201 and project.json()['integration_key'] is None
+        rid = project.json()['repository']['id']
+        catalog = dict(branch='main', revision='a' * 40, cases=[])
+        route = f'/automation/integrations/{rid}/catalog'
+        assert client.post(route, json=catalog, headers={'X-Automation-Key': 'wrong-key'}).status_code == 401
+        assert client.post(route, json=catalog, headers={'X-Automation-Key': key}).status_code == 200
+    user.tab_permissions = '["mine"]'
+    assert client.post(path, json={'rotate': True}).status_code == 403

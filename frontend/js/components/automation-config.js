@@ -2,7 +2,7 @@ import { escapeHtml as esc } from '../utils.js';
 
 export function mountAutomationConfiguration(host, { request, onCreated, notify }) {
   host.innerHTML = `<form id="automationProjectForm" style="padding:12px;border:1px solid #cbd5e1;border-radius:8px">
-    <p>创建可重复使用的自动化配置。项目名称可自定义；禅道和 Jenkins 使用本人已绑定的账号。</p>
+    <p>创建可重复使用的自动化配置。项目名称可自定义；禅道和 Jenkins 使用本人已绑定的账号。同一账号、同一 Jenkins 连接复用一份集成密钥。</p>
     <p id="automationBindingSummary" role="status"></p>
     <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-start">
       <label>项目名称<input name="name" required maxlength="160" placeholder="例如：SurveyMaster 自动化" style="display:block"></label>

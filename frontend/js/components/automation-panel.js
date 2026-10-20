@@ -1,11 +1,13 @@
 import { api } from '../api.js';
 import { escapeHtml as esc } from '../utils.js';
-import { mountAutomationConfiguration } from './automation-config.js?v=20261020-1';
+import { mountAutomationConfiguration } from './automation-config.js?v=20261020-shared-key-1';
+import { mountAutomationCredentials } from './automation-credentials.js?v=20261020-1';
 
 const state = { repositories: [], selected: null, run: null };
 let pendingRequest = null;
 let deepLinkApplied = false;
 let configuration;
+let credentials;
 let projectGeneration = 0;
 const labels = {
   created: '已登记', dispatching: '正在提交', queued: '排队中', running: '运行中', completed: '已结束',
@@ -33,7 +35,9 @@ function createShell(host) {
       <select id="automationRepository" aria-label="自动化项目"></select>
       <button id="automationReload" class="secondary">刷新</button>
       <button id="automationConfigure" class="secondary">配置项目</button>
+      <button id="automationConnection" class="secondary">Jenkins 接入设置</button>
     </div>
+    <div id="automationCredentialPanel" class="hidden"></div>
     <div id="automationSetup" class="hidden"></div>
     <div id="automationCases"></div>
     <form id="automationRunForm" class="row" style="gap:10px;flex-wrap:wrap;margin:12px 0">
@@ -52,6 +56,13 @@ function createShell(host) {
     $('automationSetup').classList.toggle('hidden');
     if (!$('automationSetup').classList.contains('hidden')) await configuration.load();
   });
+  credentials = mountAutomationCredentials($('automationCredentialPanel'), {
+    request, selectedRepository: () => state.selected, notify: notice,
+  });
+  $('automationConnection').onclick = action(async () => {
+    $('automationCredentialPanel').classList.toggle('hidden');
+    if (!$('automationCredentialPanel').classList.contains('hidden')) await credentials.refresh();
+  });
   $('automationRunForm').onsubmit = action(startRun);
   renderSetup();
 }
@@ -61,7 +72,9 @@ function renderSetup() {
     request, notify: notice,
     onCreated: async response => {
       state.selected = response.repository.id;
-      $('automationKey').textContent = `项目 ID：${response.repository.id}。集成密钥仅显示一次，请保存到 Jenkins Secret Text 凭据：${response.integration_key}`;
+      $('automationKey').textContent = response.integration_key
+        ? `项目 ID：${response.repository.id}。Jenkins 共享密钥仅显示一次，请保存到 Secret Text 凭据 omniqa-surveymaster；后续项目无需重新配置：${response.integration_key}`
+        : `项目 ID：${response.repository.id}。已复用 Jenkins 共享凭据，无需新增或更换 Jenkins 中的密钥。`;
       await loadAutomationPanel(true);
     },
   });
@@ -97,6 +110,8 @@ async function renderProject() {
   $('automationStart').disabled = true;
   $('automationTesttask').disabled = true;
   $('automationTesttask').innerHTML = '<option value="">先选择自动化项目</option>';
+  if (!$('automationCredentialPanel').classList.contains('hidden')) await credentials.refresh();
+  if (generation !== projectGeneration) return;
   if (!project) {
     $('automationCases').textContent = '配置自动化项目后，可同步脚本关联并执行测试。';
     $('automationHistory').textContent = '';

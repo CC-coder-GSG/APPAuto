@@ -10,6 +10,18 @@ from app.db.base import Base
 from app.utils.time_utils import utc_now_naive
 
 
+class AutomationIntegrationCredential(Base):
+    __tablename__ = 'automation_integration_credentials'
+    __table_args__ = (UniqueConstraint('owner_id', 'jenkins_base_url', name='uq_automation_credential_owner_server'),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
+    jenkins_base_url: Mapped[str] = mapped_column(String(500))
+    key_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+
+
 class AutomationRepository(Base):
     __tablename__ = 'automation_repositories'
 

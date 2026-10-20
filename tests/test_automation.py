@@ -31,7 +31,7 @@ class Jenkins:
 
     def get_job(self, name):
         return {'property': [{'parameterDefinitions': [{'name': x} for x in ('AUTOMATION_RUN_ID', 'ZENTAO_CASE_IDS',
-                'ZENTAO_TESTTASK_ID', 'TEST_REVISION', 'TEST_BRANCH', 'DEVICE_ID', 'APK_PATH', 'PACKAGE', 'OMNIQA_ENABLED', 'OMNIQA_DRY_RUN')]}]}
+                'ZENTAO_TESTTASK_ID', 'TEST_REVISION', 'TEST_BRANCH', 'DEVICE_ID', 'APK_PATH', 'PACKAGE', 'OMNIQA_ENABLED', 'OMNIQA_DRY_RUN', 'OMNIQA_REPOSITORY_ID')]}]}
 
     def trigger_build(self, job, params):
         self.calls.append(params)
@@ -127,6 +127,7 @@ def test_run_freezes_context_and_is_idempotent(env):
     assert json.loads(run.plan_json)[0]['case_version'] == 3
     assert env.jenkins.calls[0]['TEST_REVISION'] == SHA
     assert env.jenkins.calls[0]['ZENTAO_CASE_IDS'] == '41'
+    assert env.jenkins.calls[0]['OMNIQA_REPOSITORY_ID'] == str(env.repo.id)
     svc.save_catalog(env.db, env.repo, catalog_payload((42,), 'b' * 40))
     assert svc.create_run(env.db, env.repo, env.owner.id, request_payload()).id == run.id
     assert len(env.jenkins.calls) == 1
@@ -285,3 +286,13 @@ def test_zentao_launch_keeps_actor_and_validates_jenkins_run_id(env):
     with pytest.raises(AppError, match='运行编号'):
         svc.bind_build(env.db, env.repo, run, BuildStarted(job_name='SurveyMaster-RF-Test', build_number=18,
                        revision=SHA, device_serial='android-1'))
+
+
+def test_shared_key_cannot_bind_build_from_another_project(env):
+    run = start(env)
+    env.repo.integration_key_hash = ''
+    env.jenkins.calls[-1]['OMNIQA_REPOSITORY_ID'] = str(env.repo.id + 1)
+    with pytest.raises(AppError, match='平台项目 ID'):
+        svc.bind_build(env.db, env.repo, run, BuildStarted(job_name='SurveyMaster-RF-Test', build_number=18,
+                       revision=SHA, device_serial='android-1'))
+    assert run.build_number is None

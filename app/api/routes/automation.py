@@ -11,7 +11,8 @@ from app.api.deps import get_current_user, get_db
 from app.core.exceptions import AppError
 from app.models import AutomationRepository, AutomationRun
 from app.schemas.automation import (RepositoryCreate, CatalogUpload, RunCreate, BuildStarted,
-                                    RunResultUpload, ExternalRunCreate, WritebackConfiguration, ZentaoLaunch)
+                                    RunResultUpload, ExternalRunCreate, WritebackConfiguration, ZentaoLaunch,
+                                    IntegrationKeyConfiguration)
 from app.services import automation_service as service
 from app.services.permission_service import ensure_tab_access
 from app.core.config import settings
@@ -57,6 +58,16 @@ def create_repository(payload: RepositoryCreate, user=Depends(automation_user), 
 @router.get('/configuration/bindings')
 def configuration_bindings(user=Depends(automation_user), db: Session = Depends(get_db)):
     return service.configuration_bindings(db, user)
+
+
+@router.get('/configuration/integration-key')
+def integration_key_status(user=Depends(automation_user), db: Session = Depends(get_db)):
+    return service.integration_key_status(db, user)
+
+
+@router.post('/configuration/integration-key')
+def configure_integration_key(payload: IntegrationKeyConfiguration, user=Depends(automation_user), db: Session = Depends(get_db)):
+    return service.configure_integration_key(db, user, payload)
 
 
 @router.get('/configuration/zentao/{kind}')

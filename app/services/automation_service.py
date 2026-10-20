@@ -11,12 +11,14 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
 from app.core.exceptions import AppError
-from app.models import AutomationRepository, AutomationRun, AutomationCaseResult, User, UserZentaoBinding
+from app.models import (AutomationRepository, AutomationRun, AutomationCaseResult, AutomationIntegrationCredential,
+                        User, UserZentaoBinding)
 from app.schemas.automation import CatalogUpload, RunCreate
 from app.services import jenkins_service, automation_zentao
 from app.services.zentao_v2_protocol import normalize_base_url
 from app.services.zentao_auth_service import get_valid_token
 from app.services.zentao_client_service import ZentaoClient, ZentaoAPIError
+from app.services.permission_service import has_tab_access
 from app.utils.time_utils import utc_now_naive
 
 
@@ -41,9 +43,86 @@ def repository_for_user(db, repository_id, user):
 
 def repository_for_key(db, repository_id, key):
     row = db.get(AutomationRepository, repository_id)
-    if not key or not row or not hmac.compare_digest(row.integration_key_hash, digest(key)):
+    if not key or not row:
+        raise AppError('自动化集成凭据无效', status_code=401)
+    owner = db.get(User, row.owner_id)
+    if not owner or not owner.is_active or not has_tab_access(owner, 'testcase-center'):
+        raise AppError('自动化集成凭据无效', status_code=401)
+    key_hash = digest(key)
+    shared = _integration_credential(db, row.owner_id, row.jenkins_base_url)
+    if not ((shared and hmac.compare_digest(shared.key_hash, key_hash))
+            or (row.integration_key_hash and hmac.compare_digest(row.integration_key_hash, key_hash))):
         raise AppError('自动化集成凭据无效', status_code=401)
     return row
+
+
+def _integration_credential(db, owner_id, base_url):
+    return db.query(AutomationIntegrationCredential).filter_by(owner_id=owner_id, jenkins_base_url=base_url).first()
+
+
+def _jenkins_base_url(db, user):
+    creds = jenkins_service.get_binding_creds(db, user.id)
+    if not creds:
+        raise AppError('请先保存有效的 Jenkins 账号绑定', status_code=422)
+    return creds[0].rstrip('/')
+
+
+def integration_key_status(db, user):
+    base_url = _jenkins_base_url(db, user)
+    credential = _integration_credential(db, user.id, base_url)
+    legacy = db.query(AutomationRepository.id).filter(AutomationRepository.owner_id == user.id,
+        AutomationRepository.jenkins_base_url == base_url, AutomationRepository.integration_key_hash != '').all()
+    return {'configured': credential is not None, 'jenkins_base_url': base_url,
+            'legacy_repository_ids': [row.id for row in legacy]}
+
+
+def configure_integration_key(db, user, payload):
+    base_url = _jenkins_base_url(db, user)
+    existing = _integration_credential(db, user.id, base_url)
+    if existing and not payload.rotate:
+        raise AppError('该 Jenkins 已有共享凭据，后续项目自动复用；需要更换时请使用更换密钥', status_code=409)
+    if payload.rotate and payload.reuse_repository_id:
+        raise AppError('不能同时更换密钥和复用旧项目密钥', status_code=422)
+    key = None
+    if payload.reuse_repository_id:
+        repository = repository_for_user(db, payload.reuse_repository_id, user)
+        if repository.owner_id != user.id or repository.jenkins_base_url != base_url:
+            raise AppError('只能复用本人当前 Jenkins 连接下的项目密钥', status_code=422)
+        if not repository.integration_key_hash:
+            raise AppError('该项目已使用共享凭据，无需迁移', status_code=422)
+        key_hash = repository.integration_key_hash
+        # Once adopted, rotation must invalidate this key through every path.
+        db.query(AutomationRepository).filter_by(owner_id=user.id, jenkins_base_url=base_url,
+            integration_key_hash=key_hash).update({'integration_key_hash': ''}, synchronize_session='fetch')
+    else:
+        key = secrets.token_urlsafe(40)
+        key_hash = digest(key)
+    if existing:
+        existing.key_hash = key_hash
+    else:
+        db.add(AutomationIntegrationCredential(owner_id=user.id, jenkins_base_url=base_url, key_hash=key_hash))
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise AppError('共享凭据已由另一个请求创建，请刷新状态', status_code=409) from exc
+    return integration_key_status(db, user) | {'integration_key': key,
+        'reused_existing_key': payload.reuse_repository_id is not None}
+
+
+def _ensure_integration_credential(db, user, base_url):
+    if _integration_credential(db, user.id, base_url):
+        return None
+    key = secrets.token_urlsafe(40)
+    try:
+        with db.begin_nested():
+            db.add(AutomationIntegrationCredential(owner_id=user.id, jenkins_base_url=base_url, key_hash=digest(key)))
+            db.flush()
+    except IntegrityError:
+        if not _integration_credential(db, user.id, base_url):
+            raise
+        return None
+    return key
 
 
 def serialize_repository(row):
@@ -53,20 +132,18 @@ def serialize_repository(row):
 
 
 def create_repository(db, user, payload):
-    creds = jenkins_service.get_binding_creds(db, user.id)
-    if not creds:
-        raise AppError('请先保存有效的 Jenkins 账号绑定', status_code=422)
+    jenkins_base_url = _jenkins_base_url(db, user)
     binding = _zentao_binding(db, user.id)
     base_url = normalize_base_url(binding.base_url)
     if payload.zentao_base_url and normalize_base_url(payload.zentao_base_url) != base_url:
         raise AppError('自动化项目须使用本人已绑定的禅道地址，请刷新配置后重试', status_code=422)
-    key = secrets.token_urlsafe(40)
-    row = AutomationRepository(owner_id=user.id, jenkins_base_url=creds[0].rstrip('/'),
-                               zentao_base_url=base_url, integration_key_hash=digest(key),
+    key = _ensure_integration_credential(db, user, jenkins_base_url)
+    row = AutomationRepository(owner_id=user.id, jenkins_base_url=jenkins_base_url,
+                               zentao_base_url=base_url, integration_key_hash='',
                                **payload.model_dump(exclude={'zentao_base_url'}))
     db.add(row)
     db.commit()
-    return {'repository': serialize_repository(row), 'integration_key': key}
+    return {'repository': serialize_repository(row), 'integration_key': key, 'integration_key_reused': key is None}
 
 
 def _zentao_binding(db, user_id):
@@ -206,7 +283,7 @@ def create_run(db, repository, user_id, payload: RunCreate, *, dispatch=True, so
     client = _jenkins(db, repository)
     definitions = [d for p in client.get_job(repository.jenkins_job).get('property', []) for d in p.get('parameterDefinitions', [])]
     names = {x['name'] for x in definitions}
-    required = {'AUTOMATION_RUN_ID', 'ZENTAO_CASE_IDS', 'ZENTAO_TESTTASK_ID', 'TEST_REVISION', 'OMNIQA_ENABLED', 'OMNIQA_DRY_RUN'}
+    required = {'AUTOMATION_RUN_ID', 'ZENTAO_CASE_IDS', 'ZENTAO_TESTTASK_ID', 'TEST_REVISION', 'OMNIQA_ENABLED', 'OMNIQA_DRY_RUN', 'OMNIQA_REPOSITORY_ID'}
     if dispatch and not required.issubset(names):
         raise AppError('Jenkins Job 尚未安装自动化接入流水线或缺少运行参数', status_code=422)
     for key, value in payload.parameters.items():
@@ -233,7 +310,7 @@ def create_run(db, repository, user_id, payload: RunCreate, *, dispatch=True, so
     if dispatch:
         params = dict(payload.parameters) | {'AUTOMATION_RUN_ID': run.id, 'ZENTAO_CASE_IDS': ','.join(map(str, sorted(payload.case_ids))),
                   'ZENTAO_TESTTASK_ID': str(run.testtask_id), 'TEST_REVISION': run.revision, 'TEST_BRANCH': run.branch,
-                  'DEVICE_ID': run.device_serial, 'APK_PATH': run.apk_reference}
+                  'DEVICE_ID': run.device_serial, 'APK_PATH': run.apk_reference, 'OMNIQA_REPOSITORY_ID': str(repository.id)}
         params['OMNIQA_ENABLED'] = 'true'
         params['OMNIQA_DRY_RUN'] = 'true' if run.dry_run else 'false'
         try:
@@ -273,6 +350,9 @@ def bind_build(db, repository, run, payload):
     client = _jenkins(db, repository)
     info = client.get_build(repository.jenkins_job, payload.build_number)
     params = {x['name']: str(x.get('value', '')) for a in info.get('actions', []) for x in a.get('parameters', [])}
+    if ((not repository.integration_key_hash or 'OMNIQA_REPOSITORY_ID' in params)
+            and params.get('OMNIQA_REPOSITORY_ID') != str(repository.id)):
+        raise AppError('Jenkins 实际构建参数没有匹配的平台项目 ID', status_code=409)
     if (run.source == 'platform' or run.external_actor) and params.get('AUTOMATION_RUN_ID') != run.id:
         raise AppError('Jenkins 实际构建参数没有匹配的运行编号', status_code=409)
     if (int(info.get('number', 0)) != payload.build_number or params.get('TEST_REVISION', run.revision) != run.revision):

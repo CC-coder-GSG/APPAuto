@@ -6,6 +6,8 @@
 
 - 项目名称自定义；Git 地址支持 HTTPS、`git@github.com:组织/仓库.git` 和 `ssh://git@github.com/组织/仓库.git`。平台保存脚本来源，实际拉取由 Jenkins 完成；Job 的仓库配置须与这里一致，SSH 私钥留在 Jenkins 凭据或执行节点。
 - 禅道地址自动复用当前用户的禅道账号绑定，无需再次填写；后端也以该绑定为准。Jenkins 使用当前用户已有的账号绑定。
+- 集成密钥按“平台用户 + Jenkins 地址”共用。首次创建项目时生成一次，后续项目自动复用，不再为每个项目生成新密钥。在“Jenkins 接入设置”中可查看配置状态、生成或更换共享密钥；已有项目可点击“复用当前项目已有的密钥”，将原密钥转为共享凭据，Jenkins 中已保存的值无需改动。密钥只显示一次，数据库仅存摘要；更换后旧共享密钥失效，需要在 Jenkins 更新一次凭据。未迁移的旧项目密钥仍只作用于原项目。
+- 共享范围限制为同一用户、同一 Jenkins 地址，其他用户或其他 Jenkins 的项目不能使用该密钥。平台发起构建时自动传入 `OMNIQA_REPOSITORY_ID`，切换项目无需手改 Job 默认值；手动发布脚本目录时仍要选择目标项目 ID。该 ID 必须是 Job 已配置的字符串参数。
 - Jenkins Job 从已配置的自动化测试视图读取，保留文件夹 Job 的完整名称。禅道产品、项目、研发执行、构建和测试单均从本人可访问的远程数据中下拉选择。禅道项目仅用于筛选研发执行；构建按执行和产品筛选，测试单按产品、执行和构建筛选。列表按远程分页完整读取，获取失败可点击“刷新远程选项”重试。
 - 测试单是禅道中的一次测试批次，包含本轮执行的用例与执行历史。“专用”表示约定用于该自动化项目，不是额外的对象类型；可以选择已有且归属正确、尚未完成的测试单，但须先在禅道把所需用例关联进去。
 - 创建项目时固定测试单可选；未配置时，每次运行从下拉框选择。当前运行协议要求测试单，因此真实测试和脚本演练都必须选择。启用禅道回写仍要求项目配置固定测试单；配置后，执行和回写均限定在该测试单中。产品为必选，研发执行和构建仍为可选。
@@ -87,10 +89,10 @@ PASS、FAIL、SKIP 和环境异常分别保留；父套件 Appium 初始化失�
 以下内容已经准备为可审阅文件，本次未在服务器执行：
 
 1. 将脚本副本的 3 个变更文件评审后合入自动化仓库：`ci/omniqa_robot.py`、`ci/ci_piplines` 和核心导航用例的关联标签。`robot/SurveyMaster.integration.patch` 是这 3 个文件相对于原 main 的补丁。当前用例 ID 是专用联调数据，正式用例应使用自己的准确 ID。
-2. 更新测试管理平台代码，先备份数据库；启动时会创建 3 张新自动化表。保留现有 `APP_SECRET_KEY` / `APP_ZENTAO_BINDING_SECRET`，避免已存凭据无法解密。
+2. 更新测试管理平台代码，先备份数据库；启动时会创建自动化项目、运行、结果和共享凭据表。已部署项目在升级后自动补建共享凭据表，已有项目记录保留。保留现有 `APP_SECRET_KEY` / `APP_ZENTAO_BINDING_SECRET`，避免已存凭据无法解密。
 3. 用户在平台绑定自己的 Jenkins、禅道账号，创建自动化项目。限定产品、执行、构建和专用测试单；平台初始关闭结果回写。
 4. 保留 `SurveyMaster-RF-Test` 原有参数，按 `robot/jenkins-parameters.json` 添加新参数。布尔项使用 Boolean Parameter，其他项使用 String Parameter。设置 Jenkins Agent 能访问的 `OMNIQA_URL` 和平台项目 ID。`127.0.0.1:8001` 是本地演示地址，不能直接作为远程 Jenkins 的回调地址。
-5. 将创建项目时仅显示一次的密钥存入 Jenkins **Secret Text** 凭据 `omniqa-surveymaster`，不设为明文构建参数。更新 Job 流水线为 `robot/SurveyMaster.Jenkinsfile`，或对应 Git 中的 `ci/ci_piplines`。原 Job 的参数选择逻辑和旧执行方式在 `OMNIQA_ENABLED=false` 时保留；集成执行不发送企业微信消息。
+5. 将首次创建项目或“Jenkins 接入设置”中生成的共享密钥存入 Jenkins **Secret Text** 凭据 `omniqa-surveymaster`，不设为明文构建参数。同一平台用户在同一 Jenkins 的相关 Job 可复用这份凭据；新增项目无需新增凭据。若已有旧项目密钥，先在平台将它设为共享凭据即可继续使用原值。更新 Job 流水线为 `robot/SurveyMaster.Jenkinsfile`，或对应 Git 中的 `ci/ci_piplines`。原 Job 的参数选择逻辑和旧执行方式在 `OMNIQA_ENABLED=false` 时保留；集成执行不发送企业微信消息。
 6. 先从 Jenkins 发起 `OMNIQA_ENABLED=true`、`OMNIQA_CATALOG_ONLY=true` 构建发布目录，再从平台以演练模式验证 SHA 固定和回调。平台发起时会填写运行 ID、用例 ID、测试单、设备和 SHA；不要手工篡改运行 ID。
 7. 确认测试 APK 对应版本、设备可用、Appium 环境正常后，在专用用例上执行真实测试。报告继续归档在 **SurveyMaster-RF-Test** 下，平台链接至同一构建的 `results/report.html`、`log.html` 和截图。
 8. 人工核对首次真实结果后，再启用项目的禅道回写。结果专用客户端独立获取 REST v1 token；现有业务接口继续用 v2。它只写执行结果，不使用可能覆盖用例定义的 `ciresults` 导入。写入后读取历史核对；网络中断导致提交状态不明时只做只读核对，不盲目重复提交。失败结果始终保留在平台。

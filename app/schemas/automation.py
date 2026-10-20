@@ -15,6 +15,11 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True, allow_inf_nan=False)
 
 
+class IntegrationKeyConfiguration(StrictModel):
+    rotate: bool = False
+    reuse_repository_id: PositiveID | None = None
+
+
 class RepositoryCreate(StrictModel):
     name: str = Field(min_length=1, max_length=160)
     git_url: str = Field(min_length=1, max_length=500)

@@ -111,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/me/api/json':
             return self.reply(200, {'id': 'local-validation', 'fullName': '本地执行适配器（非服务器 Jenkins）'})
         if path == JOB + 'api/json':
-            names = ['AUTOMATION_RUN_ID', 'ZENTAO_CASE_IDS', 'ZENTAO_TESTTASK_ID', 'TEST_REVISION',
+            names = ['OMNIQA_REPOSITORY_ID', 'AUTOMATION_RUN_ID', 'ZENTAO_CASE_IDS', 'ZENTAO_TESTTASK_ID', 'TEST_REVISION',
                      'TEST_BRANCH', 'DEVICE_ID', 'APK_PATH', 'OMNIQA_ENABLED', 'OMNIQA_DRY_RUN', 'PACKAGE']
             return self.reply(200, {'name': 'SurveyMaster-RF-Test', 'buildable': True,
                 'property': [{'parameterDefinitions': [{'name': k} for k in names]}]})
