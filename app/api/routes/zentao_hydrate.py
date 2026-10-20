@@ -47,6 +47,7 @@ from app.models.user_zentao_binding import UserZentaoBinding
 from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.services.zentao_auth_service import get_valid_token, invalidate_token
 from app.services.zentao_client_service import ZentaoClient, ZentaoAPIError
+from app.services.zentao_build_names import local_build_names
 from app.services.zentao_normalizer import (
     normalize_bug,
     normalize_story,
@@ -127,7 +128,8 @@ async def hydrate_bugs(
         return {}
     client, base_url = ctx
 
-    result, got_401, errors = await _fetch_bugs_concurrent(client, base_url, id_list)
+    build_names = local_build_names(db)
+    result, got_401, errors = await _fetch_bugs_concurrent(client, base_url, id_list, build_names)
 
     if got_401:
         invalidate_token(current_user.id, db)
@@ -135,7 +137,7 @@ async def hydrate_bugs(
         if ctx2 is None:
             return _build_response({}, errors)
         client2, base_url2 = ctx2
-        result, _, errors = await _fetch_bugs_concurrent(client2, base_url2, id_list)
+        result, _, errors = await _fetch_bugs_concurrent(client2, base_url2, id_list, build_names)
 
     # Write-back: persist title + URL for bugs that don't have them yet.
     # Matches on bug_id like "b#29009" → Zentao numeric ID 29009.
@@ -422,6 +424,7 @@ async def _fetch_bugs_concurrent(
     client: ZentaoClient,
     base_url: str,
     id_list: list[int],
+    build_names: dict[str, str] | None = None,
 ) -> tuple[dict, bool, list[str]]:
     """
     Fetch bug data for all IDs concurrently (up to _MAX_CONCURRENCY at once).
@@ -432,6 +435,39 @@ async def _fetch_bugs_concurrent(
     result: dict[str, dict] = {}
     errors: list[str] = []
     got_401 = False
+    build_tasks: dict[str, asyncio.Task] = {}
+
+    async def _build_name(build_id: str) -> str:
+        nonlocal got_401
+        if build_names and build_id in build_names:
+            return build_names[build_id]
+        try:
+            build = await asyncio.to_thread(client.get_build, int(build_id))
+            if isinstance(build, dict) and str(build.get('id')) == build_id:
+                name = str(build.get('name') or build.get('title') or '').strip()
+                if name and not name.isdecimal():
+                    return name
+        except ZentaoAPIError as exc:
+            if exc.status_code == 401:
+                got_401 = True
+            logger.warning('hydrate_bugs: build_id=%s err=%s', build_id, exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('hydrate_bugs: build_id=%s err=%s', build_id, exc)
+        # Preserve the reference for retry; display code hides unresolved numeric IDs.
+        return build_id
+
+    async def _resolved_build_name(value: str) -> str:
+        names = []
+        for part in value.split(','):
+            part = part.strip()
+            if part.isdecimal():
+                build_id = str(int(part))
+                if build_id not in build_tasks:
+                    build_tasks[build_id] = asyncio.create_task(_build_name(build_id))
+                part = await build_tasks[build_id]
+            if part:
+                names.append(part)
+        return ', '.join(dict.fromkeys(names))
 
     async def _one(bug_id: int) -> None:
         nonlocal got_401
@@ -440,6 +476,7 @@ async def _fetch_bugs_concurrent(
                 raw = await asyncio.to_thread(client.get_bug_with_fallback, bug_id)
                 if raw:
                     data = normalize_bug(raw)
+                    data['resolved_build'] = await _resolved_build_name(data['resolved_build'])
                     data["zentao_url"] = f"{base_url}/bug-view-{bug_id}.html"
                     result[str(bug_id)] = data
             except ZentaoAPIError as exc:

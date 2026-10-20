@@ -386,7 +386,7 @@ button:disabled { opacity: 0.4; transform: none !important; }
   padding: 0 !important;
   margin-left: 4px;
   min-height: 0;
-  font-size: 11px;
+  font-size: 11px !important;
   font-weight: normal !important;
   line-height: inherit;
   opacity: 1;

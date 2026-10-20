@@ -428,7 +428,18 @@ def _extract_person_name(val: Any) -> str:
 
 def normalize_resolved_build(value: Any) -> str:
     # Zentao uses zero as the empty build reference on some API versions.
-    return "" if value in (None, "", "0", 0) else _extract_build_name(value).strip()
+    if value in (None, "", "0", 0):
+        return ""
+    if isinstance(value, dict):
+        if value.get("name") or value.get("title"):
+            return str(value.get("name") or value["title"]).strip()
+        if "id" in value:
+            return normalize_resolved_build(value["id"])
+        value = [name or build_id for build_id, name in value.items()]
+    if isinstance(value, list):
+        names = [normalize_resolved_build(item) for item in value]
+        return ", ".join(dict.fromkeys(name for name in names if name))
+    return str(value).strip()
 
 
 def _extract_build_name(val: Any) -> str:

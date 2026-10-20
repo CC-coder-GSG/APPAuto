@@ -7,6 +7,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import BugSourceType, BugTracking, Requirement, TestCase, Version, VersionType, ZentaoTaskMirror, ZentaoTestCaseMirror
+from app.services.zentao_build_names import local_build_names, readable_build_names
 
 
 def _case_key(value: Any) -> str:
@@ -36,6 +37,7 @@ class WorkbenchLinkService:
         self.db = db
         self._major_names: dict[int, str] | None = None
         self._product_names: dict[str, str] | None = None
+        self._build_names: dict[str, str] | None = None
 
     @staticmethod
     def _readable_reference_name(value: Any, reference_id: Any = None) -> str | None:
@@ -122,6 +124,10 @@ class WorkbenchLinkService:
         resolved_no = bug.zentao_resolved_build
         if resolved_no is None:
             resolved_no = fixed_no
+        if resolved_no and any(part.strip().isdecimal() for part in resolved_no.split(',')):
+            if self._build_names is None:
+                self._build_names = local_build_names(self.db)
+            resolved_no = readable_build_names(resolved_no, self._build_names)
         # 禅道校对：本地挂在某需求下的 Bug，若禅道侧标记了 story 且与该需求
         # 的 story 不一致，前端提示「归属不一致」；禅道已删除的也标出来。
         story_mismatch = bool(

@@ -21,6 +21,8 @@ const root = path.resolve(__dirname, '..');
       104: { status: 'closed', resolved_build: '' },
       105: { status: 'resolved', resolved_build: '4.0.5' },
       106: { status: 'active', resolved_build: '' },
+      108: { status: 'resolved', resolved_build: '4.0.6' },
+      109: { status: 'closed', resolved_build: '99999' },
     };
     const html = `<!doctype html><meta charset="utf-8">
       <link rel="stylesheet" href="/static/css/main.css"><link rel="stylesheet" href="/static/css/weave.css">
@@ -42,6 +44,8 @@ const root = path.resolve(__dirname, '..');
           bug(105,'active'),
           bug(106,'resolved',{resolved_version_no:'old-fix'}),
           bug(107,'resolved',{resolved_version_no:'<img src=x onerror=alert(1)>',found_minor_version_no:'A&B <found>'}),
+          bug(108,'resolved',{resolved_version_no:'5262'}),
+          bug(109,'closed',{resolved_version_no:'99999'}),
         ]}];
         window.rerender=renderMineCards; renderMineCards(); window.ready=true;
       </script>`;
@@ -67,6 +71,8 @@ const root = path.resolve(__dirname, '..');
     assert.match(await chip(102).innerText(), /解决于:.*4\.0\.2/);
     assert.match(await chip(103).innerText(), /解决于:.*4\.0\.4/);
     assert.match(await chip(104).innerText(), /解决于:.*未填写/);
+    assert.match(await chip(108).innerText(), /版本名称待获取/);
+    assert.doesNotMatch(await chip(108).innerText(), /5262/);
     checks.push('cached status selects the correct default for case and free bugs');
 
     const card = page.locator('.mine-req-card');
@@ -102,6 +108,14 @@ const root = path.resolve(__dirname, '..');
     assert.match(await chip(105).innerText(), /解决于:.*4\.0\.5/);
     assert.match(await chip(106).innerText(), /发现于:.*4\.0\.1/);
     assert.equal(await chip(106).isDisabled(), true);
+    assert.match(await chip(108).innerText(), /解决于:.*4\.0\.6/);
+    assert.match(await chip(109).innerText(), /版本名称待获取/);
+    assert.doesNotMatch(await chip(109).innerText(), /99999/);
+    await chip(108).click();
+    assert.match(await chip(108).innerText(), /发现于:.*4\.0\.1/);
+    await chip(108).click();
+    assert.match(await chip(108).innerText(), /解决于:.*4\.0\.6/);
+    checks.push('numeric build references display names after hydration and never expose raw IDs');
     assert.match(await chip(102).innerText(), /发现于:/);
     await chip(102).click();
     assert.match(await chip(102).innerText(), /解决于:.*4\.0\.3/);

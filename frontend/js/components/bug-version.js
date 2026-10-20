@@ -2,10 +2,13 @@ import { escapeHtml } from '../utils.js';
 
 const resolvedStatuses = new Set(['resolved', 'closed']);
 const statusOf = bug => String(bug.zentao_live_status || (bug.closed ? 'closed' : bug.fixed_minor_version_no ? 'resolved' : 'active')).trim().toLowerCase();
+const resolvedName = value => [...new Set(String(value || '').split(',')
+  .map(part => part.trim()).filter(Boolean)
+  .map(part => /^\d+$/.test(part) ? '版本名称待获取' : part))].join(', ');
 
 function displayVersion(button) {
   const resolved = button.dataset.versionMode === 'resolved';
-  const value = resolved ? button.dataset.resolvedVersion || '未填写' : button.dataset.foundVersion || '未知';
+  const value = resolved ? resolvedName(button.dataset.resolvedVersion) || '未填写' : button.dataset.foundVersion || '未知';
   const label = resolved ? '解决于' : '发现于';
   button.textContent = `(${resolved ? '✅' : ''}${label}: 🏷️${value}${button.disabled ? '' : ' ⇄'})`;
   button.title = button.disabled ? `${label}：${value}` : `${label}：${value}；点击查看${resolved ? '发现' : '解决'}版本`;
@@ -16,7 +19,7 @@ export function renderBugVersion(bug) {
   const status = statusOf(bug);
   const toggle = resolvedStatuses.has(status);
   // Empty remote values mean "not supplied"; only absent remote data uses local verification.
-  const fixed = bug.resolved_version_no ?? bug.fixed_minor_version_no ?? '';
+  const fixed = resolvedName(bug.resolved_version_no ?? bug.fixed_minor_version_no ?? '');
   return `<button type="button" class="qa-bug-version" data-bug-status="${escapeHtml(status)}"
     data-found-version="${escapeHtml(bug.found_minor_version_no || '未知')}" data-resolved-version="${escapeHtml(fixed)}"
     data-version-mode="${toggle ? 'resolved' : 'found'}" ${toggle ? '' : 'disabled'}
