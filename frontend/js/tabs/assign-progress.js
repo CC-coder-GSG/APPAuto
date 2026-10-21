@@ -7,7 +7,6 @@ const opened = new Set();
 const details = new Map();
 let context = '';
 let sequence = 0;
-let resizeObserver;
 let filters = { search: '', owner: '', status: '' };
 const statuses = { wait: '未开始', doing: '进行中', changed: '需求变更', pause: '已暂停', done: '已完成', closed: '已关闭', cancel: '已取消', todo: '待处理', in_progress: '进行中', blocked: '受阻', deferred: '已延期' };
 const conclusions = { pending: '未处理', passed: '复测通过', failed: '复测出现问题' };
@@ -35,7 +34,6 @@ export function resetAssignProgressContext() {
   sequence++;
   opened.clear();
   details.clear();
-  resizeObserver?.disconnect();
   filters = { search: '', owner: '', status: '' };
   state.assignProgressData = null;
   const area = document.getElementById('assignProgressArea');
@@ -55,18 +53,18 @@ function matches(req) {
 
 function summaryHtml(data) {
   const s = data.summary || {};
-  return [badge(`人员 ${s.owners || 0}`), badge(`需求 ${s.requirements || 0}`),
-    badge(`用例待完成 ${s.case_pending || 0}`), badge(`测试待完成 ${s.test_pending || 0}`),
-    badge(`待复测 ${s.retest_pending_total || 0}`, 'warning'), badge(`复测出现问题 ${s.retest_failed_total || 0}`, s.retest_failed_total ? 'danger' : ''),
-    badge(`未分配 ${s.unassigned_total || 0}`)].join('');
+  return [
+    ['需求总数', s.requirements], ['参与人员', s.owners], ['用例待完成', s.case_pending],
+    ['测试待完成', s.test_pending], ['待复测', s.retest_pending_total, 'warning'],
+    ['复测出现问题', s.retest_failed_total, 'danger'], ['未分配', s.unassigned_total],
+  ].map(([label, count, tone]) => `<div class="assign-progress-metric ${count ? tone || '' : ''}"><span class="assign-progress-metric-value">${Number(count || 0)}</span><span class="assign-progress-metric-label">${h(label)}</span></div>`).join('');
 }
 
 function renderBoard(data) {
   const area = document.getElementById('assignProgressArea');
   if (!area) return;
-  resizeObserver?.disconnect();
   const ownerOptions = (data.owners || []).map(o => `<option value="${h(o.owner_id ?? 'unassigned')}">${h(o.owner_name)}</option>`).join('');
-  area.innerHTML = `<div class="assign-progress-summary">${summaryHtml(data)}</div>
+  area.innerHTML = `<div class="assign-progress-metrics" aria-label="需求进度汇总">${summaryHtml(data)}</div>
     <div class="assign-progress-toolbar">
       <label>查找需求<input id="assignProgressSearch" type="search" placeholder="需求编号 / 标题" value="${h(filters.search)}"></label>
       <label>负责人<select id="assignProgressOwner"><option value="">全部负责人</option>${ownerOptions}</select></label>
@@ -74,17 +72,11 @@ function renderBoard(data) {
       <button type="button" class="secondary" data-progress-action="reload">刷新进度</button>
       <span class="muted" id="assignProgressCount"></span>
     </div>
-    <details class="assign-progress-retest-summary"><summary>复测待办汇总（按大版本）</summary><div>${(data.retest_pending_by_major || []).map(r => badge(`${r.major_version_name}：待复测 ${r.pending_retest_count}`, 'warning')).join('') || '<span class="muted">暂无待复测需求</span>'}</div></details>
+    <details class="assign-progress-retest-summary"><summary><span>复测待办汇总</span><span class="assign-progress-caption">按大版本</span><span class="assign-progress-group-count">${Number(data.summary?.retest_pending_total || 0)}</span></summary><div>${(data.retest_pending_by_major || []).map(r => badge(`${r.major_version_name}：待复测 ${r.pending_retest_count}`, 'warning')).join('') || '<span class="muted">暂无待复测需求</span>'}</div></details>
     <div id="assignProgressNotice" role="status"></div><div id="assignProgressRows"></div>
     <div class="assign-progress-footnote">摘要读取时间：${time(data.loaded_at)}。禅道数据以明细中的同步时间为准，可展开需求后刷新详情。</div>`;
   area.querySelector('#assignProgressOwner').value = filters.owner;
   area.querySelector('#assignProgressStatus').value = filters.status;
-  // Keep the expanded content within the viewport even when the summary
-  // table scrolls horizontally; each detail list has its own scroll area.
-  const resize = () => area.style.setProperty('--assign-progress-detail-width', `${Math.max(0, area.clientWidth - 2)}px`);
-  resize();
-  resizeObserver = new ResizeObserver(resize);
-  resizeObserver.observe(area);
   area.oninput = event => {
     if (event.target.id !== 'assignProgressSearch') return;
     filters.search = event.target.value;
@@ -130,18 +122,20 @@ function renderRows() {
     const reqs = (owner.requirements || []).filter(matches);
     visible += reqs.length;
     if (!reqs.length) return '';
-    return `<details class="assign-progress-owner" open><summary>${h(owner.owner_name)} <span class="muted">${reqs.length} 个需求</span></summary>
-      <div class="assign-progress-scroll"><table class="assign-progress-table"><thead><tr><th>大版本 / 需求</th><th>用例 / 测试</th><th>复测结论</th><th>关联 Bug</th><th>关联任务</th><th>操作</th></tr></thead><tbody>${reqs.map(r => {
+    return `<details class="assign-progress-owner" open><summary><span class="assign-progress-owner-avatar" aria-hidden="true">${h(owner.owner_name?.slice(0, 1) || '未')}</span><span>${h(owner.owner_name)}</span><span class="assign-progress-group-count">${reqs.length} 个需求</span></summary>
+      <div class="assign-progress-owner-body">${reqs.map(r => {
         const sid = Number(String(r.zentao_req_id || '').replace(/\D/g, ''));
-        return `<tr class="${r.retest_conclusion === 'failed' ? 'assign-progress-risk' : ''}" data-progress-row="${r.id}">
-          <td><small class="muted">${h(r.major_version_name)}</small><div>${entityLink(r.zentao_req_id, 'story', sid)} ${h(r.title)}${renderPreviewBtn('story', sid)}</div></td>
-          <td>${badge(r.case_completed ? '用例完成' : '用例未完成', r.case_completed ? 'success' : '')}${badge(r.test_completed ? '测试完成' : '测试未完成', r.test_completed ? 'success' : '')}<small class="muted">用例 ${Number(r.case_count || 0)}</small></td>
-          <td>${badge(conclusions[r.retest_conclusion] || '未处理', r.retest_conclusion === 'failed' ? 'danger' : r.retest_conclusion === 'passed' ? 'success' : '')}${r.retest_active_problem_count ? `<small class="assign-progress-danger">有效问题 ${Number(r.retest_active_problem_count)}</small>` : ''}</td>
-          <td>共 ${Number(r.bug_count || 0)}<small class="${r.open_bug_count ? 'assign-progress-danger' : 'muted'}">未闭环 ${Number(r.open_bug_count || 0)}</small></td>
-          <td>完成 ${Number(r.task_done_count || 0)} / 共 ${Number(r.task_count || 0)}${r.task_overdue_count ? `<small class="assign-progress-warning">逾期 ${Number(r.task_overdue_count)}</small>` : ''}</td>
-          <td><button type="button" class="secondary" data-progress-action="expand" data-req-id="${r.id}" aria-expanded="${opened.has(r.id)}" aria-controls="assignProgressDetail-${r.id}">${opened.has(r.id) ? '收起详情' : '展开详情'}</button></td></tr>
-          <tr ${opened.has(r.id) ? '' : 'hidden'}><td colspan="6" class="assign-progress-detail-cell"><div id="assignProgressDetail-${r.id}" class="assign-progress-detail" aria-live="polite"></div></td></tr>`;
-      }).join('')}</tbody></table></div></details>`;
+        return `<article class="assign-progress-req ${opened.has(r.id) ? 'is-open' : ''} ${r.retest_conclusion === 'failed' ? 'assign-progress-risk' : ''}">
+          <div class="assign-progress-row" data-progress-row="${r.id}">
+            <div class="assign-progress-identity"><div class="assign-progress-title">${entityLink(r.zentao_req_id, 'story', sid)}<span>${h(r.title)}</span>${renderPreviewBtn('story', sid)}</div>
+              <div class="assign-progress-row-meta">${badge(r.major_version_name)}${badge(r.case_completed ? '用例完成' : '用例未完成', r.case_completed ? 'success' : '')}${badge(r.test_completed ? '测试完成' : '测试未完成', r.test_completed ? 'success' : '')}${badge(conclusions[r.retest_conclusion] || '未处理', r.retest_conclusion === 'failed' ? 'danger' : r.retest_conclusion === 'passed' ? 'success' : '')}${r.retest_active_problem_count ? `<span class="assign-progress-danger">有效问题 ${Number(r.retest_active_problem_count)}</span>` : ''}</div>
+            </div>
+            <div class="assign-progress-counts"><div><span>关联 Bug</span><strong>${Number(r.bug_count || 0)}</strong><small class="${r.open_bug_count ? 'assign-progress-danger' : ''}">未闭环 ${Number(r.open_bug_count || 0)}</small></div><div><span>关联任务</span><strong>${Number(r.task_done_count || 0)}<i> / ${Number(r.task_count || 0)}</i></strong><small class="${r.task_overdue_count ? 'assign-progress-warning' : ''}">${r.task_overdue_count ? `逾期 ${Number(r.task_overdue_count)}` : '已完成 / 总数'}</small></div><div><span>用例</span><strong>${Number(r.case_count || 0)}</strong><small>已关联</small></div></div>
+            <button type="button" class="secondary assign-progress-expand" data-progress-action="expand" data-req-id="${r.id}" aria-expanded="${opened.has(r.id)}" aria-controls="assignProgressDetail-${r.id}">${opened.has(r.id) ? '收起详情' : '展开详情'}<span aria-hidden="true" class="assign-progress-chevron"></span></button>
+          </div>
+          <div ${opened.has(r.id) ? '' : 'hidden'} id="assignProgressDetail-${r.id}" class="assign-progress-detail" aria-live="polite"></div>
+        </article>`;
+      }).join('')}</div></details>`;
   }).join('');
   area.innerHTML = groups || '<div class="assign-progress-empty">当前筛选条件下暂无需求</div>';
   document.getElementById('assignProgressCount').textContent = `显示 ${visible} / ${data.summary?.requirements || 0} 个需求`;
@@ -186,7 +180,7 @@ function renderDetail(id) {
   const entry = details.get(id);
   const area = document.getElementById(`assignProgressDetail-${id}`);
   if (!entry || !area) return;
-  let html = `<div class="assign-progress-detail-toolbar"><b>需求进度详情</b>${action(entry.busy ? '加载中…' : '刷新详情', 'refresh', id, entry.busy ? 'disabled' : '')}</div>`;
+  let html = `<div class="assign-progress-detail-toolbar"><span class="assign-progress-detail-label">关联明细</span>${action(entry.busy ? '加载中…' : '刷新详情', 'refresh', id, entry.busy ? 'disabled' : '')}</div>`;
   if (entry.busy) html += '<div class="muted" role="status">正在加载，已有数据保留显示…</div>';
   if (entry.error) html += `<div class="assign-progress-alert" role="alert">${h(entry.error)} ${action('重试', 'retry', id, entry.busy ? 'disabled' : '')}</div>`;
   const data = entry.data;
@@ -196,7 +190,7 @@ function renderDetail(id) {
     <div class="assign-progress-records">复测记录：${data.retest_records.length ? data.retest_records.map(r => badge(`${r.user_name} · ${r.passed ? '通过' : '未通过（历史）'}${r.minor_version_name ? ` · ${r.minor_version_name}` : ''} · ${String(r.updated_at || '').replace('T', ' ').slice(0, 19)}`, r.passed ? 'success' : 'danger')).join('') : '<span class="muted">暂无人员提交复测结论</span>'}</div>
     ${(data.warnings || []).length ? `<div class="assign-progress-alert" role="alert">同步未全部完成，以下保留最近已知数据：${data.warnings.map(h).join('；')}</div>` : ''}
     <nav class="assign-progress-detail-nav" aria-label="需求详情区块">${[['bugs', '关联 Bug'], ['retest_bugs', '复测问题'], ['tasks', '关联任务']].map(([key, label]) => action(`${label}（${data[key].total}）`, 'jump', id, `data-section="${key}"`)).join('')}</nav>
-    <p class="muted">复测问题与关联 Bug 可能重叠，数量不能相加。复测来源记录保留追溯，有效问题按复测工作台规则判定。</p>`;
+    <details class="assign-progress-explanation"><summary>统计口径说明</summary><p>复测问题与关联 Bug 可能重叠，数量不能相加。复测来源记录保留追溯，有效问题按复测工作台规则判定。</p></details>`;
   for (const [key, label] of [['bugs', '关联 Bug'], ['retest_bugs', '复测问题'], ['tasks', '关联任务']]) {
     const list = data[key];
     const headers = key === 'tasks' ? ['任务 / 来源', '状态', '指派人 / 完成者', '预计起止', '数据时间'] : ['Bug', '禅道 / 平台状态', key === 'retest_bugs' ? '问题类型 / 人员 / 时间' : '当前处理人', '发现版本 / 关联来源', '数据时间'];

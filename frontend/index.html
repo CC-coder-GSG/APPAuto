@@ -10,7 +10,7 @@
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261021-assign-progress-1"></script>
+  <script type="module" src="/static/js/app.js?v=20261021-assign-progress-ui-2"></script>
   <script src="/static/js/weave-motion.js?v=20260703-1" defer></script>
   <style>
     /* Header layout */
@@ -146,7 +146,7 @@
     }
     #tabs button { position: relative; }
   </style>
-  <link rel="stylesheet" href="/static/css/assign-progress.css?v=20261021-1">
+  <link rel="stylesheet" href="/static/css/assign-progress.css?v=20261021-2">
 </head>
 <body>
 <div class="toast-wrap" id="toastWrap"></div>
@@ -318,8 +318,8 @@
       <div class="muted" style="margin-top:6px; font-size:12px;">说明：会复制需求与用例及负责人分配，不复制历史 Bug。</div>
     </div>
 
-    <div class="card" style="margin-top:16px; border:1px solid #e2e8f0; background:#f8fafc;">
-      <h3 style="margin-top:0; color:#1e293b;">任务进行状态</h3>
+    <div class="card assign-progress-panel">
+      <div class="assign-progress-panel-heading"><h3>任务进行状态</h3><p>按需求查看测试、复测与任务进度</p></div>
       <div id="assignProgressArea"></div>
     </div>
 

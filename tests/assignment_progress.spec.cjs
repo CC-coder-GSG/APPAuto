@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const timestamp = '2026-10-21T10:30:00';
+const preview = process.env.PROGRESS_PREVIEW === '1';
 
 const reqs = [
   { id: 1, zentao_req_id: 'r#900', title: '定位功能优化 <img src=x onerror="window.injected=true">', owner_id: 1, owner_name: '张三', case_completed: true, test_completed: true, retest_conclusion: 'failed', retest_active_problem_count: 2, bug_count: 23, open_bug_count: 3, task_count: 2, task_done_count: 1, task_overdue_count: 1 },
@@ -13,6 +14,7 @@ const reqs = [
   { id: 3, zentao_req_id: 'r#902', title: '待复测需求', owner_id: 1, owner_name: '张三', case_completed: true, test_completed: true, retest_conclusion: 'pending', bug_count: 0, open_bug_count: 0, task_count: 0 },
   { id: 4, zentao_req_id: 'r#903', title: '已通过需求', owner_id: 2, owner_name: '李四', case_completed: true, test_completed: true, retest_conclusion: 'passed', bug_count: 0, open_bug_count: 0, task_count: 0 },
 ].map(r => ({ ...r, major_version_id: 1, major_version_name: 'V1', case_count: 3 }));
+if (preview) ['定位结果与坐标转换一致性验证', 'RTK 断线重连后的定位恢复', '多星座观测数据导出兼容性', '蓝牙设备连接与状态提示'].forEach((title, i) => { reqs[i].title = title; });
 const secondVersion = [{ ...reqs[1], id: 5, zentao_req_id: 'r#999', title: '另一版本需求', major_version_id: 2, major_version_name: 'V2' }];
 
 function summary(rows) {
@@ -28,7 +30,7 @@ function summary(rows) {
 function detail(req, query, refreshed = false) {
   const allBugs = req.id === 1 ? Array.from({ length: 23 }, (_, i) => ({
     id: 100 + i, bug_id: `b#${100 + i}`, zentao_bug_id: String(100 + i),
-    zentao_bug_title: i ? `缺陷 ${i}` : '<script>window.injected=true</script>',
+    zentao_bug_title: preview ? ['切换坐标系后定位结果偏移', '弱信号场景下定位状态未及时更新', '观测文件导出缺少时间标记'][i % 3] : i ? `缺陷 ${i}` : '<script>window.injected=true</script>',
     zentao_live_status: i ? 'active' : 'resolved', closed: false,
     association_sources: ['用例关联', '需求归集'], found_minor_version_no: 'V1.1',
     major_version_id: i === 1 ? 2 : 1, major_version_no: i === 1 ? 'V2' : 'V1',
@@ -99,6 +101,10 @@ function detail(req, query, refreshed = false) {
     assert.equal(await page.locator('[data-progress-row]').count(), 4);
     assert.equal(requests.filter(r => /progress\/\d/.test(r.url.pathname)).length, 0, 'details load only on demand');
     assert.equal(await page.locator('#assignProgressRows img').count(), 0, 'titles are escaped');
+    if (process.env.PROGRESS_SCREENSHOT) {
+      await page.locator('.assign-progress-panel').evaluate(el => window.scrollTo(0, el.getBoundingClientRect().top + scrollY - 12));
+      await page.screenshot({ path: process.env.PROGRESS_SCREENSHOT.replace('.png', '-overview.png') });
+    }
 
     await page.locator('[data-progress-row="1"] [data-progress-action="expand"]').click();
     const first = page.locator('#assignProgressDetail-1');
@@ -159,7 +165,7 @@ function detail(req, query, refreshed = false) {
     await first.locator('#assign-progress-1-bugs tbody tr').first().waitFor();
     assert.equal(await first.locator('.qa-preview-btn svg').first().evaluate(el => el.getBoundingClientRect().height <= 16), true, 'real preview styles keep icons compact');
     if (process.env.PROGRESS_SCREENSHOT) {
-      await page.locator('#assignProgressArea').evaluate(el => window.scrollTo(0, el.getBoundingClientRect().top + scrollY - 12));
+      await page.locator('.assign-progress-panel').evaluate(el => window.scrollTo(0, el.getBoundingClientRect().top + scrollY - 12));
       await page.screenshot({ path: process.env.PROGRESS_SCREENSHOT });
     }
     await page.setViewportSize({ width: 390, height: 844 });
@@ -168,7 +174,7 @@ function detail(req, query, refreshed = false) {
     assert.equal(await first.locator('[data-progress-action="refresh"]').evaluate(el => el.getBoundingClientRect().right <= innerWidth), true, 'detail actions remain visible on narrow screens');
     assert.equal(await first.locator('.assign-progress-scroll').first().evaluate(el => el.scrollWidth >= el.clientWidth), true);
     if (process.env.PROGRESS_SCREENSHOT) {
-      await page.locator('#assignProgressArea').evaluate(el => window.scrollTo(0, el.getBoundingClientRect().top + scrollY - 12));
+      await first.evaluate(el => window.scrollTo(0, el.parentElement.getBoundingClientRect().top + scrollY - 12));
       await page.screenshot({ path: process.env.PROGRESS_SCREENSHOT.replace('.png', '-mobile.png') });
     }
     await page.setViewportSize({ width: 1440, height: 1000 });

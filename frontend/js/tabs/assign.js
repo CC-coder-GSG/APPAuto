@@ -1,4 +1,4 @@
-﻿import { loadAssignProgress, toggleAssignProgressPendingOnly, resetAssignProgressContext } from './assign-progress.js?v=20261021-1';
+﻿import { loadAssignProgress, toggleAssignProgressPendingOnly, resetAssignProgressContext } from './assign-progress.js?v=20261021-2';
 export { loadAssignProgress, toggleAssignProgressPendingOnly };
 
 import { api } from '../api.js';
