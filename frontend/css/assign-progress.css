@@ -34,7 +34,9 @@
 .assign-progress-caption { color: var(--ap-faint); font-size: 11px; }
 .assign-progress-group-count { color: var(--ap-soft); font-size: 11px; font-weight: 400; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--ap-line); font-variant-numeric: tabular-nums; }
 .assign-progress-owner { margin: 22px 0; min-width: 0; }
-.assign-progress-owner > summary { padding: 0 0 12px; font-size: 14px; font-weight: 650; color: var(--ap-ink); }
+.assign-progress-owner > summary { padding: 0 0 12px; font-size: 14px; font-weight: 650; color: var(--ap-ink); flex-wrap: wrap; }
+.assign-progress-owner-name { display: inline-flex; align-items: center; gap: 8px; }
+.assign-progress-owner-stats { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .assign-progress-owner-avatar { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--w-accent-soft, rgba(109, 108, 245, .09)); color: var(--ap-accent); font-size: 11px; }
 .assign-progress-owner-body { min-width: 0; }
 .assign-progress-req { position: relative; min-width: 0; border-radius: 12px; border-bottom: 1px solid var(--ap-line); transition: background 180ms ease; }
@@ -51,6 +53,9 @@
 .assign-progress-badge.success { color: #186a3b; background: #f3faf5; border-color: rgba(45, 159, 91, .2); }
 .assign-progress-badge.warning { color: #9a6700; background: #fff9ed; border-color: rgba(180, 127, 25, .2); }
 .assign-progress-badge.danger { color: #b4232a; background: #fff5f5; border-color: rgba(217, 44, 44, .22); }
+.assign-progress-badge.case-pending { color: #854d0e; background: #fef3c7; border-color: #dfb451; font-weight: 700; }
+.assign-progress-badge.test-pending { color: #b4232a; background: #ffe4e6; border-color: #ed9da5; font-weight: 700; }
+.assign-progress-badge.case-pending::before, .assign-progress-badge.test-pending::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 5px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
 .assign-progress-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--ap-soft); }
 .assign-progress-counts { display: grid; grid-template-columns: repeat(3, minmax(60px, auto)); gap: 18px; }
 .assign-progress-counts > div { display: flex; flex-direction: column; gap: 3px; font-size: 10px; color: var(--ap-faint); }
