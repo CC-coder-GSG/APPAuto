@@ -1,0 +1,54 @@
+.assign-progress-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.assign-progress-badge { display: inline-block; border-radius: 6px; padding: 3px 7px; margin: 2px 4px 2px 0; background: #eef2f6; color: #475569; font-size: 12px; line-height: 1.6; white-space: normal; }
+.assign-progress-badge.success { color: #166534; background: #dcfce7; }
+.assign-progress-badge.warning { color: #92400e; background: #fef3c7; }
+.assign-progress-badge.danger { color: #b91c1c; background: #fee2e2; }
+.assign-progress-toolbar { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
+.assign-progress-toolbar label { display: flex; flex-direction: column; gap: 5px; color: #475569; font-size: 12px; }
+.assign-progress-toolbar input { min-width: 240px; }
+.assign-progress-toolbar select { min-width: 160px; }
+.assign-progress-toolbar input, .assign-progress-toolbar select { margin: 0; }
+.assign-progress-retest-summary { margin: 10px 0 14px; padding: 10px 12px; border: 1px dashed #cbd5e1; border-radius: 8px; background: white; }
+.assign-progress-retest-summary summary, .assign-progress-owner > summary { cursor: pointer; font-weight: 600; }
+.assign-progress-retest-summary > div { padding-top: 8px; }
+.assign-progress-owner { margin: 14px 0; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; overflow: hidden; }
+.assign-progress-owner > summary { padding: 13px 16px; color: #0f172a; background: #f1f5f9; }
+.assign-progress-owner > summary .muted { margin-left: 8px; font-weight: 400; font-size: 12px; }
+.assign-progress-scroll { overflow-x: auto; max-width: 100%; }
+.assign-progress-table { min-width: 850px; margin: 0; table-layout: fixed; }
+.assign-progress-table > thead > tr > th:first-child { width: 34%; }
+.assign-progress-table > thead > tr > th:nth-child(2) { width: 15%; }
+.assign-progress-table > thead > tr > th:nth-child(3) { width: 15%; }
+.assign-progress-table > thead > tr > th:last-child { width: 110px; }
+.assign-progress-table > tbody > tr > td { vertical-align: top; padding: 12px; overflow-wrap: anywhere; }
+.assign-progress-table small, .assign-progress-section small { display: block; margin-top: 4px; font-size: 11px; line-height: 1.6; }
+.assign-progress-risk > td:first-child { box-shadow: inset 3px 0 #ef4444; }
+.assign-progress-danger { color: #b91c1c; }
+/* Existing global button themes use !important; scope these overrides to IDs. */
+.assign-progress-table button.assign-progress-link { padding: 0; border: 0; border-radius: 0 !important; background: transparent !important; color: #2563eb !important; font: inherit; font-weight: 600; cursor: pointer; box-shadow: none !important; min-height: 0; }
+.assign-progress-table button.assign-progress-link:hover { text-decoration: underline; background: transparent !important; color: #1d4ed8 !important; transform: none !important; }
+.assign-progress-warning { color: #92400e; }
+.assign-progress-table > tbody > tr > td.assign-progress-detail-cell { padding: 0; }
+.assign-progress-detail { width: var(--assign-progress-detail-width, 100%); position: sticky; left: 0; box-sizing: border-box; padding: 18px; border-top: 1px solid #dbeafe; border-bottom: 1px solid #dbeafe; background: #f8fafc; }
+.assign-progress-detail-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.assign-progress-records { font-size: 12px; margin-top: 8px; }
+.assign-progress-detail-nav { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 8px; }
+.assign-progress-detail p.muted { font-size: 12px; }
+.assign-progress-section { padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 14px; background: white; scroll-margin-top: 80px; }
+.assign-progress-section h4 { margin: 0 0 12px; font-size: 14px; }
+.assign-progress-section table { min-width: 760px; margin: 0; table-layout: fixed; }
+.assign-progress-section th:first-child { width: 30%; }
+.assign-progress-section td { vertical-align: top; overflow-wrap: anywhere; }
+.assign-progress-pager { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 12px; font-size: 12px; }
+.assign-progress-empty { text-align: center; color: #64748b; padding: 24px 12px; }
+.assign-progress-footnote { margin-top: 12px; font-size: 11px; color: #64748b; }
+.assign-progress-alert { border: 1px solid #fcd34d; border-radius: 6px; background: #fffbeb; color: #92400e; padding: 10px; margin: 10px 0; white-space: normal; }
+.assign-progress-task-dialog { width: min(600px, calc(100vw - 40px)); max-height: 85vh; overflow: auto; border: 1px solid #cbd5e1; border-radius: 12px; padding: 24px; box-sizing: border-box; }
+.assign-progress-task-dialog::backdrop { background: #0f172a66; }
+.assign-progress-task-description { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .assign-progress-toolbar label, .assign-progress-toolbar input, .assign-progress-toolbar select { width: 100%; min-width: 0; box-sizing: border-box; }
+  .assign-progress-detail { padding: 10px; }
+  .assign-progress-section { padding: 10px; }
+  .assign-progress-pager { justify-content: flex-start; }
+}

@@ -6,7 +6,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user, get_db
@@ -17,6 +16,7 @@ from app.services.activity_service import ActivityService
 from app.services.permission_service import ensure_admin, ensure_tab_access
 from app.services.requirement_service import RequirementService
 from app.services.zentao_task_sync_service import ZentaoTaskSyncService
+from app.services.assignment_progress_service import AssignmentProgressService
 from app.services.assignment_validation import validate_assignments, validate_task_dates
 from app.services.zentao_task_schedule_service import ZentaoTaskScheduleService
 
@@ -187,130 +187,38 @@ def admin_requirements_progress(
     db: Session = Depends(get_db),
 ):
     ensure_tab_access(current_user, "assign")
+    return AssignmentProgressService(db).summary(major_version_id, software_id)
 
-    q = (
-        db.query(Requirement)
-        .options(joinedload(Requirement.owner), joinedload(Requirement.major_version), joinedload(Requirement.test_cases))
-        .filter(Requirement.owner_id.isnot(None))
+
+@router.get("/requirements/admin/progress/{requirement_id}")
+def admin_requirement_progress_detail(
+    requirement_id: int,
+    major_version_id: Optional[int] = None,
+    software_id: Optional[int] = None,
+    bug_page: int = Query(1, ge=1),
+    retest_page: int = Query(1, ge=1),
+    task_page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_tab_access(current_user, "assign")
+    return AssignmentProgressService(db).detail(
+        requirement_id, major_version_id, software_id,
+        bug_page=bug_page, retest_page=retest_page, task_page=task_page, page_size=page_size,
     )
-    if major_version_id:
-        q = q.filter(Requirement.major_version_id == major_version_id)
-    elif software_id:
-        q = q.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
-    reqs = q.order_by(Requirement.major_version_id.asc(), Requirement.id.asc()).all()
 
-    req_ids = [r.id for r in reqs]
-    bug_count_map: dict[int, int] = {}
-    if req_ids:
-        bug_rows = (
-            db.query(BugTracking.requirement_id, func.count(BugTracking.id))
-            .filter(BugTracking.requirement_id.in_(req_ids))
-            .group_by(BugTracking.requirement_id)
-            .all()
-        )
-        bug_count_map = {rid: cnt for rid, cnt in bug_rows}
 
-    owners_map: dict[int, dict] = {}
-    for r in reqs:
-        oid = r.owner_id or -1
-        owner_name = r.owner.shown_name if r.owner else "未分配"
-        major_name = r.major_version.version_no if r.major_version else "未知"
-        owner_bucket = owners_map.setdefault(
-            oid,
-            {
-                "owner_id": oid,
-                "owner_name": owner_name,
-                "requirements": [],
-                "major_summary_map": {},
-            },
-        )
-        owner_bucket["requirements"].append(
-            {
-                "id": r.id,
-                "zentao_req_id": r.zentao_req_id,
-                "title": r.title,
-                "major_version_id": r.major_version_id,
-                "major_version_name": major_name,
-                "case_completed": bool(r.case_completed),
-                "test_completed": bool(r.test_completed),
-                "retest_completed": bool(r.retest_completed),
-                "case_count": len(r.test_cases or []),
-                "bug_count": int(bug_count_map.get(r.id, 0)),
-            }
-        )
-        s = owner_bucket["major_summary_map"].setdefault(
-            r.major_version_id,
-            {
-                "major_version_id": r.major_version_id,
-                "major_version_name": major_name,
-                "total_requirements": 0,
-                "case_done": 0,
-                "test_done": 0,
-            },
-        )
-        s["total_requirements"] += 1
-        s["case_done"] += 1 if r.case_completed else 0
-        s["test_done"] += 1 if r.test_completed else 0
-
-    owners = []
-    for owner in owners_map.values():
-        major_summaries = list(owner["major_summary_map"].values())
-        major_summaries.sort(key=lambda x: x["major_version_name"])
-        for m in major_summaries:
-            m["case_pending"] = max(0, m["total_requirements"] - m["case_done"])
-            m["test_pending"] = max(0, m["total_requirements"] - m["test_done"])
-        req_list = owner["requirements"]
-        req_list.sort(key=lambda x: (x["major_version_name"], x["zentao_req_id"]))
-        owners.append(
-            {
-                "owner_id": owner["owner_id"],
-                "owner_name": owner["owner_name"],
-                "major_summaries": major_summaries,
-                "requirements": req_list,
-            }
-        )
-    owners.sort(key=lambda x: x["owner_name"])
-
-    retest_q = db.query(Requirement).options(joinedload(Requirement.major_version)).filter(
-        Requirement.test_completed.is_(True),
-        Requirement.retest_completed.is_(False),
-        Requirement.owner_id.isnot(None),
-    )
-    if major_version_id:
-        retest_q = retest_q.filter(Requirement.major_version_id == major_version_id)
-    elif software_id:
-        retest_q = retest_q.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
-    retest_rows = retest_q.all()
-    retest_map: dict[int, dict] = {}
-    for r in retest_rows:
-        k = r.major_version_id
-        bucket = retest_map.setdefault(
-            k,
-            {
-                "major_version_id": k,
-                "major_version_name": r.major_version.version_no if r.major_version else "未知",
-                "pending_retest_count": 0,
-            },
-        )
-        bucket["pending_retest_count"] += 1
-    retest_pending_by_major = sorted(retest_map.values(), key=lambda x: x["major_version_name"])
-
-    total_requirements = len(reqs)
-    case_done_total = sum(1 for r in reqs if r.case_completed)
-    test_done_total = sum(1 for r in reqs if r.test_completed)
-    return {
-        "summary": {
-            "owners": len(owners),
-            "requirements": total_requirements,
-            "case_done": case_done_total,
-            "case_pending": max(0, total_requirements - case_done_total),
-            "test_done": test_done_total,
-            "test_pending": max(0, total_requirements - test_done_total),
-            "retest_pending_total": sum(x["pending_retest_count"] for x in retest_pending_by_major),
-        },
-        "owners": owners,
-        "retest_pending_by_major": retest_pending_by_major,
-    }
+@router.post("/requirements/admin/progress/{requirement_id}/refresh")
+def admin_refresh_requirement_progress(
+    requirement_id: int,
+    major_version_id: Optional[int] = None,
+    software_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ensure_tab_access(current_user, "assign")
+    return AssignmentProgressService(db).refresh(requirement_id, current_user, major_version_id, software_id)
 
 
 @router.post("/requirements/admin/sync-zentao")
