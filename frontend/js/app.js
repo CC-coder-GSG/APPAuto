@@ -2,7 +2,7 @@ import './realtime/sse.js?v=20260612-1';
 // 必须最先加载，确保 window.OmniQASSE 在各 tab 模块执行 bindXxxSSE() 前已就绪
 import './api.js?v=20260417-3';
 import './auth.js?v=20260417-3';
-import './zentao-binding.js?v=20260417-3';
+import './zentao-binding.js?v=20261022-token-recovery-1';
 import './zentao-hydrator.js?v=20261022-found-version-1';
 import './zentao-status-map.js?v=20260422-2';
 import './state.js?v=20260417-3';

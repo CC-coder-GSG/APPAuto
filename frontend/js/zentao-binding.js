@@ -250,6 +250,8 @@ async function handleRefresh() {
     const result = await refreshToken();
     render();
     if (result.ok) {
+      window.OmniQAZentao?.invalidate();
+      window.OmniQAZentao?.refreshVisible();
       showMsg('Token 刷新成功', 'success');
     } else {
       showMsg('Token 刷新失败：' + (result.message || ''), 'error');

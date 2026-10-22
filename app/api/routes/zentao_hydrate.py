@@ -37,7 +37,7 @@ import asyncio
 import logging
 import re
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
@@ -563,8 +563,8 @@ def _parse_id_list(raw: str) -> list[int]:
 
 def _get_client_ctx(user_id: int, db: Session) -> tuple[ZentaoClient, str] | None:
     """
-    Return (ZentaoClient, base_url) for the given user, or None if the user
-    has no binding or a valid token cannot be obtained.
+    Return (ZentaoClient, base_url), or None if the user has no binding.
+    Authentication failures are retryable upstream errors, never missing records.
     """
     binding = (
         db.query(UserZentaoBinding)
@@ -576,7 +576,7 @@ def _get_client_ctx(user_id: int, db: Session) -> tuple[ZentaoClient, str] | Non
 
     token = get_valid_token(user_id, db)
     if not token:
-        return None
+        raise HTTPException(status_code=502, detail=binding.last_error_message or "禅道 Token 获取失败，请稍后重试")
 
     base_url = binding.base_url.rstrip('/')
     return ZentaoClient.from_binding(binding, token), base_url

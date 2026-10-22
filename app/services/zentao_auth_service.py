@@ -82,8 +82,10 @@ def _fetch_new_token(binding: UserZentaoBinding) -> tuple[str, datetime] | None:
     POST /v2/users/login; expiry is a local refresh deadline, not a server TTL.
     Returns None on failure.
     """
+    binding.last_error_message = None
     plain_password = decrypt_password(binding.zentao_password_ciphertext or '')
     if not plain_password:
+        binding.last_error_message = "无法解密已保存的禅道密码，请重新保存禅道账号绑定"
         logger.warning("zentao_auth: cannot decrypt password for user_id=%s", binding.user_id)
         return None
 
@@ -100,6 +102,7 @@ def _fetch_new_token(binding: UserZentaoBinding) -> tuple[str, datetime] | None:
         data = decode_v2(resp)
         token = data.get("token")
         if not isinstance(token, str) or not token.strip():
+            binding.last_error_message = "禅道登录成功但未返回有效 Token，请稍后重试"
             logger.warning("zentao_auth: no token in v2 response for user_id=%s", binding.user_id)
             return None
         # v2 documents no expiry field. Use a conservative local refresh budget;
@@ -107,10 +110,28 @@ def _fetch_new_token(binding: UserZentaoBinding) -> tuple[str, datetime] | None:
         from datetime import timedelta
         expires_at = utc_now_naive().replace(microsecond=0) + timedelta(seconds=3600)
         return token, expires_at
+    except ZentaoAPIError as e:
+        if e.status_code == 401:
+            binding.last_error_message = "禅道登录认证失败（HTTP 401），请检查已保存的账号和密码"
+        elif e.status_code == 403:
+            binding.last_error_message = "禅道拒绝登录（HTTP 403），请检查账号权限或登录限制"
+        elif e.status_code >= 500:
+            binding.last_error_message = f"禅道登录接口暂时不可用（HTTP {e.status_code}），请稍后重试"
+        else:
+            binding.last_error_message = f"禅道登录请求失败（HTTP {e.status_code}），请检查地址及账号配置"
+        logger.warning("zentao_auth: login failed for user_id=%s status=%s", binding.user_id, e.status_code)
+    except httpx.TimeoutException:
+        binding.last_error_message = "连接禅道登录接口超时，请稍后重试"
+        logger.warning("zentao_auth: login timed out for user_id=%s", binding.user_id)
+    except httpx.RequestError:
+        binding.last_error_message = "无法连接禅道登录接口，请检查网络后重试"
+        logger.warning("zentao_auth: login connection failed for user_id=%s", binding.user_id)
     except httpx.HTTPStatusError as e:
+        binding.last_error_message = f"禅道登录请求失败（HTTP {e.response.status_code}），请稍后重试"
         logger.warning("zentao_auth: HTTP error for user_id=%s status=%s", binding.user_id, e.response.status_code)
     except Exception as e:
-        logger.warning("zentao_auth: error for user_id=%s: %s", binding.user_id, e)
+        binding.last_error_message = "禅道 Token 刷新异常，请稍后重试"
+        logger.warning("zentao_auth: error for user_id=%s type=%s", binding.user_id, type(e).__name__)
     return None
 
 
@@ -159,7 +180,7 @@ def get_valid_token(user_id: int, db: Session) -> str | None:
     else:
         binding.last_refresh_at = now
         binding.last_refresh_status = "error"
-        binding.last_error_message = "Token refresh failed — check Zentao credentials."
+        binding.last_error_message = binding.last_error_message or "Token 刷新失败，请稍后重试或检查禅道账号配置"
         db.commit()
         return None
 
