@@ -95,12 +95,22 @@ const TASK_CHIP_TONE = {
   cancel: { zh: '已取消', bg: '#f8fafc', fg: '#94a3b8', bd: '#e2e8f0' },
   closed: { zh: '已关闭', bg: '#f8fafc', fg: '#94a3b8', bd: '#e2e8f0' },
 };
-function renderStoryTaskChips(tasks, domScope, reqId) {
+function renderStoryTaskChips(tasks, domScope, reqId, managedTaskIds = []) {
   if (!tasks || !tasks.length) return '';
+  // 管理任务已有专属标签/选择器；同一任务不再在标题下重复展示。
+  const seen = new Set(managedTaskIds.map(Number));
+  tasks = tasks.filter(t => {
+    const id = Number(t.task_id);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  if (!tasks.length) return '';
   const MAX_INLINE = 3;
   const chip = (t) => {
-    if (t.task_story_change_pending) return renderTaskStoryChangeBadge(t);
-    const tone = TASK_CHIP_TONE[t.status] || TASK_CHIP_TONE.wait;
+    const pending = t.task_story_change_pending;
+    const tone = pending ? { zh: '变更待确认', bg: '#fff7ed', fg: '#9a3412', bd: '#fdba74' }
+      : TASK_CHIP_TONE[t.status] || TASK_CHIP_TONE.wait;
     const struck = t.status === 'cancel' || t.status === 'closed' ? ' qa-task-chip--closed' : '';
     const assignee = t.assigned_to_name ? `<span class="qa-task-chip-assignee">👤${escapeHtml(t.assigned_to_name)}</span>` : '';
     // 完成者单独展示：任务完成后 assignedTo 常已流转给下一环节的人
@@ -108,9 +118,9 @@ function renderStoryTaskChips(tasks, domScope, reqId) {
     const tip = `任务 #${t.task_id}【${tone.zh}】${t.name || ''}`
       + (t.assigned_to_name ? ` · 当前指派：${t.assigned_to_name}` : '')
       + (t.finished_by_name ? ` · 由 ${t.finished_by_name} 完成` : '')
-      + '（点击预览）';
+      + (pending ? '（点击查看需求变更并确认）' : '（点击预览）');
     return `<span class="qa-task-chip${struck}" style="background:${tone.bg}; color:${tone.fg}; border-color:${tone.bd};" title="${escapeHtml(tip)}"
-      onclick="event.preventDefault(); event.stopPropagation(); window.OmniQAPreview && window.OmniQAPreview.openTask(${t.task_id})">
+      onclick="event.preventDefault(); event.stopPropagation(); window.OmniQAPreview && window.OmniQAPreview.${pending ? 'openTaskStoryChange' : 'openTask'}(${t.task_id})">
       ⚙#${t.task_id}<span class="qa-task-chip-title">${escapeHtml(t.name || '')}</span>${assignee}${finisher}<span class="qa-task-chip-status">${tone.zh}</span></span>`;
   };
   const head = tasks.slice(0, MAX_INLINE).map(chip).join('');
@@ -335,7 +345,7 @@ function renderRequirementTaskSelector(req, taskTag, preview = '') {
     <summary class="qa-task-trigger" data-tone="${tone(req.zentao_task_status)}" aria-label="切换需求 ${Number(req.id)} 的当前任务" title="点击切换当前操作的禅道任务">
       <span class="qa-task-trigger-dot" aria-hidden="true"></span><span>禅道子任务 <b>#${Number(req.zentao_task_id)}</b></span><span class="qa-task-trigger-status">${escapeHtml(status)}</span><svg class="qa-task-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m5 6 3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </summary>
-    <span class="qa-task-options" ${floating ? 'popover="manual"' : ''}><span class="qa-task-menu-heading">切换关联任务<span>${own.length}</span></span>${own.map(t => `<button type="button" data-mine-task="${Number(t.task_id)}" ${t.task_id === req.zentao_task_id ? 'aria-current="true"' : ''} onclick="selectRequirementTask(${Number(req.id)}, ${Number(t.task_id)})" title="${escapeHtml(t.name)}"><span class="qa-task-option-body"><span class="qa-task-option-meta"><b>#${Number(t.task_id)}</b><span data-tone="${tone(t.status)}">${escapeHtml(TASK_STATUS_ZH[t.status] || t.status || '未开始')}</span></span><span class="qa-task-option-name">${escapeHtml(t.name)}</span></span><span class="qa-task-option-check">${t.task_id === req.zentao_task_id ? check : ''}</span></button>`).join('')}</span>
+    <span class="qa-task-options" ${floating ? 'popover="manual"' : ''}><span class="qa-task-menu-heading">切换关联任务<span>${own.length}</span></span>${own.map(t => `<button type="button" data-mine-task="${Number(t.task_id)}" ${t.task_id === req.zentao_task_id ? 'aria-current="true"' : ''} onclick="selectRequirementTask(${Number(req.id)}, ${Number(t.task_id)})" title="${escapeHtml(t.name)}"><span class="qa-task-option-body"><span class="qa-task-option-meta"><b>#${Number(t.task_id)}</b><span data-tone="${tone(t.status)}">${escapeHtml(t.task_story_change_pending ? '待确认变更' : TASK_STATUS_ZH[t.status] || t.status || '未开始')}</span></span><span class="qa-task-option-name">${escapeHtml(t.name)}</span></span><span class="qa-task-option-check">${t.task_id === req.zentao_task_id ? check : ''}</span></button>`).join('')}</span>
     </details>${preview}</span><small>存在 ${own.length} 个关联任务，点击标签切换</small></span>`;
 }
 
@@ -1458,6 +1468,10 @@ export function renderMineCards() {
       ? `<span class="qa-story-id-nohref" data-zt-story-id="${ztStoryId}">${req.zentao_req_id}</span>`
       : (req.zentao_req_id || '');
     const previewBtn = renderPreviewBtn('story', ztStoryId);
+    const storyTaskHtml = renderStoryTaskChips(req.story_tasks, 'mine', req.id, [
+      req.zentao_task_id, req.zentao_parent_task_id,
+      ...(req.test_tasks || []).filter(t => t.assigned_to_me).map(t => t.task_id),
+    ]);
     // 复测出现问题：标题旁醒目文本 + 整卡红框（对所有能看到该需求卡片的人展示）
     const retestFailed = req.retest_conclusion === 'failed';
     const retestFailTag = retestFailed
@@ -1468,7 +1482,7 @@ export function renderMineCards() {
     return `
       <details class="mine-req-card" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; ${retestFailBorder} transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
-          <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${renderTaskStoryChangeBadge(req)}${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${generateCaseChip}${renderStoryTaskChips(req.story_tasks, 'mine', req.id)}</div>
+          <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${renderTaskStoryChangeBadge(req)}${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${generateCaseChip}${storyTaskHtml}</div>
           ${isFullyCompleted ? '<span style="color:#16a34a; font-size:14px; background:#f0fdf4; padding:4px 8px; border-radius:4px; border:1px solid #bbf7d0;">✅ 测试已完成</span>' : '<span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开卡片)</span>'}
         </summary>
         <div style="margin-top: 12px;">
