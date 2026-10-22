@@ -8,6 +8,8 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models import BugTracking, Requirement, RequirementRetestRecord, Version
+from app.models.final_test_record import FinalTestRecord
+from app.models.user import User
 from app.models.task_board import TaskBoardTask
 from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.services.workbench_link_service import WorkbenchLinkService
@@ -226,6 +228,13 @@ class AssignmentProgressService:
         return result
 
     def summary(self, major_version_id=None, software_id=None):
+        if major_version_id:
+            major_query = self.db.query(Version).filter(Version.id == major_version_id)
+            if software_id:
+                major_query = major_query.filter(Version.software_id == software_id)
+            major = major_query.first()
+            if major and major.final_test_enabled:
+                return self._final_test_summary(major)
         reqs = self._query(major_version_id, software_id).order_by(Requirement.major_version_id, Requirement.id).all()
         collected = self._collect(reqs)
         owners = {}
@@ -256,6 +265,7 @@ class AssignmentProgressService:
         case_done = sum(r.case_completed for r in reqs)
         test_done = sum(r.test_completed for r in reqs)
         return {
+            "mode": "assignment",
             "summary": {"owners": sum(oid is not None for oid in owners), "requirements": len(reqs),
                         "case_done": case_done, "case_pending": len(reqs) - case_done,
                         "test_done": test_done, "test_pending": len(reqs) - test_done,
@@ -265,6 +275,55 @@ class AssignmentProgressService:
             "owners": sorted(owners.values(), key=lambda o: (o["owner_id"] == -1, o["owner_name"])),
             "retest_pending_by_major": sorted(retest_by_major.values(), key=lambda v: v["major_version_name"]),
             "loaded_at": _iso(local_now()),
+        }
+
+    def _final_test_summary(self, major):
+        """Final-test checkboxes belong to each person, never the assigned owner."""
+        reqs = self.db.query(Requirement).filter(
+            Requirement.major_version_id == major.id,
+        ).order_by(Requirement.id).all()
+        records = self.db.query(FinalTestRecord).filter(
+            FinalTestRecord.requirement_id.in_([r.id for r in reqs]),
+        ).all()
+        states = {(r.user_id, r.requirement_id): r for r in records}
+        # Include team members who have not started, plus existing participants.
+        users = self.db.query(User).filter(or_(
+            (User.is_active.is_(True) & User.is_team_member.is_(True)),
+            User.id.in_({r.user_id for r in records}),
+        )).all()
+        owners = []
+        for user in sorted(users, key=lambda u: (u.shown_name, u.id)):
+            items = []
+            for req in reqs:
+                record = states.get((user.id, req.id))
+                items.append({
+                    "id": req.id, "zentao_req_id": req.zentao_req_id, "title": req.title,
+                    "owner_id": user.id, "owner_name": user.shown_name,
+                    "major_version_id": major.id, "major_version_name": major.version_no,
+                    "case_completed": bool(record and record.case_completed),
+                    "test_completed": bool(record and record.test_completed),
+                })
+            case_done = sum(item["case_completed"] for item in items)
+            test_done = sum(item["test_completed"] for item in items)
+            owners.append({
+                "owner_id": user.id, "owner_name": user.shown_name, "requirements": items,
+                "major_summaries": [{
+                    "major_version_id": major.id, "major_version_name": major.version_no,
+                    "total_requirements": len(reqs), "case_done": case_done, "test_done": test_done,
+                    "case_pending": len(reqs) - case_done, "test_pending": len(reqs) - test_done,
+                }],
+            })
+        total = len(reqs) * len(owners)
+        case_done = sum(o["major_summaries"][0]["case_done"] for o in owners)
+        test_done = sum(o["major_summaries"][0]["test_done"] for o in owners)
+        return {
+            "mode": "final_test",
+            "summary": {
+                "owners": len(owners), "requirements": len(reqs), "person_requirements": total,
+                "case_done": case_done, "case_pending": total - case_done,
+                "test_done": test_done, "test_pending": total - test_done,
+            },
+            "owners": owners, "loaded_at": _iso(local_now()),
         }
 
     def detail(self, requirement_id, major_version_id=None, software_id=None, *, bug_page=1, retest_page=1, task_page=1, page_size=20):

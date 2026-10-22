@@ -1,4 +1,4 @@
-﻿import { loadAssignProgress, toggleAssignProgressPendingOnly, resetAssignProgressContext } from './assign-progress.js?v=20261021-3';
+﻿import { loadAssignProgress, toggleAssignProgressPendingOnly, resetAssignProgressContext } from './assign-progress.js?v=20261022-1';
 export { loadAssignProgress, toggleAssignProgressPendingOnly };
 
 import { api } from '../api.js';
@@ -183,15 +183,13 @@ export async function loadAssignBoard(options = {}) {
 }
 
 export async function refreshFinalTestState() {
+  const captured = currentAssignContext();
   const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
   const btn = document.getElementById('finalTestToggleBtn');
-  const card = document.getElementById('finalTestProgressCard');
-  const area = document.getElementById('finalTestProgressArea');
   if (!btn) return;
 
   if (!majorId) {
     btn.style.display = 'none';
-    if (card) card.style.display = 'none';
     return;
   }
   btn.style.display = '';
@@ -203,6 +201,7 @@ export async function refreshFinalTestState() {
   } catch {
     enabled = false;
   }
+  if (captured !== currentAssignContext()) return;
 
   if (enabled) {
     btn.textContent = '关闭最终测试';
@@ -215,56 +214,10 @@ export async function refreshFinalTestState() {
     btn.style.background = '';
     btn.style.color = '';
   }
-
-  if (!enabled) {
-    if (card) card.style.display = 'none';
-    return;
-  }
-
-  // 已开启：拉取每人进度并渲染
-  try {
-    const data = await (await api(`/final-test/progress?major_version_id=${majorId}`)).json();
-    if (card) card.style.display = '';
-    if (area) area.innerHTML = renderFinalTestProgress(data);
-  } catch {
-    if (card) card.style.display = 'none';
-  }
-}
-
-function renderFinalTestProgress(data) {
-  const total = Number(data.total_requirements || 0);
-  const reqs = data.requirements || [];
-  const people = data.people || [];
-  if (people.length === 0) {
-    return `<div class="muted">该版本共 ${total} 个需求。暂无人员开始最终测试勾选。</div>`;
-  }
-  const summary = `<div class="row" style="gap:10px; flex-wrap:wrap; margin-bottom:10px;">
-      <span class="badge">📄 需求总数：${total}</span>
-      <span class="badge">👥 参与人数：${people.length}</span>
-    </div>`;
-
-  const peopleCards = people.map((p) => {
-    const rows = reqs.map((r) => {
-      const st = (p.req_status || {})[r.id] || {};
-      return `<tr>
-        <td>${r.zentao_req_id || ''} ${r.title || ''}</td>
-        <td style="text-align:center;">${st.case_completed ? '✅' : '⏳'}</td>
-        <td style="text-align:center;">${st.test_completed ? '✅' : '⏳'}</td>
-      </tr>`;
-    }).join('');
-    return `<details class="card" style="margin-top:10px;">
-      <summary style="cursor:pointer; font-weight:700; color:#92400e;">👤 ${p.user_name}（用例 ${p.case_done}/${total}，测试 ${p.test_done}/${total}）</summary>
-      <table style="margin-top:8px;">
-        <thead><tr><th>需求</th><th>用例完成</th><th>测试完成</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="3" class="muted">暂无需求</td></tr>'}</tbody>
-      </table>
-    </details>`;
-  }).join('');
-
-  return summary + peopleCards;
 }
 
 export async function toggleFinalTest() {
+  const captured = currentAssignContext();
   const majorId = Number(document.getElementById('assignMajorSelect')?.value || 0);
   if (!majorId) {
     window.showMessage && window.showMessage('请先选择一个具体大版本', 'error');
@@ -290,6 +243,8 @@ export async function toggleFinalTest() {
       body: { major_version_id: majorId, enabled: nextEnabled },
     });
     window.showMessage && window.showMessage(nextEnabled ? '已进入最终测试阶段' : '已关闭最终测试阶段', 'success');
+    if (captured !== currentAssignContext()) return;
+    await loadAssignProgress();
     await refreshFinalTestState();
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '操作失败', 'error');

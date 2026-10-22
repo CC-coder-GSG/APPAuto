@@ -45,6 +45,9 @@ function matches(req) {
   if (query && !`${req.zentao_req_id} ${req.title}`.toLocaleLowerCase().includes(query)) return false;
   if (filters.owner && String(req.owner_id ?? -1) !== filters.owner) return false;
   if (filters.status === 'unfinished') return !(req.case_completed && req.test_completed);
+  if (filters.status === 'case-pending') return !req.case_completed;
+  if (filters.status === 'test-pending') return !req.test_completed;
+  if (filters.status === 'completed') return req.case_completed && req.test_completed;
   if (filters.status === 'retest') return req.test_completed && req.retest_conclusion === 'pending';
   if (filters.status === 'failed') return req.retest_conclusion === 'failed';
   if (filters.status === 'open-bugs') return req.open_bug_count > 0;
@@ -53,28 +56,37 @@ function matches(req) {
 
 function summaryHtml(data) {
   const s = data.summary || {};
-  return [
+  return (data.mode === 'final_test' ? [
+    ['需求总数', s.requirements], ['统计人员', s.owners],
+    ['用例完成（人次）', s.case_done], ['用例待完成（人次）', s.case_pending],
+    ['测试完成（人次）', s.test_done], ['测试待完成（人次）', s.test_pending],
+  ] : [
     ['需求总数', s.requirements], ['参与人员', s.owners], ['用例待完成', s.case_pending],
     ['测试待完成', s.test_pending], ['待复测', s.retest_pending_total, 'warning'],
     ['复测出现问题', s.retest_failed_total, 'danger'], ['未分配', s.unassigned_total],
-  ].map(([label, count, tone]) => `<div class="assign-progress-metric ${count ? tone || '' : ''}"><span class="assign-progress-metric-value">${Number(count || 0)}</span><span class="assign-progress-metric-label">${h(label)}</span></div>`).join('');
+  ]).map(([label, count, tone]) => `<div class="assign-progress-metric ${count ? tone || '' : ''}"><span class="assign-progress-metric-value">${Number(count || 0)}</span><span class="assign-progress-metric-label">${h(label)}</span></div>`).join('');
 }
 
 function renderBoard(data) {
   const area = document.getElementById('assignProgressArea');
   if (!area) return;
+  const finalTest = data.mode === 'final_test';
+  area.classList.toggle('assign-progress-final-test', finalTest);
+  if (finalTest && ['retest', 'failed', 'open-bugs'].includes(filters.status)) filters.status = '';
+  const caption = document.querySelector('.assign-progress-panel-heading p');
+  if (caption) caption.textContent = finalTest ? '最终测试：按人员独立统计用例完成与测试完成' : '按需求查看测试、复测与任务进度';
   const ownerOptions = (data.owners || []).map(o => `<option value="${h(o.owner_id ?? 'unassigned')}">${h(o.owner_name)}</option>`).join('');
   area.innerHTML = `<div class="assign-progress-metrics" aria-label="需求进度汇总">${summaryHtml(data)}</div>
     <div class="assign-progress-toolbar">
       <label>查找需求<input id="assignProgressSearch" type="search" placeholder="需求编号 / 标题" value="${h(filters.search)}"></label>
-      <label>负责人<select id="assignProgressOwner"><option value="">全部负责人</option>${ownerOptions}</select></label>
-      <label>进度筛选<select id="assignProgressStatus"><option value="">全部需求</option><option value="unfinished">用例或测试未完成</option><option value="retest">待复测</option><option value="failed">复测出现问题</option><option value="open-bugs">存在未闭环 Bug</option></select></label>
+      <label>${finalTest ? '测试人员' : '负责人'}<select id="assignProgressOwner"><option value="">${finalTest ? '全部人员' : '全部负责人'}</option>${ownerOptions}</select></label>
+      <label>进度筛选<select id="assignProgressStatus"><option value="">全部需求</option><option value="unfinished">用例或测试未完成</option><option value="case-pending">用例未完成</option><option value="test-pending">测试未完成</option><option value="completed">用例和测试均完成</option>${finalTest ? '' : '<option value="retest">待复测</option><option value="failed">复测出现问题</option><option value="open-bugs">存在未闭环 Bug</option>'}</select></label>
       <button type="button" class="secondary" data-progress-action="reload">刷新进度</button>
       <span class="muted" id="assignProgressCount"></span>
     </div>
-    <details class="assign-progress-retest-summary"><summary><span>复测待办汇总</span><span class="assign-progress-caption">按大版本</span><span class="assign-progress-group-count">${Number(data.summary?.retest_pending_total || 0)}</span></summary><div>${(data.retest_pending_by_major || []).map(r => badge(`${r.major_version_name}：待复测 ${r.pending_retest_count}`, 'warning')).join('') || '<span class="muted">暂无待复测需求</span>'}</div></details>
+    ${finalTest ? '<div class="assign-progress-footnote">每人均统计该版本全部需求；尚未勾选按未完成计。汇总人次按“人员 × 需求”计算。</div>' : `<details class="assign-progress-retest-summary"><summary><span>复测待办汇总</span><span class="assign-progress-caption">按大版本</span><span class="assign-progress-group-count">${Number(data.summary?.retest_pending_total || 0)}</span></summary><div>${(data.retest_pending_by_major || []).map(r => badge(`${r.major_version_name}：待复测 ${r.pending_retest_count}`, 'warning')).join('') || '<span class="muted">暂无待复测需求</span>'}</div></details>`}
     <div id="assignProgressNotice" role="status"></div><div id="assignProgressRows"></div>
-    <div class="assign-progress-footnote">摘要读取时间：${time(data.loaded_at)}。禅道数据以明细中的同步时间为准，可展开需求后刷新详情。</div>`;
+    <div class="assign-progress-footnote">摘要读取时间：${time(data.loaded_at)}。${finalTest ? '统计以各人员的最终测试勾选为准。' : '禅道数据以明细中的同步时间为准，可展开需求后刷新详情。'}</div>`;
   area.querySelector('#assignProgressOwner').value = filters.owner;
   area.querySelector('#assignProgressStatus').value = filters.status;
   area.oninput = event => {
@@ -117,6 +129,10 @@ function renderRows() {
   const area = document.getElementById('assignProgressRows');
   if (!area) return;
   const data = state.assignProgressData || {};
+  if (data.mode === 'final_test') {
+    renderFinalTestRows(area, data);
+    return;
+  }
   let visible = 0;
   const groups = (data.owners || []).map(owner => {
     const reqs = (owner.requirements || []).filter(matches);
@@ -145,6 +161,23 @@ function renderRows() {
     if (!document.getElementById(`assignProgressDetail-${id}`)) continue;
     if (details.has(id)) renderDetail(id); else fetchDetail(id);
   }
+}
+
+function renderFinalTestRows(area, data) {
+  let visible = 0;
+  area.innerHTML = (data.owners || []).map(owner => {
+    const reqs = (owner.requirements || []).filter(matches);
+    visible += reqs.length;
+    if (!reqs.length) return '';
+    const caseDone = reqs.filter(r => r.case_completed).length;
+    const testDone = reqs.filter(r => r.test_completed).length;
+    return `<details class="assign-progress-owner" open><summary><span class="assign-progress-owner-name"><span class="assign-progress-owner-avatar" aria-hidden="true">${h(owner.owner_name?.slice(0, 1))}</span>${h(owner.owner_name)}</span><span class="assign-progress-owner-stats" title="当前筛选结果中该人员的独立勾选进度">${badge(`用例完成 ${caseDone} / ${reqs.length}`, caseDone === reqs.length ? 'success' : 'case-pending')}${badge(`测试完成 ${testDone} / ${reqs.length}`, testDone === reqs.length ? 'success' : 'test-pending')}</span><span class="assign-progress-group-count">${reqs.length} 个需求</span></summary>
+      <div class="assign-progress-owner-body">${reqs.map(r => `<article class="assign-progress-req"><div class="assign-progress-row">
+        <div class="assign-progress-identity"><div class="assign-progress-title"><span>${h(r.zentao_req_id)}</span><span>${h(r.title)}</span></div>
+          <div class="assign-progress-row-meta">${badge(r.major_version_name)}${badge(r.case_completed ? '用例完成' : '用例未完成', r.case_completed ? 'success' : 'case-pending')}${badge(r.test_completed ? '测试完成' : '测试未完成', r.test_completed ? 'success' : 'test-pending')}</div>
+        </div></div></article>`).join('')}</div></details>`;
+  }).join('') || '<div class="assign-progress-empty">当前筛选条件下暂无需求</div>';
+  document.getElementById('assignProgressCount').textContent = `显示 ${visible} / ${data.summary?.person_requirements || 0} 人次需求`;
 }
 
 function action(label, actionName, id, attrs = '') {
@@ -249,6 +282,12 @@ export async function loadAssignProgress(options = {}) {
   try {
     const data = await (await api(`/requirements/admin/progress?${params()}`)).json();
     if (request !== sequence || captured !== currentContext()) return;
+    if (data.mode !== state.assignProgressData?.mode) {
+      opened.clear();
+      details.clear();
+      filters.owner = '';
+      filters.status = '';
+    }
     state.assignProgressData = data;
     if (!options.preserveDetails) details.clear();
     const validIds = new Set((data.owners || []).flatMap(o => (o.requirements || []).map(r => r.id)));

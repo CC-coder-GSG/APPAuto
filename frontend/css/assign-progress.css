@@ -44,6 +44,7 @@
 .assign-progress-req:hover::before { opacity: 1; }
 .assign-progress-req:hover, .assign-progress-req.is-open { background: rgba(28, 25, 23, .025); }
 .assign-progress-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 18px; padding: 18px 16px; }
+.assign-progress-final-test .assign-progress-row { grid-template-columns: minmax(0, 1fr); }
 .assign-progress-identity { min-width: 0; }
 .assign-progress-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; font-size: 14px; font-weight: 650; line-height: 1.6; overflow-wrap: anywhere; }
 .assign-progress-title > span { min-width: 0; }
@@ -97,6 +98,9 @@
 .assign-progress-task-dialog { width: min(600px, calc(100vw - 40px)); max-height: 85vh; overflow: auto; border: 1px solid var(--w-hairline, rgba(28, 25, 23, .09)); border-radius: 18px; padding: 24px; box-sizing: border-box; background: var(--w-surface, #fbfaf8); color: var(--w-ink, #1c1917); box-shadow: 0 24px 64px rgba(28, 25, 23, .22); }
 .assign-progress-task-dialog::backdrop { background: rgba(28, 25, 23, .32); backdrop-filter: blur(2px); }
 .assign-progress-task-description { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--w-ink-soft, #57534e); }
+@media (min-width: 741px) {
+  .assign-progress-final-test .assign-progress-metrics { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
 @media (max-width: 1100px) {
   .assign-progress-metric { padding: 2px 12px; }
   .assign-progress-row { grid-template-columns: minmax(0, 1fr) auto; gap: 14px; }

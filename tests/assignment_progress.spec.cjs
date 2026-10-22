@@ -27,6 +27,21 @@ function summary(rows) {
   return { summary: { owners: 2, requirements: rows.length, case_pending: 1, test_pending: 1, retest_pending_total: 1, retest_failed_total: 1, unassigned_total: 1 }, owners, retest_pending_by_major: [{ major_version_name: 'V1', pending_retest_count: 1 }], loaded_at: timestamp };
 }
 
+function finalSummary(rows) {
+  const owners = [1, 2].map(id => ({
+    owner_id: id, owner_name: id === 1 ? '张三' : '李四',
+    requirements: rows.map(r => ({
+      id: r.id, zentao_req_id: r.zentao_req_id, title: r.title,
+      major_version_id: r.major_version_id, major_version_name: r.major_version_name,
+      owner_id: id, owner_name: id === 1 ? '张三' : '李四',
+      case_completed: id === 1 && r.id === 1, test_completed: id === 2 && r.id === 1,
+    })),
+  }));
+  return { mode: 'final_test', owners, loaded_at: timestamp,
+    summary: { requirements: rows.length, owners: 2, person_requirements: rows.length * 2,
+      case_done: 1, case_pending: rows.length * 2 - 1, test_done: 1, test_pending: rows.length * 2 - 1 } };
+}
+
 function detail(req, query, refreshed = false) {
   const allBugs = req.id === 1 ? Array.from({ length: 23 }, (_, i) => ({
     id: 100 + i, bug_id: `b#${100 + i}`, zentao_bug_id: String(100 + i),
@@ -54,6 +69,7 @@ function detail(req, query, refreshed = false) {
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     const errors = [], requests = [];
+    let finalEnabled = false;
     let failDetail = false, holdDetail = false, heldDetailStarted = false, releaseDetail;
     let failSummary = false, holdSummary = false, heldSummaryStarted = false, releaseSummary;
     const index = fs.readFileSync(path.join(root, 'frontend/index.html'), 'utf8');
@@ -67,7 +83,7 @@ function detail(req, query, refreshed = false) {
       import '/static/js/components/entity-preview-modal.js';
       import * as assign from '/static/js/tabs/assign.js';
       window.OmniQAPreview={openBug:id=>previews.push(['bug',id]),openTask:id=>previews.push(['task',id]),openStory:id=>previews.push(['story',id])};
-      window.assign=assign;window.loadAssignBoard=assign.loadAssignBoard;
+      window.assign=assign;window.loadAssignBoard=assign.loadAssignBoard;window.toggleFinalTest=assign.toggleFinalTest;
       document.getElementById('assignMajorSelect').innerHTML='<option value="1">V1</option><option value="2">V2</option>';
       await assign.loadAssignBoard({skipSync:true});window.ready=true;
       </script>`;
@@ -85,7 +101,7 @@ function detail(req, query, refreshed = false) {
       if (url.pathname === '/requirements/admin/progress') {
         if (failSummary) { failSummary = false; return route.fulfill({ status: 500, json: { detail: 'summary offline' } }); }
         if (holdSummary) { holdSummary = false; heldSummaryStarted = true; await new Promise(resolve => { releaseSummary = resolve; }); }
-        return route.fulfill({ json: summary(rows) });
+        return route.fulfill({ json: finalEnabled ? finalSummary(rows) : summary(rows) });
       }
       const match = url.pathname.match(/^\/requirements\/admin\/progress\/(\d+)(\/refresh)?$/);
       if (match) {
@@ -93,7 +109,11 @@ function detail(req, query, refreshed = false) {
         if (holdDetail) { holdDetail = false; heldDetailStarted = true; await new Promise(resolve => { releaseDetail = resolve; }); }
         return route.fulfill({ json: detail([...reqs, ...secondVersion].find(r => r.id === Number(match[1])), url.searchParams, Boolean(match[2])) });
       }
-      if (url.pathname === '/final-test/status') return route.fulfill({ json: { enabled: false } });
+      if (url.pathname === '/final-test/status') return route.fulfill({ json: { enabled: finalEnabled } });
+      if (url.pathname === '/final-test/toggle') {
+        finalEnabled = request.postDataJSON().enabled;
+        return route.fulfill({ json: { enabled: finalEnabled } });
+      }
       return route.fulfill({ json: [] });
     });
     await page.goto('http://progress.test/');
@@ -200,6 +220,50 @@ function detail(req, query, refreshed = false) {
     await page.evaluate(() => window.oldProgress);
     assert.equal(await page.locator('[data-progress-row="5"]').count(), 0, 'stale summary cannot overwrite the selected version');
     assert.equal(await page.locator('[data-progress-row]').count(), 4);
+
+    // Enter final test through the real toggle: the existing board must switch immediately.
+    page.on('dialog', dialog => dialog.accept());
+    await page.locator('#assignProgressStatus').selectOption('failed');
+    await page.locator('#finalTestToggleBtn').click();
+    await page.waitForSelector('.assign-progress-final-test');
+    assert.match(await page.locator('.assign-progress-panel-heading p').innerText(), /最终测试/);
+    assert.equal(await page.locator('#assignProgressStatus').inputValue(), '', 'normal-only filters are reset');
+    assert.equal(await page.locator('.assign-progress-owner').count(), 2);
+    assert.equal(await page.locator('.assign-progress-req').count(), 8, 'each person sees every requirement');
+    assert.match(await page.locator('#assignProgressCount').innerText(), /8 \/ 8 人次需求/);
+    assert.match(await page.locator('.assign-progress-owner').first().locator('summary').innerText(), /用例完成 1 \/ 4.*测试完成 0 \/ 4/s);
+    assert.match(await page.locator('.assign-progress-owner').nth(1).locator('summary').innerText(), /用例完成 0 \/ 4.*测试完成 1 \/ 4/s);
+    assert.doesNotMatch(await page.locator('#assignProgressArea').innerText(), /关联 Bug|关联任务|复测待办汇总|复测出现问题|展开详情/);
+    assert.equal(await page.locator('#assignProgressStatus option[value="failed"]').count(), 0);
+    assert.equal(await page.locator('#assignProgressRows img').count(), 0, 'final-test titles are escaped');
+    const detailCount = requests.filter(r => /progress\/\d/.test(r.url.pathname)).length;
+    await page.locator('#assignProgressOwner').selectOption('2');
+    await page.locator('#assignProgressStatus').selectOption('case-pending');
+    assert.equal(await page.locator('.assign-progress-req').count(), 4);
+    await page.locator('#assignProgressStatus').selectOption('test-pending');
+    assert.equal(await page.locator('.assign-progress-req').count(), 3);
+    await page.locator('#assignProgressStatus').selectOption('completed');
+    assert.match(await page.locator('#assignProgressRows').innerText(), /暂无需求/);
+    await page.locator('#assignProgressStatus').selectOption('');
+    await page.locator('#assignProgressOwner').selectOption('');
+    await page.locator('#assignProgressSearch').fill('r#900');
+    assert.equal(await page.locator('.assign-progress-req').count(), 2);
+    await page.locator('#assignProgressSearch').fill('');
+    await page.getByRole('button', { name: '刷新进度', exact: true }).click();
+    await page.waitForFunction(() => document.getElementById('assignProgressNotice').textContent === '');
+    assert.equal(requests.filter(r => /progress\/\d/.test(r.url.pathname)).length, detailCount, 'final test never fetches bug/task details');
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.locator('.assign-progress-owner').first().evaluate(el => el.getBoundingClientRect().right <= innerWidth), true);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    if (process.env.PROGRESS_SCREENSHOT) {
+      await page.locator('.assign-progress-panel').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: process.env.PROGRESS_SCREENSHOT.replace('.png', '-final-test.png') });
+    }
+    await page.locator('#finalTestToggleBtn').click();
+    await page.waitForFunction(() => !document.getElementById('assignProgressArea').classList.contains('assign-progress-final-test'));
+    assert.equal(await page.locator('[data-progress-row]').count(), 4, 'closing final test restores the assignment view');
+    assert.match(await page.locator('#assignProgressArea').innerText(), /关联 Bug/);
+    assert.equal(await page.locator('.assign-progress-detail [data-progress-action="refresh"]').count(), 0, 'old details stay cleared');
     assert.equal(await page.evaluate(() => window.injected), undefined);
     assert.deepEqual(errors, []);
     console.log('Assignment progress browser checks passed');

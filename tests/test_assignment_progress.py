@@ -13,6 +13,7 @@ from app.models import (
     TestCase as CaseModel, User, UserRole, Version, VersionType,
 )
 from app.models.enums import TaskBoardStatus
+from app.models.final_test_record import FinalTestRecord
 from app.models.software import SoftwareProduct
 from app.models.task_board import TaskBoardTask
 from app.models.zentao_task_mirror import ZentaoTaskMirror
@@ -197,6 +198,101 @@ def test_pagination_is_independent_and_clamps_after_deletions(progress_env):
     assert data["tasks"]["page"] == 3 and len(data["tasks"]["items"]) == 1
 
 
+def test_final_test_counts_each_person_independently_without_associations(progress_env, monkeypatch):
+    e = progress_env
+    db = e["db"]
+    e["major"].final_test_enabled = True
+    newcomer = User(username="not_started", password_hash="x")
+    db.add(newcomer)
+    db.add_all([
+        FinalTestRecord(requirement_id=e["req"].id, user_id=e["owner"].id, case_completed=True),
+        FinalTestRecord(requirement_id=e["req"].id, user_id=e["reviewer"].id, test_completed=True),
+        # A record outside the selected major must not count.
+        FinalTestRecord(requirement_id=e["foreign"].id, user_id=e["owner"].id,
+                        case_completed=True, test_completed=True),
+    ])
+    db.commit()
+
+    def unexpected_collect(*args):
+        pytest.fail("Final test must not collect bugs, retest conclusions or tasks")
+
+    monkeypatch.setattr(AssignmentProgressService, "_collect", unexpected_collect)
+    data = AssignmentProgressService(db).summary(e["major"].id, e["software"].id)
+    assert data["mode"] == "final_test"
+    assert data["summary"] == {
+        "owners": 3, "requirements": 2, "person_requirements": 6,
+        "case_done": 1, "case_pending": 5, "test_done": 1, "test_pending": 5,
+    }
+    people = {o["owner_id"]: o for o in data["owners"]}
+    assert set(people) == {e["owner"].id, e["reviewer"].id, newcomer.id}, "sync bot is excluded"
+    for person in people.values():
+        assert {r["id"] for r in person["requirements"]} == {e["req"].id, e["unassigned"].id}
+        assert all(r["owner_id"] == person["owner_id"] for r in person["requirements"])
+        assert all("bug_count" not in r and "retest_conclusion" not in r and "task_count" not in r
+                   for r in person["requirements"])
+    owner_state = people[e["owner"].id]["requirements"][0]
+    reviewer_state = people[e["reviewer"].id]["requirements"][0]
+    assert owner_state["case_completed"] and not owner_state["test_completed"]
+    assert not reviewer_state["case_completed"] and reviewer_state["test_completed"]
+    assert people[newcomer.id]["major_summaries"][0]["case_pending"] == 2
+    assert not db.dirty
+
+
+def test_final_test_switching_preserves_original_and_personal_states(progress_env):
+    e = progress_env
+    db = e["db"]
+    record = FinalTestRecord(requirement_id=e["req"].id, user_id=e["owner"].id,
+                             case_completed=True, test_completed=True)
+    db.add(record)
+    e["major"].final_test_enabled = True
+    db.commit()
+    service = AssignmentProgressService(db)
+    assert service.summary(e["major"].id)["summary"]["test_done"] == 1
+    record.test_completed = False
+    db.commit()
+    assert service.summary(e["major"].id)["summary"]["test_done"] == 0
+    assert e["req"].test_completed is True
+    # A stale major selection cannot reveal another software's personal records.
+    scoped = service.summary(e["major"].id, e["other_software"].id)
+    assert scoped["mode"] == "assignment" and scoped["owners"] == []
+    e["major"].final_test_enabled = False
+    db.commit()
+    normal = service.summary(e["major"].id)
+    assert normal["mode"] == "assignment" and normal["summary"]["test_done"] == 1
+    e["major"].final_test_enabled = True
+    db.commit()
+    assert service.summary(e["major"].id)["summary"]["test_done"] == 0
+
+
+def test_final_test_before_any_checkmarks_and_without_requirements(progress_env):
+    e = progress_env
+    e["major"].final_test_enabled = True
+    empty_major = Version(version_no="empty-final", version_type=VersionType.MAJOR,
+                          software_id=e["software"].id, final_test_enabled=True)
+    e["db"].add(empty_major)
+    e["db"].commit()
+    service = AssignmentProgressService(e["db"])
+    fresh = service.summary(e["major"].id)
+    assert fresh["summary"]["owners"] == 2
+    assert fresh["summary"]["case_pending"] == fresh["summary"]["test_pending"] == 4
+    empty = service.summary(empty_major.id)
+    assert empty["mode"] == "final_test"
+    assert empty["summary"]["person_requirements"] == empty["summary"]["case_pending"] == 0
+
+
+def test_final_test_retains_recorded_participants_and_excludes_inactive_nonparticipants(progress_env):
+    e = progress_env
+    e["major"].final_test_enabled = True
+    e["reviewer"].is_team_member = False
+    e["db"].add(User(username="inactive", password_hash="x", is_active=False))
+    e["db"].add(FinalTestRecord(requirement_id=e["req"].id, user_id=e["reviewer"].id,
+                               case_completed=True))
+    e["db"].commit()
+    data = AssignmentProgressService(e["db"]).summary(e["major"].id)
+    assert {o["owner_id"] for o in data["owners"]} == {e["owner"].id, e["reviewer"].id}
+    assert data["summary"]["case_done"] == 1
+
+
 def test_dismissed_problems_do_not_override_a_pass_record(progress_env):
     e = progress_env
     for bug in e["bugs"]:
@@ -271,6 +367,11 @@ def test_api_permissions_scope_and_page_validation(progress_env, monkeypatch):
     e["reviewer"].tab_permissions = '["assign"]'
     e["db"].commit()
     assert client.get(url).status_code == 200, "explicit assignment access works for non-admins"
+    e["major"].final_test_enabled = True
+    e["db"].commit()
+    final = client.get(f'/requirements/admin/progress?major_version_id={e["major"].id}&software_id={e["software"].id}')
+    assert final.status_code == 200 and final.json()["mode"] == "final_test"
+    assert final.json()["summary"]["test_done"] == 0, "original owner completion must not leak into final test"
     app.dependency_overrides[get_current_user] = lambda: e["owner"]
     assert client.get(url + '?page_size=0').status_code == 422
     assert client.get(url + '?bug_page=0').status_code == 422
