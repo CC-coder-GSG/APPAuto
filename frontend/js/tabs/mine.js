@@ -3,7 +3,7 @@ import { state } from '../state.js';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 import { closeModal, openModal } from '../components/modal.js';
 import { renderCaseReviewControls } from '../components/case-review.js?v=20260714-1';
-import { renderBugVersion } from '../components/bug-version.js?v=20261020-2';
+import { renderBugVersion } from '../components/bug-version.js?v=20261022-found-version-1';
 import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge, sourceTypeZh } from '../utils.js?v=20261014-2';
 
 const RESULT_OPTIONS = [

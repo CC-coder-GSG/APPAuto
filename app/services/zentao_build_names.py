@@ -12,8 +12,9 @@ def local_build_names(db: Session) -> dict[str, str]:
     ).all()
     names = {}
     for build_id, version_no, cached_name in rows:
-        name = str(version_no or cached_name or "").strip()
-        if name and not name.isdecimal():
+        name = next((str(value).strip() for value in (version_no, cached_name)
+                     if value and str(value).strip() and not str(value).strip().isdecimal()), "")
+        if name:
             names[str(build_id)] = name
     return names
 

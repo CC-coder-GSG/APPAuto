@@ -3,7 +3,7 @@ import './realtime/sse.js?v=20260612-1';
 import './api.js?v=20260417-3';
 import './auth.js?v=20260417-3';
 import './zentao-binding.js?v=20260417-3';
-import './zentao-hydrator.js?v=20261020-bug-version-3';
+import './zentao-hydrator.js?v=20261022-found-version-1';
 import './zentao-status-map.js?v=20260422-2';
 import './state.js?v=20260417-3';
 import './utils.js?v=20261014-2';
@@ -18,7 +18,7 @@ import { resizeAllCharts } from './components/charts.js?v=20260706-2';
 import { runGuardrails } from './guardrails.js?v=20260716-1';
 
 const OPTIONAL_TAB_MODULES = [
-  { name: 'mine', path: './tabs/mine.js?v=20261022-task-selector-ui-2' },
+  { name: 'mine', path: './tabs/mine.js?v=20261022-found-version-1' },
   { name: 'review-workbench', path: './tabs/review-workbench.js?v=20261014-2' },
   { name: 'task-workbench', path: './tabs/task-workbench.js?v=20261014-2' },
   { name: 'task-board', path: './tabs/task-board.js?v=20261019-1' },

@@ -78,7 +78,7 @@ def normalize_bug(raw: dict) -> dict:
         "pri": bug.get("pri"),
         "assigned_to": _extract_person_name(bug.get("assignedTo")),
         "opened_by": _extract_person_name(bug.get("openedBy")),
-        "build": _extract_build_name(bug.get("openedBuild") or bug.get("foundBuild")),
+        "build": normalize_resolved_build(bug.get("openedBuild") or bug.get("openedBuilds") or bug.get("foundBuild")),
         "resolved_build": normalize_resolved_build(bug.get("resolvedBuild")),
         "closed_date": bug.get("closedDate") or bug.get("resolvedDate") or "",
     }

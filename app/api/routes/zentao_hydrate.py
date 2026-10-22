@@ -456,7 +456,7 @@ async def _fetch_bugs_concurrent(
         # Preserve the reference for retry; display code hides unresolved numeric IDs.
         return build_id
 
-    async def _resolved_build_name(value: str) -> str:
+    async def _readable_build_name(value: str) -> str:
         names = []
         for part in value.split(','):
             part = part.strip()
@@ -476,7 +476,9 @@ async def _fetch_bugs_concurrent(
                 raw = await asyncio.to_thread(client.get_bug_with_fallback, bug_id)
                 if raw:
                     data = normalize_bug(raw)
-                    data['resolved_build'] = await _resolved_build_name(data['resolved_build'])
+                    data['build'], data['resolved_build'] = await asyncio.gather(
+                        _readable_build_name(data['build']), _readable_build_name(data['resolved_build']),
+                    )
                     data["zentao_url"] = f"{base_url}/bug-view-{bug_id}.html"
                     result[str(bug_id)] = data
             except ZentaoAPIError as exc:
@@ -617,6 +619,11 @@ def _writeback_bug_fields(db: Session, result: dict, base_url: str) -> None:
             if "resolved_build" in data and row.zentao_resolved_build != data["resolved_build"]:
                 row.zentao_resolved_build = data["resolved_build"]
                 any_changed = True
+            found_build = str(data.get("build") or "").strip()
+            if found_build and not any(part.strip().isdecimal() for part in found_build.split(',')):
+                if row.zentao_affected_version != found_build:
+                    row.zentao_affected_version = found_build
+                    any_changed = True
             # 禅道已删除：实时核对到 deleted 即回写标记，供大盘排除统计/筛选并红色展示。
             if data.get("deleted") and not row.zentao_deleted:
                 row.zentao_deleted = True

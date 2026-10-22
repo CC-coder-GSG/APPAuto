@@ -38,6 +38,16 @@ def test_resolved_build_normalizes_remote_formats(raw, expected):
     assert normalize_bug({'id': 71040, 'resolvedBuild': raw})['resolved_build'] == expected
 
 
+@pytest.mark.parametrize('field', ['openedBuild', 'openedBuilds', 'foundBuild'])
+@pytest.mark.parametrize('raw, expected', [
+    ('5262', '5262'), ({'id': 5262}, '5262'), ({'5262': ''}, '5262'),
+    ({'id': 5262, 'name': '4.0.4.0261022'}, '4.0.4.0261022'),
+    ([{'id': 5262}, {'id': 5263}], '5262, 5263'),
+])
+def test_found_build_normalizes_remote_formats(field, raw, expected):
+    assert normalize_bug({'id': 71040, field: raw})['build'] == expected
+
+
 def test_hydration_caches_solution_version_and_status_for_next_render(db_session):
     bug = _bug(db_session)
     _writeback_bug_fields(db_session, {'71040': normalize_bug({
@@ -120,15 +130,18 @@ def test_hydration_resolves_numeric_build_and_deduplicates_requests(db_session):
         return {'id': build_id, 'name': '4.0.6'}
 
     client = SimpleNamespace(
-        get_bug_with_fallback=lambda bug_id: {'id': bug_id, 'status': 'resolved', 'resolvedBuild': '5262'},
+        get_bug_with_fallback=lambda bug_id: {'id': bug_id, 'status': 'resolved', 'resolvedBuild': '5262', 'openedBuild': '5262'},
         get_build=build,
     )
     data, got_401, errors = asyncio.run(_fetch_bugs_concurrent(client, 'http://zentao.test', [71040, 71041]))
     assert not got_401 and not errors
     assert calls == [5262]
     assert data['71040']['resolved_build'] == data['71041']['resolved_build'] == '4.0.6'
+    assert data['71040']['build'] == data['71041']['build'] == '4.0.6'
     _writeback_bug_fields(db_session, data, 'http://zentao.test')
     assert bug.zentao_resolved_build == '4.0.6'
+    assert bug.zentao_affected_version == '4.0.6'
+    assert WorkbenchLinkService(db_session).serialize_bug_brief(bug, {})['found_minor_version_no'] == '4.0.6'
 
 
 def test_hydration_prefers_local_name_without_remote_build_request():
@@ -168,3 +181,32 @@ def test_hydration_rejects_wrong_build_and_resolves_multiple_build_references():
     )
     data, _, errors = asyncio.run(_fetch_bugs_concurrent(client, 'http://zentao.test', [71040]))
     assert not errors and data['71040']['resolved_build'] == '4.0.6, 4.0.7, 5263'
+
+
+def test_cached_found_build_id_uses_full_local_version_name(db_session):
+    bug = _bug(db_session)
+    version_name = '4.0.4.0261022(40400088)'
+    db_session.add(Version(version_no=version_name, version_type=VersionType.MINOR,
+                           parent_id=bug.major_version_id, zentao_build_id=5262))
+    bug.zentao_affected_version = '5262'
+    db_session.commit()
+    brief = WorkbenchLinkService(db_session).serialize_bug_brief(bug, {})
+    assert brief['found_minor_version_no'] == version_name
+    bug.zentao_affected_version = '99999'
+    assert WorkbenchLinkService(db_session).serialize_bug_brief(bug, {})['found_minor_version_no'] == '版本名称待获取'
+
+
+def test_unresolved_found_build_does_not_overwrite_cached_name(db_session):
+    bug = _bug(db_session)
+    _writeback_bug_fields(db_session, {'71040': {'status': 'resolved', 'build': '5262'}}, 'http://zentao.test')
+    assert bug.zentao_affected_version == '4.0.1'
+
+
+def test_found_build_uses_cached_name_when_local_version_is_only_an_id(db_session):
+    from app.services.zentao_build_names import local_build_names
+    bug = _bug(db_session)
+    db_session.add(Version(version_no='5262', version_type=VersionType.MINOR,
+                           parent_id=bug.major_version_id, zentao_build_id=5262,
+                           zentao_build_name_cache='4.0.4.0261022'))
+    db_session.commit()
+    assert local_build_names(db_session)['5262'] == '4.0.4.0261022'

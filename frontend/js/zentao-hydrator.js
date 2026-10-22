@@ -30,7 +30,7 @@
  */
 
 import { api } from './api.js';
-import { updateBugVersion } from './components/bug-version.js?v=20261020-2';
+import { updateBugVersion } from './components/bug-version.js?v=20261022-found-version-1';
 
 // ─── One-time style injection ─────────────────────────────────────────────────
 
