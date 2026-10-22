@@ -324,11 +324,62 @@ export function selectRequirementTask(reqId, taskId) {
   renderMineCards();
 }
 
-function renderRequirementTaskSelector(req, taskTag) {
+function renderRequirementTaskSelector(req, taskTag, preview = '') {
   const own = (req.test_tasks || []).filter(t => t.assigned_to_me);
-  if (own.length < 2) return taskTag;
-  return `<span class="qa-task-selector"><span class="qa-task-selector-heading">${taskTag}<details class="qa-task-dropdown"><summary aria-label="切换需求 ${Number(req.id)} 的当前任务" title="切换当前操作的禅道任务">▾</summary><span class="qa-task-options">${own.map(t => `<button type="button" data-mine-task="${Number(t.task_id)}" ${t.task_id === req.zentao_task_id ? 'aria-current="true"' : ''} onclick="selectRequirementTask(${Number(req.id)}, ${Number(t.task_id)})">#${Number(t.task_id)} ${escapeHtml(t.name)} · ${escapeHtml(TASK_STATUS_ZH[t.status] || t.status || '未开始')}</button>`).join('')}</span></details></span><small>存在 ${own.length} 个关联任务，可切换操作</small></span>`;
+  if (own.length < 2) return taskTag + preview;
+  const status = req.task_story_change_pending ? '待确认变更' : TASK_STATUS_ZH[req.zentao_task_status] || req.zentao_task_status || '未开始';
+  const tone = value => ['done', 'closed'].includes(value) ? 'done' : ['doing', 'changed'].includes(value) ? 'active' : value === 'pause' ? 'paused' : 'idle';
+  const check = '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.5 8 3 3 6-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const floating = 'showPopover' in HTMLElement.prototype;
+  return `<span class="qa-task-selector"><span class="qa-task-selector-heading"><details class="qa-task-dropdown">
+    <summary class="qa-task-trigger" data-tone="${tone(req.zentao_task_status)}" aria-label="切换需求 ${Number(req.id)} 的当前任务" title="点击切换当前操作的禅道任务">
+      <span class="qa-task-trigger-dot" aria-hidden="true"></span><span>禅道子任务 <b>#${Number(req.zentao_task_id)}</b></span><span class="qa-task-trigger-status">${escapeHtml(status)}</span><svg class="qa-task-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m5 6 3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </summary>
+    <span class="qa-task-options" ${floating ? 'popover="manual"' : ''}><span class="qa-task-menu-heading">切换关联任务<span>${own.length}</span></span>${own.map(t => `<button type="button" data-mine-task="${Number(t.task_id)}" ${t.task_id === req.zentao_task_id ? 'aria-current="true"' : ''} onclick="selectRequirementTask(${Number(req.id)}, ${Number(t.task_id)})" title="${escapeHtml(t.name)}"><span class="qa-task-option-body"><span class="qa-task-option-meta"><b>#${Number(t.task_id)}</b><span data-tone="${tone(t.status)}">${escapeHtml(TASK_STATUS_ZH[t.status] || t.status || '未开始')}</span></span><span class="qa-task-option-name">${escapeHtml(t.name)}</span></span><span class="qa-task-option-check">${t.task_id === req.zentao_task_id ? check : ''}</span></button>`).join('')}</span>
+    </details>${preview}</span><small>存在 ${own.length} 个关联任务，点击标签切换</small></span>`;
 }
+
+function positionRequirementTaskMenu(menu) {
+  const popup = menu.querySelector('.qa-task-options[popover]');
+  if (!popup) return;
+  if (!menu.open) { if (popup.matches(':popover-open')) popup.hidePopover(); return; }
+  const anchor = menu.querySelector('summary').getBoundingClientRect();
+  if (anchor.bottom < 0 || anchor.top > window.innerHeight) { menu.open = false; return; }
+  const width = Math.min(Math.max(anchor.width, 240), window.innerWidth - 24);
+  popup.style.width = `${width}px`;
+  popup.style.left = `${Math.max(12, Math.min(anchor.left, window.innerWidth - width - 12))}px`;
+  popup.style.top = `${anchor.bottom + 8}px`;
+  if (!popup.matches(':popover-open')) popup.showPopover();
+  const height = popup.getBoundingClientRect().height;
+  if (anchor.bottom + height + 8 > window.innerHeight - 12) {
+    popup.style.top = `${Math.max(12, anchor.top - height - 8)}px`;
+  }
+}
+
+document.addEventListener('toggle', event => {
+  if (event.target.matches?.('.qa-task-dropdown')) positionRequirementTaskMenu(event.target);
+}, true);
+
+document.addEventListener('scroll', event => {
+  if (event.target.closest?.('.qa-task-options')) return;
+  document.querySelectorAll('.qa-task-dropdown[open]').forEach(positionRequirementTaskMenu);
+}, true);
+window.addEventListener('resize', () => {
+  document.querySelectorAll('.qa-task-dropdown[open]').forEach(positionRequirementTaskMenu);
+});
+
+document.addEventListener('click', event => {
+  document.querySelectorAll('.qa-task-dropdown[open]').forEach(menu => {
+    if (!menu.contains(event.target)) menu.open = false;
+  });
+});
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  document.querySelectorAll('.qa-task-dropdown[open]').forEach(menu => {
+    menu.open = false;
+    menu.querySelector('summary')?.focus();
+  });
+});
 
 async function requestSelectedRequirementTask(req, action, extra = {}) {
   return api(`/requirements/${req.id}/linked-tasks/${req.zentao_task_id}/operate`, {
@@ -1323,7 +1374,7 @@ function renderTaskMeta(req) {
     const effectiveStatus = req.test_completed ? 'done' : rawStatus;
     const zh = TASK_STATUS_ZH[effectiveStatus] || effectiveStatus || '';
     const done = effectiveStatus === 'done' || effectiveStatus === 'closed';
-    const taskTag = renderRequirementTaskSelector(req, `<span class="badge" style="background:${done ? '#dcfce7' : '#eff6ff'}; color:${done ? '#166534' : '#1d4ed8'}; border:1px solid ${done ? '#bbf7d0' : '#bfdbfe'};">禅道子任务 #${req.zentao_task_id}${zh ? '·' + zh : ''}</span>${renderPreviewBtn('task', req.zentao_task_id)}`);
+    const taskTag = renderRequirementTaskSelector(req, `<span class="badge" style="background:${done ? '#dcfce7' : '#eff6ff'}; color:${done ? '#166534' : '#1d4ed8'}; border:1px solid ${done ? '#bbf7d0' : '#bfdbfe'};">禅道子任务 #${req.zentao_task_id}${zh ? '·' + zh : ''}</span>`, renderPreviewBtn('task', req.zentao_task_id));
     if (!req.task_assigned_to_me) {
       // 非指派人：隐藏预计用时输入，改为只读的指派人标签。
       const assignee = req.zentao_task_assigned_to
