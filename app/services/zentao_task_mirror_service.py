@@ -111,16 +111,24 @@ class ZentaoTaskMirrorService:
         }, channels=["global"])
 
     def _linked_requirement(self, task_id: int) -> Optional[Requirement]:
-        return (
+        primary = (
             self.db.query(Requirement)
             .filter(Requirement.zentao_task_id == int(task_id))
             .first()
         )
+        if primary:
+            return primary
+        row = self.db.get(ZentaoTaskMirror, task_id)
+        if not row or not row.story or row.type != "test" or row.is_parent:
+            return None
+        return self.db.query(Requirement).join(Version, Requirement.major_version_id == Version.id).filter(
+            Requirement.zentao_story_id == row.story, Version.zentao_execution_id == row.execution_id,
+        ).first()
 
     @staticmethod
     def _hydrate_tracking_from_requirement(row: ZentaoTaskMirror, requirement: Optional[Requirement]) -> None:
         """Use one clock/effort ledger for linked tasks in both UI views."""
-        if requirement is None:
+        if requirement is None or row.task_id != requirement.zentao_task_id:
             return
         row.local_started_at = requirement.task_started_at
         row.consumed_accum = float(requirement.task_consumed_accum or 0.0)
@@ -133,6 +141,10 @@ class ZentaoTaskMirrorService:
     ) -> bool:
         if requirement is None:
             return False
+        from app.services.requirement_task_service import RequirementTaskService
+        task_service = RequirementTaskService(self.db)
+        if row.task_id != requirement.zentao_task_id:
+            return task_service.reconcile(requirement)
         if row.task_story_change_pending is not None:
             for field in ("task_story_change_pending", "task_story_version", "task_latest_story_version", "task_change_checked_at"):
                 setattr(requirement, field, getattr(row, field, None))
@@ -146,6 +158,9 @@ class ZentaoTaskMirrorService:
             requirement.task_finished_at = row.finished_date
         elif status in {"doing", "changed"}:
             requirement.task_finished_at = None
+        rows = task_service.rows_by_requirement([requirement])[requirement.id]
+        if len(rows) > 1:
+            return task_service.reconcile(requirement, rows)
         if status != "done" or requirement.test_completed or requirement.task_story_change_pending:
             return False
 
@@ -356,6 +371,14 @@ class ZentaoTaskMirrorService:
             row.synced_at = local_now()
             self._sync_requirement_from_mirror(row, linked_requirement)
             n += 1
+        # Reconcile after the full snapshot, including manually added sibling tasks.
+        self.db.flush()
+        from app.services.requirement_task_service import RequirementTaskService
+        reqs = self.db.query(Requirement).filter(Requirement.major_version_id == major.id).all()
+        task_service = RequirementTaskService(self.db)
+        grouped = task_service.rows_by_requirement(reqs)
+        for req in reqs:
+            task_service.reconcile(req, grouped[req.id])
         return n
 
     # ------------------------------------------------------------------

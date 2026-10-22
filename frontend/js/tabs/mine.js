@@ -17,6 +17,7 @@ const RESULT_OPTIONS = [
 const modalState = {
   reqId: null,
   checkboxEl: null,
+  taskId: null,
 };
 
 const notesModalState = {
@@ -288,8 +289,51 @@ function initTestExecutionModal() {
   }
 }
 
-function getRequirementById(reqId) {
-  return (state.currentMineData || []).find((r) => Number(r.id) === Number(reqId)) || null;
+function taskSelectionKey(req) {
+  return `omniqa_requirement_task:${state.currentUser?.id || window.currentUser?.id || 'anonymous'}:${req.id}`;
+}
+
+function projectRequirementTask(req, preferredId = null) {
+  if (!req) return null;
+  const own = (req.test_tasks || []).filter(t => t.assigned_to_me);
+  if (!own.length) return req;
+  const saved = Number(preferredId || localStorage.getItem(taskSelectionKey(req)) || 0);
+  if (preferredId && !own.some(t => t.task_id === Number(preferredId))) return null;
+  const task = own.find(t => t.task_id === saved) || own.find(t => t.task_id === req.zentao_task_id)
+    || own.find(t => !['done', 'closed'].includes(t.status)) || own[0];
+  if (!req.has_multiple_test_tasks && task.task_id === req.zentao_task_id) return req;
+  return { ...req, selected_task_mode: true, selected_test_task: task,
+    zentao_task_id: task.task_id, zentao_task_status: task.status,
+    task_assigned_to_me: !!task.can_operate, zentao_task_assigned_to: task.assigned_to,
+    estimated_test_hours: task.estimate ?? 4, task_has_time_tracking: !!task.has_time_tracking,
+    task_story_change_pending: task.task_story_change_pending,
+    task_story_version: task.task_story_version, task_latest_story_version: task.task_latest_story_version,
+    test_completed: ['done', 'closed'].includes(task.status) };
+}
+
+function getRequirementById(reqId, preferredId = null) {
+  return projectRequirementTask((state.currentMineData || []).find((r) => Number(r.id) === Number(reqId)), preferredId);
+}
+
+export function selectRequirementTask(reqId, taskId) {
+  const req = (state.currentMineData || []).find(r => Number(r.id) === Number(reqId));
+  if (!req || !(req.test_tasks || []).some(t => t.assigned_to_me && t.task_id === Number(taskId))) return;
+  localStorage.setItem(taskSelectionKey(req), String(taskId));
+  const menu = document.querySelector(`.mine-req-card[data-req-id="${Number(reqId)}"] .qa-task-dropdown`);
+  if (menu) menu.open = false;
+  renderMineCards();
+}
+
+function renderRequirementTaskSelector(req, taskTag) {
+  const own = (req.test_tasks || []).filter(t => t.assigned_to_me);
+  if (own.length < 2) return taskTag;
+  return `<span class="qa-task-selector"><span class="qa-task-selector-heading">${taskTag}<details class="qa-task-dropdown"><summary aria-label="切换需求 ${Number(req.id)} 的当前任务" title="切换当前操作的禅道任务">▾</summary><span class="qa-task-options">${own.map(t => `<button type="button" data-mine-task="${Number(t.task_id)}" ${t.task_id === req.zentao_task_id ? 'aria-current="true"' : ''} onclick="selectRequirementTask(${Number(req.id)}, ${Number(t.task_id)})">#${Number(t.task_id)} ${escapeHtml(t.name)} · ${escapeHtml(TASK_STATUS_ZH[t.status] || t.status || '未开始')}</button>`).join('')}</span></details></span><small>存在 ${own.length} 个关联任务，可切换操作</small></span>`;
+}
+
+async function requestSelectedRequirementTask(req, action, extra = {}) {
+  return api(`/requirements/${req.id}/linked-tasks/${req.zentao_task_id}/operate`, {
+    method: 'POST', body: { action, ...extra },
+  });
 }
 
 function getMinorOptionsByMajor(majorId) {
@@ -340,6 +384,8 @@ function openTestExecutionModal(reqId, checkboxEl) {
   }
 
   modalState.reqId = reqId;
+  const selected = getRequirementById(reqId);
+  modalState.taskId = selected?.selected_task_mode ? selected.zentao_task_id : null;
   modalState.checkboxEl = checkboxEl || null;
 
   noteInput.value = '';
@@ -352,6 +398,7 @@ export function closeMineTestExecutionModal() {
   if (modal) closeModal(modal);
   if (modalState.checkboxEl) modalState.checkboxEl.checked = false;
   modalState.reqId = null;
+  modalState.taskId = null;
   modalState.checkboxEl = null;
 }
 
@@ -925,7 +972,11 @@ export async function confirmMineTestExecutionModal() {
     window.showMessage && window.showMessage('请先选择当前复测发包（小版本）', 'error');
     return;
   }
-  const req = getRequirementById(reqId);
+  const req = getRequirementById(reqId, modalState.taskId);
+  if (!req) {
+    window.showMessage?.('所选任务已变化，请关闭弹窗并重新选择任务', 'error');
+    return;
+  }
   const taskConsumedHours = promptRequirementTaskConsumed(req);
   if (taskConsumedHours === null) return;
 
@@ -934,7 +985,11 @@ export async function confirmMineTestExecutionModal() {
 
   showLoading('正在提交测试完成并同步禅道任务，请稍候…');
   try {
-    await submitTestExecution(reqId, {
+    if (req?.selected_task_mode) await requestSelectedRequirementTask(req, 'finish', {
+      minor_version_id: minorId, result_status: resultStatus, notes,
+      ...(taskConsumedHours !== undefined ? { consumed: taskConsumedHours } : {}),
+    });
+    else await submitTestExecution(reqId, {
       minor_version_id: minorId,
       result_status: resultStatus,
       test_completed: true,
@@ -948,13 +1003,14 @@ export async function confirmMineTestExecutionModal() {
     setLoadingText('禅道已同步，正在刷新工作台…');
     try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
     hideLoading();
-    window.showMessage && window.showMessage('测试执行记录已提交，需求已标记测试完成（禅道任务已联动完成）', 'success');
+    window.showMessage && window.showMessage(req?.selected_task_mode ? '当前任务已完成；全部关联测试任务完成后，需求显示测试完成' : '测试执行记录已提交，需求已标记测试完成（禅道任务已联动完成）', 'success');
   } catch (err) {
     hideLoading();
     if (modalState.checkboxEl) modalState.checkboxEl.checked = false;
     window.showMessage && window.showMessage(err.message || '提交失败，请稍后重试', 'error');
   } finally {
     modalState.reqId = null;
+    modalState.taskId = null;
     modalState.checkboxEl = null;
   }
 }
@@ -981,7 +1037,9 @@ export async function handleTestCompletedToggle(reqId, checked, checkboxEl) {
   let msg = '已取消测试完成状态（禅道任务已联动重新激活）';
   let msgType = 'success';
   try {
-    await api(`/requirements/${reqId}/status`, {
+    const req = getRequirementById(reqId);
+    if (req?.selected_task_mode) await requestSelectedRequirementTask(req, 'reactivate');
+    else await api(`/requirements/${reqId}/status`, {
       method: 'PATCH',
       headers: window.H,
       body: { test_completed: false },
@@ -1260,12 +1318,12 @@ function renderTaskStartControl(req) {
 // 非指派人只读展示子任务状态与指派人，避免误操作他人任务。
 function renderTaskMeta(req) {
   if (req.zentao_task_id) {
-    if (req.task_story_change_pending) return `<span style="font-size:12px; color:var(--w-ink-soft, #64748b);">禅道子任务 #${Number(req.zentao_task_id)}</span>`;
+    if (req.task_story_change_pending) return renderRequirementTaskSelector(req, `<span style="font-size:12px; color:var(--w-ink-soft, #64748b);">禅道子任务 #${Number(req.zentao_task_id)}</span>`);
     const rawStatus = String(req.zentao_task_status || '').toLowerCase();
     const effectiveStatus = req.test_completed ? 'done' : rawStatus;
     const zh = TASK_STATUS_ZH[effectiveStatus] || effectiveStatus || '';
     const done = effectiveStatus === 'done' || effectiveStatus === 'closed';
-    const taskTag = `<span class="badge" style="background:${done ? '#dcfce7' : '#eff6ff'}; color:${done ? '#166534' : '#1d4ed8'}; border:1px solid ${done ? '#bbf7d0' : '#bfdbfe'};">禅道子任务 #${req.zentao_task_id}${zh ? '·' + zh : ''}</span>${renderPreviewBtn('task', req.zentao_task_id)}`;
+    const taskTag = renderRequirementTaskSelector(req, `<span class="badge" style="background:${done ? '#dcfce7' : '#eff6ff'}; color:${done ? '#166534' : '#1d4ed8'}; border:1px solid ${done ? '#bbf7d0' : '#bfdbfe'};">禅道子任务 #${req.zentao_task_id}${zh ? '·' + zh : ''}</span>${renderPreviewBtn('task', req.zentao_task_id)}`);
     if (!req.task_assigned_to_me) {
       // 非指派人：隐藏预计用时输入，改为只读的指派人标签。
       const assignee = req.zentao_task_assigned_to
@@ -1288,6 +1346,8 @@ function collectReqBugs(req) {
 }
 
 export function renderMineCards() {
+  const openTaskMenus = [...document.querySelectorAll('.mine-req-card .qa-task-dropdown[open]')]
+    .map(el => el.closest('.mine-req-card').dataset.reqId);
   const searchKw = (document.getElementById('mineSearchInput')?.value || '').trim().toLowerCase();
   const onlyAssignedToMe = !!document.getElementById('mineAssignedToMe')?.checked;
   const filteredData = state.currentMineData.filter((req) => {
@@ -1307,12 +1367,14 @@ export function renderMineCards() {
   const mode = getMode();
   const foldStateMap = getFoldStateMap();
 
-  const reqsHtml = filteredData.map((req) => {
+  const reqsHtml = filteredData.map((baseReq) => {
+    const req = projectRequirementTask(baseReq);
     const caseDisabled = req.case_completed ? 'disabled' : '';
     const testDisabled = req.test_completed ? 'disabled' : '';
-    const isFullyCompleted = req.test_completed && req.case_completed;
+    const aggregateDone = baseReq.has_multiple_test_tasks ? baseReq.all_linked_test_tasks_completed : baseReq.test_completed;
+    const isFullyCompleted = aggregateDone && req.case_completed && (!req.final_test || baseReq.test_completed);
     const isOpen = Object.prototype.hasOwnProperty.call(foldStateMap, String(req.id)) ? !!foldStateMap[String(req.id)] : (!isFullyCompleted || req.task_story_change_pending);
-    const taskChangeDisabled = req.task_story_change_pending && (!req.final_test || req.task_assigned_to_me) ? 'disabled title="请先查看并确认研发需求变更"' : '';
+    const taskChangeDisabled = req.selected_task_mode && !req.selected_test_task.can_operate ? 'disabled title="当前任务已流转给其他人员，仅可查看"' : req.task_story_change_pending && (!req.final_test || req.task_assigned_to_me) ? 'disabled title="请先查看并确认研发需求变更"' : '';
     const vTag = mode === 'all_pending' && req.major_version_name
       ? `<span class="badge" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; margin-right:8px; padding:2px 6px;">🏷️${req.major_version_name}</span>`
       : '';
@@ -1367,6 +1429,7 @@ export function renderMineCards() {
               : `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked).then(()=>loadMyWorkbench())">✅用例完成</label>
             <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">✅测试完成</label>`}
             ${renderTaskMeta(req)}
+            ${baseReq.has_multiple_test_tasks ? `<span class="muted qa-task-progress">关联测试任务完成 ${baseReq.linked_test_task_done ?? (baseReq.test_tasks || []).filter(t => ['done', 'closed'].includes(t.status)).length} / ${baseReq.linked_test_task_total ?? (baseReq.test_tasks || []).length}</span>` : ''}
             <span class="badge" style="background:${req.test_notes ? '#dcfce7' : '#f1f5f9'}; color:${req.test_notes ? '#166534' : '#64748b'}; border:1px solid ${req.test_notes ? '#bbf7d0' : '#e2e8f0'};">
               测试要点：${req.test_notes ? '已填写' : '未填写'}
             </span>
@@ -1394,6 +1457,10 @@ export function renderMineCards() {
     const pendingCount = filteredData.filter((r) => r.task_story_change_pending).length;
     const changeBanner = pendingCount ? `<div role="status" style="background:#fff7ed; color:#9a3412; border:1px solid #fdba74; padding:10px 14px; border-radius:8px; margin-bottom:12px;">⚠ 有 ${pendingCount} 项研发需求变更待确认，请点击需求卡片上的橙色标签查看内容并确认。</div>` : '';
     mineCards.innerHTML = changeBanner + finalTestBanner + (state.currentFeedbackTodoHtml || '') + state.currentDispatchHtml + reqsHtml;
+    for (const id of openTaskMenus) {
+      const menu = mineCards.querySelector(`.mine-req-card[data-req-id="${Number(id)}"] .qa-task-dropdown`);
+      if (menu) menu.open = true;
+    }
     window.OmniQAZentao?.hydrateContainer(mineCards);
     window.OmniQAStoryAI?.refreshSlots?.(mineCards);
   }
@@ -1601,7 +1668,8 @@ export async function startReqTask(reqId) {
   let msg = '任务已开始，已同步禅道';
   let msgType = 'success';
   try {
-    const res = await api(`/requirements/${reqId}/task/start`, { method: 'POST', headers: window.H, body: {} });
+    const req = getRequirementById(reqId);
+    const res = req?.selected_task_mode ? await requestSelectedRequirementTask(req, 'start') : await api(`/requirements/${reqId}/task/start`, { method: 'POST', headers: window.H, body: {} });
     let data = null;
     try { data = await res.json(); } catch (_) { /* ignore */ }
     const errs = (data && data.errors) || [];
@@ -1625,7 +1693,8 @@ export async function pauseReqTask(reqId) {
   let msg = '任务已暂停，已同步禅道';
   let msgType = 'success';
   try {
-    const res = await api(`/requirements/${reqId}/task/pause`, { method: 'POST', headers: window.H, body: {} });
+    const req = getRequirementById(reqId);
+    const res = req?.selected_task_mode ? await requestSelectedRequirementTask(req, 'pause') : await api(`/requirements/${reqId}/task/pause`, { method: 'POST', headers: window.H, body: {} });
     let data = null;
     try { data = await res.json(); } catch (_) { /* ignore */ }
     const errs = (data && data.errors) || [];
@@ -1651,7 +1720,11 @@ export async function setReqEstimatedHours(reqId, value) {
     return;
   }
   try {
-    await api(`/requirements/${reqId}/estimated-hours`, { method: 'PUT', headers: window.H, body: { estimated_test_hours: hours } });
+    const req = getRequirementById(reqId);
+    if (req?.selected_task_mode) {
+      await requestSelectedRequirementTask(req, 'set_time', { hours });
+      await loadMyWorkbench();
+    } else await api(`/requirements/${reqId}/estimated-hours`, { method: 'PUT', headers: window.H, body: { estimated_test_hours: hours } });
     window.showMessage && window.showMessage('预计测试用时已更新', 'success');
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '更新预计用时失败', 'error');
@@ -1670,7 +1743,12 @@ export async function setFinalTestStatus(reqId, key, checked, checkboxEl) {
   try {
     const payload = {};
     payload[key] = checked;
-    await api(`/final-test/requirements/${reqId}/status`, { method: 'PATCH', headers: window.H, body: payload });
+    const req = getRequirementById(reqId);
+    if (key === 'test_completed' && req?.selected_task_mode) {
+      const consumed = checked ? promptRequirementTaskConsumed(req) : undefined;
+      if (consumed === null) { if (checkboxEl) checkboxEl.checked = !checked; return; }
+      await requestSelectedRequirementTask(req, checked ? 'finish' : 'reactivate', consumed !== undefined ? { consumed } : {});
+    } else await api(`/final-test/requirements/${reqId}/status`, { method: 'PATCH', headers: window.H, body: payload });
     window.showMessage && window.showMessage('最终测试状态已更新', 'success');
     if (checked && (key === 'case_completed' || key === 'test_completed')) {
       scheduleCompletionIncrementalRefresh({ testcasesRecent: key === 'case_completed' });
@@ -1762,6 +1840,7 @@ export async function pushTest() {
 }
 
 window.rememberMineReqFold = rememberMineReqFold;
+window.selectRequirementTask = selectRequirementTask;
 // 直接挂到 window，避免依赖（可能被缓存的）index.html 内联包装函数
 window.setFinalTestStatus = setFinalTestStatus;
 window.OmniQAMineTab = {

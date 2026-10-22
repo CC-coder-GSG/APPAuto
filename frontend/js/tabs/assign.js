@@ -1,5 +1,6 @@
 ﻿import { loadAssignProgress, toggleAssignProgressPendingOnly, resetAssignProgressContext } from './assign-progress.js?v=20261022-1';
 export { loadAssignProgress, toggleAssignProgressPendingOnly };
+import './assign-linked-tasks.js?v=20261022-1';
 
 import { api } from '../api.js';
 import { state } from '../state.js';
@@ -35,7 +36,7 @@ function updateAssignSelectionUI() {
   const count = document.getElementById('assignSelectionCount');
   if (count) count.textContent = boardLoading ? '正在加载需求…' : `已选 ${selectedRequirements.size} / ${rows.length} 个需求${ready ? '' : '（当前不可操作）'}`;
   document.querySelectorAll('[data-assign-action]').forEach(el => { el.disabled = !ready || !selectedRequirements.size; });
-  document.querySelectorAll('#assignTable input[type="checkbox"], #assignTable select').forEach(el => { el.disabled = !ready; });
+  document.querySelectorAll('#assignTable input[type="checkbox"], #assignTable select, #assignTable button').forEach(el => { el.disabled = !ready; });
   document.querySelectorAll('[data-assign-lock], #assignMajorSelect, #assignTaskStartDate, #assignTaskDeadline').forEach(el => { el.disabled = assignBusy; });
 }
 
@@ -97,6 +98,7 @@ export async function loadAssignBoard(options = {}) {
     .filter(([, value, original]) => value !== undefined && value !== original)
     .map(([id, value]) => [id, value]) : []);
   if (!sameContext) {
+    document.getElementById('assignLinkedTasksDialog')?.close();
     selectedRequirements.clear();
     boardContext = context;
     const result = document.getElementById('assignBatchResult');
@@ -156,7 +158,7 @@ export async function loadAssignBoard(options = {}) {
             ${users.map((u) => `<option value='${u.id}' ${u.id === r.owner_id ? 'selected' : ''}>${escapeHtml(u.display_name || u.username)}</option>`).join('')}
           </select>
         </td>
-        <td class="assign-task-dates">${r.zentao_task_id ? `<span>任务 #${Number(r.zentao_task_id)}</span><small>${r.task_dates_synced === false ? '日期待同步' : `${escapeHtml(r.task_start_date || '未设置')} → ${escapeHtml(r.task_deadline || '未设置')}`}</small>` : '<span class="muted">未创建子任务</span>'}</td>
+        <td class="assign-task-dates">${r.zentao_task_id ? `<span>任务 #${Number(r.zentao_task_id)}</span><small>${r.task_dates_synced === false ? '日期待同步' : `${escapeHtml(r.task_start_date || '未设置')} → ${escapeHtml(r.task_deadline || '未设置')}`}</small>` : '<span class="muted">未创建子任务</span>'}<button type="button" class="secondary" onclick="openAssignLinkedTasks(${Number(r.id)})">选择关联任务并修改</button></td>
       </tr>`;
     }).join('');
     ownerDrafts.forEach((value, id) => {

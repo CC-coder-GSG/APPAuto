@@ -32,7 +32,7 @@ def _binding_error(task: dict, req, execution_id: int) -> str:
         return "关联任务不属于当前大版本的禅道执行"
     if task.get("deleted") in (True, 1, "1"):
         return "关联任务已删除"
-    if str(task.get("type") or "") != "test" or _id(task.get("parent")) <= 0 or task.get("isParent") in (True, 1, "1"):
+    if str(task.get("type") or "") != "test" or (_id(task.get("parent")) <= 0 and not getattr(req, "allow_root_task", False)) or task.get("isParent") in (True, 1, "1"):
         return "关联任务不是有效的测试子任务，请先修正关联"
     if req.zentao_story_id and _id(task.get("story")) != req.zentao_story_id:
         return "关联任务的研发需求不一致，请先修正关联"

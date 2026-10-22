@@ -607,6 +607,8 @@ class ZentaoTaskSyncService:
             mirror = self.db.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == req.zentao_task_id).first()
             if mirror:
                 apply_task_story_change(mirror, t)
+                if status:
+                    mirror.status = status
             if metadata_changed:
                 changed = True
                 change_requirements.append(req)

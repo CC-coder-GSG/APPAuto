@@ -426,6 +426,8 @@ class RequirementService:
             self.reopen_after_task_reactivation(requirement, actor_id=getattr(acting_user, "id", None))
         else:
             requirement.test_completed = bool(test_completed)
+        from app.services.requirement_task_service import RequirementTaskService
+        RequirementTaskService(self.db).reconcile(requirement)
 
     def mark_test_completed_from_zentao_task(
         self,
@@ -441,6 +443,10 @@ class RequirementService:
         existing task-reactivation behavior unchanged.
         """
         if requirement.test_completed:
+            return False
+        from app.services.requirement_task_service import RequirementTaskService
+        rows = RequirementTaskService(self.db).rows_by_requirement([requirement])[requirement.id]
+        if len(rows) > 1 and any(t.status not in RequirementTaskService.DONE or t.task_story_change_pending for t in rows):
             return False
         requirement.test_completed = True
         requirement.test_completed_at = completed_at or local_now()

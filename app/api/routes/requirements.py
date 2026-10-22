@@ -99,6 +99,21 @@ class StartTaskPayload(BaseModel):
     hours: Optional[float] = None
 
 
+class LinkedTaskOperatePayload(BaseModel):
+    action: str
+    hours: Optional[float] = Field(default=None, gt=0, le=999)
+    consumed: Optional[float] = Field(default=None, gt=0, le=999)
+    minor_version_id: Optional[int] = Field(default=None, gt=0)
+    result_status: str = "passed"
+    notes: Optional[str] = None
+
+
+class LinkedTaskEditPayload(BaseModel):
+    owner_id: Optional[int] = Field(default=None, gt=0)
+    task_start_date: Optional[str] = None
+    task_deadline: Optional[str] = None
+
+
 class RequirementStoryBindingPayload(BaseModel):
     zentao_story_id: Optional[int] = None
 
@@ -528,6 +543,40 @@ def patch_requirement_status(
         test_completed=payload.test_completed,
         task_consumed_hours=payload.task_consumed_hours,
     )
+
+
+@router.get("/requirements/{requirement_id}/linked-tasks")
+def requirement_linked_tasks(requirement_id: int, refresh: bool = False,
+                             current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.requirement_task_service import RequirementTaskService
+
+    ensure_tab_access(current_user, "assign")
+    req = db.get(Requirement, requirement_id)
+    if req is None:
+        raise HTTPException(404, "需求不存在")
+    if refresh:
+        from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+        result = ZentaoTaskMirrorService(db).sync_one_major(req.major_version_id)
+    else:
+        result = None
+    return {"tasks": RequirementTaskService(db).describe([req], current_user)[req.id], "refreshed": result}
+
+
+@router.post("/requirements/{requirement_id}/linked-tasks/{task_id}/operate")
+def operate_requirement_linked_task(requirement_id: int, task_id: int, payload: LinkedTaskOperatePayload,
+                                    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.requirement_task_service import RequirementTaskService
+    ensure_tab_access(current_user, "mine")
+    return RequirementTaskService(db).operate(requirement_id, task_id, current_user, **payload.model_dump())
+
+
+@router.put("/requirements/{requirement_id}/linked-tasks/{task_id}")
+def edit_requirement_linked_task(requirement_id: int, task_id: int, payload: LinkedTaskEditPayload,
+                                 current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.requirement_task_service import RequirementTaskService
+    ensure_tab_access(current_user, "assign")
+    return RequirementTaskService(db).edit(requirement_id, task_id, current_user, owner_id=payload.owner_id,
+                                          start=payload.task_start_date, deadline=payload.task_deadline)
 
 
 @router.put("/requirements/{requirement_id}/estimated-hours")

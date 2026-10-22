@@ -18,7 +18,7 @@ import { resizeAllCharts } from './components/charts.js?v=20260706-2';
 import { runGuardrails } from './guardrails.js?v=20260716-1';
 
 const OPTIONAL_TAB_MODULES = [
-  { name: 'mine', path: './tabs/mine.js?v=20261020-bug-version-3' },
+  { name: 'mine', path: './tabs/mine.js?v=20261022-linked-tasks-1' },
   { name: 'review-workbench', path: './tabs/review-workbench.js?v=20261014-2' },
   { name: 'task-workbench', path: './tabs/task-workbench.js?v=20261014-2' },
   { name: 'task-board', path: './tabs/task-board.js?v=20261019-1' },
@@ -30,7 +30,7 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'build-records', path: './tabs/build-records.js?v=20260513-1' },
   { name: 'testcase-center', path: './tabs/testcase-center.js?v=20261020-http-uuid-1' },
   { name: 'activity', path: './tabs/activity.js?v=20260417-3' },
-  { name: 'assign', path: './tabs/assign.js?v=20261022-1' },
+  { name: 'assign', path: './tabs/assign.js?v=20261022-linked-tasks-1' },
   { name: 'dispatch', path: './tabs/dispatch.js?v=20260417-3' },
   { name: 'data', path: './tabs/data.js?v=20261010-2' },
   { name: 'zentao-ai', path: './tabs/zentao-ai.js?v=20261013-1' },

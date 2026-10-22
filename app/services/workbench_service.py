@@ -38,6 +38,8 @@ class WorkbenchService:
             from app.services.zentao_task_sync_service import ZentaoTaskSyncService
 
             ZentaoTaskSyncService(self.db).sync_tasks_status_for_major(major_version_id)
+            from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+            ZentaoTaskMirrorService(self.db).sync_one_major(major_version_id)
         except Exception as exc:  # noqa: BLE001 — 禅道侧异常绝不阻断工作台加载
             logger.warning("workbench task status sync major %s failed: %s", major_version_id, exc)
 
@@ -153,15 +155,42 @@ class WorkbenchService:
         if final_test_mode:
             query = query.filter(Requirement.major_version_id == major_version_id)
         else:
-            query = query.filter(Requirement.owner_id == current_user.id)
+            from app.models.zentao_task_mirror import ZentaoTaskMirror
+            account = (current_user.zentao_account or "").strip().lower()
+            own_tasks = self.db.query(ZentaoTaskMirror.task_id).join(
+                Version, Version.zentao_execution_id == ZentaoTaskMirror.execution_id,
+            ).filter(
+                Version.id == Requirement.major_version_id,
+                or_(ZentaoTaskMirror.task_id == Requirement.zentao_task_id,
+                    ZentaoTaskMirror.story == Requirement.zentao_story_id),
+                ZentaoTaskMirror.type == "test", ZentaoTaskMirror.is_parent == 0,
+                ZentaoTaskMirror.status != "cancel",
+                or_(ZentaoTaskMirror.assignee_user_id == current_user.id,
+                    ZentaoTaskMirror.assigned_to == account if account else False),
+            ).exists()
+            query = query.filter(or_(Requirement.owner_id == current_user.id, own_tasks))
             if mode == "version" and major_version_id:
                 query = query.filter(Requirement.major_version_id == major_version_id)
             elif mode == "all_pending":
-                query = query.filter(or_(Requirement.test_completed.is_(False), Requirement.task_story_change_pending.is_(True)))
+                pending_tasks = self.db.query(ZentaoTaskMirror.task_id).join(
+                    Version, Version.zentao_execution_id == ZentaoTaskMirror.execution_id,
+                ).filter(Version.id == Requirement.major_version_id,
+                         or_(ZentaoTaskMirror.task_id == Requirement.zentao_task_id,
+                             ZentaoTaskMirror.story == Requirement.zentao_story_id),
+                         ZentaoTaskMirror.type == "test", ZentaoTaskMirror.is_parent == 0,
+                         or_(ZentaoTaskMirror.status.notin_(["done", "closed", "cancel"]),
+                             ZentaoTaskMirror.status.is_(None))).exists()
+                query = query.filter(or_(Requirement.test_completed.is_(False), Requirement.task_story_change_pending.is_(True), pending_tasks))
             if software_id:
                 query = query.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
 
         reqs = query.order_by(Requirement.id.desc()).all()
+        from app.services.requirement_task_service import RequirementTaskService
+        task_service = RequirementTaskService(self.db)
+        task_rows = task_service.rows_by_requirement(reqs)
+        if any([task_service.reconcile(r, task_rows[r.id]) for r in reqs]):
+            self.db.commit()
+        test_task_map = task_service.describe(reqs, current_user)
 
         # 当前用户在该版本的最终测试勾选状态
         ft_record_map: dict[int, FinalTestRecord] = {}
@@ -232,6 +261,11 @@ class WorkbenchService:
                 "zentao_req_id": r.zentao_req_id,
                 "title": r.title,
                 "final_test": final_test_mode,
+                "test_tasks": test_task_map.get(r.id, []),
+                "has_multiple_test_tasks": task_service.task_count(r, task_rows[r.id]) > 1,
+                "linked_test_task_total": task_service.task_count(r, task_rows[r.id]),
+                "linked_test_task_done": sum(t.status in task_service.DONE for t in task_rows[r.id]) + int(task_service.missing_primary(r, task_rows[r.id]) and r.zentao_task_status_cache in task_service.DONE),
+                "all_linked_test_tasks_completed": bool(r.test_completed),
                 "case_completed": _case_done(r),
                 "test_completed": _test_done(r),
                 "major_version_id": r.major_version_id,
