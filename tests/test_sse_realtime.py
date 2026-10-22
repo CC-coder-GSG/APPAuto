@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import uuid
 
+import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_db
@@ -13,6 +15,18 @@ from app.models.enums import UserRole
 from app.models.user import User
 from app.services.sse_service import sse_pull_since, sse_publish
 from app.services.stage5_service import Stage5Service
+
+
+@pytest.fixture
+def finite_stream(monkeypatch):
+    # TestClient buffers streaming responses until the generator finishes.
+    # End after one event batch so these assertions do not wait forever.
+    async def disconnected_after_one_batch(request):
+        polls = getattr(request.state, 'sse_test_polls', 0)
+        request.state.sse_test_polls = polls + 1
+        return polls > 0
+
+    monkeypatch.setattr(Request, 'is_disconnected', disconnected_after_one_batch)
 
 
 def _make_auth_headers(db_session) -> dict[str, str]:
@@ -77,7 +91,7 @@ def test_sse_stream_requires_token(db_session):
         client.close()
 
 
-def test_sse_stream_with_valid_token_reads_event(db_session):
+def test_sse_stream_with_valid_token_reads_event(db_session, finite_stream):
     client = _build_client_with_db_override(db_session)
     try:
         headers = _make_auth_headers(db_session)
@@ -101,7 +115,7 @@ def test_sse_stream_with_valid_token_reads_event(db_session):
         client.close()
 
 
-def test_sse_stream_last_event_id_only_returns_newer(db_session):
+def test_sse_stream_last_event_id_only_returns_newer(db_session, finite_stream):
     client = _build_client_with_db_override(db_session)
     try:
         headers = _make_auth_headers(db_session)
@@ -121,7 +135,7 @@ def test_sse_stream_last_event_id_only_returns_newer(db_session):
         client.close()
 
 
-def test_sse_stream_user_channel_filtering(db_session):
+def test_sse_stream_user_channel_filtering(db_session, finite_stream):
     client = _build_client_with_db_override(db_session)
     try:
         headers = _make_auth_headers(db_session)

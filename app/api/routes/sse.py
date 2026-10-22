@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import get_current_user, get_db
 from app.models import User
@@ -17,6 +17,12 @@ router = APIRouter()
 _SESSION_CHECK_INTERVAL = 60
 
 
+def _read_session_token(bind, user_id: int) -> str | None:
+    # A session check must release its connection before the stream waits again.
+    with Session(bind=bind) as check_db:
+        return check_db.query(User.session_token).filter(User.id == user_id).scalar()
+
+
 @router.get("/api/sse/stream")
 async def sse_stream(
     request: Request,
@@ -24,12 +30,19 @@ async def sse_stream(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # Snapshot authentication before closing the request Session. Depending on
+    # FastAPI's version, yield dependencies close before or after streaming;
+    # neither lifecycle should leave a connection reserved for an idle client.
+    user_id = current_user.id
+    saved_session_token = current_user.session_token
+    bind = db.get_bind()
+    await run_in_threadpool(db.close)
+
     async def event_generator() -> AsyncGenerator[str, None]:
         cursor = int(last_event_id or 0)
         idle_ticks = 0
         session_check_ticks = 0
-        saved_session_token = current_user.session_token
-        channels = {"global", f"user:{current_user.id}"}
+        channels = {"global", f"user:{user_id}"}
         while True:
             if await request.is_disconnected():
                 break
@@ -50,19 +63,12 @@ async def sse_stream(
                 # This replaces the fixed 0.8s sleep and wakes up immediately on publish.
                 await sse_wait_for_events(timeout=1.0)
 
-            # 定期重查 DB 验证 session 是否仍有效（防止被踢后流继续推送）。
-            # 这里不用 db.expire/refresh —— current_user 实例在请求返回后会被
-            # get_db 关闭 session 从而变成 detached，expire 会抛
-            # InvalidRequestError。直接用 id 重新查一次 session_token 列即可。
+            # 定期校验会话；短会话在查询后立即归还连接，查询也不阻塞事件循环。
             session_check_ticks += 1
             if session_check_ticks >= _SESSION_CHECK_INTERVAL:
                 session_check_ticks = 0
                 try:
-                    current_token = (
-                        db.query(User.session_token)
-                        .filter(User.id == current_user.id)
-                        .scalar()
-                    )
+                    current_token = await run_in_threadpool(_read_session_token, bind, user_id)
                 except Exception:
                     break
                 if current_token != saved_session_token:

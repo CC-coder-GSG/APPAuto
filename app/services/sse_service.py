@@ -79,7 +79,9 @@ class SSEEventBus:
         notify = self._get_notify()
         notify.clear()
         try:
-            await asyncio.wait_for(asyncio.shield(notify.wait()), timeout=timeout)
+            # Cancel this individual waiter on timeout. Shielding it leaves one
+            # orphaned task per idle tick/client until the next published event.
+            await asyncio.wait_for(notify.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             pass
 
