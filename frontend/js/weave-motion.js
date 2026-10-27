@@ -21,10 +21,10 @@
     report: "tabReportBtn", activity: "tabActivityBtn",
     data: "tabDataBtn", dispatch: "tabDispatchBtn", "zentao-ai": "tabZentaoAiBtn",
     jenkins: "tabJenkinsBtn", "cad-test": "tabCadTestBtn", terminal: "tabTerminalBtn",
-    learning: "tabLearningBtn",
+    learning: "tabLearningBtn", tools: "tabToolsBtn",
   };
   // retest / overall-test 是工作台子页，归并到 mine
-  const ALIAS = { retest: "mine", "overall-test": "mine" };
+  const ALIAS = { retest: "mine", "overall-test": "mine", "database-compare": "tools" };
 
   /* ── 1. 流体导航指示器 ─────────────────────────────── */
 
