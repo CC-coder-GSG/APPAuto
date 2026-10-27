@@ -105,6 +105,17 @@ from app.services.zentao_background_sync_service import ZentaoBackgroundSyncServ
 app = FastAPI(title="测量软件测试平台", version="0.3.0")
 scheduler = BackgroundScheduler(timezone=settings.scheduler_timezone)
 logger = logging.getLogger("uvicorn.error")
+_database_compare_worker = None
+
+
+def _ensure_database_compare_worker() -> None:
+    global _database_compare_worker
+    if _database_compare_worker is None or _database_compare_worker.poll() is not None:
+        from app.services.database_compare.worker import start_managed_worker
+        try:
+            _database_compare_worker = start_managed_worker()
+        except OSError:
+            logger.exception("database comparison worker could not start")
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 _cors_origins = settings.cors_allowed_origins
@@ -211,7 +222,11 @@ def _run_nightly_full_zentao_sync() -> None:
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    _ensure_database_compare_worker()
     if not scheduler.running:
+        if settings.database_compare_worker_enabled:
+            scheduler.add_job(_ensure_database_compare_worker, IntervalTrigger(seconds=15),
+                              id="database_compare_worker", replace_existing=True, max_instances=1)
         scheduler.add_job(_push_daily_report, CronTrigger(hour=18, minute=0), id="daily_report", replace_existing=True)
         if settings.zentao_background_sync_enabled:
             if settings.zentao_workbench_recent_sync_interval_minutes > 0:
@@ -245,6 +260,8 @@ def on_startup() -> None:
 def on_shutdown() -> None:
     if scheduler.running:
         scheduler.shutdown(wait=False)
+    if _database_compare_worker is not None and _database_compare_worker.poll() is None:
+        _database_compare_worker.terminate()
 
 
 app.include_router(api_router)

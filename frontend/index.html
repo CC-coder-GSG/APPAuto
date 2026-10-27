@@ -10,7 +10,7 @@
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261022-token-recovery-1"></script>
+  <script type="module" src="/static/js/app.js?v=20261027-files-1"></script>
   <script src="/static/js/weave-motion.js?v=20260703-1" defer></script>
   <style>
     /* Header layout */
@@ -211,6 +211,7 @@
     <button id="tabZentaoAiBtn" class="hidden" onclick="showTab('zentao-ai')">禅道AI用例生成</button>
     <button id="tabJenkinsBtn" class="hidden" onclick="showTab('jenkins')">Jenkins</button>
     <button id="tabCadTestBtn" class="hidden" onclick="showTab('cad-test')">CAD测试统计</button>
+    <button id="tabToolsBtn" class="hidden" onclick="showTab('tools')">实用工具</button>
     <button id="tabTerminalBtn" class="hidden" onclick="showTab('terminal')">终端控制台</button>
     <button id="tabLearningBtn" class="hidden" onclick="showTab('learning')">学习中心</button>
     <button id="tabCompetitorAnalysisBtn" class="hidden" onclick="window.location.href='/competitor-analysis'">竞品分析工作台</button>
@@ -1658,6 +1659,23 @@
     <div id="cadTestRoot"><div class="muted" style="padding:20px;">正在加载 CAD 测试统计…</div></div>
   </section>
 
+  <section id="tab-tools" class="hidden card">
+    <div class="workbench-shell">
+      <div class="workbench-shell-header" style="position:static;">
+        <div>
+          <h2 style="margin:0;">实用工具</h2>
+          <div class="muted" style="margin-top:6px;">集中使用测试辅助工具</div>
+        </div>
+        <div class="workbench-subnav" role="tablist" aria-label="实用工具模块">
+          <button id="toolsDatabaseCompareBtn" class="active" type="button" role="tab" aria-selected="true" aria-controls="toolsDatabaseComparePanel" onclick="window.OmniQAToolsTab?.activate()">数据库对比</button>
+        </div>
+      </div>
+      <div id="toolsDatabaseComparePanel" role="tabpanel" aria-labelledby="toolsDatabaseCompareBtn">
+        <div id="databaseCompareRoot"><div class="muted" style="padding:20px;">正在加载数据库对比…</div></div>
+      </div>
+    </div>
+  </section>
+
   <section id="tab-terminal" class="hidden card">
     <div class="row" style="justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
       <h2 style="margin:0;">终端控制台</h2>
@@ -2304,7 +2322,7 @@ function sourceTypeZh(v){
 }
 function logout(){localStorage.removeItem('token');location.href='/login'}
 function confirmPush(){return confirm('确定要向企微群发送吗？')}
-const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal','learning','bugly','competitor-analysis'];
+const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','database-compare','terminal','learning','bugly','competitor-analysis'];
 const DEFAULT_ALLOWED_TABS=['mine','task-board','feedback','retest','overall-test','field-test','testcase-center','report','jenkins','learning'];
 const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test','task','review'];
 const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test', task:'mine', review:'mine' };
@@ -2343,6 +2361,7 @@ function canAccessWorkbench(){
 function canAccessTab(name){
   if(name==='feature-tree') return true; // 功能图谱：全员可访问，仅经入口按钮进入
   if(name==='mine') return canAccessWorkbench();
+  if(name==='tools') return canAccessRawTab('database-compare');
   return canAccessRawTab(name);
 }
 function getDefaultWorkbenchSubtab(){
@@ -2577,6 +2596,7 @@ function applyTabVisibility(){
   const buttonMap={
     'bugly':'tabBuglyBtn',
     'competitor-analysis':'tabCompetitorAnalysisBtn',
+    'database-compare':'tabToolsBtn',
     'assign':'tabAssignBtn','mine':'tabMineBtn','task-board':'tabTaskBoardBtn','feedback':'tabFeedbackBtn',
     'field-test':'tabFieldTestBtn','build-records':'tabBuildRecordsBtn','testcase-center':'tabTestcaseCenterBtn',
     'report':'tabReportBtn','activity':'tabActivityBtn',
@@ -2592,7 +2612,7 @@ function applyTabVisibility(){
   }
 }
 function getDefaultVisibleTab(){
-  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal','learning']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','tools','terminal','learning']
     .find((name)=>canAccessTab(name)) || 'mine';
 }
 function getTabNamespaceName(name){
@@ -2613,6 +2633,7 @@ function getTabNamespaceName(name){
     'zentao-ai':'OmniQAZentaoAiTab',
     jenkins:'OmniQAJenkinsTab',
     'cad-test':'OmniQACadTab',
+    tools:'OmniQAToolsTab',
     terminal:'OmniQATerminalTab',
     learning:'OmniQALearningTab',
     'feature-tree':'OmniQAFeatureTreeTab',
@@ -2624,10 +2645,11 @@ function isTabRuntimeReady(name){
   return !!window[nsName];
 }
 function getFirstRuntimeReadyTab(){
-  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','tools','terminal']
     .find((tabName)=>canAccessTab(tabName) && isTabRuntimeReady(tabName)) || null;
 }
 async function showTab(name){
+  if(name==='database-compare') name='tools'; // 兼容已有入口及权限配置
   mountWorkbenchSubpages();
   const requestedSubtab=(name==='retest' || name==='overall-test') ? name : (name==='mine' ? getResolvedWorkbenchSubtab(name) : null);
   if(name==='retest' || name==='overall-test') name='mine';
@@ -2647,7 +2669,7 @@ async function showTab(name){
     if(!fallback || fallback===name) return;
     name = fallback;
   }
-  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','terminal','learning','feature-tree'].forEach(x=>{
+  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','tools','terminal','learning','feature-tree'].forEach(x=>{
     const el=document.getElementById('tab-'+x);
     if(el) el.classList.add('hidden');
   });
@@ -2670,6 +2692,7 @@ async function showTab(name){
   if(name === 'zentao-ai') { window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.activate && window.OmniQAZentaoAiTab.activate().catch(err=>showMessage(err.message||'加载禅道AI用例生成失败','error')); }
   if(name === 'jenkins') { window.OmniQAJenkinsTab && window.OmniQAJenkinsTab.loadJenkinsTab && window.OmniQAJenkinsTab.loadJenkinsTab().catch(err=>showMessage(err.message||'加载自动化测试失败','error')); }
   if(name === 'cad-test') { window.OmniQACadTab && window.OmniQACadTab.activate && window.OmniQACadTab.activate().catch(err=>showMessage(err.message||'加载CAD测试统计失败','error')); }
+  if(name === 'tools') { window.OmniQAToolsTab?.activate().catch(err=>showMessage(err.message||'加载实用工具失败','error')); }
   if(name === 'terminal') { window.OmniQATerminalTab && window.OmniQATerminalTab.loadTerminalTab && window.OmniQATerminalTab.loadTerminalTab().catch(err=>showMessage(err.message||'加载终端控制台失败','error')); }
   if(name === 'learning') {
     window.OmniQALearningTab && window.OmniQALearningTab.loadLearningTab && window.OmniQALearningTab.loadLearningTab().catch(err=>showMessage(err.message||'加载历史学习主题失败','error'));

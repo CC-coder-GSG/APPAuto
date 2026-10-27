@@ -28,3 +28,7 @@ bugly-backups/
 .codex-tmp/automation-implementation-20261019/
 .codex-tmp/surveymaster-integration-20261019/
 .codex-tmp/surveymaster-jenkins-20261020/
+# Database comparison uploads, generated results and isolated acceptance artifacts.
+uploads/database_compare/
+.codex-tmp/database-compare-*/
+.codex-tmp/database-comparison-*.sqlite

@@ -11,6 +11,7 @@ from app.models.bugly import (
 from app.models.cad_test import CadAttachment, CadBoard, CadCustomColumn, CadItem, CadItemFile, CadItemFolder, CadRecord, CadVersion
 from app.models.case_review import TestCaseReview
 from app.models.competitor_analysis import CompetitorAnalysisReport
+from app.models.database_compare import DatabaseCompareInput, DatabaseCompareTask
 from app.models.enums import (
     AssessmentStatus,
     BugSourceType,
@@ -98,6 +99,8 @@ __all__ = [
     "CadRecord",
     "CadVersion",
     "CompetitorAnalysisReport",
+    "DatabaseCompareInput",
+    "DatabaseCompareTask",
     "FeatureTreeCaseLink",
     "FeatureTreeMark",
     "FeatureTreeNode",

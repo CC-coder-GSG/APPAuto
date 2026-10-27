@@ -11,6 +11,7 @@ from app.core.exceptions import PermissionDenied
 ALL_TAB_KEYS = [
     "bugly",
     "competitor-analysis",
+    "database-compare",
     "assign",
     "mine",
     "task-board",

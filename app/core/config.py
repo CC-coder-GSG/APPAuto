@@ -15,6 +15,11 @@ class Settings(BaseSettings):
 
     app_name: str = '测量软件测试平台'
     app_version: str = '0.4.0'
+    database_compare_root: str = 'uploads/database_compare'
+    database_compare_worker_enabled: bool = True
+    database_compare_max_file_mb: int = Field(default=256, ge=1, le=2048)
+    database_compare_max_group_mb: int = Field(default=512, ge=1, le=4096)
+    database_compare_timeout_seconds: int = Field(default=1800, ge=10)
     env: str = Field(default_factory=lambda: os.getenv('APP_ENV', os.getenv('ENV', 'dev')))
     database_url: str = Field(default_factory=lambda: os.getenv('APP_DATABASE_URL', os.getenv('DATABASE_URL', 'sqlite:///./app_auto.db')))
     secret_key: str = Field(default_factory=lambda: os.getenv('APP_SECRET_KEY', os.getenv('SECRET_KEY', 'change_me_in_production')), min_length=16)

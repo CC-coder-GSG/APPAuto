@@ -1,0 +1,119 @@
+#databaseCompareRoot { color:var(--text-main); min-width:0; }
+#databaseCompareRoot [hidden] { display:none!important; }
+#databaseCompareRoot .dc-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px; }
+#databaseCompareRoot .dc-panel { padding:24px 0;margin-top:20px;border-top:1px solid var(--border-light); }
+#databaseCompareRoot .dc-flex { display:flex;gap:10px;align-items:center;flex-wrap:wrap; }
+#databaseCompareRoot .dc-upload-actions { margin-top:24px;gap:12px; }
+#databaseCompareRoot .dc-history-actions { margin-bottom:16px; }
+#databaseCompareRoot .dc-history-actions .dc-note { flex:1;min-width:200px; }
+#databaseCompareRoot button.dc-danger:not(:disabled) { color:var(--danger, #b91c1c)!important; }
+#databaseCompareRoot .dc-row-actions { flex-wrap:nowrap; }
+#databaseCompareRoot #dcPreviewArea:not(:empty) { margin-top:28px;padding-top:24px;border-top:1px solid var(--border-light); }
+#databaseCompareRoot #dcPreviewArea h3 { margin-bottom:12px; }
+#databaseCompareRoot #dcPreviewArea h3:not(:first-child) { margin-top:28px; }
+#databaseCompareRoot #dcPreviewArea>.dc-note { margin:0 0 16px; }
+#databaseCompareRoot #dcAddPair { margin-top:14px; }
+#databaseCompareRoot .dc-section-title { display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap; }
+#databaseCompareRoot h3 { font-size:16px;margin:0; }
+#databaseCompareRoot h4 { font-size:13px;margin:16px 0 10px; }
+#databaseCompareRoot .dc-step { font-size:12px;font-weight:700;color:var(--primary);background:var(--primary-light);padding:5px 8px;border-radius:6px; }
+#databaseCompareRoot .dc-upload { --dc-file-accent:#7260c5;--dc-file-tint:#f1edfb;background:var(--bg-muted);padding:24px;border:1px solid var(--border-light);border-radius:16px;min-width:0; }
+#databaseCompareRoot .dc-upload[data-side=new] { --dc-file-accent:#347d73;--dc-file-tint:#eaf4ef; }
+#databaseCompareRoot .dc-upload-heading { display:flex;gap:12px;align-items:center;margin-bottom:24px; }
+#databaseCompareRoot .dc-side-marker { display:grid;place-items:center;width:38px;height:42px;border-radius:10px;background:var(--dc-file-tint);color:var(--dc-file-accent);font:500 24px/1 Georgia,"Times New Roman",serif; }
+#databaseCompareRoot .dc-eyebrow { display:block;color:var(--text-main);font-size:14px;font-weight:700;letter-spacing:.03em; }
+#databaseCompareRoot .dc-side-subtitle { display:block;color:var(--text-muted);font-size:11px;margin-top:4px; }
+#databaseCompareRoot .dc-upload-format { margin-left:auto;color:var(--dc-file-accent);font:500 12px/1.5 "Cascadia Code",Consolas,monospace;letter-spacing:.04em; }
+#databaseCompareRoot .dc-upload label { display:block;font-size:12px;margin:12px 0 6px; }
+#databaseCompareRoot input,#databaseCompareRoot select { max-width:100%;box-sizing:border-box;font:inherit;font-size:13px; }
+#databaseCompareRoot .dc-upload input { width:100%; }
+#databaseCompareRoot .dc-files-heading { display:flex;justify-content:space-between;align-items:center;gap:10px;margin:22px 0 10px;font-size:12px;color:var(--text-muted); }
+#databaseCompareRoot .dc-file-count { color:var(--text-faint);font-size:11px;font-variant-numeric:tabular-nums; }
+#databaseCompareRoot .dc-file-list { display:grid;gap:8px;max-height:296px;overflow-y:auto;scrollbar-width:thin; }
+#databaseCompareRoot .dc-file-card { display:flex;align-items:center;gap:14px;padding:15px 12px 15px 16px;background:var(--card-bg);border:1px solid var(--border-light);border-radius:11px;min-width:0;transition:border-color .18s ease,box-shadow .18s ease; }
+#databaseCompareRoot .dc-file-card:hover { border-color:color-mix(in srgb,var(--dc-file-accent) 35%,transparent);box-shadow:0 3px 12px rgba(28,25,23,.035); }
+#databaseCompareRoot .dc-file-icon { flex:0 0 36px;width:36px;height:44px;color:var(--dc-file-accent); }
+#databaseCompareRoot .dc-file-icon svg { display:block;width:100%;height:100%; }
+#databaseCompareRoot .dc-file-info { min-width:0;flex:1; }
+#databaseCompareRoot .dc-file-title { display:flex;align-items:baseline;min-width:0;line-height:1.5;letter-spacing:-.025em;font:600 15px/1.5 "Cascadia Code","SFMono-Regular",Consolas,"Microsoft YaHei",monospace; }
+#databaseCompareRoot .dc-file-name { overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+#databaseCompareRoot .dc-file-extension { color:var(--text-faint);font-weight:400;flex-shrink:0; }
+#databaseCompareRoot .dc-file-meta { display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px;font:11px/1.5 "Segoe UI","Microsoft YaHei",sans-serif;color:var(--text-muted);font-variant-numeric:tabular-nums; }
+#databaseCompareRoot .dc-file-type { color:var(--dc-file-accent);background:var(--dc-file-tint);padding:1px 5px;border-radius:4px;font:600 9px/1.6 "Cascadia Code",Consolas,monospace;letter-spacing:.04em; }
+#databaseCompareRoot .dc-file-state { display:inline-flex;align-items:center;gap:5px;margin-left:auto;color:var(--text-faint);font-size:10px; }
+#databaseCompareRoot .dc-file-state::before { content:"";width:4px;height:4px;border-radius:50%;background:currentColor; }
+#databaseCompareRoot .dc-file-state[data-uploaded=true] { color:#347d73; }
+#databaseCompareRoot button.dc-file-remove { display:grid;place-items:center;flex:0 0 26px;width:26px;height:26px;min-height:0;padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important;color:var(--text-faint)!important;border-radius:6px!important; }
+#databaseCompareRoot button.dc-file-remove:hover { color:#b45350!important;background:#fcf0ee!important;transform:none; }
+#databaseCompareRoot .dc-file-remove svg { width:16px;height:16px; }
+#databaseCompareRoot .dc-dropzone { display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:12px;padding:26px 16px;border:1px dashed var(--border-mid);border-radius:11px;background:color-mix(in srgb,var(--card-bg) 45%,transparent);transition:background .18s ease,border-color .18s ease; }
+#databaseCompareRoot .dc-dropzone.dc-drag-over { background:var(--dc-file-tint);border-color:var(--dc-file-accent);border-style:solid; }
+#databaseCompareRoot .dc-drop-icon { display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;border-radius:10px;background:var(--dc-file-tint);color:var(--dc-file-accent); }
+#databaseCompareRoot .dc-drop-icon svg { width:19px;height:19px; }
+#databaseCompareRoot .dc-drop-copy { display:flex;flex-direction:column;gap:5px; }
+#databaseCompareRoot .dc-drop-copy strong { font-size:12px;font-weight:500; }
+#databaseCompareRoot .dc-drop-copy>span { color:var(--text-faint);font:10px/1.5 "Cascadia Code",Consolas,monospace; }
+#databaseCompareRoot button.dc-file-choose { display:inline-flex;align-items:center;gap:10px;font-size:11px!important;font-weight:600;padding:7px 12px!important;white-space:nowrap;color:var(--dc-file-accent)!important;border-color:color-mix(in srgb,var(--dc-file-accent) 22%,transparent)!important;background:var(--card-bg)!important; }
+#databaseCompareRoot button.dc-file-choose:hover { background:var(--dc-file-tint)!important;transform:none; }
+#databaseCompareRoot .dc-has-files { margin-top:10px;padding:10px 12px;justify-content:space-between; }
+#databaseCompareRoot .dc-has-files .dc-drop-icon { display:none; }
+#databaseCompareRoot .dc-has-files .dc-drop-copy strong { font-size:11px;color:var(--text-muted); }
+#databaseCompareRoot .dc-has-files .dc-drop-copy>span { display:none; }
+#databaseCompareRoot .dc-file-summary { color:var(--text-faint);font-size:10px;line-height:1.7;margin-top:10px;font-variant-numeric:tabular-nums; }
+#databaseCompareRoot .dc-note { color:var(--text-muted);font-size:12px;line-height:1.7; }
+#databaseCompareRoot .dc-scroll { overflow:auto;max-height:440px; }
+#databaseCompareRoot table { width:100%;border-collapse:collapse;font-size:13px; }
+#databaseCompareRoot th,#databaseCompareRoot td { text-align:left;vertical-align:top;padding:12px;border-bottom:1px solid var(--border-light); }
+#databaseCompareRoot thead th { color:var(--text-muted);font-size:12px;font-weight:600;background:var(--bg-muted); }
+#databaseCompareRoot .dc-metrics { display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;margin:20px 0;background:var(--border-light);border-radius:10px;overflow:hidden; }
+#databaseCompareRoot .dc-metric { background:var(--bg-muted);padding:16px 20px;font-size:12px;color:var(--text-muted); }
+#databaseCompareRoot .dc-metric strong { display:inline-block;margin-top:8px;font-size:26px;line-height:1.2;color:var(--text-main);font-variant-numeric:tabular-nums; }
+#databaseCompareRoot .dc-badge { display:inline-flex;align-items:center;font-size:11px;font-weight:600;line-height:1.5;padding:4px 9px;border-radius:6px;color:var(--primary);background:var(--primary-light);white-space:nowrap; }
+#databaseCompareRoot .dc-badge[data-status=succeeded] { color:#22734a;background:#eaf5ee; }
+#databaseCompareRoot .dc-badge[data-status=failed],#databaseCompareRoot .dc-badge[data-status=partial] { color:#a45620;background:#fcf0e5; }
+#databaseCompareRoot #dcTableSummary { margin-top:20px; }
+#databaseCompareRoot #dcTableSummary summary { padding:12px 0;cursor:pointer;font-size:13px;color:var(--text-muted); }
+#databaseCompareRoot #dcDiffControls { padding:14px;background:var(--bg-muted);border-radius:10px;gap:16px; }
+#databaseCompareRoot #dcDiffControls label { display:flex;align-items:center;gap:8px;font-size:12px;min-width:0; }
+#databaseCompareRoot .dc-diff-item { border-bottom:1px solid var(--border-light); }
+#databaseCompareRoot .dc-diff-item summary { display:flex;align-items:center;gap:16px;padding:16px 8px;cursor:pointer;list-style:none; }
+#databaseCompareRoot .dc-diff-item summary::-webkit-details-marker { display:none; }
+#databaseCompareRoot .dc-diff-item summary:hover { background:var(--bg-muted); }
+#databaseCompareRoot .dc-diff-heading { display:flex;align-items:center;gap:10px;flex:1;flex-wrap:wrap;min-width:0;overflow-wrap:anywhere; }
+#databaseCompareRoot .dc-diff-heading strong { font-size:13px; }
+#databaseCompareRoot .dc-expand { color:var(--primary);font-size:12px;white-space:nowrap; }
+#databaseCompareRoot .dc-expand::after { content:' ＋'; }
+#databaseCompareRoot details[open]>summary .dc-expand::after { content:' −'; }
+#databaseCompareRoot .dc-diff-body { padding:4px 16px 20px; }
+#databaseCompareRoot .dc-location { padding:12px 16px;background:var(--bg-muted);border-radius:8px;margin-bottom:14px;font-size:12px; }
+#databaseCompareRoot .dc-location>.dc-properties { margin-top:8px; }
+#databaseCompareRoot .dc-compare-scroll { overflow:auto;border:1px solid var(--border-light);border-radius:8px; }
+#databaseCompareRoot .dc-values { table-layout:fixed;min-width:560px; }
+#databaseCompareRoot .dc-values th:first-child { width:20%; }
+#databaseCompareRoot .dc-values tbody th { font-size:12px;font-weight:600;overflow-wrap:anywhere; }
+#databaseCompareRoot .dc-values tr.dc-changed>td:nth-child(2) { background:rgba(190,75,65,.045); }
+#databaseCompareRoot .dc-values tr.dc-changed>td:nth-child(3) { background:rgba(45,142,89,.055); }
+#databaseCompareRoot .dc-type { display:inline-block;font-size:10px;line-height:1.5;color:var(--text-muted);background:var(--bg-muted);padding:2px 6px;border-radius:4px;margin-bottom:5px; }
+#databaseCompareRoot .dc-value { white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;font-size:13px; }
+#databaseCompareRoot .dc-empty { font-size:12px;color:var(--text-faint);font-style:italic; }
+#databaseCompareRoot .dc-properties { margin:0; }
+#databaseCompareRoot .dc-properties>div { display:grid;grid-template-columns:minmax(80px,140px) minmax(0,1fr);gap:12px;padding:6px 0;border-bottom:1px solid var(--border-light); }
+#databaseCompareRoot .dc-properties dt { font-size:12px;color:var(--text-muted);overflow-wrap:anywhere; }
+#databaseCompareRoot .dc-properties dd { margin:0;min-width:0; }
+#databaseCompareRoot .dc-detail-meta { margin-top:14px; }
+#databaseCompareRoot .dc-list { margin:0;padding-left:20px; }
+#databaseCompareRoot .dc-list li { padding:4px 0; }
+#databaseCompareRoot .dc-empty-state { padding:32px;text-align:center;font-size:13px;background:var(--bg-muted);border-radius:10px; }
+#databaseCompareRoot :focus-visible { outline:2px solid var(--primary);outline-offset:3px; }
+@media(max-width:800px) {
+  #databaseCompareRoot .dc-grid { grid-template-columns:1fr; }
+  #databaseCompareRoot .dc-upload { padding:18px; }
+  #databaseCompareRoot .dc-file-card { gap:10px;padding:12px; }
+  #databaseCompareRoot .dc-file-title { font-size:13px; }
+  #databaseCompareRoot .dc-file-meta { gap:7px; }
+  #databaseCompareRoot .dc-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  #databaseCompareRoot .dc-diff-item summary { flex-wrap:wrap;gap:8px; }
+  #databaseCompareRoot .dc-diff-heading { flex-basis:100%; }
+  #databaseCompareRoot .dc-diff-body { padding:4px 0 16px; }
+  #databaseCompareRoot .dc-properties>div { grid-template-columns:minmax(60px,100px) minmax(0,1fr); }
+}
