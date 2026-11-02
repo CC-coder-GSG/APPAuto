@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -13,7 +13,10 @@ from app.utils.time_utils import local_now
 
 class Requirement(Base):
     __tablename__ = "requirements"
-    __table_args__ = (UniqueConstraint("major_version_id", "zentao_req_id", name="uq_requirements_major_reqid"),)
+    __table_args__ = (
+        UniqueConstraint("major_version_id", "zentao_req_id", name="uq_requirements_major_reqid"),
+        Index("ix_requirements_major_test_completed", "major_version_id", "test_completed"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     zentao_req_id: Mapped[str] = mapped_column(String(20), nullable=False, index=True)

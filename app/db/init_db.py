@@ -23,6 +23,7 @@ from app.db.seed import (
     ensure_zentao_sync_bot,
 )
 from app.db.session import SessionLocal, engine
+from app.db.workbench_indexes import ensure_workbench_indexes
 from app.models import (
     AuditLog,
     BrowserSyncEvent,
@@ -74,11 +75,16 @@ def init_db() -> None:
         ensure_browser_sync_schema_compat(db)
         ensure_build_record_schema_compat(db)
         Base.metadata.create_all(bind=engine)
+        ensure_workbench_indexes(db)
         ensure_feature_tree_schema_compat(db)
         ensure_cad_schema_compat(db)
         ensure_default_admin(db)
         ensure_zentao_sync_bot(db)
         ensure_default_software_and_backfill(db)
         repair_software_product_mappings_from_bug_history(db)
+        # Backfill before serving read-only workbenches. Also repairs old rows
+        # on startup after an interrupted import or an out-of-band DB change.
+        from app.services.retest_aggregate_service import RetestAggregateService
+        RetestAggregateService(db).reconcile_all(commit_batches=True)
     finally:
         db.close()

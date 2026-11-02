@@ -32,12 +32,96 @@ def _case_key_sql_variants(keys: set[str]) -> list[str]:
     return list(out)
 
 
+def _load_matching(query, filters: list[tuple[Any, set]], *, identity: str = "id") -> list:
+    """Union bounded IN queries, including on SQLite builds with a 999 bind limit."""
+    rows = {}
+    for column, values in filters:
+        values = sorted(values)
+        for start in range(0, len(values), 400):
+            for row in query.filter(column.in_(values[start:start + 400])).all():
+                rows[getattr(row, identity)] = row
+    return [rows[key] for key in sorted(rows)]
+
+
 class WorkbenchLinkService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, *, requirements: list[Requirement] | None = None):
         self.db = db
         self._major_names: dict[int, str] | None = None
         self._product_names: dict[str, str] | None = None
         self._build_names: dict[str, str] | None = None
+        self._mirrors: list[ZentaoTestCaseMirror] | None = None
+        self._bugs: list[BugTracking] | None = None
+        self._product_ids: set[str] | None = None
+        if requirements is not None:
+            # This service is scoped to one request; never reuse these rows after a write.
+            story_ids = {int(r.zentao_story_id) for r in requirements if r.zentao_story_id}
+            numeric_ids = {int(c.zentao_case_numeric_id) for r in requirements for c in r.test_cases if c.zentao_case_numeric_id}
+            self._mirrors = _load_matching(db.query(ZentaoTestCaseMirror), [
+                (ZentaoTestCaseMirror.zentao_story_id, story_ids),
+                (ZentaoTestCaseMirror.zentao_case_numeric_id, numeric_ids),
+            ])
+            self._product_ids = {str(row.zentao_product_id).strip()
+                                 for row in [c for r in requirements for c in r.test_cases] + self._mirrors
+                                 if row.zentao_product_id and not self._readable_reference_name(
+                                     row.zentao_product_name, row.zentao_product_id)}
+            case_keys = {_case_key(m.zentao_case_id) for m in self._mirrors
+                         if m.zentao_story_id in story_ids and not m.deleted and _case_key(m.zentao_case_id)}
+            req_ids = {r.id for r in requirements}
+            self._bugs = _load_matching(self._bug_query(), [
+                (BugTracking.requirement_id, req_ids),
+                (BugTracking.zentao_story_id, story_ids),
+                (BugTracking.zentao_linked_case_id, set(_case_key_sql_variants(case_keys))),
+                (BugTracking.retest_activated_req_id, req_ids),
+            ])
+
+    def _bug_query(self):
+        return self.db.query(BugTracking).options(
+            joinedload(BugTracking.dispatched_to), joinedload(BugTracking.retest_activated_by)
+        )
+
+    def _story_mirrors(self, story_ids: list[int]) -> list[ZentaoTestCaseMirror]:
+        if self._mirrors is not None:
+            ids = set(story_ids)
+            return sorted((m for m in self._mirrors if m.zentao_story_id in ids and not m.deleted),
+                          key=lambda m: m.zentao_case_numeric_id)
+        return (self.db.query(ZentaoTestCaseMirror).filter(
+            ZentaoTestCaseMirror.zentao_story_id.in_(story_ids), ZentaoTestCaseMirror.deleted.isnot(True)
+        ).order_by(ZentaoTestCaseMirror.zentao_case_numeric_id.asc()).all() if story_ids else [])
+
+    def _local_bug_rows(self, req_ids, source_types, case_refs=None) -> list[BugTracking]:
+        if self._bugs is not None:
+            ids = set(req_ids)
+            refs = set(case_refs) if case_refs is not None else None
+            return [b for b in self._bugs if b.requirement_id in ids and b.source_type in source_types
+                    and (refs is None or b.source_ref in refs)]
+        query = self._bug_query().filter(BugTracking.requirement_id.in_(req_ids), BugTracking.source_type.in_(source_types))
+        if case_refs is not None:
+            query = query.filter(BugTracking.source_ref.in_(case_refs))
+        return query.all() if req_ids else []
+
+    def _candidate_bug_rows(self, story_ids, case_keys, source_types=None) -> list[BugTracking]:
+        variants = set(_case_key_sql_variants(case_keys))
+        if self._bugs is not None:
+            ids = set(story_ids)
+            return [b for b in self._bugs if not b.zentao_deleted
+                    and (b.zentao_story_id in ids or b.zentao_linked_case_id in variants)
+                    and (source_types is None or b.source_type in source_types)]
+        terms = []
+        if story_ids:
+            terms.append(BugTracking.zentao_story_id.in_(story_ids))
+        if variants:
+            terms.append(BugTracking.zentao_linked_case_id.in_(variants))
+        if not terms:
+            return []
+        query = self._bug_query().filter(or_(*terms), BugTracking.zentao_deleted.isnot(True))
+        if source_types is not None:
+            query = query.filter(BugTracking.source_type.in_(source_types))
+        return query.order_by(BugTracking.id.asc()).all()
+
+    def activated_bug_rows(self, req_id: int) -> list[BugTracking]:
+        if self._bugs is not None:
+            return [b for b in self._bugs if b.retest_activated and b.retest_activated_req_id == req_id]
+        return self._bug_query().filter(BugTracking.retest_activated.is_(True), BugTracking.retest_activated_req_id == req_id).all()
 
     @staticmethod
     def _readable_reference_name(value: Any, reference_id: Any = None) -> str | None:
@@ -54,12 +138,17 @@ class WorkbenchLinkService:
 
         votes: dict[str, Counter[str]] = defaultdict(Counter)
         for model in (TestCase, BugTracking, ZentaoTestCaseMirror):
-            rows = (
+            query = (
                 self.db.query(model.zentao_product_id, model.zentao_product_name, func.count())
                 .filter(model.zentao_product_id.isnot(None), model.zentao_product_name.isnot(None))
                 .group_by(model.zentao_product_id, model.zentao_product_name)
-                .all()
             )
+            if self._product_ids is None:
+                rows = query.all()
+            else:
+                ids = sorted(self._product_ids)
+                rows = [row for start in range(0, len(ids), 400)
+                        for row in query.filter(model.zentao_product_id.in_(ids[start:start + 400])).all()]
             for product_id, product_name, count in rows:
                 readable = self._readable_reference_name(product_name, product_id)
                 key = str(product_id or "").strip()
@@ -96,14 +185,14 @@ class WorkbenchLinkService:
     def minor_version_name_map(self) -> dict[int, str]:
         return {
             version.id: version.version_no
-            for version in self.db.query(Version).filter(Version.version_type == VersionType.MINOR).all()
+            for version in self.db.query(Version.id, Version.version_no).filter(Version.version_type == VersionType.MINOR).all()
         }
 
     def _major_name_map(self) -> dict[int, str]:
         if self._major_names is None:
             self._major_names = {
                 version.id: version.version_no
-                for version in self.db.query(Version).filter(Version.version_type == VersionType.MAJOR).all()
+                for version in self.db.query(Version.id, Version.version_no).filter(Version.version_type == VersionType.MAJOR).all()
             }
         return self._major_names
 
@@ -143,6 +232,7 @@ class WorkbenchLinkService:
             "zentao_story_id": bug.zentao_story_id,
             # 复测问题留痕：激活人/误报标记/禅道提出人（复测结论判定用）
             "retest_activated": bool(getattr(bug, "retest_activated", False)),
+            "retest_activated_req_id": bug.retest_activated_req_id,
             "retest_activated_by_name": bug.retest_activated_by.shown_name if getattr(bug, "retest_activated_by", None) else None,
             "retest_dismissed": bool(getattr(bug, "retest_dismissed", False)),
             "zentao_opened_by_account": bug.zentao_opened_by_account,
@@ -174,17 +264,8 @@ class WorkbenchLinkService:
     ) -> dict[int, list[dict[str, Any]]]:
         req_ids = [req.id for req in reqs]
         local_case_ids = [case.id for req in reqs for case in (req.test_cases or [])]
-        local_case_bug_rows = (
-            self.db.query(BugTracking)
-            .options(joinedload(BugTracking.dispatched_to))
-            .filter(
-                BugTracking.requirement_id.in_(req_ids),
-                BugTracking.source_type == BugSourceType.CASE,
-                BugTracking.source_ref.in_([str(case_id) for case_id in local_case_ids] if local_case_ids else ["-1"]),
-            )
-            .all()
-            if req_ids
-            else []
+        local_case_bug_rows = self._local_bug_rows(
+            req_ids, [BugSourceType.CASE], [str(x) for x in local_case_ids] or ["-1"]
         )
 
         # 存原始行，序列化推迟到需求循环里做——序列化时要携带该需求的
@@ -194,17 +275,7 @@ class WorkbenchLinkService:
             case_bug_rows_map[str(bug.source_ref or "")].append(bug)
 
         story_ids = [int(req.zentao_story_id) for req in reqs if req.zentao_story_id]
-        mirror_rows = (
-            self.db.query(ZentaoTestCaseMirror)
-            .filter(
-                ZentaoTestCaseMirror.zentao_story_id.in_(story_ids),
-                ZentaoTestCaseMirror.deleted.isnot(True),
-            )
-            .order_by(ZentaoTestCaseMirror.zentao_case_numeric_id.asc())
-            .all()
-            if story_ids
-            else []
-        )
+        mirror_rows = self._story_mirrors(story_ids)
         mirror_by_story: dict[int, list[ZentaoTestCaseMirror]] = defaultdict(list)
         all_mirror_case_keys: set[str] = set()
         for row in mirror_rows:
@@ -224,12 +295,11 @@ class WorkbenchLinkService:
         ]
         mirror_by_numeric: dict[int, ZentaoTestCaseMirror] = {}
         if local_numeric_ids:
-            for row in (
-                self.db.query(ZentaoTestCaseMirror)
-                .filter(ZentaoTestCaseMirror.zentao_case_numeric_id.in_(local_numeric_ids))
-                .all()
-            ):
-                mirror_by_numeric[int(row.zentao_case_numeric_id)] = row
+            numeric_ids = set(local_numeric_ids)
+            rows = (self._mirrors if self._mirrors is not None else
+                    _load_matching(self.db.query(ZentaoTestCaseMirror), [(ZentaoTestCaseMirror.zentao_case_numeric_id, numeric_ids)]))
+            mirror_by_numeric = {int(row.zentao_case_numeric_id): row for row in rows
+                                 if row.zentao_case_numeric_id in numeric_ids}
 
         # Reverse-lookup Bugs by Zentao linked-case id. Covers the "this Bug
         # was opened against a testcase but never tagged with the parent
@@ -238,17 +308,7 @@ class WorkbenchLinkService:
         # Bug 也要挂出来（前端按 major_version_id 差异加「来自 X」徽章）。
         case_keyed_bug_map: dict[str, list[BugTracking]] = defaultdict(list)
         if all_mirror_case_keys:
-            linked_bug_rows = (
-                self.db.query(BugTracking)
-                .options(joinedload(BugTracking.dispatched_to))
-                .filter(
-                    BugTracking.zentao_linked_case_id.in_(
-                        _case_key_sql_variants(all_mirror_case_keys)
-                    ),
-                    BugTracking.zentao_deleted.isnot(True),
-                )
-                .all()
-            )
+            linked_bug_rows = self._candidate_bug_rows([], all_mirror_case_keys)
             for bug in linked_bug_rows:
                 key = _case_key(bug.zentao_linked_case_id)
                 if not key:
@@ -345,62 +405,22 @@ class WorkbenchLinkService:
         req_ids = [req.id for req in reqs]
         story_ids = [int(req.zentao_story_id) for req in reqs if req.zentao_story_id]
 
-        local_query = (
-            self.db.query(BugTracking)
-            .options(joinedload(BugTracking.dispatched_to))
-            .filter(BugTracking.requirement_id.in_(req_ids))
-        )
-        if include_retest:
-            local_query = local_query.filter(BugTracking.source_type == BugSourceType.RETEST)
-        else:
-            local_query = local_query.filter(BugTracking.source_type.in_([BugSourceType.MANUAL, BugSourceType.REQUIREMENT]))
-        local_rows = local_query.all() if req_ids else []
+        source_types = [BugSourceType.RETEST] if include_retest else [BugSourceType.MANUAL, BugSourceType.REQUIREMENT]
+        local_rows = self._local_bug_rows(req_ids, source_types)
 
         # Build a story_id → mirror_case_keys map so we can also pull in
         # auto-linked Bugs that only reference the testcase (no story tag).
         mirror_keys_by_story: dict[int, set[str]] = defaultdict(set)
-        if story_ids:
-            for row in (
-                self.db.query(ZentaoTestCaseMirror.zentao_story_id, ZentaoTestCaseMirror.zentao_case_id)
-                .filter(
-                    ZentaoTestCaseMirror.zentao_story_id.in_(story_ids),
-                    ZentaoTestCaseMirror.deleted.isnot(True),
-                )
-                .all()
-            ):
-                story_id_val, case_id_val = row
-                key = _case_key(case_id_val)
-                if story_id_val and key:
-                    mirror_keys_by_story[int(story_id_val)].add(key)
+        for row in self._story_mirrors(story_ids):
+            key = _case_key(row.zentao_case_id)
+            if row.zentao_story_id and key:
+                mirror_keys_by_story[int(row.zentao_story_id)].add(key)
         all_mirror_keys: set[str] = set()
         for keys in mirror_keys_by_story.values():
             all_mirror_keys.update(keys)
 
-        story_filter_terms = []
-        if story_ids:
-            story_filter_terms.append(BugTracking.zentao_story_id.in_(story_ids))
-        if all_mirror_keys:
-            story_filter_terms.append(BugTracking.zentao_linked_case_id.in_(_case_key_sql_variants(all_mirror_keys)))
-
-        # 不按大版本过滤：跨大版本的同需求 Bug 一并归集，前端加来源徽章。
-        if story_filter_terms:
-            story_query = (
-                self.db.query(BugTracking)
-                .options(joinedload(BugTracking.dispatched_to))
-                .filter(
-                    or_(*story_filter_terms),
-                    BugTracking.zentao_deleted.isnot(True),
-                )
-            )
-            if include_retest:
-                story_query = story_query.filter(BugTracking.source_type == BugSourceType.RETEST)
-            else:
-                story_query = story_query.filter(
-                    BugTracking.source_type.in_([BugSourceType.MANUAL, BugSourceType.REQUIREMENT])
-                )
-            story_rows = story_query.all()
-        else:
-            story_rows = []
+        # Keep cross-major story/case matches; partition the shared rows by source.
+        story_rows = self._candidate_bug_rows(story_ids, all_mirror_keys, source_types)
 
         req_by_story: dict[int, list[Requirement]] = defaultdict(list)
         req_story_map: dict[int, int | None] = {}
@@ -475,12 +495,8 @@ class WorkbenchLinkService:
         if not story_ids:
             return {req.id: [] for req in reqs}
 
-        rows = (
-            self.db.query(ZentaoTaskMirror)
-            .filter(ZentaoTaskMirror.story.in_(story_ids))
-            .order_by(ZentaoTaskMirror.task_id.asc())
-            .all()
-        )
+        rows = _load_matching(self.db.query(ZentaoTaskMirror),
+                              [(ZentaoTaskMirror.story, set(story_ids))], identity="task_id")
         by_story: dict[int, list[ZentaoTaskMirror]] = defaultdict(list)
         for task in rows:
             if task.story:
@@ -532,39 +548,13 @@ class WorkbenchLinkService:
         # Same story → mirror keys map as in build_requirement_free_bug_view.
         mirror_keys_by_story: dict[int, set[str]] = defaultdict(set)
         all_mirror_keys: set[str] = set()
-        if story_ids:
-            for story_id_val, case_id_val in (
-                self.db.query(ZentaoTestCaseMirror.zentao_story_id, ZentaoTestCaseMirror.zentao_case_id)
-                .filter(
-                    ZentaoTestCaseMirror.zentao_story_id.in_(story_ids),
-                    ZentaoTestCaseMirror.deleted.isnot(True),
-                )
-                .all()
-            ):
-                key = _case_key(case_id_val)
-                if story_id_val and key:
-                    mirror_keys_by_story[int(story_id_val)].add(key)
-                    all_mirror_keys.add(key)
+        for row in self._story_mirrors(story_ids):
+            key = _case_key(row.zentao_case_id)
+            if row.zentao_story_id and key:
+                mirror_keys_by_story[int(row.zentao_story_id)].add(key)
+                all_mirror_keys.add(key)
 
-        story_filter_terms = []
-        if story_ids:
-            story_filter_terms.append(BugTracking.zentao_story_id.in_(story_ids))
-        if all_mirror_keys:
-            story_filter_terms.append(BugTracking.zentao_linked_case_id.in_(_case_key_sql_variants(all_mirror_keys)))
-
-        if not story_filter_terms:
-            return {req.id: [] for req in reqs}
-
-        # 不按大版本过滤：跨大版本的同需求 Bug 也纳入测后归集证据。
-        candidate_rows = (
-            self.db.query(BugTracking)
-            .options(joinedload(BugTracking.dispatched_to))
-            .filter(
-                or_(*story_filter_terms),
-                BugTracking.zentao_deleted.isnot(True),
-            )
-            .all()
-        )
+        candidate_rows = self._candidate_bug_rows(story_ids, all_mirror_keys)
 
         req_by_story: dict[int, list[Requirement]] = defaultdict(list)
         for req in reqs:
@@ -580,7 +570,7 @@ class WorkbenchLinkService:
             bug_case_key = _case_key(bug.zentao_linked_case_id)
             if bug_story_id and bug_story_id in req_by_story:
                 target_reqs = list(req_by_story[bug_story_id])
-            elif bug_case_key:
+            if bug_case_key:
                 for sid, keys in mirror_keys_by_story.items():
                     if bug_case_key in keys:
                         target_reqs.extend(req_by_story.get(sid, []))
@@ -591,12 +581,7 @@ class WorkbenchLinkService:
                 # phase and already covered by the existing free-bug view.
                 cutoff = req.test_completed_at
                 opened_at = bug.zentao_opened_at
-                if cutoff and opened_at and opened_at <= cutoff:
-                    continue
-                # If we have neither cutoff nor opened_at we can't make a
-                # safe call about whether this is "new" — skip rather than
-                # show a stale Bug as a fresh leak.
-                if not opened_at:
+                if not req.test_completed or not cutoff or not opened_at or opened_at <= cutoff:
                     continue
                 if bug.id in seen_bug_ids[req.id]:
                     continue

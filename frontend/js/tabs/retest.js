@@ -7,6 +7,15 @@ let retestPreflightKey = '';
 let retestPreflightAt = 0;
 let retestPreflightHandled = null;
 let retestLoadSeq = 0;
+let retestLoadController = null;
+let retestRenderedKey = null;
+
+function getRetestSelection() {
+  const mode = getRetestMode();
+  const majorId = Number(document.getElementById('retestMajorSelect')?.value || 0);
+  const sid = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+  return { mode, majorId, sid, key: `${sid}:${mode}:${mode === 'version' ? majorId : 0}` };
+}
 
 function getRetestMode() {
   return document.getElementById('retestDisplayMode')?.value || 'version';
@@ -120,7 +129,9 @@ function scheduleRetestPreflightBackgroundRefresh(softwareId) {
     const synced = (part) => part && part.cached !== true && !part.error;
     if (!synced(res.bugs) && !synced(res.testcases)) return;
     if (window.isWorkbenchSubtabActive && !window.isWorkbenchSubtabActive('retest')) return;
-    loadRetest().catch((err) => console.warn('retest reload after preflight failed', err));
+    // A completed sync must not interrupt a version switch already in progress.
+    if (retestLoadController || getRetestSelection().sid !== softwareId) return;
+    loadRetest({ background: true }).catch((err) => console.warn('retest reload after preflight failed', err));
   });
 }
 
@@ -155,51 +166,83 @@ export function toggleRetestMode() {
   return loadRetest();
 }
 
-export async function loadRetest() {
+export async function loadRetest({ background = false } = {}) {
+  // Invalidate the whole previous load, including its final-test status request.
+  const seq = ++retestLoadSeq;
+  retestLoadController?.abort();
+  const controller = new AbortController();
+  retestLoadController = controller;
   syncRetestMinorOptionsByMode();
-  const mode = getRetestMode();
-  const majorId = Number(document.getElementById('retestMajorSelect')?.value || 0);
-  if (mode === 'version' && !majorId) {
-    window.showMessage && window.showMessage('请选择大版本', 'error');
-    return;
+  const { mode, majorId, sid, key } = getRetestSelection();
+  const isCurrent = () => seq === retestLoadSeq && key === getRetestSelection().key;
+  const container = document.getElementById('retestCardsArea');
+  const keepCards = background && retestRenderedKey === key;
+  if (!keepCards) {
+    state.currentRetestData = [];
+    retestRenderedKey = null;
+    if (container) container.innerHTML = '<div class="muted" role="status" style="padding:20px; text-align:center;">正在加载复测需求，请稍候…</div>';
   }
+  container?.setAttribute('aria-busy', 'true');
 
-  // 该大版本若已进入最终测试阶段：复测流程暂停，不再统计待复测需求，
-  // 改为提示前往工作台处理。取消最终测试后自动恢复正常复测。
-  if (mode === 'version' && majorId) {
-    let finalTestEnabled = false;
-    try {
-      const st = await (await api(`/final-test/status?major_version_id=${majorId}`)).json();
-      finalTestEnabled = !!st.enabled;
-    } catch {
-      finalTestEnabled = false;
-    }
-    if (finalTestEnabled) {
-      state.currentRetestData = [];
-      const container = document.getElementById('retestCardsArea');
-      if (container) {
-        container.innerHTML = `<div class="card" style="padding:24px; text-align:center; border:2px solid #fcd34d; background:#fffbeb;">
-          <div style="font-size:18px; font-weight:700; color:#92400e;">🏁 当前版本已进入最终测试阶段</div>
-          <div class="muted" style="margin-top:8px; color:#92400e;">复测流程已暂停，不再统计待复测需求。请前往「我的工作台」对全部需求进行处理。</div>
-          <div class="muted" style="margin-top:4px; font-size:12px;">在「任务分配台」取消最终测试状态后，复测将自动恢复正常。</div>
-        </div>`;
-      }
+  try {
+    if (mode === 'version' && !majorId) {
+      if (container) container.innerHTML = '<div class="muted" role="status" style="padding:20px; text-align:center;">请选择大版本后加载复测需求</div>';
+      window.showMessage && window.showMessage('请选择大版本', 'error');
       return;
     }
+
+    // 该大版本若已进入最终测试阶段：复测流程暂停，不再统计待复测需求，
+    // 改为提示前往工作台处理。取消最终测试后自动恢复正常复测。
+    if (mode === 'version' && majorId) {
+      let finalTestEnabled = false;
+      try {
+        const st = await (await api(`/final-test/status?major_version_id=${majorId}`, { signal: controller.signal })).json();
+        finalTestEnabled = !!st.enabled;
+      } catch {
+        if (!isCurrent() || controller.signal.aborted) return;
+        finalTestEnabled = false;
+      }
+      if (!isCurrent()) return;
+      if (finalTestEnabled) {
+        state.currentRetestData = [];
+        const container = document.getElementById('retestCardsArea');
+        if (container) {
+          container.innerHTML = `<div class="card" style="padding:24px; text-align:center; border:2px solid #fcd34d; background:#fffbeb;">
+            <div style="font-size:18px; font-weight:700; color:#92400e;">🏁 当前版本已进入最终测试阶段</div>
+            <div class="muted" style="margin-top:8px; color:#92400e;">复测流程已暂停，不再统计待复测需求。请前往「我的工作台」对全部需求进行处理。</div>
+            <div class="muted" style="margin-top:4px; font-size:12px;">在「任务分配台」取消最终测试状态后，复测将自动恢复正常。</div>
+          </div>`;
+        }
+        return;
+      }
+    }
+
+    let url = '/workbench/retest?mode=' + mode;
+    if (mode === 'version' && majorId) url += '&major_version_id=' + majorId;
+    if (sid) url += '&software_id=' + sid;
+
+    const data = await (await api(url, { signal: controller.signal })).json();
+    if (!isCurrent()) return;
+    state.currentRetestData = data;
+    renderRetestCards(data, mode, sid);
+    retestRenderedKey = key;
+  } catch (err) {
+    if (!isCurrent() || controller.signal.aborted) return;
+    if (!keepCards && container) {
+      state.currentRetestData = [];
+      container.innerHTML = `<div role="alert" style="padding:20px; text-align:center; color:#b91c1c;">加载复测需求失败：${escapeHtml(err.message || '请稍后重试')} <button type="button" onclick="window.OmniQARetestTab.loadRetest().catch(() => {})">重试</button></div>`;
+    }
+    throw err;
+  } finally {
+    // An obsolete request must not clear the new request's loading indicator.
+    if (seq === retestLoadSeq) {
+      container?.setAttribute('aria-busy', 'false');
+      retestLoadController = null;
+    }
   }
+}
 
-  const sid = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
-  let url = '/workbench/retest?mode=' + mode;
-  if (mode === 'version' && majorId) url += '&major_version_id=' + majorId;
-  if (sid) url += '&software_id=' + sid;
-
-  // Cache first: render local data before starting the background preflight.
-  // The sequence guard prevents an older request from replacing newer filters.
-  const seq = ++retestLoadSeq;
-  const data = await (await api(url)).json();
-  if (seq !== retestLoadSeq) return;
-  state.currentRetestData = data;
-
+function renderRetestCards(data, mode, sid) {
   const container = document.getElementById('retestCardsArea');
   if (!container) return;
   if (!data || data.length === 0) {

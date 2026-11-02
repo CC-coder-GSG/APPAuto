@@ -100,6 +100,7 @@ def progress_env(db_session):
 def test_associations_are_deduplicated_scoped_and_read_only(progress_env):
     e = progress_env
     service = AssignmentProgressService(e["db"])
+    aggregate_before = (e["req"].retest_completed, e["req"].retest_passed, e["req"].retested_at)
     data = service.detail(e["req"].id, e["major"].id, e["software"].id)
     bugs = data["bugs"]["items"]
     assert {b["bug_id"] for b in bugs} == {f"b#{n}" for n in range(1001, 1008)}
@@ -113,7 +114,7 @@ def test_associations_are_deduplicated_scoped_and_read_only(progress_env):
     assert data["requirement"]["bug_count"] == 7
     assert data["requirement"]["open_bug_count"] == 6
     # Merely inspecting this report must not rewrite lifecycle/aggregate state.
-    assert e["req"].retest_completed is False
+    assert (e["req"].retest_completed, e["req"].retest_passed, e["req"].retested_at) == aggregate_before
     assert not e["db"].dirty
 
 

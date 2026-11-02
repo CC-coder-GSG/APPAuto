@@ -38,7 +38,7 @@ class ZentaoTaskMirror(Base):
     type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
     pri: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    story: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    story: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     task_story_change_pending: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True, index=True)
     task_story_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     task_latest_story_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

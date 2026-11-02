@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from collections import defaultdict
 
 from fastapi import HTTPException
 from sqlalchemy import or_
@@ -18,17 +19,29 @@ class RequirementTaskService:
         self.db = db
 
     def rows_by_requirement(self, reqs):
+        from app.services.workbench_link_service import _load_matching
+
         ids = {r.zentao_task_id for r in reqs if r.zentao_task_id}
         stories = {r.zentao_story_id for r in reqs if r.zentao_story_id}
-        rows = self.db.query(ZentaoTaskMirror).filter(
+        query = self.db.query(ZentaoTaskMirror).filter(
             ZentaoTaskMirror.is_parent == 0, ZentaoTaskMirror.type == "test",
             or_(ZentaoTaskMirror.status != "cancel", ZentaoTaskMirror.status.is_(None)),
-            or_(ZentaoTaskMirror.task_id.in_(ids), ZentaoTaskMirror.story.in_(stories)),
-        ).order_by(ZentaoTaskMirror.task_id).all() if reqs else []
-        return {r.id: [t for t in rows if t.execution_id == r.major_version.zentao_execution_id
-                       and (t.task_id == r.zentao_task_id or
-                            (r.zentao_story_id and t.story == r.zentao_story_id))]
-                for r in reqs}
+        )
+        rows = _load_matching(query, [(ZentaoTaskMirror.task_id, ids),
+                                      (ZentaoTaskMirror.story, stories)], identity="task_id")
+        by_story = defaultdict(dict)
+        by_id = {t.task_id: t for t in rows}
+        for task in rows:
+            by_story[(task.execution_id, task.story)][task.task_id] = task
+        result = {}
+        for req in reqs:
+            execution_id = req.major_version.zentao_execution_id
+            matches = dict(by_story.get((execution_id, req.zentao_story_id), {})) if req.zentao_story_id else {}
+            primary = by_id.get(req.zentao_task_id)
+            if primary and primary.execution_id == execution_id:
+                matches[primary.task_id] = primary
+            result[req.id] = [matches[key] for key in sorted(matches)]
+        return result
 
     @staticmethod
     def belongs_to_user(row, user, *, include_finished=True):
@@ -38,11 +51,11 @@ class RequirementTaskService:
                 bool(include_finished and row.status in RequirementTaskService.DONE and account
                      and (row.finished_by or "").strip().lower() == account))
 
-    def describe(self, reqs, user=None):
+    def describe(self, reqs, user=None, *, task_rows=None):
         from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
 
         result = {}
-        for req_id, rows in self.rows_by_requirement(reqs).items():
+        for req_id, rows in (task_rows if task_rows is not None else self.rows_by_requirement(reqs)).items():
             result[req_id] = [{**ZentaoTaskMirrorService._serialize(t),
                                "assigned_to_me": bool(user and self.belongs_to_user(t, user)),
                                "can_operate": bool(user and self.belongs_to_user(t, user, include_finished=False))}

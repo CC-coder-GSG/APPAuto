@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -16,6 +16,7 @@ class BugTracking(Base):
     __table_args__ = (
         UniqueConstraint("zentao_bug_id", name="uq_bug_tracking_zentao_bug_id"),
         UniqueConstraint("zentao_client_record_id", name="uq_bug_tracking_zentao_client_record_id"),
+        Index("ix_bug_tracking_requirement_source", "requirement_id", "source_type", "source_ref"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -62,7 +63,7 @@ class BugTracking(Base):
     zentao_resolved_build: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     zentao_bug_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     zentao_source_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
-    zentao_linked_case_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    zentao_linked_case_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
     zentao_linked_case_label: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     zentao_linked_case_href: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     zentao_display_bucket: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)

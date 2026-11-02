@@ -1,16 +1,18 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import time
+from threading import Lock
+from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from app.services.zentao_task_status import serialize_task_story_change
 
-from app.models import FinalTestRecord, Requirement, RequirementRetestRecord, User, Version
+from app.models import FinalTestRecord, Requirement, RequirementRetestRecord, User, Version, VersionType
 from app.services.case_review_service import CaseReviewService
-from app.services.workbench_link_service import WorkbenchLinkService
+from app.services.workbench_link_service import WorkbenchLinkService, _load_matching
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,8 @@ logger = logging.getLogger(__name__)
 # 刷新工作台时反复打禅道接口。
 _TASK_STATUS_SYNC_TTL_SECONDS = 20
 _task_status_sync_at: dict[int, float] = {}
+_task_status_sync_running: set[int] = set()
+_task_status_sync_lock = Lock()
 
 
 class WorkbenchService:
@@ -25,34 +29,65 @@ class WorkbenchService:
         self.db = db
         self.link_service = WorkbenchLinkService(db)
 
-    def _maybe_sync_task_status(self, major_version_id: int | None) -> None:
+    def _maybe_sync_task_status(self, major_version_id: int | None) -> bool:
         """按大版本节流地从禅道回写子任务状态/指派人（最佳努力，失败不影响加载）。"""
         if not major_version_id:
-            return
+            return False
         now = time.monotonic()
-        last = _task_status_sync_at.get(major_version_id, 0.0)
-        if now - last < _TASK_STATUS_SYNC_TTL_SECONDS:
-            return
-        _task_status_sync_at[major_version_id] = now
+        with _task_status_sync_lock:
+            last = _task_status_sync_at.get(major_version_id, 0.0)
+            if major_version_id in _task_status_sync_running or now - last < _TASK_STATUS_SYNC_TTL_SECONDS:
+                return False
+            _task_status_sync_running.add(major_version_id)
         try:
             from app.services.zentao_task_sync_service import ZentaoTaskSyncService
 
             ZentaoTaskSyncService(self.db).sync_tasks_status_for_major(major_version_id)
             from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
             ZentaoTaskMirrorService(self.db).sync_one_major(major_version_id)
+            return True
         except Exception as exc:  # noqa: BLE001 — 禅道侧异常绝不阻断工作台加载
+            self.db.rollback()
             logger.warning("workbench task status sync major %s failed: %s", major_version_id, exc)
+            return False
+        finally:
+            with _task_status_sync_lock:
+                _task_status_sync_at[major_version_id] = time.monotonic()
+                _task_status_sync_running.discard(major_version_id)
+
+    def refresh_my_task_status(self, *, current_user: User, major_version_id: int | None = None,
+                               mode: str = "version", software_id: int | None = None) -> dict:
+        """Explicit background refresh; the list GET never waits for Zentao."""
+        query = self.db.query(Version.id).filter(Version.version_type == VersionType.MAJOR)
+        if software_id:
+            query = query.filter(Version.software_id == software_id)
+        if mode == "version":
+            query = query.filter(Version.id == major_version_id)
+        else:
+            from app.models.zentao_task_mirror import ZentaoTaskMirror
+            account = (current_user.zentao_account or "").strip().lower()
+            owned = self.db.query(Requirement.id).filter(
+                Requirement.major_version_id == Version.id,
+                Requirement.owner_id == current_user.id,
+                Requirement.zentao_task_id.isnot(None),
+            ).exists()
+            assigned = self.db.query(ZentaoTaskMirror.task_id).filter(
+                ZentaoTaskMirror.execution_id == Version.zentao_execution_id,
+                or_(ZentaoTaskMirror.assignee_user_id == current_user.id,
+                    ZentaoTaskMirror.assigned_to == account if account else False),
+            ).exists()
+            query = query.filter(or_(owned, assigned))
+        # Materialize IDs before sync commits expire ORM state.
+        results = [self._maybe_sync_task_status(mid) for (mid,) in query.distinct().all()]
+        return {"refreshed": any(results)}
 
     def _latest_retest_passed_map(self, req_ids: list[int]) -> dict[int, bool]:
         """req_id → 最新一条复测记录的 passed（无记录则缺键）。"""
         if not req_ids:
             return {}
-        rows = (
-            self.db.query(RequirementRetestRecord)
-            .filter(RequirementRetestRecord.requirement_id.in_(req_ids))
-            .order_by(RequirementRetestRecord.updated_at.asc(), RequirementRetestRecord.id.asc())
-            .all()
-        )
+        rows = _load_matching(self.db.query(RequirementRetestRecord),
+                              [(RequirementRetestRecord.requirement_id, set(req_ids))])
+        rows.sort(key=lambda r: (r.updated_at or datetime.min, r.id))
         out: dict[int, bool] = {}
         for rec in rows:  # 升序遍历，后写覆盖 → 留下最新
             out[rec.requirement_id] = bool(rec.passed)
@@ -82,7 +117,9 @@ class WorkbenchService:
         fail_actors: list[str] = []
         for b in bug_dicts:
             kind = None
-            if b.get("retest_activated"):
+            if b.get("zentao_deleted") or not r.test_completed:
+                continue
+            if b.get("retest_activated") and b.get("retest_activated_req_id", r.id) == r.id:
                 kind = "activated"
             elif b["id"] in evidence_ids:
                 opener = (b.get("zentao_opened_by_account") or "").strip().lower()
@@ -103,7 +140,9 @@ class WorkbenchService:
                 actor = b.get("retest_activated_by_name") if kind == "activated" else b.get("zentao_opened_by_name")
                 if actor and actor not in fail_actors:
                     fail_actors.append(actor)
-        if active_count:
+        if not r.test_completed:
+            conclusion = "pending"
+        elif active_count:
             conclusion = "failed"
         elif latest_passed is not None:
             conclusion = "passed" if latest_passed else "failed"  # 历史打回记录保留原义
@@ -125,20 +164,6 @@ class WorkbenchService:
         mode: str = "version",
         software_id: int | None = None,
     ) -> list[dict]:
-        # 进入版本工作台时，先按大版本回写禅道子任务的最新状态/指派人（节流+最佳努力），
-        # 避免「已在禅道完成的任务本地仍显示未开始」以及指派人判定过期。
-        if mode == "version" and major_version_id:
-            self._maybe_sync_task_status(major_version_id)
-        elif mode == "all_pending":
-            # Include completed tasks that acquired an acknowledgement after completion.
-            major_query = self.db.query(Requirement.major_version_id).filter(
-                Requirement.owner_id == current_user.id, Requirement.zentao_task_id.isnot(None)
-            )
-            if software_id:
-                major_query = major_query.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
-            for (major_id,) in major_query.distinct().all():
-                self._maybe_sync_task_status(major_id)
-
         # 最终测试模式：所选大版本已开启 final_test 时，无视分配，返回该版本全部
         # 需求，且勾选状态改用当前用户独立的 FinalTestRecord。
         final_test_mode = False
@@ -147,6 +172,7 @@ class WorkbenchService:
             final_test_mode = bool(ft_flag[0]) if ft_flag else False
 
         query = self.db.query(Requirement).options(
+            joinedload(Requirement.owner),
             joinedload(Requirement.major_version),
             joinedload(Requirement.test_cases),
             joinedload(Requirement.test_notes_updated_by),
@@ -185,24 +211,30 @@ class WorkbenchService:
                 query = query.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
 
         reqs = query.order_by(Requirement.id.desc()).all()
+        if not reqs:
+            return []
         from app.services.requirement_task_service import RequirementTaskService
         task_service = RequirementTaskService(self.db)
         task_rows = task_service.rows_by_requirement(reqs)
         if any([task_service.reconcile(r, task_rows[r.id]) for r in reqs]):
+            req_ids = {r.id for r in reqs}
             self.db.commit()
-        test_task_map = task_service.describe(reqs, current_user)
+            # commit expires every loaded row. Reload eagerly in bounded batches
+            # instead of re-fetching requirements, cases and tasks one by one.
+            reqs = sorted(_load_matching(self.db.query(Requirement).options(
+                joinedload(Requirement.owner), joinedload(Requirement.major_version),
+                joinedload(Requirement.test_cases), joinedload(Requirement.test_notes_updated_by),
+            ), [(Requirement.id, req_ids)]), key=lambda r: r.id, reverse=True)
+            task_rows = task_service.rows_by_requirement(reqs)
+        test_task_map = task_service.describe(reqs, current_user, task_rows=task_rows)
+        links = WorkbenchLinkService(self.db, requirements=reqs)
 
         # 当前用户在该版本的最终测试勾选状态
         ft_record_map: dict[int, FinalTestRecord] = {}
         if final_test_mode and reqs:
-            ft_records = (
-                self.db.query(FinalTestRecord)
-                .filter(
-                    FinalTestRecord.user_id == current_user.id,
-                    FinalTestRecord.requirement_id.in_([r.id for r in reqs]),
-                )
-                .all()
-            )
+            ft_records = _load_matching(self.db.query(FinalTestRecord).filter(
+                FinalTestRecord.user_id == current_user.id,
+            ), [(FinalTestRecord.requirement_id, {r.id for r in reqs})])
             ft_record_map = {rec.requirement_id: rec for rec in ft_records}
 
         def _case_done(r: Requirement) -> bool:
@@ -217,24 +249,24 @@ class WorkbenchService:
                 return bool(rec.test_completed) if rec else False
             return r.test_completed
 
-        minors = self.link_service.minor_version_name_map()
-        case_view_map = self.link_service.build_requirement_case_view(reqs, minors)
+        minors = links.minor_version_name_map()
+        case_view_map = links.build_requirement_case_view(reqs, minors)
         # 用例审查标签（与审查工作台联动展示）
         CaseReviewService(self.db).attach_reviews_to_case_view(case_view_map)
-        free_bug_map, auto_story_bug_map = self.link_service.build_requirement_free_bug_view(
+        free_bug_map, auto_story_bug_map = links.build_requirement_free_bug_view(
             reqs,
             minors,
             include_retest=False,
             exclude_case_view=case_view_map,
         )
-        story_task_map = self.link_service.build_story_task_map(reqs)
+        story_task_map = links.build_story_task_map(reqs)
 
         # 复测结论改版：给卡片 Bug 打「复测问题」标记 + 需求级结论。
         # 「归集问题」只对已测试完成的需求判定（口径=测后归集证据）。
         completed_reqs = [r for r in reqs if r.test_completed and r.test_completed_at]
         retest_evidence_ids: dict[int, set[int]] = {}
         if completed_reqs:
-            for rid, bugs in self.link_service.build_retest_evidence(completed_reqs, minors).items():
+            for rid, bugs in links.build_retest_evidence(completed_reqs, minors).items():
                 retest_evidence_ids[rid] = {b["id"] for b in bugs}
         latest_passed_map = self._latest_retest_passed_map([r.id for r in reqs])
         retest_flag_map: dict[int, dict] = {}
@@ -405,18 +437,21 @@ class WorkbenchService:
 
         reqs = query.order_by(Requirement.id.asc()).all()
 
+        if not reqs:
+            return []
+
         # 拉取这批需求的全部 per-user 复测记录，构建"我的复测状态"和"已复测人"标签
         req_ids = [r.id for r in reqs]
         retest_records_map: dict[int, list[dict]] = {}
         my_record_map: dict[int, RequirementRetestRecord] = {}
+        records_by_req: dict[int, list[RequirementRetestRecord]] = {}
         if req_ids:
-            records = (
-                self.db.query(RequirementRetestRecord)
-                .options(joinedload(RequirementRetestRecord.user))
-                .filter(RequirementRetestRecord.requirement_id.in_(req_ids))
-                .all()
+            records = _load_matching(
+                self.db.query(RequirementRetestRecord).options(joinedload(RequirementRetestRecord.user)),
+                [(RequirementRetestRecord.requirement_id, set(req_ids))],
             )
             for rec in records:
+                records_by_req.setdefault(rec.requirement_id, []).append(rec)
                 retest_records_map.setdefault(rec.requirement_id, []).append({
                     "user_id": rec.user_id,
                     "user_name": rec.user.shown_name if rec.user else "未知",
@@ -426,18 +461,21 @@ class WorkbenchService:
                 if rec.user_id == current_user.id:
                     my_record_map[rec.requirement_id] = rec
 
-        minors = self.link_service.minor_version_name_map()
-        case_view_map = self.link_service.build_requirement_case_view(reqs, minors)
-        free_bug_map, _ = self.link_service.build_requirement_free_bug_view(
+        # A fresh request-scoped service shares mirror/Bug rows across all views.
+        link = WorkbenchLinkService(self.db, requirements=reqs)
+        minors = link.minor_version_name_map()
+        case_view_map = link.build_requirement_case_view(reqs, minors)
+        free_bug_map, _ = link.build_requirement_free_bug_view(
             reqs, minors, include_retest=False, exclude_case_view=case_view_map
         )
-        retest_bug_map, _ = self.link_service.build_requirement_free_bug_view(reqs, minors, include_retest=True)
-        retest_evidence_map = self.link_service.build_retest_evidence(reqs, minors)
-        story_task_map = self.link_service.build_story_task_map(reqs)
-        latest_passed_map = self._latest_retest_passed_map(req_ids)
+        retest_bug_map, _ = link.build_requirement_free_bug_view(reqs, minors, include_retest=True)
+        retest_evidence_map = link.build_retest_evidence(reqs, minors)
+        story_task_map = link.build_story_task_map(reqs)
+        for records in records_by_req.values():
+            records.sort(key=lambda rec: (rec.updated_at or datetime.min, rec.id), reverse=True)
+        latest_passed_map = {rid: bool(records[0].passed) for rid, records in records_by_req.items()}
 
         result = []
-        aggregate_dirty = False
         for r in reqs:
             evidence = retest_evidence_map.get(r.id, [])
             existing_retest_ids = {b["id"] for b in retest_bug_map.get(r.id, [])}
@@ -455,6 +493,13 @@ class WorkbenchService:
                 and bug["id"] not in existing_free_ids
                 and bug["id"] not in existing_case_bug_ids
             ]
+            # Activations can belong here even when the Bug's original
+            # requirement/story points elsewhere or its opened time is missing.
+            visible_ids = existing_retest_ids | existing_free_ids | existing_case_bug_ids | {b["id"] for b in filtered_evidence}
+            for bug in link.activated_bug_rows(r.id):
+                if bug.id not in visible_ids and not bug.zentao_deleted:
+                    filtered_evidence.append(link.serialize_bug_brief(bug, minors, expect_story_id=r.zentao_story_id))
+                    visible_ids.add(bug.id)
             my_record = my_record_map.get(r.id)
 
             # 复测结论改版：给卡片各区块的 Bug 打「复测问题」标记 + 需求级结论
@@ -467,14 +512,6 @@ class WorkbenchService:
             flags = self._retest_flags_for_req(
                 r, card_bug_dicts, {b["id"] for b in evidence}, latest_passed_map.get(r.id)
             )
-            # 读时校准聚合：归集 Bug 由禅道同步产生、不经过复测写路径，聚合
-            # 字段可能滞后；与结论不一致时就地重算（报表/看板读同一字段）。
-            expected = {"failed": (True, False), "passed": (True, True), "pending": (False, None)}[flags["retest_conclusion"]]
-            if (bool(r.retest_completed), r.retest_passed) != expected:
-                from app.services.retest_service import RetestService
-
-                RetestService(self.db)._recompute_aggregate(r)
-                aggregate_dirty = True
             result.append({
                 **flags,
                 "id": r.id,
@@ -509,6 +546,4 @@ class WorkbenchService:
                 "auto_linked_case_count": sum(1 for c in case_view_map.get(r.id, []) if c.get("auto_linked")),
                 "auto_linked_evidence_count": len(filtered_evidence),
             })
-        if aggregate_dirty:
-            self.db.commit()
         return result

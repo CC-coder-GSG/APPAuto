@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -55,6 +55,24 @@ def retest_workbench_v2(
         major_version_id=major_version_id,
         mode=mode,
         software_id=software_id,
+    )
+
+
+class WorkbenchTaskRefreshPayload(BaseModel):
+    major_version_id: Optional[int] = None
+    software_id: Optional[int] = None
+    mode: Literal["version", "all_pending"] = "version"
+
+
+@router.post("/refresh-task-status")
+def refresh_workbench_tasks(
+    payload: WorkbenchTaskRefreshPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return WorkbenchService(db).refresh_my_task_status(
+        current_user=current_user, major_version_id=payload.major_version_id,
+        mode=payload.mode, software_id=payload.software_id,
     )
 
 

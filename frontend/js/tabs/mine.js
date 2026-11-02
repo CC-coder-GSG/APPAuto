@@ -37,6 +37,47 @@ let minePreflightAt = 0;
 let minePreflightFailedAt = 0;
 let minePreflightHandled = null;
 let mineLoadSeq = 0;
+let mineLoadController = null;
+let mineLoading = false;
+let mineRenderedKey = '';
+let mineRefreshKey = '';
+let mineRefreshTimer = null;
+const mineTaskRefreshes = new Map();
+
+function mineFilterKey() {
+  return `${Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0)}:${getMode()}:${getMode() === 'version' ? Number(document.getElementById('mineMajorSelect')?.value || 0) : 0}`;
+}
+
+function mineLoadingHtml(label) {
+  return `<div class="mine-loading" role="status"><span class="mine-loading-spinner" aria-hidden="true"></span>${label}</div>`;
+}
+
+function queueMineBackgroundReload(key) {
+  if (key !== mineFilterKey()) return;
+  mineRefreshKey = key;
+  clearTimeout(mineRefreshTimer);
+  mineRefreshTimer = setTimeout(() => {
+    if (mineLoading) return; // finally resumes a refresh that finishes during a user load.
+    mineRefreshKey = '';
+    if (key !== mineFilterKey() || (window.isWorkbenchSubtabActive && !window.isWorkbenchSubtabActive('demand'))) return;
+    loadMyWorkbench({ background: true }).catch(err => console.warn('workbench background reload failed', err));
+  }, 200);
+}
+
+function scheduleTaskBackgroundRefresh(key, mode, majorId, softwareId) {
+  const previous = mineTaskRefreshes.get(key);
+  if (previous?.running || Date.now() - (previous?.at || 0) < 20000) return;
+  const entry = { running: true, at: 0 };
+  mineTaskRefreshes.set(key, entry);
+  api('/workbench/refresh-task-status', {
+    method: 'POST', body: { mode, major_version_id: majorId || null, software_id: softwareId || null },
+  }).then(r => r.json()).then(result => {
+    if (result.refreshed) queueMineBackgroundReload(key);
+  }).catch(err => console.warn('workbench task refresh failed', err)).finally(() => {
+    entry.running = false;
+    entry.at = Date.now();
+  });
+}
 
 function getFoldStorageKey() {
   const uid = state.currentUser?.id || window.currentUser?.id || 'anonymous';
@@ -152,7 +193,9 @@ function preflightWorkbenchData(softwareId) {
     return null;
   }
   minePreflightKey = key;
-  minePreflightPromise = api('/workbench/preflight-refresh', {
+  minePreflightAt = 0;
+  minePreflightFailedAt = 0;
+  const promise = api('/workbench/preflight-refresh', {
     method: 'POST',
     headers: window.H,
     body: {
@@ -162,15 +205,16 @@ function preflightWorkbenchData(softwareId) {
       force: false,
     },
   }).then(async (resp) => {
-    minePreflightAt = Date.now();
+    if (minePreflightKey === key) minePreflightAt = Date.now();
     try { return await resp.json(); } catch { return null; }
   }).catch((err) => {
-    minePreflightFailedAt = Date.now();
+    if (minePreflightKey === key) minePreflightFailedAt = Date.now();
     console.warn('workbench preflight refresh failed', err);
     return null;
   }).finally(() => {
-    minePreflightPromise = null;
+    if (minePreflightPromise === promise) minePreflightPromise = null;
   });
+  minePreflightPromise = promise;
   return minePreflightPromise;
 }
 
@@ -186,7 +230,8 @@ function schedulePreflightBackgroundRefresh(softwareId) {
     const synced = (part) => part && part.cached !== true && !part.error;
     if (!synced(res.bugs) && !synced(res.testcases)) return;
     if (window.isWorkbenchSubtabActive && !window.isWorkbenchSubtabActive('demand')) return;
-    loadMyWorkbench().catch((err) => console.warn('workbench reload after preflight failed', err));
+    const currentSoftware = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+    if (currentSoftware === softwareId) queueMineBackgroundReload(mineFilterKey());
   });
 }
 
@@ -1289,7 +1334,7 @@ function renderDispatchPanel(ddata) {
   </details>`;
 }
 
-export async function loadMyWorkbench() {
+export async function loadMyWorkbench({ background = false } = {}) {
   initTestExecutionModal();
   refreshMineMinorSelectByMode();
   const mode = getMode();
@@ -1298,39 +1343,91 @@ export async function loadMyWorkbench() {
   if (mode === 'version' && majorId) url += '&major_version_id=' + majorId;
   const currentSoftwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
   if (currentSoftwareId) url += `&software_id=${currentSoftwareId}`;
-  // 缓存优先：本地数据（禅道镜像缓存）立刻上屏，禅道 preflight 同步转后台，
-  // 真同步到新数据后静默重载一次。进页面不再空等禅道全量用例同步。
-  if (currentSoftwareId) {
-    schedulePreflightBackgroundRefresh(currentSoftwareId);
+  const key = mineFilterKey();
+  if (background && mineLoading) {
+    queueMineBackgroundReload(key);
+    return;
+  }
+  const seq = ++mineLoadSeq;
+  mineLoadController?.abort();
+  const controller = new AbortController();
+  mineLoadController = controller;
+  const isCurrent = () => seq === mineLoadSeq && key === mineFilterKey() && !controller.signal.aborted;
+  const container = document.getElementById('mineCards');
+  const summaryEl = document.getElementById('mineSummaryText');
+  const statusEl = document.getElementById('mineLoadStatus');
+  const keepCards = background && mineRenderedKey === key;
+  mineLoading = true;
+  container?.setAttribute('aria-busy', 'true');
+  if (statusEl) statusEl.innerHTML = keepCards ? mineLoadingHtml('正在更新工作台…') : '';
+  if (!keepCards) {
+    mineRenderedKey = '';
+    state.currentMineData = [];
+    state.currentDispatchData = [];
+    state.currentDispatchHtml = '';
+    state.currentFeedbackTodoHtml = '';
+    if (summaryEl) summaryEl.style.display = 'none';
+    if (container) container.innerHTML = mineLoadingHtml('正在加载工作台…');
   }
 
-  // 三路数据并行拉取；seq 防竞态：只有最新一次加载的结果允许上屏
-  const seq = ++mineLoadSeq;
-
-  const feedbackPromise = (async () => {
-    if (window.OmniQAFeedbackTab && typeof window.OmniQAFeedbackTab.loadFeedbackTodoOnMine === 'function') {
-      try {
-        await window.OmniQAFeedbackTab.loadFeedbackTodoOnMine(mode === 'version' ? majorId : null);
-        return;
-      } catch { /* 失败清空，下方兜底 */ }
+  try {
+    if (mode === 'version' && !majorId) {
+      if (container) container.innerHTML = '<div class="muted">请选择大版本</div>';
+      return;
     }
-    state.currentFeedbackTodoHtml = '';
-  })();
+    // Auxiliary results update only their own slots, never block/rebuild the requirement cards.
+    const setPanel = (name, html) => {
+      if (!isCurrent()) return;
+      state[name === 'feedback' ? 'currentFeedbackTodoHtml' : 'currentDispatchHtml'] = html;
+      const slot = document.getElementById(`mine-${name}-panel`);
+      if (slot) slot.innerHTML = html;
+    };
+    const panelError = label => `<div role="alert" class="muted">${label}加载失败 <button type="button" onclick="window.OmniQAMineTab.loadMyWorkbench().catch(() => {})">重试</button></div>`;
+    if (!keepCards) {
+      setPanel('feedback', mineLoadingHtml('正在加载反馈待办…'));
+      setPanel('dispatch', mode === 'version' ? mineLoadingHtml('正在加载指派 Bug…') : '');
+    }
+    const feedbackLoader = window.OmniQAFeedbackTab?.loadFeedbackTodoOnMine;
+    Promise.resolve().then(() => feedbackLoader
+      ? feedbackLoader(mode === 'version' ? majorId : null, { signal: controller.signal, commit: false }) : '')
+      .then(html => setPanel('feedback', html || ''))
+      .catch(() => setPanel('feedback', panelError('反馈待办')));
+    const dispatchPromise = mode === 'version'
+      ? api('/bugs/dispatched-to-me?major_version_id=' + majorId, { signal: controller.signal }).then(r => r.json())
+      : Promise.resolve([]);
+    dispatchPromise.then(data => {
+      if (!isCurrent()) return;
+      state.currentDispatchData = data;
+      setPanel('dispatch', data.length ? renderDispatchPanel(data) : '');
+    }).catch(() => setPanel('dispatch', panelError('指派 Bug')));
 
-  const dispatchPromise = (mode === 'version' && majorId)
-    ? api('/bugs/dispatched-to-me?major_version_id=' + majorId).then((r) => r.json())
-    : Promise.resolve([]);
+    const mineData = await (await api(url, { signal: controller.signal })).json();
+    if (!isCurrent()) return;
+    state.currentMineData = mineData;
+    mineRenderedKey = key;
+    updateMineSummary(mode);
+    renderMineCards();
+    if (!background) {
+      scheduleTaskBackgroundRefresh(key, mode, majorId, currentSoftwareId);
+      if (currentSoftwareId) schedulePreflightBackgroundRefresh(currentSoftwareId);
+    }
+  } catch (err) {
+    if (!isCurrent()) return;
+    const html = `<div role="alert" style="padding:16px; color:#b91c1c;">加载工作台失败：${escapeHtml(err.message || '请稍后重试')} <button type="button" onclick="window.OmniQAMineTab.loadMyWorkbench().catch(() => {})">重试</button></div>`;
+    if (keepCards && statusEl) statusEl.innerHTML = html;
+    else if (container) container.innerHTML = html;
+    throw err;
+  } finally {
+    if (seq === mineLoadSeq) {
+      mineLoading = false;
+      container?.setAttribute('aria-busy', 'false');
+      if (statusEl?.querySelector('[role="status"]')) statusEl.innerHTML = '';
+      if (mineRefreshKey === key) queueMineBackgroundReload(key);
+    }
+  }
+}
 
-  const [, ddata, mineData] = await Promise.all([
-    feedbackPromise,
-    dispatchPromise,
-    api(url).then((r) => r.json()),
-  ]);
-  if (seq !== mineLoadSeq) return; // 已有更新的加载在跑，丢弃本次结果
-
-  state.currentDispatchData = ddata;
-  state.currentDispatchHtml = ddata.length > 0 ? renderDispatchPanel(ddata) : '';
-  state.currentMineData = mineData;
+function updateMineSummary(mode) {
   const summaryEl = document.getElementById('mineSummaryText');
   const pendingCount = state.currentMineData.filter((r) => !r.test_completed || !r.case_completed || r.task_story_change_pending).length;
   const incompleteCount = state.currentMineData.filter((r) => !r.test_completed || !r.case_completed).length;
@@ -1338,14 +1435,13 @@ export async function loadMyWorkbench() {
   if (summaryEl) {
     if (mode === 'version') {
       const select = document.getElementById('mineMajorSelect');
-      const vName = select?.options?.[select.selectedIndex]?.text || '当前大版本';
+      const vName = escapeHtml(select?.options?.[select.selectedIndex]?.text || '当前大版本');
       summaryEl.innerHTML = `📢 <b>${vName}</b> 剩余 <b style="color:#dc2626; font-size:18px;">${incompleteCount}</b> 个需求未完成测试！${changeCount ? ` 另有 <b style="color:#c2410c;">${changeCount}</b> 项需求变更待确认。` : ''}`;
     } else {
       summaryEl.innerHTML = `📢 跨版本汇总：您共有 <b style="color:#dc2626; font-size:18px;">${pendingCount}</b> 个待处理需求！${changeCount ? ` 其中 <b style="color:#c2410c;">${changeCount}</b> 项需求变更待确认。` : ''}`;
     }
     summaryEl.style.display = 'block';
   }
-  renderMineCards();
 }
 
 const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', changed: '进行中', done: '已完成', pause: '已暂停', cancel: '已取消', closed: '已关闭' };
@@ -1407,6 +1503,8 @@ function collectReqBugs(req) {
 }
 
 export function renderMineCards() {
+  // Search/filter input must not erase a foreground loading indicator.
+  if (mineLoading && mineRenderedKey !== mineFilterKey()) return;
   const openTaskMenus = [...document.querySelectorAll('.mine-req-card .qa-task-dropdown[open]')]
     .map(el => el.closest('.mine-req-card').dataset.reqId);
   const searchKw = (document.getElementById('mineSearchInput')?.value || '').trim().toLowerCase();
@@ -1521,7 +1619,10 @@ export function renderMineCards() {
   if (mineCards) {
     const pendingCount = filteredData.filter((r) => r.task_story_change_pending).length;
     const changeBanner = pendingCount ? `<div role="status" style="background:#fff7ed; color:#9a3412; border:1px solid #fdba74; padding:10px 14px; border-radius:8px; margin-bottom:12px;">⚠ 有 ${pendingCount} 项研发需求变更待确认，请点击需求卡片上的橙色标签查看内容并确认。</div>` : '';
-    mineCards.innerHTML = changeBanner + finalTestBanner + (state.currentFeedbackTodoHtml || '') + state.currentDispatchHtml + reqsHtml;
+    mineCards.innerHTML = changeBanner + finalTestBanner
+      + `<div id="mine-feedback-panel">${state.currentFeedbackTodoHtml || ''}</div>`
+      + `<div id="mine-dispatch-panel">${state.currentDispatchHtml || ''}</div>`
+      + (reqsHtml || '<div class="muted" style="padding:20px; text-align:center;">当前筛选条件下没有需求</div>');
     for (const id of openTaskMenus) {
       const menu = mineCards.querySelector(`.mine-req-card[data-req-id="${Number(id)}"] .qa-task-dropdown`);
       if (menu) menu.open = true;
@@ -1561,7 +1662,7 @@ function bindMineSSE() {
     window._mineSSERequirementTimer = setTimeout(async () => {
       window._mineSSERequirementTimer = null;
       if (!window.isWorkbenchSubtabActive?.('demand')) return;
-      if (typeof window.loadMyWorkbench === 'function') await window.loadMyWorkbench();
+      await loadMyWorkbench({ background: true });
       // After reload, pulse the new card
       const el = document.querySelector(`.mine-req-card[data-req-id='${reqId}']`);
       if (el) window.OmniQASSE.pulseBoundaryGlow(el, 'blue');
@@ -1583,7 +1684,7 @@ function bindMineSSE() {
     if (window._mineSSETestNotesTimer) clearTimeout(window._mineSSETestNotesTimer);
     window._mineSSETestNotesTimer = setTimeout(() => {
       window._mineSSETestNotesTimer = null;
-      loadMyWorkbench().catch(() => {});
+      queueMineBackgroundReload(mineFilterKey());
     }, 500);
   });
 
@@ -1594,7 +1695,7 @@ function bindMineSSE() {
     if (window._mineSSETaskTimer) clearTimeout(window._mineSSETaskTimer);
     window._mineSSETaskTimer = setTimeout(() => {
       window._mineSSETaskTimer = null;
-      loadMyWorkbench().catch(() => {});
+      queueMineBackgroundReload(mineFilterKey());
     }, 400);
   });
   window.OmniQASSE.subscribe('final_test_requirement_status_changed', ({ payload }) => {
@@ -1604,7 +1705,7 @@ function bindMineSSE() {
     if (window._mineSSEFinalTestTimer) clearTimeout(window._mineSSEFinalTestTimer);
     window._mineSSEFinalTestTimer = setTimeout(() => {
       window._mineSSEFinalTestTimer = null;
-      loadMyWorkbench().catch(() => {});
+      queueMineBackgroundReload(mineFilterKey());
     }, 400);
   });
   window.OmniQASSE.subscribe('retest_requirement_status_changed', ({ payload }) => {
@@ -1613,7 +1714,7 @@ function bindMineSSE() {
     if (window._mineSSECompletionTimer) clearTimeout(window._mineSSECompletionTimer);
     window._mineSSECompletionTimer = setTimeout(() => {
       window._mineSSECompletionTimer = null;
-      loadMyWorkbench().catch(() => {});
+      queueMineBackgroundReload(mineFilterKey());
     }, 400);
   });
 

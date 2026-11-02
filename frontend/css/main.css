@@ -1945,3 +1945,24 @@ section.card > h2 {
     letter-spacing: -0.224px !important;
   }
 }
+/* Workbench first load and independent panel refresh feedback. */
+.mine-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 20px;
+  color: #64748b;
+}
+.mine-loading-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #dbeafe;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: mine-loading-spin .8s linear infinite;
+}
+@keyframes mine-loading-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .mine-loading-spinner { animation: none; }
+}

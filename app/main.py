@@ -219,11 +219,26 @@ def _run_nightly_full_zentao_sync() -> None:
         db.close()
 
 
+def _reconcile_retest_aggregates() -> None:
+    from app.services.retest_aggregate_service import RetestAggregateService
+    db = SessionLocal()
+    try:
+        result = RetestAggregateService(db).reconcile_all(commit_batches=True)
+        logger.info("retest aggregate audit finished | checked=%s changed=%s", result['checked'], result['changed'])
+    except Exception:
+        db.rollback()
+        logger.exception("retest aggregate audit failed; the next scheduled run will retry")
+    finally:
+        db.close()
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
     _ensure_database_compare_worker()
     if not scheduler.running:
+        scheduler.add_job(_reconcile_retest_aggregates, IntervalTrigger(minutes=15),
+                          id="retest_aggregate_reconcile", replace_existing=True, max_instances=1, coalesce=True)
         if settings.database_compare_worker_enabled:
             scheduler.add_job(_ensure_database_compare_worker, IntervalTrigger(seconds=15),
                               id="database_compare_worker", replace_existing=True, max_instances=1)

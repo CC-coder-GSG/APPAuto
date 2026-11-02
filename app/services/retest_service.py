@@ -123,7 +123,10 @@ class RetestService:
             for r in reqs
         ]
 
-    def compute_retest_problems(self, req: Requirement) -> list[dict]:
+    def compute_retest_problems(
+        self, req: Requirement, *, activated_rows: list[BugTracking] | None = None,
+        evidence: list[dict] | None = None,
+    ) -> list[dict]:
         """
         该需求当前的「复测问题 Bug」清单（2026-07 改版后的唯一口径）：
 
@@ -138,8 +141,10 @@ class RetestService:
         """
         problems: list[dict] = []
         seen: set[int] = set()
+        if not req.test_completed:
+            return problems
 
-        activated_rows = (
+        activated_rows = activated_rows if activated_rows is not None else (
             self.db.query(BugTracking)
             .options(joinedload(BugTracking.retest_activated_by))
             .filter(
@@ -149,6 +154,8 @@ class RetestService:
             .all()
         )
         for bug in activated_rows:
+            if bug.zentao_deleted or not bug.retest_activated or bug.retest_activated_req_id != req.id:
+                continue
             problems.append(
                 {
                     "bug_db_id": bug.id,
@@ -163,9 +170,10 @@ class RetestService:
         owner_account = ""
         if req.owner and req.owner.zentao_account:
             owner_account = req.owner.zentao_account.strip().lower()
-        link = WorkbenchLinkService(self.db)
-        minors = link.minor_version_name_map()
-        evidence = link.build_retest_evidence([req], minors).get(req.id, [])
+        if evidence is None:
+            link = WorkbenchLinkService(self.db)
+            minors = link.minor_version_name_map()
+            evidence = link.build_retest_evidence([req], minors).get(req.id, [])
         for bug in evidence:
             if bug["id"] in seen:
                 continue
@@ -192,6 +200,8 @@ class RetestService:
         - passed ：无有效问题，且有人点过通过 / 或问题全部被标记误报
         - pending：默认未处理
         """
+        if not req.test_completed:
+            return "pending"
         if problems is None:
             problems = self.compute_retest_problems(req)
         active = [p for p in problems if not p["dismissed"]]
@@ -210,7 +220,11 @@ class RetestService:
             return "passed"  # 出现过问题但全部被标记误报 → 视为通过
         return "pending"
 
-    def _recompute_aggregate(self, req: Requirement) -> None:
+    def _recompute_aggregate(
+        self, req: Requirement, *, problems: list[dict] | None = None,
+        records: list[RequirementRetestRecord] | None = None,
+        activated_rows: list[BugTracking] | None = None,
+    ) -> None:
         """
         刷新 Requirement 行上的共享聚合字段（供需求状态机 / 报表 / 看板沿用）。
 
@@ -218,9 +232,16 @@ class RetestService:
         「先通过后激活/归集到 Bug」的自动降级由此天然成立——聚合每次都按
         当前问题清单重算，通过记录仍保留但结论被问题覆盖。
         """
-        problems = self.compute_retest_problems(req)
+        previous = (req.retest_completed, req.retest_passed, req.retest_minor_version_id, req.retested_by_id)
+        previous_at = req.retested_at
+        if not req.test_completed:
+            req.retest_completed = False
+            req.retest_passed = req.retest_minor_version_id = req.retested_by_id = req.retested_at = None
+            return
+        if problems is None:
+            problems = self.compute_retest_problems(req)
         active = [p for p in problems if not p["dismissed"]]
-        records = (
+        records = records if records is not None else (
             self.db.query(RequirementRetestRecord)
             .filter(RequirementRetestRecord.requirement_id == req.id)
             .order_by(RequirementRetestRecord.updated_at.desc(), RequirementRetestRecord.id.desc())
@@ -229,17 +250,24 @@ class RetestService:
         latest = records[0] if records else None
         if active:
             # 复测未通过：任何人的问题都覆盖通过结论
+            active_ids = {p["bug_db_id"] for p in active if p["kind"] == "activated"}
+            if activated_rows is None:
+                activated_rows = (self.db.query(BugTracking)
+                    .filter(BugTracking.id.in_(active_ids))
+                    .order_by(BugTracking.retest_activated_at.desc()).all()) if active_ids else []
+            else:
+                activated_rows = sorted(
+                    (b for b in activated_rows if b.id in active_ids),
+                    key=lambda b: b.retest_activated_at or datetime.min, reverse=True,
+                )
             activated_by = next(
                 (
                     bug.retest_activated_by_id
-                    for bug in self.db.query(BugTracking)
-                    .filter(BugTracking.id.in_([p["bug_db_id"] for p in active if p["kind"] == "activated"]))
-                    .order_by(BugTracking.retest_activated_at.desc())
-                    .all()
+                    for bug in activated_rows
                     if bug.retest_activated_by_id
                 ),
                 None,
-            ) if any(p["kind"] == "activated" for p in active) else None
+            )
             req.retest_completed = True
             req.retest_passed = False
             req.retest_minor_version_id = latest.minor_version_id if latest else None
@@ -264,6 +292,12 @@ class RetestService:
             req.retest_minor_version_id = None
             req.retested_by_id = None
             req.retested_at = None
+
+        # Reconciliation is idempotent: an unchanged finding must not look like
+        # a new retest every time the scheduled audit runs.
+        current = (req.retest_completed, req.retest_passed, req.retest_minor_version_id, req.retested_by_id)
+        if previous == current and previous_at and (active or (problems and not latest)):
+            req.retested_at = previous_at
 
     def submit_retest(
         self,
@@ -321,8 +355,8 @@ class RetestService:
             self.db.delete(record)
         self.db.flush()
 
-        # 刷新共享聚合字段，供需求状态机 / 报表 / 看板沿用
-        self._recompute_aggregate(req)
+        # AppSession updates every affected requirement in this transaction,
+        # including other versions sharing the same story/case evidence.
         self.db.commit()
         audit(self.db, action="retest.submit", target_type="requirement", actor_id=current_user.id, target_id=str(req.id), detail=f"passed={retest_passed if retest_completed else None},minor={retest_minor_version_id if retest_completed else None}")
         sse_publish(
@@ -367,7 +401,6 @@ class RetestService:
         bug.retest_dismissed_by_id = None
         bug.closed = False  # 禅道已激活，本地闭环状态同步复位
         self.db.flush()  # 重算前先落盘：问题清单靠查询判定
-        self._recompute_aggregate(req)
         self.db.commit()
         audit(
             self.db, action="retest.bug_activated", target_type="bug",
@@ -388,7 +421,6 @@ class RetestService:
         bug.retest_dismissed = bool(dismissed)
         bug.retest_dismissed_by_id = current_user.id if dismissed else None
         self.db.flush()  # 重算前先落盘：问题清单靠查询判定
-        self._recompute_aggregate(req)
         self.db.commit()
         audit(
             self.db, action="retest.bug_dismissed", target_type="bug",

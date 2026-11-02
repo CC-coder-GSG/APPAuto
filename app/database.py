@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.core.config import settings
+from app.core.retest_aggregate_events import AppSession
 
 DATABASE_URL = settings.database_url
 
@@ -18,7 +19,7 @@ def set_sqlite_pragmas(dbapi_conn, _):
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA synchronous=NORMAL")
     cursor.close()
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(class_=AppSession, autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 

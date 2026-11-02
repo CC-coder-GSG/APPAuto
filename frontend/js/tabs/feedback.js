@@ -469,14 +469,14 @@ export async function createFeedbackBug(feedbackId) {
   await openFeedbackDetail(feedbackId);
 }
 
-export async function loadFeedbackTodoOnMine(majorVersionId) {
+export async function loadFeedbackTodoOnMine(majorVersionId, { signal, commit = true } = {}) {
   const majorPart = majorVersionId ? `?major_version_id=${majorVersionId}` : '';
-  const rows = await (await api(`/feedbacks/my-todo${majorPart}`)).json();
+  const rows = await (await api(`/feedbacks/my-todo${majorPart}`, { signal })).json();
   if (!rows.length) {
-    state.currentFeedbackTodoHtml = '';
-    return;
+    if (commit) state.currentFeedbackTodoHtml = '';
+    return '';
   }
-  state.currentFeedbackTodoHtml = `
+  const html = `
     <div class="card" style="border:2px solid #16a34a; background:#f0fdf4; margin-bottom:24px;">
       <h3 style="color:#166534; margin-top:0; border-bottom:1px dashed #86efac; padding-bottom:8px;">📚 反馈待处理</h3>
       <table style="background:#fff; border-radius:6px; overflow:hidden;">
@@ -495,6 +495,8 @@ export async function loadFeedbackTodoOnMine(majorVersionId) {
       </table>
     </div>
   `;
+  if (commit) state.currentFeedbackTodoHtml = html;
+  return html;
 }
 
 window.OmniQAFeedbackTab = {
