@@ -1967,8 +1967,27 @@ section.card > h2 {
   .mine-loading-spinner { animation: none; }
 }
 /* Shared final-test status remains visible when a requirement is collapsed. */
-.final-test-people { display:inline-flex; flex-wrap:wrap; gap:6px; margin:6px 0 0 8px; vertical-align:middle; }
-.final-test-person { display:inline-block; padding:4px 9px; border:1px solid; border-radius:6px; font-size:12px; font-weight:700; line-height:1.5; overflow-wrap:anywhere; }
-.final-test-person.is-testing { background:#fff3c4; color:#854d0e; border-color:#eab308; box-shadow:0 0 0 2px #fef9c3; }
-.final-test-person.is-completed { background:#dcfce7; color:#166534; border-color:#86efac; }
-.final-test-start { background:#fef9c3; color:#854d0e; padding:4px 8px; border-radius:6px; font-weight:600; }
+.final-test-people { display:inline-flex; flex-wrap:wrap; gap:6px; margin:6px 0 0 8px; vertical-align:middle; max-width:100%; }
+.final-test-person { display:inline-flex; align-items:center; gap:7px; max-width:100%; box-sizing:border-box; padding:5px 10px; border:1px solid; border-radius:999px; font-size:12px; font-weight:500; line-height:1.5; text-decoration:none; }
+.final-test-person.is-testing { background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; }
+.final-test-person.is-completed { background:#f0fdf4; color:#15803d; border-color:#dcfce7; }
+.final-test-person-name { font-weight:650; overflow-wrap:anywhere; min-width:0; }
+.final-test-person-status { padding-left:7px; border-left:1px solid currentColor; white-space:nowrap; font-size:11px; }
+.final-test-indicator { flex:0 0 7px; width:7px; height:7px; border-radius:50%; }
+.is-testing .final-test-indicator { background:#3b82f6; box-shadow:0 0 0 3px #dbeafe; animation:final-test-live 2s ease-in-out infinite; }
+.is-completed .final-test-indicator { flex-basis:12px; width:12px; height:auto; font-size:12px; font-weight:700; }
+.final-test-start { position:relative; display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid #e2e8f0; border-radius:8px; background:#fff; color:#64748b; font-size:12px; font-weight:500; cursor:pointer; transition:background .15s, border-color .15s; }
+.final-test-start:hover { border-color:#93c5fd; background:#f8fafc; }
+.final-test-start:has(input:checked) { color:#1d4ed8; border-color:#bfdbfe; background:#eff6ff; }
+.final-test-start input { position:absolute; inset:0; width:100%; height:100%; padding:0; margin:0; opacity:0; cursor:inherit; z-index:1; }
+.final-test-toggle { position:relative; width:26px; height:16px; flex-shrink:0; border-radius:999px; background:#cbd5e1; transition:background .15s; }
+.final-test-toggle::after { content:''; position:absolute; top:3px; left:3px; width:10px; height:10px; border-radius:50%; background:#fff; box-shadow:0 1px 2px #0f172a26; transition:transform .15s; }
+.final-test-start input:checked + .final-test-toggle { background:#3b82f6; }
+.final-test-start input:checked + .final-test-toggle::after { transform:translateX(10px); }
+.final-test-start:has(input:focus-visible) { outline:2px solid #2563eb; outline-offset:3px; }
+.final-test-start:has(input:disabled) { opacity:.55; cursor:wait; }
+@keyframes final-test-live { 50% { box-shadow:0 0 0 4px #dbeafe80; } }
+@media (prefers-reduced-motion:reduce) {
+  .is-testing .final-test-indicator { animation:none; }
+  .final-test-start, .final-test-toggle, .final-test-toggle::after { transition:none; }
+}

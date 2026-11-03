@@ -392,7 +392,7 @@ function renderFinalTestPeople(req) {
   if (!req.final_test) return '';
   return `<span class="final-test-people" aria-label="最终测试人员状态">${(req.final_test_people || []).map(person => {
     const done = person.status === 'completed';
-    return `<span class="final-test-person ${done ? 'is-completed' : 'is-testing'}">${done ? '✓' : '●'} ${escapeHtml(person.user_name)} · ${done ? '已测试完成' : '正在测试'}</span>`;
+    return `<span class="final-test-person ${done ? 'is-completed' : 'is-testing'}"><span class="final-test-indicator" aria-hidden="true">${done ? '✓' : ''}</span><span class="final-test-person-name">${escapeHtml(person.user_name)}</span><span class="final-test-person-status">${done ? '已测试完成' : '正在测试'}</span></span>`;
   }).join('')}</span>`;
 }
 
@@ -1625,7 +1625,7 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
             ${renderTaskStartControl(req)}
             ${req.final_test
               ? `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'case_completed', this.checked, this)">✅用例完成</label>
-            ${!baseReq.test_completed ? `<label class="final-test-start"><input type="checkbox" ${baseReq.testing ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'testing', this.checked, this)">● 正在测试</label>` : ''}
+            ${!baseReq.test_completed ? `<label class="final-test-start"><input type="checkbox" ${baseReq.testing ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'testing', this.checked, this)"><span class="final-test-toggle" aria-hidden="true"></span><span>正在测试</span></label>` : ''}
             <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="setFinalTestStatus(${req.id}, 'test_completed', this.checked, this)">✅测试完成</label>`
               : `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked, this)">✅用例完成</label>
             <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">✅测试完成</label>`}
