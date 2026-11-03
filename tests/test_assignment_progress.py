@@ -239,6 +239,35 @@ def test_final_test_counts_each_person_independently_without_associations(progre
     assert not db.dirty
 
 
+def test_final_test_coverage_counts_people_and_excludes_in_progress(progress_env):
+    e = progress_env
+    db = e['db']
+    e['major'].final_test_enabled = True
+    records = [
+        FinalTestRecord(requirement_id=e['req'].id, user_id=e['owner'].id, test_completed=True, testing=True),
+        FinalTestRecord(requirement_id=e['req'].id, user_id=e['reviewer'].id, test_completed=True),
+    ]
+    db.add_all(records)
+    db.commit()
+    svc = AssignmentProgressService(db)
+    coverage = svc.summary(major_version_id=e['major'].id)['coverage']
+    assert coverage['tested_requirements'] == 1
+    assert coverage['untested_requirements'] == 1
+    assert coverage['multiple_tested_requirements'] == 1
+    assert coverage['testing_requirements'] == 0
+    assert coverage['coverage_percent'] == 50
+    row = next(r for r in coverage['requirements'] if r['id'] == e['req'].id)
+    assert row['test_count'] == 2 and len(row['completed_by']) == 2
+    records[0].test_completed = False
+    records[1].test_completed = False
+    db.commit()
+    coverage = svc.summary(major_version_id=e['major'].id)['coverage']
+    assert coverage['tested_requirements'] == coverage['multiple_tested_requirements'] == 0
+    assert coverage['coverage_percent'] == 0
+    assert coverage['testing_requirements'] == 1
+    assert all(r['test_count'] == 0 for r in coverage['requirements'])
+
+
 def test_final_test_switching_preserves_original_and_personal_states(progress_env):
     e = progress_env
     db = e["db"]

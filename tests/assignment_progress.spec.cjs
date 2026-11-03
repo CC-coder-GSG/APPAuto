@@ -38,6 +38,8 @@ function finalSummary(rows) {
     })),
   }));
   return { mode: 'final_test', owners, loaded_at: timestamp,
+    coverage: {tested_requirements:1, untested_requirements:rows.length-1, multiple_tested_requirements:0, testing_requirements:0, coverage_percent:25,
+      requirements:rows.map(r=>({...r,test_count:r.id===1?1:0,completed_by:r.id===1?['李四']:[],testing_by:[]}))},
     summary: { requirements: rows.length, owners: 2, person_requirements: rows.length * 2,
       case_done: 1, case_pending: rows.length * 2 - 1, test_done: 1, test_pending: rows.length * 2 - 1 } };
 }
@@ -126,6 +128,8 @@ function detail(req, query, refreshed = false) {
       await page.screenshot({ path: process.env.PROGRESS_SCREENSHOT.replace('.png', '-overview.png') });
     }
 
+    assert.equal(await page.locator('.assign-progress-owner[open]').count(), 0, 'groups start collapsed');
+    await page.locator('.assign-progress-owner').evaluateAll(els => els.forEach(el => { el.open = true; }));
     await page.locator('[data-progress-row="1"] [data-progress-action="expand"]').click();
     const first = page.locator('#assignProgressDetail-1');
     await first.locator('#assign-progress-1-bugs tbody tr').first().waitFor();
@@ -205,7 +209,7 @@ function detail(req, query, refreshed = false) {
     for (let i = 0; !heldDetailStarted && i < 100; i++) await page.waitForTimeout(10);
     assert.ok(heldDetailStarted);
     await page.locator('#assignMajorSelect').selectOption('2');
-    await page.locator('[data-progress-row="5"]').waitFor();
+    await page.locator('[data-progress-row="5"]').waitFor({state:'attached'});
     releaseDetail();
     await page.waitForTimeout(50);
     assert.equal(await page.locator('#assignProgressDetail-3').count(), 0, 'stale details cannot enter another version');
@@ -215,7 +219,7 @@ function detail(req, query, refreshed = false) {
     for (let i = 0; !heldSummaryStarted && i < 100; i++) await page.waitForTimeout(10);
     assert.ok(heldSummaryStarted);
     await page.locator('#assignMajorSelect').selectOption('1');
-    await page.locator('[data-progress-row="1"]').waitFor();
+    await page.locator('[data-progress-row="1"]').waitFor({state:'attached'});
     releaseSummary();
     await page.evaluate(() => window.oldProgress);
     assert.equal(await page.locator('[data-progress-row="5"]').count(), 0, 'stale summary cannot overwrite the selected version');
@@ -229,6 +233,12 @@ function detail(req, query, refreshed = false) {
     assert.match(await page.locator('.assign-progress-panel-heading p').innerText(), /最终测试/);
     assert.equal(await page.locator('#assignProgressStatus').inputValue(), '', 'normal-only filters are reset');
     assert.equal(await page.locator('.assign-progress-owner').count(), 2);
+    assert.equal(await page.locator('.assign-progress-owner[open], .assign-progress-coverage[open]').count(), 0, 'final test statistics start collapsed');
+    assert.match(await page.locator('.assign-progress-metrics').innerText(), /25%/);
+    await page.locator('.assign-progress-coverage > summary').click();
+    assert.equal(await page.locator('.assign-progress-coverage tbody tr').count(), 4);
+    assert.match(await page.locator('.assign-progress-coverage tbody tr').first().innerText(), /1 次.*李四/s);
+    assert.equal(await page.locator('.assign-progress-coverage img').count(), 0);
     assert.equal(await page.locator('.assign-progress-req').count(), 8, 'each person sees every requirement');
     assert.match(await page.locator('#assignProgressCount').innerText(), /8 \/ 8 人次需求/);
     assert.match(await page.locator('.assign-progress-owner').first().locator('summary').innerText(), /用例完成 1 \/ 4.*测试完成 0 \/ 4/s);
@@ -262,7 +272,7 @@ function detail(req, query, refreshed = false) {
     await page.locator('#finalTestToggleBtn').click();
     await page.waitForFunction(() => !document.getElementById('assignProgressArea').classList.contains('assign-progress-final-test'));
     assert.equal(await page.locator('[data-progress-row]').count(), 4, 'closing final test restores the assignment view');
-    assert.match(await page.locator('#assignProgressArea').innerText(), /关联 Bug/);
+    assert.match(await page.locator('#assignProgressArea').textContent(), /关联 Bug/);
     assert.equal(await page.locator('.assign-progress-detail [data-progress-action="refresh"]').count(), 0, 'old details stay cleared');
     assert.equal(await page.evaluate(() => window.injected), undefined);
     assert.deepEqual(errors, []);

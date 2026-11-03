@@ -302,6 +302,7 @@ class AssignmentProgressService:
                     "major_version_id": major.id, "major_version_name": major.version_no,
                     "case_completed": bool(record and record.case_completed),
                     "test_completed": bool(record and record.test_completed),
+                    "testing": bool(record and record.testing and not record.test_completed),
                 })
             case_done = sum(item["case_completed"] for item in items)
             test_done = sum(item["test_completed"] for item in items)
@@ -316,8 +317,30 @@ class AssignmentProgressService:
         total = len(reqs) * len(owners)
         case_done = sum(o["major_summaries"][0]["case_done"] for o in owners)
         test_done = sum(o["major_summaries"][0]["test_done"] for o in owners)
+        by_requirement = defaultdict(list)
+        names = {u.id: u.shown_name for u in users}
+        for record in records:
+            by_requirement[record.requirement_id].append(record)
+        coverage_rows = []
+        for req in reqs:
+            entries = by_requirement[req.id]
+            completed = [names.get(r.user_id, "未知") for r in entries if r.test_completed]
+            testing = [names.get(r.user_id, "未知") for r in entries if r.testing and not r.test_completed]
+            coverage_rows.append({
+                "id": req.id, "zentao_req_id": req.zentao_req_id, "title": req.title,
+                "test_count": len(completed), "completed_by": sorted(completed),
+                "testing_count": len(testing), "testing_by": sorted(testing),
+            })
+        covered = sum(r["test_count"] > 0 for r in coverage_rows)
         return {
             "mode": "final_test",
+            "coverage": {
+                "tested_requirements": covered, "untested_requirements": len(reqs) - covered,
+                "multiple_tested_requirements": sum(r["test_count"] >= 2 for r in coverage_rows),
+                "testing_requirements": sum(r["testing_count"] > 0 for r in coverage_rows),
+                "coverage_percent": round(covered * 100 / len(reqs), 1) if reqs else 0,
+                "requirements": coverage_rows,
+            },
             "summary": {
                 "owners": len(owners), "requirements": len(reqs), "person_requirements": total,
                 "case_done": case_done, "case_pending": total - case_done,
