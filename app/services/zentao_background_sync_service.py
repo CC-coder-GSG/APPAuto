@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.core.db_lifecycle import bounded_sync, release_read_transaction
+
 import logging
 from typing import Any
 
@@ -21,6 +23,7 @@ class ZentaoBackgroundSyncService:
         self.overall_test_service = OverallTestService(db)
         self.testcase_service = ZentaoTestCaseService(db)
 
+    @bounded_sync
     def run_recent_sync_for_all_software(self) -> dict[str, Any]:
         actor = self._resolve_sync_actor()
         software_rows = self.db.query(SoftwareProduct).order_by(SoftwareProduct.id.asc()).all()
@@ -86,6 +89,7 @@ class ZentaoBackgroundSyncService:
             "task_mirror": task_mirror,
         }
 
+    @bounded_sync
     def run_nightly_full_sync_for_all_software(self) -> dict[str, Any]:
         actor = self._resolve_sync_actor()
         software_rows = self.db.query(SoftwareProduct).order_by(SoftwareProduct.id.asc()).all()

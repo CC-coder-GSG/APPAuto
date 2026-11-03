@@ -11,8 +11,11 @@ compatibility.
 """
 from __future__ import annotations
 
+from app.core.db_lifecycle import bounded_sync, release_read_transaction
+
 import json
 import logging
+import sys
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -418,6 +421,7 @@ class OverallTestService:
         audit(self.db, action="stage5.add_issue", target_type="bug", actor_id=current_user.id, target_id=str(item.id), detail=item.bug_id)
         return {"id": item.id, "message": "Issue added"}
 
+    @bounded_sync
     def sync_zentao_major_bugs(
         self,
         *,
@@ -537,6 +541,7 @@ class OverallTestService:
             "cached": False,
         }
 
+    @bounded_sync
     def sync_all_zentao_bugs_by_software(
         self,
         *,
@@ -603,18 +608,14 @@ class OverallTestService:
             # Fetch bugs from every product (parallel).
             remote_bugs_by_product: dict[int, list[dict]] = {}
             fetch_errors: dict[int, Exception] = {}
-            with ThreadPoolExecutor(max_workers=_PRODUCT_FETCH_CONCURRENCY) as executor:
-                future_to_pid = {
-                    executor.submit(self._fetch_product_bugs_with_retry, client, pid, current_user.id): pid
-                    for pid in product_ids
-                }
-                for future in as_completed(future_to_pid):
-                    pid = future_to_pid[future]
-                    try:
-                        remote_bugs_by_product[pid] = future.result() or []
-                    except Exception as exc:
-                        logger.warning("sync_all_zentao_bugs: product %s failed: %s", pid, exc)
-                        fetch_errors[pid] = exc
+            user_id = current_user.id
+            release_read_transaction(self.db)
+            # Token refresh uses this Session: do not share it across threads.
+            for pid in product_ids:
+                try:
+                    remote_bugs_by_product[pid] = self._fetch_product_bugs_with_retry(client, pid, user_id) or []
+                except Exception as exc:
+                    fetch_errors[pid] = exc
 
             if fetch_errors:
                 failed_ids = ", ".join(str(pid) for pid in sorted(fetch_errors))
@@ -725,8 +726,11 @@ class OverallTestService:
                 "sync_source": sync_source,
             }
         finally:
+            if sys.exc_info()[0] is not None:
+                self.db.rollback()
             release_sync_lock(self.db, lock_key)
 
+    @bounded_sync
     def sync_recent_zentao_bugs_by_software(
         self,
         *,
@@ -786,25 +790,14 @@ class OverallTestService:
 
             remote_bugs_by_product: dict[int, list[dict]] = {}
             fetch_errors: dict[int, Exception] = {}
-            with ThreadPoolExecutor(max_workers=min(_PRODUCT_FETCH_CONCURRENCY, max(1, len(product_ids)))) as executor:
-                future_to_pid = {
-                    executor.submit(
-                        self._fetch_recent_product_bugs_with_retry,
-                        client,
-                        pid,
-                        current_user.id,
-                        limit,
-                        max_pages_per_product,
-                    ): pid
-                    for pid in product_ids
-                }
-                for future in as_completed(future_to_pid):
-                    pid = future_to_pid[future]
-                    try:
-                        remote_bugs_by_product[pid] = future.result() or []
-                    except Exception as exc:
-                        logger.warning("sync_recent_zentao_bugs: product %s failed: %s", pid, exc)
-                        fetch_errors[pid] = exc
+            user_id = current_user.id
+            release_read_transaction(self.db)
+            # Token refresh uses this Session: do not share it across threads.
+            for pid in product_ids:
+                try:
+                    remote_bugs_by_product[pid] = self._fetch_recent_product_bugs_with_retry(client, pid, user_id, limit, max_pages_per_product) or []
+                except Exception as exc:
+                    fetch_errors[pid] = exc
 
             if fetch_errors:
                 failed_ids = ", ".join(str(pid) for pid in sorted(fetch_errors))
@@ -889,6 +882,8 @@ class OverallTestService:
                 "sync_source": sync_source,
             }
         finally:
+            if sys.exc_info()[0] is not None:
+                self.db.rollback()
             release_sync_lock(self.db, lock_key)
 
     def _collect_zentao_product_ids_for_software(
@@ -1024,9 +1019,11 @@ class OverallTestService:
                 return bug_id_str, None
             return bug_id_str, self._zentao_bug_is_deleted(raw)
 
+        probe_ids = [b.zentao_bug_id for b in candidates]
+        release_read_transaction(self.db)
         results: dict[str, bool | None] = {}
         with ThreadPoolExecutor(max_workers=self._DELETED_PROBE_CONCURRENCY) as executor:
-            futures = [executor.submit(_probe, b.zentao_bug_id) for b in candidates]
+            futures = [executor.submit(_probe, bid) for bid in probe_ids]
             for future in as_completed(futures):
                 bid, is_deleted = future.result()
                 results[bid] = is_deleted
@@ -1068,6 +1065,7 @@ class OverallTestService:
         if not refreshed_ctx:
             raise HTTPException(status_code=400, detail="禅道 token 刷新失败")
         refreshed_client, _ = refreshed_ctx
+        release_read_transaction(self.db)
         return self._fetch_bug_collection(
             refreshed_client, f"products/{product_id}/bugs", limit=500, max_pages=50
         )
@@ -1107,6 +1105,7 @@ class OverallTestService:
         if not refreshed_ctx:
             raise HTTPException(status_code=400, detail="禅道 token 刷新失败")
         refreshed_client, _ = refreshed_ctx
+        release_read_transaction(self.db)
         return self._fetch_recent_bug_collection(
             refreshed_client,
             f"products/{product_id}/bugs",

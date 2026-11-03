@@ -17,6 +17,8 @@
 """
 from __future__ import annotations
 
+from app.core.db_lifecycle import release_read_transaction
+
 import logging
 from datetime import date, datetime
 from typing import Optional
@@ -664,6 +666,7 @@ class ZentaoTaskSyncService:
         acting = get_user_zentao_client(acting_user.id, self.db) if acting_user is not None else None
         system = get_system_zentao_client(self.db)
         task = None
+        release_read_transaction(self.db)
         for candidate in (acting, system):
             if candidate is None:
                 continue
@@ -744,6 +747,7 @@ class ZentaoTaskSyncService:
         if web_op is not None:
             web_logins["self"] = get_user_zentao_web_login(acting_user.id, self.db) if acting_user is not None else None
             web_logins["system"] = get_system_zentao_web_login(self.db)
+        release_read_transaction(self.db)
         last_err: Optional[Exception] = None
         actual = ""
         target_status_seen = False
@@ -1102,6 +1106,7 @@ class ZentaoTaskSyncService:
         client = get_system_zentao_client(self.db)
         if client is None:
             return fallback
+        release_read_transaction(self.db)
         try:
             return float((client.get_task(task_id) or {}).get("left") or fallback)
         except Exception:  # noqa: BLE001
@@ -1115,6 +1120,7 @@ class ZentaoTaskSyncService:
         clients = [acting] if acting is not None else []
         if system is not None and system is not acting:
             clients.append(system)
+        release_read_transaction(self.db)
         for client in clients:
             try:
                 task = client.get_task(task_id) or {}

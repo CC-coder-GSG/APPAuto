@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from app.core.db_lifecycle import bounded_sync, release_read_transaction
+
 import logging
 from datetime import date, datetime
 from typing import Any, Optional
@@ -226,6 +228,7 @@ class ZentaoTaskMirrorService:
                 by_name.setdefault(nm, u.id)
         return by_account, by_name
 
+    @bounded_sync
     def sync_all(self) -> dict[str, Any]:
         """遍历所有绑定了禅道执行的大版本，刷新其任务镜像。"""
         client = get_system_zentao_client(self.db)
@@ -242,13 +245,16 @@ class ZentaoTaskMirrorService:
         for major in majors:
             try:
                 synced += self._sync_execution(client, major, by_account, by_name)
+                self.db.commit()
             except Exception as exc:  # noqa: BLE001
+                self.db.rollback()
                 logger.warning("mirror sync exec %s failed: %s", major.zentao_execution_id, exc)
                 errors.append(f"执行 {major.zentao_execution_id}: {exc}")
         self.db.commit()
         self._publish_story_change_sync()
         return {"ok": not errors, "synced": synced, "executions": len(majors), "errors": errors}
 
+    @bounded_sync
     def sync_mine(self, current_user: User) -> dict[str, Any]:
         """只刷新「当前用户已有任务」所在的执行（通常 1~3 个），远快于 sync_all。
 
@@ -278,13 +284,16 @@ class ZentaoTaskMirrorService:
         for major in majors:
             try:
                 synced += self._sync_execution(client, major, by_account, by_name)
+                self.db.commit()
             except Exception as exc:  # noqa: BLE001
+                self.db.rollback()
                 logger.warning("sync_mine exec %s failed: %s", major.zentao_execution_id, exc)
                 errors.append(str(exc))
         self.db.commit()
         self._publish_story_change_sync()
         return {"ok": not errors, "synced": synced, "executions": len(majors), "errors": errors}
 
+    @bounded_sync
     def sync_one_major(self, major_version_id: int) -> dict[str, Any]:
         client = get_system_zentao_client(self.db)
         if not client:
@@ -304,6 +313,7 @@ class ZentaoTaskMirrorService:
 
     def _sync_execution(self, client, major: Version, by_account: dict[str, int], by_name: dict[str, int]) -> int:
         exec_id = int(major.zentao_execution_id)
+        release_read_transaction(self.db)
         tasks = client.list_execution_tasks(exec_id) or []
         requirements_by_task_id = {
             int(req.zentao_task_id): req

@@ -6,6 +6,26 @@ from app.services.report_service import ReportService
 from app.services.workbench_service import WorkbenchService
 
 
+def test_final_record_not_flushed_during_remote_task_sync(db_session, monkeypatch):
+    db = db_session
+    major = _major(db, 'V-short-final')
+    major.final_test_enabled = True
+    user = _user(db, 'short-final')
+    user.zentao_account = 'short-final'
+    req = _req(db, major.id, 'r#short-final', user.id)
+    req.zentao_task_id = 123
+    req.zentao_task_assigned_to = 'short-final'
+    db.commit()
+    from app.services.zentao_task_sync_service import ZentaoTaskSyncService
+    def finish(service, requirement, **kwargs):
+        assert not service.db.in_transaction()
+        assert not any(isinstance(row, FinalTestRecord) for row in service.db.new)
+        return {'ok':True}
+    monkeypatch.setattr(ZentaoTaskSyncService, 'finish_requirement_task', finish)
+    result = FinalTestService(db).upsert_record(req.id, user, test_completed=True)
+    assert result['test_completed'] is True
+
+
 def _major(db, version_no="V9000"):
     v = Version(version_no=version_no, version_type=VersionType.MAJOR)
     db.add(v)

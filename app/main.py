@@ -141,6 +141,22 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.message, "code": exc.code})
 
 
+from sqlalchemy.exc import OperationalError, TimeoutError as DatabasePoolTimeout
+
+
+@app.exception_handler(DatabasePoolTimeout)
+@app.exception_handler(OperationalError)
+async def database_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    busy = isinstance(exc, DatabasePoolTimeout) or 'database is locked' in str(getattr(exc, 'orig', '')).lower()
+    # Do not log SQL parameters: login writes contain session credentials.
+    logger.error('database request failed method=%s path=%s kind=%s busy=%s',
+                 request.method, request.url.path, type(exc).__name__, busy)
+    return JSONResponse(
+        status_code=503 if busy else 500,
+        content={'detail': '数据库繁忙，请稍后刷新核对操作结果；请勿重复提交' if busy else '数据库操作失败，请联系管理员查看日志'},
+    )
+
+
 # HTML 入口页永不强缓存：作为缓存锚点必须每次回源校验，否则浏览器启发式缓存
 # 会用旧 index.html（连带加载旧版 JS 模块，导致前端改动「拉了也不生效」）。
 _NO_CACHE_HTML = {"Cache-Control": "no-cache, must-revalidate"}

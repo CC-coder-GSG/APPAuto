@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from app.core.db_lifecycle import bounded_sync, release_read_transaction
+
 import json
 import logging
+import sys
 from datetime import timedelta
 from typing import Any
 
@@ -260,6 +263,7 @@ class ZentaoTestCaseService:
         if not ctx:
             return None
         client, _ = ctx
+        release_read_transaction(self.db)
         try:
             return client.get_testcase(case_numeric_id)
         except ZentaoAPIError as exc:
@@ -270,6 +274,7 @@ class ZentaoTestCaseService:
         if not ctx:
             raise HTTPException(status_code=400, detail="禅道 token 刷新失败")
         refreshed_client, _ = ctx
+        release_read_transaction(self.db)
         return refreshed_client.get_testcase(case_numeric_id)
 
     def _extract_testcase_rows(self, data: Any) -> list[dict[str, Any]]:
@@ -442,6 +447,7 @@ class ZentaoTestCaseService:
             if value is not None:
                 setattr(row, key, value)
 
+    @bounded_sync
     def sync_software_testcases(
         self,
         *,
@@ -495,6 +501,7 @@ class ZentaoTestCaseService:
             detail_refresh_budget = 30
 
             for product_id in product_ids:
+                release_read_transaction(self.db)
                 try:
                     remote_rows = self._fetch_product_testcases(client, product_id)
                 except ZentaoAPIError as exc:
@@ -508,6 +515,19 @@ class ZentaoTestCaseService:
                     remote_rows = self._fetch_product_testcases(client, product_id)
 
                 remote_total += len(remote_rows)
+                details = {}
+                for raw in remote_rows:
+                    normalized = self._normalize_testcase(raw, base_url=base_url)
+                    if not normalized or detail_refresh_budget <= 0:
+                        continue
+                    case_id = normalized['zentao_case_numeric_id']
+                    if case_id in details:
+                        continue
+                    existing = self.db.query(ZentaoTestCaseMirror).filter_by(zentao_case_numeric_id=case_id).first()
+                    if self._needs_detail_refresh(existing, normalized, existing is None):
+                        details[case_id] = self._fetch_case_detail_with_retry(case_numeric_id=case_id, current_user=current_user)
+                        detail_refresh_budget -= 1
+                        detail_refreshed += 1
                 product_batch_count = 0
                 for raw in remote_rows:
                     normalized = self._normalize_testcase(raw, base_url=base_url)
@@ -522,13 +542,10 @@ class ZentaoTestCaseService:
                     row, created_now, updated_now = self._upsert_case(normalized, sync_source=sync_source)
                     created += int(created_now)
                     updated += int((not created_now) and updated_now)
-                    if detail_refresh_budget > 0 and self._needs_detail_refresh(existing or row, normalized, created_now):
-                        detail_raw = self._fetch_case_detail_with_retry(case_numeric_id=row.zentao_case_numeric_id, current_user=current_user)
-                        self._enrich_case_detail(row, detail_raw, base_url=base_url)
+                    if row.zentao_case_numeric_id in details:
+                        self._enrich_case_detail(row, details[row.zentao_case_numeric_id], base_url=base_url)
                         row.last_zentao_synced_at = local_now()
                         row.sync_source = sync_source
-                        detail_refreshed += 1
-                        detail_refresh_budget -= 1
 
                     # Commit in batches so a 4k-row first-sync doesn't hold
                     # one giant transaction open for minutes.
@@ -554,8 +571,11 @@ class ZentaoTestCaseService:
                 "sync_source": sync_source,
             }
         finally:
+            if sys.exc_info()[0] is not None:
+                self.db.rollback()
             release_sync_lock(self.db, lock_key)
 
+    @bounded_sync
     def sync_recent_software_testcases(
         self,
         *,
@@ -602,6 +622,7 @@ class ZentaoTestCaseService:
             detail_refresh_budget = 20
 
             for product_id in product_ids:
+                release_read_transaction(self.db)
                 try:
                     remote_rows = self._fetch_recent_product_testcases(
                         client, product_id, limit=limit, max_pages=max_pages_per_product
@@ -619,6 +640,19 @@ class ZentaoTestCaseService:
                     )
 
                 remote_total += len(remote_rows)
+                details = {}
+                for raw in remote_rows:
+                    normalized = self._normalize_testcase(raw, base_url=base_url)
+                    if not normalized or detail_refresh_budget <= 0:
+                        continue
+                    case_id = normalized['zentao_case_numeric_id']
+                    if case_id in details:
+                        continue
+                    existing = self.db.query(ZentaoTestCaseMirror).filter_by(zentao_case_numeric_id=case_id).first()
+                    if self._needs_detail_refresh(existing, normalized, existing is None):
+                        details[case_id] = self._fetch_case_detail_with_retry(case_numeric_id=case_id, current_user=current_user)
+                        detail_refresh_budget -= 1
+                        detail_refreshed += 1
                 for raw in remote_rows:
                     normalized = self._normalize_testcase(raw, base_url=base_url)
                     if not normalized:
@@ -632,13 +666,12 @@ class ZentaoTestCaseService:
                     row, created_now, updated_now = self._upsert_case(normalized, sync_source=sync_source)
                     created += int(created_now)
                     updated += int((not created_now) and updated_now)
-                    if detail_refresh_budget > 0 and self._needs_detail_refresh(existing or row, normalized, created_now):
-                        detail_raw = self._fetch_case_detail_with_retry(case_numeric_id=row.zentao_case_numeric_id, current_user=current_user)
-                        self._enrich_case_detail(row, detail_raw, base_url=base_url)
+                    if row.zentao_case_numeric_id in details:
+                        self._enrich_case_detail(row, details[row.zentao_case_numeric_id], base_url=base_url)
                         row.last_zentao_synced_at = local_now()
                         row.sync_source = sync_source
-                        detail_refreshed += 1
-                        detail_refresh_budget -= 1
+
+                self.db.commit()
 
             self.db.commit()
             elapsed = (local_now() - started).total_seconds()
@@ -657,6 +690,8 @@ class ZentaoTestCaseService:
                 "sync_source": sync_source,
             }
         finally:
+            if sys.exc_info()[0] is not None:
+                self.db.rollback()
             release_sync_lock(self.db, lock_key)
 
     def _linked_requirements(self, story_id: int | None, software_id: int | None = None) -> list[dict[str, Any]]:

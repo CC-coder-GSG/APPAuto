@@ -33,6 +33,8 @@ GET /zentao/hydrate/stories?ids=5604,5605
 """
 from __future__ import annotations
 
+from app.core.db_lifecycle import release_read_transaction
+
 import asyncio
 import logging
 import re
@@ -119,24 +121,27 @@ async def hydrate_bugs(
     callers can distinguish them from confirmed-not-found IDs.
     Missing binding is an authentication error, never a missing entity.
     """
+    user_id = current_user.id
     id_list = _parse_id_list(ids)
     if not id_list:
         return {}
 
-    ctx = _get_client_ctx(current_user.id, db)
+    ctx = _get_client_ctx(user_id, db)
     if ctx is None:
         return {"__fetch_errors__": [str(i) for i in id_list], "__auth_required__": True}
     client, base_url = ctx
 
     build_names = local_build_names(db)
+    release_read_transaction(db)
     result, got_401, errors = await _fetch_bugs_concurrent(client, base_url, id_list, build_names)
 
     if got_401:
-        invalidate_token(current_user.id, db)
-        ctx2 = _get_client_ctx(current_user.id, db)
+        invalidate_token(user_id, db)
+        ctx2 = _get_client_ctx(user_id, db)
         if ctx2 is None:
             return {"__fetch_errors__": [str(i) for i in id_list], "__auth_required__": True}
         client2, base_url2 = ctx2
+        release_read_transaction(db)
         result, got_401, errors = await _fetch_bugs_concurrent(client2, base_url2, id_list, build_names)
 
     # Write-back: persist title + URL for bugs that don't have them yet.
@@ -161,23 +166,26 @@ async def hydrate_stories(
     Returns a mapping: { "<story_id>": normalized_story_dict, … }
     Transient errors are listed under "__fetch_errors__".
     """
+    user_id = current_user.id
     id_list = _parse_id_list(ids)
     if not id_list:
         return {}
 
-    ctx = _get_client_ctx(current_user.id, db)
+    ctx = _get_client_ctx(user_id, db)
     if ctx is None:
         return {"__fetch_errors__": [str(i) for i in id_list], "__auth_required__": True}
     client, base_url = ctx
 
+    release_read_transaction(db)
     result, got_401, errors = await _fetch_stories_concurrent(client, base_url, id_list)
 
     if got_401:
-        invalidate_token(current_user.id, db)
-        ctx2 = _get_client_ctx(current_user.id, db)
+        invalidate_token(user_id, db)
+        ctx2 = _get_client_ctx(user_id, db)
         if ctx2 is None:
             return {"__fetch_errors__": [str(i) for i in id_list], "__auth_required__": True}
         client2, base_url2 = ctx2
+        release_read_transaction(db)
         result, got_401, errors = await _fetch_stories_concurrent(client2, base_url2, id_list)
 
     response = _build_response(result, errors)

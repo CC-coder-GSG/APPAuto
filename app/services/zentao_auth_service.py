@@ -166,6 +166,8 @@ def get_valid_token(user_id: int, db: Session) -> str | None:
         return binding.token_value
 
     # Attempt refresh
+    from app.core.db_lifecycle import release_read_transaction
+    release_read_transaction(db)
     result = _fetch_new_token(binding)
     now = utc_now_naive().replace(microsecond=0)
     if result:

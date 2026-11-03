@@ -7,6 +7,7 @@ from app.models import FinalTestRecord, Requirement, User, Version, VersionType
 from app.services.audit_service import audit
 from app.services.sse_service import sse_publish
 from app.utils.time_utils import local_now
+from app.core.db_lifecycle import release_read_transaction
 
 
 class FinalTestService:
@@ -103,7 +104,6 @@ class FinalTestService:
         )
         if not record:
             record = FinalTestRecord(requirement_id=requirement_id, user_id=current_user.id)
-            self.db.add(record)
 
         test_completed_changed = False
         finish_zentao = False
@@ -119,6 +119,7 @@ class FinalTestService:
         # 仅当子任务指派人是当前用户本人时，勾选/取消完成才联动禅道任务；否则只留本地记录。
         # 先确认禅道状态，再写最终测试记录，避免取消勾选后禅道仍停留在完成态。
         if test_completed_changed and self._is_task_assignee(requirement, current_user):
+            release_read_transaction(self.db)
             try:
                 from app.services.zentao_task_sync_service import ZentaoTaskSyncService
 
@@ -150,6 +151,7 @@ class FinalTestService:
             record.test_completed = bool(test_completed)
             record.test_completed_at = local_now() if test_completed else None
 
+        self.db.add(record)
         self.db.commit()
         self.db.refresh(record)
         audit(
