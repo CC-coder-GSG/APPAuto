@@ -10,7 +10,7 @@
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261102-mine-loading-1"></script>
+  <script type="module" src="/static/js/app.js?v=20261103-mine-status-1"></script>
   <script src="/static/js/weave-motion.js?v=20261027-tools-1" defer></script>
   <style>
     /* Header layout */
@@ -3142,8 +3142,8 @@ async function editWorkbenchBug(id, oldBugId){
 async function removeWorkbenchBug(id){
   return window.OmniQAMineTab.removeWorkbenchBug(id);
 }
-async function setReqStatus(reqId, key, checked){
-  return window.OmniQAMineTab.setReqStatus(reqId, key, checked);
+async function setReqStatus(reqId, key, checked, checkboxEl){
+  return window.OmniQAMineTab.setReqStatus(reqId, key, checked, checkboxEl);
 }
 
 async function handleTestCompletedToggle(reqId, checked, checkboxEl){

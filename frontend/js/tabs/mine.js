@@ -269,7 +269,7 @@ function scheduleCompletionIncrementalRefresh(opts = {}) {
           testcases_recent: wantRecent,
         },
       });
-      await loadMyWorkbench();
+      await loadMyWorkbench({ background: true });
     } catch (err) {
       console.warn('completion-toggle incremental refresh failed', err);
     }
@@ -1107,7 +1107,7 @@ export async function confirmMineTestExecutionModal() {
     scheduleCompletionIncrementalRefresh(); // 测试完成 → 增量同步用例/Bug 保持最新
     // 加载条挂到工作台重载完成再收起：提示出现时界面已是最新状态
     setLoadingText('禅道已同步，正在刷新工作台…');
-    try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
+    try { await refreshMineAfterStatus(); } catch (e) { console.warn('workbench reload failed', e); }
     hideLoading();
     window.showMessage && window.showMessage(req?.selected_task_mode ? '当前任务已完成；全部关联测试任务完成后，需求显示测试完成' : '测试执行记录已提交，需求已标记测试完成（禅道任务已联动完成）', 'success');
   } catch (err) {
@@ -1157,7 +1157,7 @@ export async function handleTestCompletedToggle(reqId, checked, checkboxEl) {
   }
   // 加载条挂到工作台重载完成再收起，提示与界面更新同时出现
   setLoadingText('正在刷新工作台数据…');
-  try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
+  try { await refreshMineAfterStatus(); } catch (e) { console.warn('workbench reload failed', e); }
   hideLoading();
   window.showMessage && window.showMessage(msg, msgType);
 }
@@ -1334,6 +1334,10 @@ function renderDispatchPanel(ddata) {
   </details>`;
 }
 
+async function refreshMineAfterStatus() {
+  return loadMyWorkbench({ background: true });
+}
+
 export async function loadMyWorkbench({ background = false } = {}) {
   initTestExecutionModal();
   refreshMineMinorSelectByMode();
@@ -1387,26 +1391,31 @@ export async function loadMyWorkbench({ background = false } = {}) {
       setPanel('feedback', mineLoadingHtml('正在加载反馈待办…'));
       setPanel('dispatch', mode === 'version' ? mineLoadingHtml('正在加载指派 Bug…') : '');
     }
-    const feedbackLoader = window.OmniQAFeedbackTab?.loadFeedbackTodoOnMine;
-    Promise.resolve().then(() => feedbackLoader
-      ? feedbackLoader(mode === 'version' ? majorId : null, { signal: controller.signal, commit: false }) : '')
-      .then(html => setPanel('feedback', html || ''))
-      .catch(() => setPanel('feedback', panelError('反馈待办')));
-    const dispatchPromise = mode === 'version'
-      ? api('/bugs/dispatched-to-me?major_version_id=' + majorId, { signal: controller.signal }).then(r => r.json())
-      : Promise.resolve([]);
-    dispatchPromise.then(data => {
-      if (!isCurrent()) return;
-      state.currentDispatchData = data;
-      setPanel('dispatch', data.length ? renderDispatchPanel(data) : '');
-    }).catch(() => setPanel('dispatch', panelError('指派 Bug')));
+    if (!keepCards) {
+      const feedbackLoader = window.OmniQAFeedbackTab?.loadFeedbackTodoOnMine;
+      Promise.resolve().then(() => feedbackLoader
+        ? feedbackLoader(mode === 'version' ? majorId : null, { signal: controller.signal, commit: false }) : '')
+        .then(html => setPanel('feedback', html || ''))
+        .catch(() => setPanel('feedback', panelError('反馈待办')));
+      const dispatchPromise = mode === 'version'
+        ? api('/bugs/dispatched-to-me?major_version_id=' + majorId, { signal: controller.signal }).then(r => r.json())
+        : Promise.resolve([]);
+      dispatchPromise.then(data => {
+        if (!isCurrent()) return;
+        state.currentDispatchData = data;
+        setPanel('dispatch', data.length ? renderDispatchPanel(data) : '');
+      }).catch(() => setPanel('dispatch', panelError('指派 Bug')));
+    }
 
     const mineData = await (await api(url, { signal: controller.signal })).json();
     if (!isCurrent()) return;
+    const oldData = state.currentMineData;
+    const oldById = new Map(oldData.map(row => [row.id, row]));
+    const changedIds = new Set(mineData.filter(row => JSON.stringify(oldById.get(row.id)) !== JSON.stringify(row)).map(row => row.id));
     state.currentMineData = mineData;
     mineRenderedKey = key;
     updateMineSummary(mode);
-    renderMineCards();
+    renderMineCards({ preserveCards: keepCards, changedIds });
     if (!background) {
       scheduleTaskBackgroundRefresh(key, mode, majorId, currentSoftwareId);
       if (currentSoftwareId) schedulePreflightBackgroundRefresh(currentSoftwareId);
@@ -1502,7 +1511,7 @@ function collectReqBugs(req) {
   return [...caseBugs, ...(req.free_bugs || [])];
 }
 
-export function renderMineCards() {
+export function renderMineCards({ preserveCards = false, changedIds = null } = {}) {
   // Search/filter input must not erase a foreground loading indicator.
   if (mineLoading && mineRenderedKey !== mineFilterKey()) return;
   const openTaskMenus = [...document.querySelectorAll('.mine-req-card .qa-task-dropdown[open]')]
@@ -1589,7 +1598,7 @@ export function renderMineCards() {
             ${req.final_test
               ? `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'case_completed', this.checked, this)">✅用例完成</label>
             <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="setFinalTestStatus(${req.id}, 'test_completed', this.checked, this)">✅测试完成</label>`
-              : `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked).then(()=>loadMyWorkbench())">✅用例完成</label>
+              : `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked, this)">✅用例完成</label>
             <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">✅测试完成</label>`}
             ${renderTaskMeta(req)}
             ${baseReq.has_multiple_test_tasks ? `<span class="muted qa-task-progress">关联测试任务完成 ${baseReq.linked_test_task_done ?? (baseReq.test_tasks || []).filter(t => ['done', 'closed'].includes(t.status)).length} / ${baseReq.linked_test_task_total ?? (baseReq.test_tasks || []).length}</span>` : ''}
@@ -1619,16 +1628,57 @@ export function renderMineCards() {
   if (mineCards) {
     const pendingCount = filteredData.filter((r) => r.task_story_change_pending).length;
     const changeBanner = pendingCount ? `<div role="status" style="background:#fff7ed; color:#9a3412; border:1px solid #fdba74; padding:10px 14px; border-radius:8px; margin-bottom:12px;">⚠ 有 ${pendingCount} 项研发需求变更待确认，请点击需求卡片上的橙色标签查看内容并确认。</div>` : '';
-    mineCards.innerHTML = changeBanner + finalTestBanner
-      + `<div id="mine-feedback-panel">${state.currentFeedbackTodoHtml || ''}</div>`
-      + `<div id="mine-dispatch-panel">${state.currentDispatchHtml || ''}</div>`
-      + (reqsHtml || '<div class="muted" style="padding:20px; text-align:center;">当前筛选条件下没有需求</div>');
+    const existingList = mineCards.querySelector('#mine-requirements-panel');
+    if (preserveCards && existingList) {
+      const anchor = [...existingList.querySelectorAll('.mine-req-card')]
+        .find(el => el.getBoundingClientRect().bottom > 0) || existingList.querySelector('.mine-req-card');
+      const anchorId = anchor?.dataset.reqId;
+      const anchorTop = anchor?.getBoundingClientRect().top;
+      const changeSlot = mineCards.querySelector('#mine-change-banner');
+      const finalSlot = mineCards.querySelector('#mine-final-banner');
+      if (changeSlot && changeSlot.innerHTML !== changeBanner) changeSlot.innerHTML = changeBanner;
+      if (finalSlot && finalSlot.innerHTML !== finalTestBanner) finalSlot.innerHTML = finalTestBanner;
+      const freshList = document.createElement('div');
+      freshList.innerHTML = reqsHtml;
+      const oldCards = new Map([...existingList.querySelectorAll('.mine-req-card')].map(el => [el.dataset.reqId, el]));
+      const freshCards = [...freshList.querySelectorAll('.mine-req-card')];
+      const expectedIds = new Set(freshCards.map(el => el.dataset.reqId));
+      for (const [id, old] of oldCards) if (!expectedIds.has(id)) old.remove();
+      freshCards.forEach((fresh, index) => {
+        const old = oldCards.get(fresh.dataset.reqId);
+        if (old && changedIds && !changedIds.has(Number(fresh.dataset.reqId))) return;
+        if (old) {
+          fresh.open = old.open;
+          for (const menu of old.querySelectorAll('.qa-task-dropdown[open]')) {
+            const matching = fresh.querySelector('.qa-task-dropdown');
+            if (matching) matching.open = true;
+          }
+          old.replaceWith(fresh);
+        } else {
+          const next = freshCards.slice(index + 1).map(el => existingList.querySelector(`.mine-req-card[data-req-id="${el.dataset.reqId}"]`)).find(Boolean);
+          existingList.insertBefore(fresh, next || null);
+        }
+        window.OmniQAZentao?.hydrateContainer(fresh);
+        window.OmniQAStoryAI?.refreshSlots?.(fresh);
+      });
+      if (!freshCards.length) existingList.innerHTML = '<div class="muted" style="padding:20px; text-align:center;">当前筛选条件下没有需求</div>';
+      else if (existingList.children.length === 1 && existingList.firstElementChild?.classList.contains('muted')) existingList.firstElementChild.remove();
+      const updatedAnchor = anchorId && existingList.querySelector(`.mine-req-card[data-req-id="${anchorId}"]`);
+      if (updatedAnchor && Number.isFinite(anchorTop)) window.scrollBy(0, updatedAnchor.getBoundingClientRect().top - anchorTop);
+    } else {
+      mineCards.innerHTML = `<div id="mine-change-banner">${changeBanner}</div><div id="mine-final-banner">${finalTestBanner}</div>`
+        + `<div id="mine-feedback-panel">${state.currentFeedbackTodoHtml || ''}</div>`
+        + `<div id="mine-dispatch-panel">${state.currentDispatchHtml || ''}</div>`
+        + `<div id="mine-requirements-panel">${reqsHtml || '<div class="muted" style="padding:20px; text-align:center;">当前筛选条件下没有需求</div>'}</div>`;
+    }
     for (const id of openTaskMenus) {
       const menu = mineCards.querySelector(`.mine-req-card[data-req-id="${Number(id)}"] .qa-task-dropdown`);
       if (menu) menu.open = true;
     }
-    window.OmniQAZentao?.hydrateContainer(mineCards);
-    window.OmniQAStoryAI?.refreshSlots?.(mineCards);
+    if (!preserveCards || !existingList) {
+      window.OmniQAZentao?.hydrateContainer(mineCards);
+      window.OmniQAStoryAI?.refreshSlots?.(mineCards);
+    }
   }
   window.scheduleWorkbenchViewportResize?.();
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
@@ -1773,7 +1823,7 @@ export async function removeWorkbenchBug(id) {
   }
 }
 
-export async function setReqStatus(reqId, key, checked) {
+export async function setReqStatus(reqId, key, checked, checkboxEl) {
   // 测试完成勾选/取消会联动禅道任务（完成/重新激活），给出等待提示。
   // showLoading/hideLoading 是计数器配对的，用标志位保证「确认框取消」的
   // 早退路径不会多调一次 hideLoading。
@@ -1787,7 +1837,7 @@ export async function setReqStatus(reqId, key, checked) {
     if (!checked) {
       const ok = confirm(key === 'case_completed' ? '确认取消【用例完成】状态吗？' : '确认取消【测试完成】状态吗？');
       if (!ok) {
-        await loadMyWorkbench();
+        if (checkboxEl) checkboxEl.checked = true;
         return;
       }
     }
@@ -1795,7 +1845,7 @@ export async function setReqStatus(reqId, key, checked) {
     if (key === 'test_completed' && checked) {
       taskConsumedHours = promptRequirementTaskConsumed(getRequirementById(reqId));
       if (taskConsumedHours === null) {
-        await loadMyWorkbench();
+        if (checkboxEl) checkboxEl.checked = false;
         return;
       }
     }
@@ -1815,12 +1865,15 @@ export async function setReqStatus(reqId, key, checked) {
       scheduleCompletionIncrementalRefresh({ testcasesRecent: key === 'case_completed' });
     }
   } catch (err) {
+    if (checkboxEl) checkboxEl.checked = !checked;
     msg = err.message || '状态更新失败';
     msgType = 'error';
     if (!loadingShown) window.showMessage && window.showMessage(msg, msgType);
   }
   if (loadingShown) setLoadingText('正在刷新工作台数据…');
-  try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
+  if (msgType === 'success') {
+    try { await refreshMineAfterStatus(); } catch (e) { console.warn('workbench reload failed', e); }
+  }
   if (loadingShown) {
     hideLoading();
     window.showMessage && window.showMessage(msg, msgType);
@@ -1923,7 +1976,7 @@ export async function setFinalTestStatus(reqId, key, checked, checkboxEl) {
     if (checkboxEl) checkboxEl.checked = !checked;
     window.showMessage && window.showMessage(err.message || '状态更新失败', 'error');
   } finally {
-    await loadMyWorkbench();
+    await refreshMineAfterStatus();
   }
 }
 
