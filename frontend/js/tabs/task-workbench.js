@@ -1,3 +1,5 @@
+import { prepareOperationModal } from '../components/zentao-operation.js';
+import { operateTask } from '../components/task-operation.js';
 import { api } from '../api.js';
 import { escapeHtml, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
@@ -452,25 +454,7 @@ export async function taskWorkbenchOperate(taskId, action) {
     }
   }
   // 加载条挂到任务列表重载完成、提示放在重载之后：条消失时界面已与禅道一致。
-  showLoading('正在同步禅道，请稍候…');
-  let msg = '操作已同步禅道';
-  let msgType = 'success';
-  try {
-    const res = await (await api(`/workbench/tasks/${taskId}/operate`, {
-      method: 'POST', headers: window.H, body: ({ action, ...(consumed !== undefined ? { consumed } : {}) }),
-    })).json();
-    if (!res.ok) {
-      msg = '禅道操作有异常：' + (res.errors || []).join('；');
-      msgType = 'error';
-    }
-  } catch (err) {
-    msg = err.message || '操作失败';
-    msgType = 'error';
-  }
-  setLoadingText(msgType === 'success' ? '禅道已同步，正在刷新任务列表…' : '正在刷新任务列表…');
-  try { await loadTaskWorkbench(); } catch (e) { console.warn('task workbench reload failed', e); }
-  hideLoading();
-  window.showMessage && window.showMessage(msg, msgType);
+  await operateTask(taskId, { action, ...(consumed !== undefined ? { consumed } : {}) }, { onSuccess: () => loadTaskWorkbench() });
 }
 
 export async function taskWorkbenchSetTime(taskId) {
@@ -481,25 +465,7 @@ export async function taskWorkbenchSetTime(taskId) {
     window.showMessage && window.showMessage('工时需在 0~999 小时之间', 'error');
     return;
   }
-  showLoading('正在同步禅道，请稍候…');
-  let msg = '工时已更新';
-  let msgType = 'success';
-  try {
-    const res = await (await api(`/workbench/tasks/${taskId}/operate`, {
-      method: 'POST', headers: window.H, body: ({ action: 'set_time', hours }),
-    })).json();
-    if (!res.ok) {
-      msg = '禅道操作有异常：' + (res.errors || []).join('；');
-      msgType = 'error';
-    }
-  } catch (err) {
-    msg = err.message || '设置失败';
-    msgType = 'error';
-  }
-  setLoadingText(msgType === 'success' ? '禅道已同步，正在刷新任务列表…' : '正在刷新任务列表…');
-  try { await loadTaskWorkbench(); } catch (e) { console.warn('task workbench reload failed', e); }
-  hideLoading();
-  window.showMessage && window.showMessage(msg, msgType);
+  await operateTask(taskId, { action:'set_time', hours }, { onSuccess: () => loadTaskWorkbench() });
 }
 
 export function taskWorkbenchRememberFold(taskId, open) {
@@ -510,7 +476,7 @@ export function taskWorkbenchRememberFold(taskId, open) {
 
 // ── 任务指派（面向所有用户开放，支持姓名/账号模糊搜索）──────────────────────
 
-const assignCtx = { taskId: null, items: [], picked: '', source: 'workbench' };
+let assignCtx = { taskId: null, items: [], picked: '', source: 'workbench' };
 
 function assignEls() {
   return {
@@ -541,16 +507,14 @@ function renderAssignList() {
 }
 
 export async function openTaskAssign(taskId, source = 'workbench') {
-  assignCtx.taskId = taskId;
-  assignCtx.items = [];
-  assignCtx.picked = '';
-  assignCtx.source = source;
+  const snapshot = assignCtx = { taskId, items: [], picked: '', source };
   const { modal, input, list, hint, label } = assignEls();
   if (!modal || !input || !list) return;
   if (label) label.textContent = `#${taskId}`;
   if (hint) hint.textContent = '';
   input.value = '';
   list.innerHTML = '<div class="muted" style="padding:8px 10px; font-size:12px;">正在加载可指派人…</div>';
+  prepareOperationModal(modal);
   modal.classList.remove('hidden');
   modal.style.display = 'flex';
   if (!input.dataset.bound) {
@@ -565,6 +529,7 @@ export async function openTaskAssign(taskId, source = 'workbench') {
   }
   try {
     const data = await (await api(`/workbench/tasks/${taskId}/assignable`)).json();
+    if (assignCtx !== snapshot) return;
     assignCtx.items = data.users || [];
     if (hint) {
       const cur = assignCtx.items.find((u) => u.account === data.current);
@@ -572,6 +537,7 @@ export async function openTaskAssign(taskId, source = 'workbench') {
     }
     renderAssignList();
   } catch (err) {
+    if (assignCtx !== snapshot) return;
     list.innerHTML = `<div class="muted" style="padding:8px 10px; font-size:12px;">加载可指派人失败：${escapeHtml(err.message || '未知错误')}</div>`;
   }
   input.focus();
@@ -590,33 +556,22 @@ export async function confirmTaskAssign() {
     window.showMessage && window.showMessage('请先从列表中选择要指派的人员', 'info');
     return;
   }
-  const target = assignCtx.items.find((u) => u.account === assignCtx.picked);
-  showLoading('正在同步禅道指派，请稍候…');
-  let msg = `任务 #${assignCtx.taskId} 已指派给 ${target ? target.realname : assignCtx.picked}，已同步禅道`;
-  let msgType = 'success';
-  try {
-    const res = await (await api(`/workbench/tasks/${assignCtx.taskId}/operate`, {
-      method: 'POST', headers: window.H, body: ({ action: 'assign', assigned_to: assignCtx.picked }),
-    })).json();
-    if (res.ok) {
-      closeTaskAssignModal();
-    } else {
-      msg = '禅道指派有异常：' + (res.errors || []).join('；');
-      msgType = 'error';
-    }
-  } catch (err) {
-    msg = err.message || '指派失败';
-    msgType = 'error';
-  }
-  // 刷新数据：任务工作台始终刷新；从任务看板发起时同时刷新看板的禅道数据。
-  // 加载条挂到重载完成、提示放在重载之后，条消失时界面已与禅道一致。
-  setLoadingText(msgType === 'success' ? '禅道已同步，正在刷新任务列表…' : '正在刷新任务列表…');
-  try { await loadTaskWorkbench(); } catch (e) { console.warn('task workbench reload failed', e); }
-  hideLoading();
-  window.showMessage && window.showMessage(msg, msgType);
-  if (assignCtx.source === 'board' && window.OmniQATaskBoardTab?.reloadZentaoFromMirror) {
-    window.OmniQATaskBoardTab.reloadZentaoFromMirror().catch?.(() => {});
-  }
+  const snapshot = assignCtx;
+  await operateTask(snapshot.taskId, { action:'assign', assigned_to:snapshot.picked }, {
+    modal: 'taskAssignModal',
+    isCurrent: () => assignCtx === snapshot,
+    restore: () => {
+      assignCtx = snapshot;
+      const { label } = assignEls();
+      if (label) label.textContent = `#${snapshot.taskId}`;
+      renderAssignList();
+    },
+    onSuccess: async () => {
+      if (assignCtx === snapshot) closeTaskAssignModal();
+      await loadTaskWorkbench();
+      if (snapshot.source === 'board') await window.OmniQATaskBoardTab?.reloadZentaoFromMirror?.();
+    },
+  });
 }
 
 window.OmniQATaskWorkbenchTab = {

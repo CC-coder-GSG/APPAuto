@@ -131,6 +131,7 @@ def test_stage5_overview_separates_my_record_and_other_records(db_session):
     row = data["bug_pool"][0]
 
     assert row["my_test_done"] is False
+    assert row["my_minor_version_id"] == minor.id
     assert row["dispatched_to_name"] == other.username
     assert len(row["other_records"]) == 1
     assert row["other_records"][0]["username"] == other.username

@@ -1,3 +1,5 @@
+import { runZentaoOperation, operationPending, prepareOperationModal } from '../components/zentao-operation.js';
+import { verifyBugResult } from '../components/bug-result-operation.js';
 import { api } from '../api.js';
 import { state } from '../state.js';
 import { withPrefix, sourceTypeZh, escapeHtml } from '../utils.js';
@@ -699,68 +701,34 @@ export function toggleS5CloseComment(bugId, checked) {
 }
 
 export async function saveS5(id) {
-  showLoading('正在保存并同步禅道，请稍候…');
-  try {
-    return await _saveS5Impl(id);
-  } finally {
-    hideLoading();
-  }
-}
-
-async function _saveS5Impl(id) {
-  const bug = state.overallTestRows.find((b) => b.id === id);
-  const isZentaoBug = !!(bug?.zentao_bug_id);
-  const zentaoBugId = bug?.zentao_bug_id || '';
-  const doneEl = document.getElementById('done_' + id);
-  const done = doneEl?.checked;
-  const res = document.getElementById('res_' + id)?.value;
-  const closeComment = isZentaoBug ? (document.getElementById('closeCommentText_' + id)?.value || '') : '';
-
-  if (isZentaoBug && done && zentaoBugId) {
-    const ztId = Number(zentaoBugId);
-    if (ztId) {
-      try {
-        await api(`/zentao/bugs/${ztId}/close`, {
-          method: 'POST',
-          headers: window.H,
-          body: { comment: closeComment },
-        });
-      } catch (err) {
-        window.showMessage && window.showMessage(err.message || '禅道关闭失败，本地未保存闭环结果', 'error');
-        return;
+  const bug = state.overallTestRows.find(b => b.id === id);
+  const ztId = Number(bug?.zentao_bug_id || 0);
+  const minorId = Number(document.getElementById('s5MinorSelect')?.value || 0);
+  const done = !!document.getElementById('done_' + id)?.checked;
+  const resolution = document.getElementById('res_' + id)?.value;
+  const comment = document.getElementById('closeCommentText_' + id)?.value || '';
+  const majorId = Number(document.getElementById('s5MajorSelect')?.value || 0);
+  const softwareId = Number(window.currentSoftwareId || 0);
+  let synced = false;
+  await runZentaoOperation({
+    key:`bug-result:${id}`, label:`Bug #${ztId || id} 保存测试结果`,
+    locks:done && ztId ? [`bug:${ztId}`] : [],
+    verify:() => verifyBugResult({ bugId:id, ztId, majorId, softwareId, minorId, done, resolution }),
+    run:async () => {
+      if (ztId && done && !synced) {
+        await api(`/zentao/bugs/${ztId}/close`, {method:'POST',body:{comment}});
+        synced = true;
       }
-    }
-  }
-
-  // 取消闭环：本地之前记了 closed=true，现在用户要撤销勾选。此时禅道
-  // 通常是 closed 状态，必须先重新激活才允许让本地变回未闭环。
-  if (isZentaoBug && !done && bug?.closed && zentaoBugId) {
-    const ztId = Number(zentaoBugId);
-    if (ztId) {
-      window.showMessage && window.showMessage('取消闭环需要先在禅道重新激活该 Bug', 'info');
-      const activated = await openS5ReactivateModalAsync(id, ztId);
-      if (!activated) {
-        // 用户放弃激活 → 回滚勾选，不保存
-        if (doneEl) doneEl.checked = true;
-        window.showMessage && window.showMessage('未完成重新激活，已取消"取消闭环"操作', 'error');
-        return;
+      if (ztId && !done && bug.closed && !synced) {
+        synced = await openS5ReactivateModalAsync(id, ztId);
+        if (!synced) throw Object.assign(new Error('已取消重新激活'), {status:400});
       }
-    }
-  }
-
-  await api(`/overall-test/bugs/${id}/result`, {
-    method: 'PUT',
-    headers: window.H,
-    body: {
-      minor_version_id: Number(document.getElementById('s5MinorSelect')?.value || 0),
-      test_done: done,
-      newly_found_bug_id: null,
-      resolution: res,
+      await api(`/overall-test/bugs/${id}/result`, {
+        method:'PUT',body:{minor_version_id:minorId,test_done:done,newly_found_bug_id:null,resolution},
+      });
     },
+    onSuccess:() => loadOverallTest({syncBeforeLoad:false,showSuccess:false}),
   });
-
-  window.showMessage && window.showMessage('整体测试项已保存');
-  await loadOverallTest({ syncBeforeLoad: false, showSuccess: false });
 }
 
 export async function editS5Bug(id, oldBugId, zentaoBugId, currentTitle) {
@@ -1336,8 +1304,8 @@ export async function submitS5Bug() {
 // Reactivate Modal
 
 // In-memory state for the reactivate / assign modals
-let _s5ModalZtId = '';
-let _s5ModalBugDbId = 0;
+let reactivateContext = {};
+let assignContext = {};
 let _s5ActionMeta = { users: {}, builds: {} };
 
 async function _loadActionMeta(ztId, action = 'activate') {
@@ -1439,7 +1407,7 @@ function _buildSearchableUserSelect(selectId, users, currentAssigned = '') {
 }
 
 // 激活成功后的刷新回调：由入口方（我的工作台/特派面板）传入，默认刷新测试工作台。
-let _s5ReactivateOnDone = null;
+
 
 function _setS5ReactivateSubmitting(submitting) {
   const btn = document.getElementById('s5ReactivateSubmitBtn');
@@ -1451,9 +1419,9 @@ function _setS5ReactivateSubmitting(submitting) {
 }
 
 export function openS5ReactivateModal(bugDbId, zentaoBugId, opts = {}) {
-  _s5ModalBugDbId = bugDbId;
-  _s5ModalZtId = zentaoBugId;
-  _s5ReactivateOnDone = typeof opts.onDone === 'function' ? opts.onDone : null;
+  if (!operationPending(`bug:${reactivateContext.ztId}`)) reactivateContext.resolve?.(false);
+  const context = reactivateContext = { bugDbId, ztId:zentaoBugId };
+  context.onDone = typeof opts.onDone === 'function' ? opts.onDone : null;
   const modal = document.getElementById('s5ReactivateModal');
   if (!modal) return;
 
@@ -1464,12 +1432,15 @@ export function openS5ReactivateModal(bugDbId, zentaoBugId, opts = {}) {
   const userContainer = document.getElementById('s5ReactivateUserSelectContainer');
   if (userContainer) userContainer.innerHTML = '<div style="color:#94a3b8; font-size:13px;">加载候选人中...</div>';
 
+  prepareOperationModal(modal);
   modal.classList.remove('hidden');
   modal.style.display = 'flex';
   bindModalEsc('s5ReactivateModal', closeS5ReactivateModal);
 
   // Load action meta for user list and build list
   _loadActionMeta(zentaoBugId, 'activate').then((meta) => {
+    if (reactivateContext !== context) return;
+    context.meta = meta;
     _buildSearchableUserSelect('s5ReactivateUserSelect', meta.users, meta.current_assigned || '');
     // Populate build select
     const buildSel = document.getElementById('s5ReactivateBuildSelect');
@@ -1485,12 +1456,12 @@ export function openS5ReactivateModal(bugDbId, zentaoBugId, opts = {}) {
 // Resolves to `true` when the user successfully reactivates, `false`
 // when they cancel or the reactivation fails. Co-exists with the plain
 // openS5ReactivateModal for the existing "重新激活" button entry.
-let _s5ReactivateResolver = null;
+
 
 export function openS5ReactivateModalAsync(bugDbId, zentaoBugId) {
   openS5ReactivateModal(bugDbId, zentaoBugId);
   return new Promise((resolve) => {
-    _s5ReactivateResolver = resolve;
+    reactivateContext.resolve = resolve;
   });
 }
 
@@ -1499,62 +1470,47 @@ export async function submitS5Reactivate() {
   const openedBuild = document.getElementById('s5ReactivateBuildSelect')?.value || '';
   const comment = document.getElementById('s5ReactivateComment')?.value || '';
 
-  if (!_s5ModalZtId) return;
-  // 提交期间：按钮转圈禁用 + 顶部加载气泡，防止重复点击；加载条一直挂到
-  // 列表刷新完成（条消失 = 界面已是激活后的最新状态）。
-  _setS5ReactivateSubmitting(true);
-  showLoading('正在重新激活禅道 Bug，请稍候…');
-  try {
-    await api(`/zentao/bugs/${Number(_s5ModalZtId)}/active`, {
-      method: 'POST',
-      headers: window.H,
-      body: {
-        assigned_to: assignedTo,
-        opened_build: openedBuild ? [openedBuild] : [],
-        comment,
-      },
-    });
-    window.showMessage && window.showMessage('禅道 Bug 已重新激活', 'success');
-    if (_s5ReactivateResolver) {
-      const resolver = _s5ReactivateResolver;
-      _s5ReactivateResolver = null;
-      resolver(true);
-      closeS5ReactivateModal();
-      return;
-    }
-    const onDone = _s5ReactivateOnDone;
-    closeS5ReactivateModal();
-    setLoadingText('已重新激活，正在刷新列表…');
-    if (onDone) {
-      await onDone();
-    } else {
-      await loadOverallTest({ syncBeforeLoad: false, showSuccess: false });
-    }
-  } catch (err) {
-    window.showMessage && window.showMessage(err.message || '激活失败', 'error');
-  } finally {
-    hideLoading();
-    _setS5ReactivateSubmitting(false);
-  }
+  const context = reactivateContext;
+  if (!context.ztId) return;
+  const builds = document.getElementById('s5ReactivateBuildSelect')?.innerHTML || '';
+  await runZentaoOperation({
+    key:`bug:${context.ztId}`, label:`Bug #${context.ztId} 重新激活`,
+    modal:'s5ReactivateModal', isCurrent:() => reactivateContext === context,
+    restore:() => {
+      reactivateContext = context;
+      _buildSearchableUserSelect('s5ReactivateUserSelect', context.meta?.users || {}, assignedTo);
+      document.getElementById('s5ReactivateBuildSelect').innerHTML = builds;
+    },
+    run:async () => (await api(`/zentao/bugs/${Number(context.ztId)}/active`, {
+      method:'POST', body:{ assigned_to:assignedTo, opened_build:openedBuild ? [openedBuild] : [], comment },
+    })).json(),
+    verify:async () => {
+      const bug = await (await api(`/zentao/bugs/${Number(context.ztId)}/preview`)).json();
+      return bug.status === 'active' ? true : null;
+    },
+    onSuccess:async () => {
+      const resolve = context.resolve; context.resolve = null;
+      if (reactivateContext === context) closeS5ReactivateModal();
+      if (resolve) resolve(true);
+      else if (context.onDone) await context.onDone();
+      else await loadOverallTest({syncBeforeLoad:false,showSuccess:false});
+    },
+  });
 }
 
 export function closeS5ReactivateModal() {
   const modal = document.getElementById('s5ReactivateModal');
   if (modal) { modal.classList.add('hidden'); modal.style.display = 'none'; }
   unbindModalEsc('s5ReactivateModal');
-  _s5ReactivateOnDone = null;
-  if (_s5ReactivateResolver) {
-    const resolver = _s5ReactivateResolver;
-    _s5ReactivateResolver = null;
-    resolver(false);
-  }
+  if (operationPending(`bug:${reactivateContext.ztId}`)) return;
+  reactivateContext.resolve?.(false);
+  reactivateContext.resolve = null;
 }
 
 // Assign Modal
 
 export function openS5AssignModal(bugDbId, zentaoBugId) {
-  _s5ModalBugDbId = bugDbId;
-  _s5ModalZtId = zentaoBugId;
+  const context = assignContext = { bugDbId, ztId:zentaoBugId };
   const modal = document.getElementById('s5AssignModal');
   if (!modal) return;
 
@@ -1563,11 +1519,14 @@ export function openS5AssignModal(bugDbId, zentaoBugId) {
   const userContainer = document.getElementById('s5AssignUserSelectContainer');
   if (userContainer) userContainer.innerHTML = '<div style="color:#94a3b8; font-size:13px;">加载候选人中...</div>';
 
+  prepareOperationModal(modal);
   modal.classList.remove('hidden');
   modal.style.display = 'flex';
   bindModalEsc('s5AssignModal', closeS5AssignModal);
 
   _loadActionMeta(zentaoBugId, 'activate').then((meta) => {
+    if (assignContext !== context) return;
+    context.meta = meta;
     _buildSearchableUserSelect('s5AssignUserSelect', meta.users, meta.current_assigned || '');
   });
 }
@@ -1579,19 +1538,27 @@ export async function submitS5Assign() {
     window.showMessage && window.showMessage('请选择指派人', 'error');
     return;
   }
-  if (!_s5ModalZtId) return;
-  try {
-    await api(`/zentao/bugs/${Number(_s5ModalZtId)}/assign`, {
-      method: 'POST',
-      headers: window.H,
-      body: { assigned_to: assignedTo, comment },
-    });
-    window.showMessage && window.showMessage(`禅道 Bug 已指派给 ${assignedTo}`, 'success');
-    closeS5AssignModal();
-    await loadOverallTest({ syncBeforeLoad: false, showSuccess: false });
-  } catch (err) {
-    window.showMessage && window.showMessage(err.message || '指派失败', 'error');
-  }
+  const context = assignContext;
+  if (!context.ztId) return;
+  await runZentaoOperation({
+    key:`bug:${context.ztId}`, label:`Bug #${context.ztId} 指派`,
+    modal:'s5AssignModal', isCurrent:() => assignContext === context,
+    restore:() => {
+      assignContext = context;
+      _buildSearchableUserSelect('s5AssignUserSelect', context.meta?.users || {}, assignedTo);
+    },
+    run:async () => (await api(`/zentao/bugs/${Number(context.ztId)}/assign`, {
+      method:'POST', body:{assigned_to:assignedTo,comment},
+    })).json(),
+    verify:async () => {
+      const meta = await _loadActionMeta(Number(context.ztId), 'activate');
+      return meta.current_assigned === assignedTo ? true : null;
+    },
+    onSuccess:async () => {
+      if (assignContext === context) closeS5AssignModal();
+      await loadOverallTest({syncBeforeLoad:false,showSuccess:false});
+    },
+  });
 }
 
 export function closeS5AssignModal() {

@@ -69,7 +69,7 @@ const root = path.resolve(__dirname, '..');
         const taskId = Number(op[1]), body = request.postDataJSON();
         operations.push({ taskId, ...body });
         assert.notEqual(taskId, 103, 'another user task must never be operated');
-        if (failOperation) { failOperation = false; return route.fulfill({ status: 502, json: { detail: '任务操作未生效' } }); }
+        if (failOperation) { failOperation = false; return route.fulfill({ status: 422, json: { detail: '任务操作未生效' } }); }
         const task = tasks.find(t => t.task_id === taskId);
         if (body.action === 'set_time') task.estimate = body.hours;
         else task.status = { start: 'doing', pause: 'pause', finish: 'done', reactivate: 'doing' }[body.action];
@@ -133,7 +133,8 @@ const root = path.resolve(__dirname, '..');
     assert.deepEqual(operations.at(-1), { taskId: 102, action: 'reactivate' });
     failOperation = true;
     await card.getByRole('button', { name: '⏸ 暂停', exact: true }).click();
-    await page.waitForFunction(() => window.messages.at(-1)?.[0] === '任务操作未生效');
+    await page.waitForFunction(() => window.messages.at(-1)?.[0].includes('任务操作未生效'));
+    await page.getByRole('dialog').filter({ hasText: '任务操作未生效' }).getByRole('button', { name: '收起', exact: true }).click();
     assert.match(await taskLabel().innerText(), /进行中/, 'failed remote operation retains known state');
     finalTest = true;
     await page.evaluate(() => window.mine.loadMyWorkbench());

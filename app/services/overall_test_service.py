@@ -269,6 +269,7 @@ class OverallTestService:
                 "fixed_minor_version_id": bug.fixed_minor_version_id,
                 "closed": bug.closed,
                 "my_test_done": my_record.test_done if my_record else False,
+                "my_minor_version_id": my_record.minor_version_id if my_record else None,
                 "my_resolution": my_record.resolution if my_record else "fixed",
                 "my_source": my_record.source if my_record else "",
                 "my_comment": my_record.comment if my_record else "",

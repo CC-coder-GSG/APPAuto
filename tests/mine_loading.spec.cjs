@@ -130,7 +130,7 @@ const root = path.resolve(__dirname, '..');
 
     await reset();job=await load('1');await response('/workbench/mine','1',card(1));await finish(job);
     const background=await load('1',{background:true});assert.deepEqual((await view()).ids,[1]);
-    assert.match(await page.locator('#mineLoadStatus').textContent(),/正在更新/);
+    assert.match(await page.locator('#workbenchActivity').textContent(),/\u9700\u6c42\u66f4\u65b0\u4e2d/);
     const switched=await load('2');await response('/workbench/mine','1',card(99));await finish(background);
     assert.match((await view()).text,/正在加载工作台/);
     await response('/workbench/mine','2',card(2));await finish(switched);

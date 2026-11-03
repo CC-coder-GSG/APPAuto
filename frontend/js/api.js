@@ -1,4 +1,6 @@
-﻿export async function api(url, options = {}) {
+import { requestActivity } from './components/workbench-activity.js';
+
+export async function api(url, options = {}) {
   const token = localStorage.getItem('token');
   const headers = { ...(options.headers || {}) };
   if (token) {
@@ -21,15 +23,18 @@
     body = JSON.stringify(body);
   }
 
-  const response = await fetch(url, { ...options, headers, body });
+  const activity = requestActivity(url, options);
+  let response;
+  try { response = await fetch(url, { ...options, headers, body }); }
+  finally { activity?.end(); }
   if (response.status === 401) {
     localStorage.removeItem('token');
     window.location.href = '/login';
-    throw new Error('401');
+    throw Object.assign(new Error('401'), { status: 401 });
   }
 
   if (response.status === 403) {
-    throw new Error('无权限执行此操作');
+    throw Object.assign(new Error('无权限执行此操作'), { status: 403 });
   }
 
   if (!response.ok) {
@@ -43,7 +48,9 @@
         if (raw && raw.trim()) message = `${message}: ${raw.slice(0, 160)}`;
       } catch {}
     }
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
 
   return response;

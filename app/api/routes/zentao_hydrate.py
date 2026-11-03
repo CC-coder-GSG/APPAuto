@@ -117,7 +117,7 @@ async def hydrate_bugs(
     Returns a mapping: { "<bug_id>": normalized_bug_dict, … }
     IDs with transient errors are listed under "__fetch_errors__" so
     callers can distinguish them from confirmed-not-found IDs.
-    If the user has no Zentao binding, returns an empty object.
+    Missing binding is an authentication error, never a missing entity.
     """
     id_list = _parse_id_list(ids)
     if not id_list:
@@ -125,7 +125,7 @@ async def hydrate_bugs(
 
     ctx = _get_client_ctx(current_user.id, db)
     if ctx is None:
-        return {}
+        return {"__fetch_errors__": [str(i) for i in id_list], "__auth_required__": True}
     client, base_url = ctx
 
     build_names = local_build_names(db)
@@ -135,15 +135,18 @@ async def hydrate_bugs(
         invalidate_token(current_user.id, db)
         ctx2 = _get_client_ctx(current_user.id, db)
         if ctx2 is None:
-            return _build_response({}, errors)
+            return {"__fetch_errors__": [str(i) for i in id_list], "__auth_required__": True}
         client2, base_url2 = ctx2
-        result, _, errors = await _fetch_bugs_concurrent(client2, base_url2, id_list, build_names)
+        result, got_401, errors = await _fetch_bugs_concurrent(client2, base_url2, id_list, build_names)
 
     # Write-back: persist title + URL for bugs that don't have them yet.
     # Matches on bug_id like "b#29009" → Zentao numeric ID 29009.
     _writeback_bug_fields(db, result, base_url)
 
-    return _build_response(result, errors)
+    response = _build_response(result, errors)
+    if got_401:
+        response["__auth_required__"] = True
+    return response
 
 
 @router.get("/hydrate/stories")
@@ -164,7 +167,7 @@ async def hydrate_stories(
 
     ctx = _get_client_ctx(current_user.id, db)
     if ctx is None:
-        return {}
+        return {"__fetch_errors__": [str(i) for i in id_list], "__auth_required__": True}
     client, base_url = ctx
 
     result, got_401, errors = await _fetch_stories_concurrent(client, base_url, id_list)
@@ -173,11 +176,14 @@ async def hydrate_stories(
         invalidate_token(current_user.id, db)
         ctx2 = _get_client_ctx(current_user.id, db)
         if ctx2 is None:
-            return _build_response({}, errors)
+            return {"__fetch_errors__": [str(i) for i in id_list], "__auth_required__": True}
         client2, base_url2 = ctx2
-        result, _, errors = await _fetch_stories_concurrent(client2, base_url2, id_list)
+        result, got_401, errors = await _fetch_stories_concurrent(client2, base_url2, id_list)
 
-    return _build_response(result, errors)
+    response = _build_response(result, errors)
+    if got_401:
+        response["__auth_required__"] = True
+    return response
 
 
 @router.get("/story/{story_id}/detail")
@@ -484,6 +490,7 @@ async def _fetch_bugs_concurrent(
             except ZentaoAPIError as exc:
                 if exc.status_code == 401:
                     got_401 = True
+                    errors.append(str(bug_id))
                 else:
                     logger.warning("hydrate_bugs: bug_id=%s err=%s", bug_id, exc)
                     errors.append(str(bug_id))
@@ -522,6 +529,7 @@ async def _fetch_stories_concurrent(
             except ZentaoAPIError as exc:
                 if exc.status_code == 401:
                     got_401 = True
+                    errors.append(str(story_id))
                 else:
                     logger.warning("hydrate_stories: story_id=%s err=%s", story_id, exc)
                     errors.append(str(story_id))
@@ -550,10 +558,12 @@ def _build_response(result: dict, errors: list[str]) -> dict:
 # ---------------------------------------------------------------------------
 
 def _parse_id_list(raw: str) -> list[int]:
-    """Parse a comma-separated string of integers, capped at _MAX_BATCH."""
+    """Parse IDs; reject oversized batches rather than silently dropping IDs."""
     parts = [p.strip() for p in raw.split(",") if p.strip()]
     result: list[int] = []
-    for part in parts[:_MAX_BATCH]:
+    if len(parts) > _MAX_BATCH:
+        raise HTTPException(status_code=422, detail=f"At most {_MAX_BATCH} IDs per request")
+    for part in parts:
         try:
             result.append(int(part))
         except ValueError:

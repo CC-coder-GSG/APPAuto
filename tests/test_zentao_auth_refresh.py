@@ -109,6 +109,36 @@ async def _expired_batch():
 
 
 @pytest.mark.parametrize('kind', ['bugs', 'stories'])
+def test_hydrate_missing_binding_is_auth_failure(client, monkeypatch, kind):
+    monkeypatch.setattr(zentao_hydrate, '_get_client_ctx', lambda *args: None)
+    response = client.get(f'/zentao/hydrate/{kind}?ids=101,102')
+    assert response.status_code == 200
+    assert response.json() == {'__fetch_errors__': ['101', '102'], '__auth_required__': True}
+
+
+@pytest.mark.parametrize('kind', ['bugs', 'stories'])
+def test_hydrate_rejects_oversize_batch_before_network(client, monkeypatch, kind):
+    def unexpected(*args):
+        raise AssertionError('Oversize batch must not contact Zentao')
+    monkeypatch.setattr(zentao_hydrate, '_get_client_ctx', unexpected)
+    response = client.get(f'/zentao/hydrate/{kind}?ids=' + ','.join(map(str, range(1, 502))))
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize('kind', ['bugs', 'stories'])
+def test_hydrate_permanent_401_reports_auth_required(client, db_session, binding, monkeypatch, kind):
+    monkeypatch.setattr(zentao_hydrate, '_get_client_ctx', lambda *args: (object(), 'https://zentao.invalid'))
+    monkeypatch.setattr(zentao_hydrate, '_writeback_bug_fields', lambda *args: None)
+    async def expired(*args):
+        return {}, True, ['101', '102']
+    monkeypatch.setattr(zentao_hydrate, f'_fetch_{kind}_concurrent', expired)
+    response = client.get(f'/zentao/hydrate/{kind}?ids=101,102')
+    assert response.status_code == 200
+    assert response.json()['__auth_required__'] is True
+    assert set(response.json()['__fetch_errors__']) == {'101', '102'}
+
+
+@pytest.mark.parametrize('kind', ['bugs', 'stories'])
 def test_read_after_temporary_login_failure_can_refresh_and_recover(client, monkeypatch, kind):
     monkeypatch.setattr(httpx, 'post', lambda *args, **kwargs: httpx.Response(500, text='upstream error'))
     assert client.get(f'/zentao/hydrate/{kind}?ids=101').status_code == 502

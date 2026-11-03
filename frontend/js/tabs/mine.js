@@ -1,5 +1,8 @@
-﻿import { api } from '../api.js';
+import { api } from '../api.js';
 import { state } from '../state.js';
+import { errorPanel } from '../components/workbench-activity.js';
+import { runZentaoOperation, operationPending, prepareOperationModal } from '../components/zentao-operation.js';
+import { verifyBugResult } from '../components/bug-result-operation.js';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 import { closeModal, openModal } from '../components/modal.js';
 import { renderCaseReviewControls } from '../components/case-review.js?v=20260714-1';
@@ -14,7 +17,7 @@ const RESULT_OPTIONS = [
   { value: 'untested', label: '未测试' },
 ];
 
-const modalState = {
+let modalState = {
   reqId: null,
   checkboxEl: null,
   taskId: null,
@@ -25,7 +28,7 @@ const notesModalState = {
   afterSave: null,
 };
 
-const bugResultModalState = {
+let bugResultModalState = {
   bugId: null,
   zentaoBugId: '',
   wasClosed: false,
@@ -296,7 +299,6 @@ function renderCachedBugSlot(bug) {
 }
 
 function renderBugChip(req, bug) {
-  const immutable = req.test_completed || bug.auto_linked;
   const dBadge = bug.dispatched_to_name
     ? `<span style="color:#ea580c; background:#ffedd5; padding:1px 4px; border-radius:4px; font-size:11px; margin-left:6px;">🪂已特派给:${bug.dispatched_to_name}</span>`
     : '';
@@ -330,8 +332,6 @@ function renderBugChip(req, bug) {
   return `<span class="badge" style="${chipTone} padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
       ${renderBugLink(bug)} ${ztSlot} ${previewBugBtn} ${verText} ${crossMajorBadge} ${dBadge} ${autoBadge}${renderZentaoCheckBadge(bug)}${retestProblemBadge}${closedHint}
       ${resultBtn}
-      <a href="javascript:void(0)" title="编辑" onclick="${immutable ? 'return false;' : `editWorkbenchBug(${bug.id}, '${bug.bug_id}')`}" style="color:${immutable ? '#94a3b8' : '#3b82f6'}; margin-left:4px; text-decoration:none;">✎</a>
-      <a href="javascript:void(0)" title="删除" onclick="${immutable ? 'return false;' : `removeWorkbenchBug(${bug.id})`}" style="color:${immutable ? '#94a3b8' : '#ef4444'}; margin-left:2px; text-decoration:none;">×</a>
   </span>`;
 }
 
@@ -489,19 +489,19 @@ function openTestExecutionModal(reqId, checkboxEl) {
     return;
   }
 
-  modalState.reqId = reqId;
   const selected = getRequirementById(reqId);
-  modalState.taskId = selected?.selected_task_mode ? selected.zentao_task_id : null;
-  modalState.checkboxEl = checkboxEl || null;
+  modalState = { reqId, taskId: selected?.selected_task_mode ? selected.zentao_task_id : null, checkboxEl: checkboxEl || null };
 
   noteInput.value = '';
   resultSel.value = 'passed';
+  prepareOperationModal(modal);
   openModal(modal);
 }
 
 export function closeMineTestExecutionModal() {
   const modal = document.getElementById('mineTestExecModal');
   if (modal) closeModal(modal);
+  if (operationPending(`requirement:${modalState.reqId}`)) return;
   if (modalState.checkboxEl) modalState.checkboxEl.checked = false;
   modalState.reqId = null;
   modalState.taskId = null;
@@ -946,9 +946,7 @@ export function openBugResultModal(bugId, bugIdText, closed, zentaoBugId) {
     window.showMessage && window.showMessage('请先在页面顶部选择【当前复测发包(小版本)】环境！', 'error');
     return;
   }
-  bugResultModalState.bugId = bugId;
-  bugResultModalState.zentaoBugId = String(zentaoBugId || '');
-  bugResultModalState.wasClosed = !!closed;
+  bugResultModalState = { bugId, zentaoBugId: String(zentaoBugId || ''), wasClosed: !!closed, minorId, bugIdText };
   const titleEl = document.getElementById('mineBugResultTitle');
   const minorEl = document.getElementById('mineBugResultMinor');
   const resSel = document.getElementById('mineBugResultResolution');
@@ -966,79 +964,55 @@ export function openBugResultModal(bugId, bugIdText, closed, zentaoBugId) {
       : '该 Bug 为本地 Bug，保存仅记录闭环结果。';
   }
   toggleBugResultCloseComment();
+  prepareOperationModal(modal);
   openModal(modal);
 }
 
 export function closeBugResultModal() {
   const modal = document.getElementById('mineBugResultModal');
   if (modal) closeModal(modal);
-  bugResultModalState.bugId = null;
-  bugResultModalState.zentaoBugId = '';
-  bugResultModalState.wasClosed = false;
 }
 
 export async function confirmBugResultModal() {
-  const bugId = Number(bugResultModalState.bugId || 0);
-  if (!bugId) {
-    closeBugResultModal();
-    return;
-  }
-  const minorId = Number(document.getElementById('mineMinorSelect')?.value || 0);
-  if (!minorId) {
-    window.showMessage && window.showMessage('请先在页面顶部选择【当前复测发包(小版本)】环境！', 'error');
-    return;
-  }
+  const snapshot = bugResultModalState;
+  const { bugId, zentaoBugId, minorId } = snapshot;
+  if (!bugId || !minorId) return;
   const resolution = document.getElementById('mineBugResultResolution')?.value || 'fixed';
   const done = !!document.getElementById('mineBugResultDone')?.checked;
   const comment = (document.getElementById('mineBugResultComment')?.value || '').trim();
-  const zentaoBugId = bugResultModalState.zentaoBugId;
-  const isZentaoBug = !!zentaoBugId;
-
-  try {
-    // 勾选闭环且是禅道 Bug：先同步关闭禅道（与测试工作台一致）
-    if (isZentaoBug && done) {
-      const ztId = Number(zentaoBugId);
-      if (ztId) {
-        try {
-          await api(`/zentao/bugs/${ztId}/close`, {
-            method: 'POST',
-            headers: window.H,
-            body: { comment },
-          });
-        } catch (err) {
-          window.showMessage && window.showMessage(err.message || '禅道关闭失败，本地未保存闭环结果', 'error');
-          return;
-        }
+  const majorId = (window.versions || []).find(version => Number(version.id) === minorId)?.parent_id;
+  const softwareId = Number(window.currentSoftwareId || 0);
+  await runZentaoOperation({
+    key: `bug-result:${bugId}`, label: `Bug #${zentaoBugId || bugId} 保存复测结果`,
+    locks: done && zentaoBugId ? [`bug:${Number(zentaoBugId)}`] : [],
+    verify: () => verifyBugResult({ bugId, ztId:zentaoBugId, majorId, softwareId, minorId, done, resolution }),
+    modal: 'mineBugResultModal', isCurrent: () => bugResultModalState === snapshot,
+    restore: () => {
+      bugResultModalState = snapshot;
+      document.getElementById('mineBugResultTitle').textContent = `Bug ${snapshot.bugIdText}`;
+      document.getElementById('mineBugResultMinor').textContent = getMinorText(minorId);
+    },
+    run: async () => {
+      if (zentaoBugId && done && !snapshot.closedSynced) {
+        await api(`/zentao/bugs/${Number(zentaoBugId)}/close`, { method:'POST', body:{ comment } });
+        snapshot.closedSynced = true;
       }
-    }
-
-    // 取消闭环且禅道侧已关闭：必须先在禅道重新激活，再落本地未闭环
-    if (isZentaoBug && !done && bugResultModalState.wasClosed) {
-      const ztId = Number(zentaoBugId);
-      if (ztId) {
+      if (zentaoBugId && !done && snapshot.wasClosed && !snapshot.activated) {
         const reactivate = window.OmniQAOverallTestTab?.openS5ReactivateModalAsync;
-        if (typeof reactivate === 'function') {
-          window.showMessage && window.showMessage('取消闭环需要先在禅道重新激活该 Bug', 'info');
-          const activated = await reactivate(bugId, ztId);
-          if (!activated) {
-            window.showMessage && window.showMessage('未完成重新激活，已取消「取消闭环」操作', 'error');
-            return;
-          }
-        }
+        if (!reactivate) throw Object.assign(new Error('重新激活组件尚未加载'), {status:400});
+        closeModal(document.getElementById('mineBugResultModal'));
+        snapshot.activated = await reactivate(bugId, Number(zentaoBugId));
+        if (!snapshot.activated) throw Object.assign(new Error('已取消重新激活'), {status:400});
       }
-    }
-
-    await api(`/overall-test/bugs/${bugId}/result`, {
-      method: 'PUT',
-      headers: window.H,
-      body: { minor_version_id: minorId, test_done: done, newly_found_bug_id: null, resolution },
-    });
-    window.showMessage && window.showMessage('Bug 修复结果已保存并同步至总盘', 'success');
-    closeBugResultModal();
-    await loadMyWorkbench();
-  } catch (err) {
-    window.showMessage && window.showMessage(err.message || '保存失败，请稍后重试', 'error');
-  }
+      await api(`/overall-test/bugs/${bugId}/result`, {
+        method:'PUT', body:{ minor_version_id:minorId, test_done:done, newly_found_bug_id:null, resolution },
+      });
+    },
+    onSuccess: async () => {
+      if (bugResultModalState === snapshot) closeBugResultModal();
+      await refreshMineAfterStatus();
+    },
+  });
 }
 
 export async function submitTestExecution(reqId, payload) {
@@ -1089,8 +1063,26 @@ export async function confirmMineTestExecutionModal() {
   const pageMinorSel = document.getElementById('mineMinorSelect');
   if (pageMinorSel) pageMinorSel.value = String(minorId);
 
-  showLoading('正在提交测试完成并同步禅道任务，请稍候…');
-  try {
+  const snapshot = modalState;
+  await runZentaoOperation({
+    key: `requirement:${reqId}`, label: `需求 #${reqId} 提交测试完成`,
+    locks: req.zentao_task_id ? [`task:${req.zentao_task_id}`] : [],
+    modal: 'mineTestExecModal', isCurrent: () => modalState === snapshot,
+    restore: () => { modalState = snapshot; },
+    verify: async () => {
+      const rows = await (await api(`/workbench/mine?mode=version&major_version_id=${req.major_version_id}`)).json();
+      const row = rows.find(item => Number(item.id) === reqId);
+      const localDone = req.selected_task_mode
+        ? row?.test_tasks?.some(task => task.task_id === req.zentao_task_id && ['done', 'closed'].includes(task.status))
+        : row?.test_completed;
+      if (!localDone) return null;
+      if (req.zentao_task_id) {
+        const task = await (await api(`/zentao/task/${req.zentao_task_id}/detail`)).json();
+        if (!['done', 'closed'].includes(task.status)) return null;
+      }
+      return true;
+    },
+    run: async () => {
     if (req?.selected_task_mode) await requestSelectedRequirementTask(req, 'finish', {
       minor_version_id: minorId, result_status: resultStatus, notes,
       ...(taskConsumedHours !== undefined ? { consumed: taskConsumedHours } : {}),
@@ -1102,23 +1094,16 @@ export async function confirmMineTestExecutionModal() {
       notes,
       ...(taskConsumedHours !== undefined ? { task_consumed_hours: taskConsumedHours } : {}),
     });
-    const modal = document.getElementById('mineTestExecModal');
-    if (modal) closeModal(modal);
-    scheduleCompletionIncrementalRefresh(); // 测试完成 → 增量同步用例/Bug 保持最新
-    // 加载条挂到工作台重载完成再收起：提示出现时界面已是最新状态
-    setLoadingText('禅道已同步，正在刷新工作台…');
-    try { await refreshMineAfterStatus(); } catch (e) { console.warn('workbench reload failed', e); }
-    hideLoading();
-    window.showMessage && window.showMessage(req?.selected_task_mode ? '当前任务已完成；全部关联测试任务完成后，需求显示测试完成' : '测试执行记录已提交，需求已标记测试完成（禅道任务已联动完成）', 'success');
-  } catch (err) {
-    hideLoading();
-    if (modalState.checkboxEl) modalState.checkboxEl.checked = false;
-    window.showMessage && window.showMessage(err.message || '提交失败，请稍后重试', 'error');
-  } finally {
-    modalState.reqId = null;
-    modalState.taskId = null;
-    modalState.checkboxEl = null;
-  }
+    },
+    onSuccess: async () => {
+      if (modalState === snapshot) {
+        closeModal(document.getElementById('mineTestExecModal'));
+        modalState = { reqId:null, taskId:null, checkboxEl:null };
+      }
+      scheduleCompletionIncrementalRefresh();
+      await refreshMineAfterStatus();
+    },
+  });
 }
 
 export async function handleTestCompletedToggle(reqId, checked, checkboxEl) {
@@ -1338,6 +1323,39 @@ async function refreshMineAfterStatus() {
   return loadMyWorkbench({ background: true });
 }
 
+const minePanelControllers = new Map();
+export async function retryMinePanel(name) {
+  if (!['feedback', 'dispatch'].includes(name)) return;
+  const key = mineFilterKey();
+  const mode = getMode();
+  const majorId = Number(document.getElementById('mineMajorSelect')?.value || 0);
+  minePanelControllers.get(name)?.abort();
+  const controller = new AbortController();
+  minePanelControllers.set(name, controller);
+  const current = () => !controller.signal.aborted && key === mineFilterKey();
+  const set = html => {
+    if (!current()) return;
+    state[name === 'feedback' ? 'currentFeedbackTodoHtml' : 'currentDispatchHtml'] = html;
+    const slot = document.getElementById(`mine-${name}-panel`);
+    if (slot) slot.innerHTML = html;
+    window.scheduleWorkbenchViewportResize?.();
+  };
+  set(mineLoadingHtml(name === 'feedback' ? '正在加载反馈待办…' : '正在加载指派 Bug…'));
+  try {
+    if (name === 'feedback') {
+      const html = await window.OmniQAFeedbackTab?.loadFeedbackTodoOnMine(mode === 'version' ? majorId : null, { signal: controller.signal, commit: false });
+      set(html || '');
+    } else {
+      const data = mode === 'version' && majorId ? await (await api('/bugs/dispatched-to-me?major_version_id=' + majorId, { signal: controller.signal })).json() : [];
+      if (!current()) return;
+      state.currentDispatchData = data;
+      set(data.length ? renderDispatchPanel(data) : '');
+    }
+  } catch (error) {
+    if (current()) set(errorPanel(name === 'feedback' ? '反馈待办加载失败' : '指派 Bug 加载失败', error, `window.OmniQAMineTab.retryMinePanel('${name}')`));
+  }
+}
+
 export async function loadMyWorkbench({ background = false } = {}) {
   initTestExecutionModal();
   refreshMineMinorSelectByMode();
@@ -1363,7 +1381,7 @@ export async function loadMyWorkbench({ background = false } = {}) {
   const keepCards = background && mineRenderedKey === key;
   mineLoading = true;
   container?.setAttribute('aria-busy', 'true');
-  if (statusEl) statusEl.innerHTML = keepCards ? mineLoadingHtml('正在更新工作台…') : '';
+  if (statusEl) statusEl.innerHTML = '';
   if (!keepCards) {
     mineRenderedKey = '';
     state.currentMineData = [];
@@ -1379,32 +1397,9 @@ export async function loadMyWorkbench({ background = false } = {}) {
       if (container) container.innerHTML = '<div class="muted">请选择大版本</div>';
       return;
     }
-    // Auxiliary results update only their own slots, never block/rebuild the requirement cards.
-    const setPanel = (name, html) => {
-      if (!isCurrent()) return;
-      state[name === 'feedback' ? 'currentFeedbackTodoHtml' : 'currentDispatchHtml'] = html;
-      const slot = document.getElementById(`mine-${name}-panel`);
-      if (slot) slot.innerHTML = html;
-    };
-    const panelError = label => `<div role="alert" class="muted">${label}加载失败 <button type="button" onclick="window.OmniQAMineTab.loadMyWorkbench().catch(() => {})">重试</button></div>`;
     if (!keepCards) {
-      setPanel('feedback', mineLoadingHtml('正在加载反馈待办…'));
-      setPanel('dispatch', mode === 'version' ? mineLoadingHtml('正在加载指派 Bug…') : '');
-    }
-    if (!keepCards) {
-      const feedbackLoader = window.OmniQAFeedbackTab?.loadFeedbackTodoOnMine;
-      Promise.resolve().then(() => feedbackLoader
-        ? feedbackLoader(mode === 'version' ? majorId : null, { signal: controller.signal, commit: false }) : '')
-        .then(html => setPanel('feedback', html || ''))
-        .catch(() => setPanel('feedback', panelError('反馈待办')));
-      const dispatchPromise = mode === 'version'
-        ? api('/bugs/dispatched-to-me?major_version_id=' + majorId, { signal: controller.signal }).then(r => r.json())
-        : Promise.resolve([]);
-      dispatchPromise.then(data => {
-        if (!isCurrent()) return;
-        state.currentDispatchData = data;
-        setPanel('dispatch', data.length ? renderDispatchPanel(data) : '');
-      }).catch(() => setPanel('dispatch', panelError('指派 Bug')));
+      retryMinePanel('feedback');
+      retryMinePanel('dispatch');
     }
 
     const mineData = await (await api(url, { signal: controller.signal })).json();
@@ -1422,7 +1417,7 @@ export async function loadMyWorkbench({ background = false } = {}) {
     }
   } catch (err) {
     if (!isCurrent()) return;
-    const html = `<div role="alert" style="padding:16px; color:#b91c1c;">加载工作台失败：${escapeHtml(err.message || '请稍后重试')} <button type="button" onclick="window.OmniQAMineTab.loadMyWorkbench().catch(() => {})">重试</button></div>`;
+    const html = errorPanel('加载工作台失败', err, "window.OmniQAMineTab.loadMyWorkbench().catch(() => {})");
     if (keepCards && statusEl) statusEl.innerHTML = html;
     else if (container) container.innerHTML = html;
     throw err;
@@ -1610,9 +1605,6 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
           </div>
           <div>${caseHtml}</div>
           <div class="free-bug-box"><div><b>自由Bug</b></div><div style="margin-top:6px;">${freeBugHtml}</div></div>
-          <div class="muted" style="margin-top:10px; font-size:12px; padding:6px 10px; background:#f8fafc; border-left:3px solid #94a3b8; border-radius:4px;">
-            用例与 Bug 已改为按禅道 story / testcase 自动归集，不再需要手工录入。如需补救异常归属，请到“同步中心”由管理员处理。
-          </div>
         </div>
       </details>`;
   }).join('');
@@ -1882,54 +1874,29 @@ export async function setReqStatus(reqId, key, checked, checkboxEl) {
 
 // 禅道任务联动：点击「开始」→ 记录开始时刻并让禅道子任务开始。
 // 加载条挂到工作台重载完成、提示放在重载之后：条消失时界面已与禅道一致。
-export async function startReqTask(reqId) {
-  showLoading('正在开始任务并同步禅道，请稍候…');
-  let msg = '任务已开始，已同步禅道';
-  let msgType = 'success';
-  try {
-    const req = getRequirementById(reqId);
-    const res = req?.selected_task_mode ? await requestSelectedRequirementTask(req, 'start') : await api(`/requirements/${reqId}/task/start`, { method: 'POST', headers: window.H, body: {} });
-    let data = null;
-    try { data = await res.json(); } catch (_) { /* ignore */ }
-    const errs = (data && data.errors) || [];
-    if (errs.length) {
-      msg = `任务已开始（禅道侧部分失败：${errs[0]}）`;
-      msgType = 'error';
-    }
-  } catch (err) {
-    msg = err.message || '开始任务失败';
-    msgType = 'error';
-  }
-  setLoadingText(msgType === 'success' ? '禅道已同步，正在刷新工作台…' : '正在刷新工作台…');
-  try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
-  hideLoading();
-  window.showMessage && window.showMessage(msg, msgType);
+async function runRequirementTaskAction(reqId, action) {
+  const req = getRequirementById(reqId);
+  if (!req) return;
+  await runZentaoOperation({
+    key:`requirement:${reqId}`, locks:req.zentao_task_id ? [`task:${req.zentao_task_id}`] : [],
+    label:`需求 #${reqId} ${action === 'start' ? '开始' : '暂停'}任务`,
+    run:async () => {
+      const response = req.selected_task_mode ? await requestSelectedRequirementTask(req, action)
+        : await api(`/requirements/${reqId}/task/${action}`, {method:'POST',body:{}});
+      const data = await response.json();
+      if (data.errors?.length) return {...data,ok:false};
+      return data;
+    },
+    verify:async () => {
+      if (!req.zentao_task_id) return null;
+      const task = await (await api(`/zentao/task/${req.zentao_task_id}/detail`)).json();
+      return task.status === (action === 'start' ? 'doing' : 'pause') ? true : null;
+    },
+    onSuccess:refreshMineAfterStatus,
+  });
 }
-
-// 禅道任务联动：点击「暂停」→ 让禅道子任务暂停（之后可用「开始」继续）
-export async function pauseReqTask(reqId) {
-  showLoading('正在暂停任务并同步禅道，请稍候…');
-  let msg = '任务已暂停，已同步禅道';
-  let msgType = 'success';
-  try {
-    const req = getRequirementById(reqId);
-    const res = req?.selected_task_mode ? await requestSelectedRequirementTask(req, 'pause') : await api(`/requirements/${reqId}/task/pause`, { method: 'POST', headers: window.H, body: {} });
-    let data = null;
-    try { data = await res.json(); } catch (_) { /* ignore */ }
-    const errs = (data && data.errors) || [];
-    if (errs.length) {
-      msg = `任务已暂停（禅道侧部分失败：${errs[0]}）`;
-      msgType = 'error';
-    }
-  } catch (err) {
-    msg = err.message || '暂停任务失败';
-    msgType = 'error';
-  }
-  setLoadingText(msgType === 'success' ? '禅道已同步，正在刷新工作台…' : '正在刷新工作台…');
-  try { await loadMyWorkbench(); } catch (e) { console.warn('workbench reload failed', e); }
-  hideLoading();
-  window.showMessage && window.showMessage(msg, msgType);
-}
+export async function startReqTask(reqId) { return runRequirementTaskAction(reqId, 'start'); }
+export async function pauseReqTask(reqId) { return runRequirementTaskAction(reqId, 'pause'); }
 
 // 修改某需求的预计测试用时（小时）
 export async function setReqEstimatedHours(reqId, value) {
@@ -2063,6 +2030,7 @@ window.selectRequirementTask = selectRequirementTask;
 // 直接挂到 window，避免依赖（可能被缓存的）index.html 内联包装函数
 window.setFinalTestStatus = setFinalTestStatus;
 window.OmniQAMineTab = {
+  retryMinePanel,
   toggleMineMode,
   loadMyWorkbench,
   renderMineCards,

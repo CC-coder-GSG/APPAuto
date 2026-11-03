@@ -29,7 +29,7 @@
  * Exposes: window.OmniQAZentao = { hydrateContainer, invalidate }
  */
 
-import { api } from './api.js';
+import { loadHydration, hydrationEpoch, invalidateHydration } from './components/hydration-queue.js';
 import { updateBugVersion } from './components/bug-version.js?v=20261022-found-version-1';
 
 // ─── One-time style injection ─────────────────────────────────────────────────
@@ -99,7 +99,7 @@ const _storyCache = new Map();
 function _cacheGet(map, id) {
   const entry = map.get(id);
   if (!entry) return undefined;
-  if (Date.now() > entry.expiry) { map.delete(id); return undefined; }
+  if (Date.now() > entry.expiry) return undefined;
   return entry.data;   // may be null (confirmed not found)
 }
 
@@ -109,8 +109,14 @@ function _cacheSet(map, id, data) {
 
 /** Clear all cached data (call after user changes Zentao binding). */
 function invalidate() {
+  invalidateHydration();
   _bugCache.clear();
   _storyCache.clear();
+  document.querySelectorAll('.zt-story-slot, .zt-bug-slot').forEach(el => {
+    el.replaceChildren();
+    delete el.dataset.ztLoaded;
+    delete el.dataset.ztPending;
+  });
   _setIndicator('idle');
 }
 
@@ -144,14 +150,14 @@ function _renderBugSlot(d, { showTitle = false } = {}) {
   }
 
   const sc = _BUG_STATUS_COLOR[d.status] || { bg: '#f1f5f9', color: '#475569' };
-  const statusBadge = `<span style="background:${sc.bg};color:${sc.color};padding:1px 5px;border-radius:4px;font-size:10px;font-weight:600;">${d.status_zh || d.status}</span>`;
+  const statusBadge = `<span style="background:${sc.bg};color:${sc.color};padding:1px 5px;border-radius:4px;font-size:10px;font-weight:600;">${_escHtml(d.status_zh || d.status)}</span>`;
 
   const resBadge = (d.resolution && d.resolution !== 'none')
-    ? `<span style="color:#64748b;font-size:10px;margin-left:3px;">(${d.resolution_zh || d.resolution})</span>`
+    ? `<span style="color:#64748b;font-size:10px;margin-left:3px;">(${_escHtml(d.resolution_zh || d.resolution)})</span>`
     : '';
 
   const assignee = d.assigned_to
-    ? `<span style="color:#0ea5e9;font-size:10px;margin-left:3px;">→${d.assigned_to}</span>`
+    ? `<span style="color:#0ea5e9;font-size:10px;margin-left:3px;">→${_escHtml(d.assigned_to)}</span>`
     : '';
 
   const titleHtml = (showTitle && d.title)
@@ -190,20 +196,20 @@ function _renderStorySlot(d) {
   if (!d) return '';
 
   const sc = _STORY_STATUS_COLOR[d.status] || { bg: '#f1f5f9', color: '#475569' };
-  const statusBadge = `<span style="background:${sc.bg};color:${sc.color};padding:1px 5px;border-radius:4px;font-size:10px;font-weight:600;">${d.status_zh || d.status}</span>`;
+  const statusBadge = `<span style="background:${sc.bg};color:${sc.color};padding:1px 5px;border-radius:4px;font-size:10px;font-weight:600;">${_escHtml(d.status_zh || d.status)}</span>`;
 
   let stageBadge = '';
   if (d.stage_zh) {
     const sty = _STORY_STAGE_STYLE[d.stage];
     if (sty) {
-      stageBadge = `<span style="${sty.style}">${sty.icon}${d.stage_zh}</span>`;
+      stageBadge = `<span style="${sty.style}">${sty.icon}${_escHtml(d.stage_zh)}</span>`;
     } else {
-      stageBadge = `<span style="color:#64748b;font-size:10px;margin-left:3px;">[${d.stage_zh}]</span>`;
+      stageBadge = `<span style="color:#64748b;font-size:10px;margin-left:3px;">[${_escHtml(d.stage_zh)}]</span>`;
     }
   }
 
   const assignee = d.assigned_to
-    ? `<span style="color:#0ea5e9;font-size:10px;margin-left:3px;">→${d.assigned_to}</span>`
+    ? `<span style="color:#0ea5e9;font-size:10px;margin-left:3px;">→${_escHtml(d.assigned_to)}</span>`
     : '';
 
   return `${statusBadge}${stageBadge}${assignee}`;
@@ -218,76 +224,8 @@ function _renderStorySlot(d) {
  *   errors — Set of id strings that had transient fetch errors (do NOT cache as null)
  *   ok     — false if the entire HTTP request failed
  */
-async function _fetchBugs(ids, signal) {
-  if (!ids.length) return { data: {}, errors: new Set(), ok: true };
-  try {
-    const res = await api('/zentao/hydrate/bugs?ids=' + ids.join(','), { signal });
-    if (!res.ok) return { data: {}, errors: new Set(ids.map(String)), ok: false };
-    const json = await res.json();
-    const errorIds = new Set((json.__fetch_errors__ || []).map(String));
-    delete json.__fetch_errors__;
-    return { data: json, errors: errorIds, ok: true };
-  } catch (err) {
-    if (err.name === 'AbortError') return { data: {}, errors: new Set(), ok: true };
-    return { data: {}, errors: new Set(ids.map(String)), ok: false };
-  }
-}
-
-/**
- * Fetch story data from the backend.
- * Returns { data, errors, ok } with the same semantics as _fetchBugs.
- */
-async function _fetchStories(ids, signal) {
-  if (!ids.length) return { data: {}, errors: new Set(), ok: true };
-  try {
-    const res = await api('/zentao/hydrate/stories?ids=' + ids.join(','), { signal });
-    if (!res.ok) return { data: {}, errors: new Set(ids.map(String)), ok: false };
-    const json = await res.json();
-    const errorIds = new Set((json.__fetch_errors__ || []).map(String));
-    delete json.__fetch_errors__;
-    return { data: json, errors: errorIds, ok: true };
-  } catch (err) {
-    if (err.name === 'AbortError') return { data: {}, errors: new Set(), ok: true };
-    return { data: {}, errors: new Set(ids.map(String)), ok: false };
-  }
-}
-
-// ─── Concurrency guard ────────────────────────────────────────────────────────
-// Prevent overlapping fetches from the same container
-const _containerAbortMap = new WeakMap();
 const _containerRequestSeq = new WeakMap();
 
-// Global abort controller — cancelled on each new hydrateContainer call so that
-// page/version switches immediately free up Zentao connections for the new data.
-function _nextContainerRequestSeq(containerEl) {
-  const next = (_containerRequestSeq.get(containerEl) || 0) + 1;
-  _containerRequestSeq.set(containerEl, next);
-  return next;
-}
-
-function _isLatestContainerRequest(containerEl, seq) {
-  return (_containerRequestSeq.get(containerEl) || 0) === seq;
-}
-
-function _replaceContainerAbort(containerEl) {
-  const prev = _containerAbortMap.get(containerEl);
-  if (prev) prev.abort();
-  const abort = new AbortController();
-  _containerAbortMap.set(containerEl, abort);
-  return abort;
-}
-
-// ─── Link upgrade helper ──────────────────────────────────────────────────────
-
-/**
- * After slots are filled, find any <span class="qa-bug-id-nohref"> elements
- * whose bug ID now has a known URL (from hydration) and upgrade them to
- * proper <a class="qa-ext-link"> links.
- *
- * Pages should render bug IDs without a local URL as:
- *   <span class="qa-bug-id-nohref" data-zt-bug-id="12345">b#12345</span>
- * so the hydrator can find and upgrade them.
- */
 function _upgradeBugIdLinks(bugSlots) {
   for (const el of bugSlots) {
     const id = el.dataset.ztBugId;
@@ -350,157 +288,69 @@ function _upgradeStoryIdLinks(storySlots) {
  * Slots with transient errors are NOT marked loaded, so they retry next call.
  * @param {Element} containerEl
  */
-async function hydrateContainer(containerEl) {
-  if (!containerEl) return;
-  const requestSeq = _nextContainerRequestSeq(containerEl);
-  const abort = _replaceContainerAbort(containerEl);
-
-  // Collect un-loaded slots
-  const bugSlots   = Array.from(containerEl.querySelectorAll(
-    '.zt-bug-slot[data-zt-bug-id]:not([data-zt-loaded])'));
-  const storySlots = Array.from(containerEl.querySelectorAll(
-    '.zt-story-slot[data-zt-story-id]:not([data-zt-loaded])'));
-
-  if (!bugSlots.length && !storySlots.length) return;
-
-  // — Step 1: show loading dots immediately —
-  // 已用 DB 缓存预填(data-zt-prefilled)的 slot 不刷加载点，保留「先显示」的内容，
-  // 等 fetch 完成再覆盖为最新数据（先显示出来、再慢慢更新）。
-  const LOADING_HTML = '<span class="zt-loading-dots">···</span>';
-  bugSlots.forEach((el) => { if (!el.dataset.ztPrefilled) el.innerHTML = LOADING_HTML; el.dataset.ztPending = '1'; });
-  storySlots.forEach((el) => { if (!el.dataset.ztPrefilled) el.innerHTML = LOADING_HTML; el.dataset.ztPending = '1'; });
-
-  // Collect unique uncached IDs
-  const uncachedBugIds = [...new Set(
-    bugSlots.map((el) => el.dataset.ztBugId).filter(Boolean)
-  )].filter((id) => _cacheGet(_bugCache, id) === undefined);
-
-  const uncachedStoryIds = [...new Set(
-    storySlots.map((el) => el.dataset.ztStoryId).filter(Boolean)
-  )].filter((id) => _cacheGet(_storyCache, id) === undefined);
-
-  _setIndicator('syncing');
-
-  // — Step 2: fetch concurrently from backend —
-  let bugResult   = { data: {}, errors: new Set(), ok: true };
-  let storyResult = { data: {}, errors: new Set(), ok: true };
-
-  try {
-    [bugResult, storyResult] = await Promise.all([
-      _fetchBugs(uncachedBugIds, abort.signal),
-      _fetchStories(uncachedStoryIds, abort.signal),
-    ]);
-
-    // If this hydration was superseded by a newer one, stop filling slots
-    if (abort.signal.aborted || !_isLatestContainerRequest(containerEl, requestSeq)) return;
-
-    // Populate cache.
-    // KEY RULE: only cache null for "confirmed not found" (id absent from data
-    // AND no transient error).  Transient errors are NOT cached — they retry.
-    for (const id of uncachedBugIds) {
-      if (!bugResult.ok || bugResult.errors.has(id)) {
-        // Transient error — skip cache, will retry on next hydrateContainer call
-      } else if (bugResult.data[id]) {
-        _cacheSet(_bugCache, id, bugResult.data[id]);          // found
-      } else {
-        _cacheSet(_bugCache, id, null);                        // confirmed not in Zentao
-      }
-    }
-    for (const id of uncachedStoryIds) {
-      if (!storyResult.ok || storyResult.errors.has(id)) {
-        // skip
-      } else if (storyResult.data[id]) {
-        _cacheSet(_storyCache, id, storyResult.data[id]);
-      } else {
-        _cacheSet(_storyCache, id, null);
-      }
-    }
-  } catch {
-    // Unexpected JS exception — treat all uncached IDs as transient errors
-    uncachedBugIds.forEach((id) => bugResult.errors.add(id));
-    uncachedStoryIds.forEach((id) => storyResult.errors.add(id));
-    bugResult.ok   = false;
-    storyResult.ok = false;
-  } finally {
-    if (_containerAbortMap.get(containerEl) === abort) {
-      _containerAbortMap.delete(containerEl);
-    }
-  }
-
-  if (abort.signal.aborted || !_isLatestContainerRequest(containerEl, requestSeq)) return;
-
-  // — Step 3: fill bug slots —
-  let anyFound = false;
-
-  // Determine which IDs had transient errors this round
-  const bugErrorIds = new Set();
-  for (const id of uncachedBugIds) {
-    if (!bugResult.ok || bugResult.errors.has(id)) bugErrorIds.add(id);
-  }
-
-  for (const el of bugSlots) {
-    const id = el.dataset.ztBugId;
-    delete el.dataset.ztPending;
-
-    if (!id) { el.innerHTML = ''; el.dataset.ztLoaded = '1'; continue; }
-
-    if (bugErrorIds.has(id)) {
-      // Transient error: show indicator but do NOT set ztLoaded so it retries
-      el.innerHTML = `<span class="zt-err" title="禅道连接失败，请检查绑定">!</span>`;
-      continue;
-    }
-
-    const data = _cacheGet(_bugCache, id);
-    if (data) anyFound = true;
-
-    const parent    = el.parentElement;
-    const hasTitleTip = !!parent?.querySelector('.qa-title-tip');
-    const hasNoTitle  = el.dataset.ztNoTitle === '1';
-    el.innerHTML = _renderBugSlot(data, {
-      showTitle: !hasTitleTip && !hasNoTitle,
-    });
+function _fillSlot(el, kind, data) {
+  delete el.dataset.ztPending;
+  if (kind === 'bugs') {
+    const parent = el.parentElement;
+    el.innerHTML = _renderBugSlot(data, { showTitle: !parent?.querySelector('.qa-title-tip') && el.dataset.ztNoTitle !== '1' });
     updateBugVersion(parent, data);
-    el.dataset.ztLoaded = '1';
-  }
-
-  // — Step 4: fill story slots —
-  const storyErrorIds = new Set();
-  for (const id of uncachedStoryIds) {
-    if (!storyResult.ok || storyResult.errors.has(id)) storyErrorIds.add(id);
-  }
-
-  for (const el of storySlots) {
-    const id = el.dataset.ztStoryId;
-    delete el.dataset.ztPending;
-
-    if (!id) { el.innerHTML = ''; el.dataset.ztLoaded = '1'; continue; }
-
-    if (storyErrorIds.has(id)) {
-      el.innerHTML = `<span class="zt-err" title="禅道连接失败">!</span>`;
-      continue;
-    }
-
-    const data = _cacheGet(_storyCache, id);
-    if (data) anyFound = true;
+    _upgradeBugIdLinks([el]);
+  } else {
     el.innerHTML = _renderStorySlot(data);
-    el.dataset.ztLoaded = '1';
+    _upgradeStoryIdLinks([el]);
   }
-
-  // — Step 5: upgrade no-href bug/story ID spans to links —
-  _upgradeBugIdLinks(bugSlots);
-  _upgradeStoryIdLinks(storySlots);
-
-  // — Step 6: update page indicator —
-  const hasErrors = bugErrorIds.size > 0 || storyErrorIds.size > 0;
-  _setIndicator(hasErrors ? 'error' : 'ok');
+  el.dataset.ztLoaded = '1';
 }
 
-// ─── Export ───────────────────────────────────────────────────────────────────
+let _identity = localStorage.getItem('token') || '';
+async function hydrateContainer(containerEl) {
+  if (!containerEl) return;
+  const identity = localStorage.getItem('token') || '';
+  if (_identity !== identity) { _identity = identity; invalidate(); }
+  const seq = (_containerRequestSeq.get(containerEl) || 0) + 1;
+  _containerRequestSeq.set(containerEl, seq);
+  const epoch = hydrationEpoch();
+  const valid = el => el.isConnected && epoch === hydrationEpoch() && _containerRequestSeq.get(containerEl) === seq;
+  const tasks = [];
+  let errors = false;
+  for (const [kind, attr, cache] of [['stories', 'ztStoryId', _storyCache], ['bugs', 'ztBugId', _bugCache]]) {
+    const selector = kind === 'stories' ? '.zt-story-slot:not([data-zt-loaded])' : '.zt-bug-slot:not([data-zt-loaded])';
+    for (const el of containerEl.querySelectorAll(selector)) {
+      const id = el.dataset[attr];
+      if (!/^\d+$/.test(id || '')) continue;
+      const cached = _cacheGet(cache, id);
+      if (cached !== undefined) { _fillSlot(el, kind, cached); continue; }
+      const stale = cache.get(id);
+      if (stale) { _fillSlot(el, kind, stale.data); delete el.dataset.ztLoaded; }
+      if (!el.textContent.trim()) el.innerHTML = '<span class="zt-loading-dots">···</span>';
+      el.dataset.ztPending = '1';
+      const rect = el.getBoundingClientRect();
+      const priority = rect.bottom >= 0 && rect.top < innerHeight ? 0 : 1;
+      tasks.push(loadHydration(kind, id, priority).then(result => {
+        if (!valid(el) || result.cancelled) return;
+        delete el.dataset.ztPending;
+        if (!result.error) {
+          _cacheSet(cache, id, result.data);
+          _fillSlot(el, kind, result.data);
+          return;
+        }
+        errors = true;
+        el.querySelector('.zt-loading-dots')?.remove();
+        el.querySelector('.zt-err')?.remove();
+        const retry = document.createElement('button');
+        retry.type = 'button'; retry.className = 'zt-err wb-text-button';
+        retry.textContent = '↻'; retry.title = '信息更新失败，点击重试；鉴权失败时请检查禅道绑定';
+        retry.onclick = event => { event.preventDefault(); event.stopPropagation(); hydrateContainer(el.parentElement); };
+        el.appendChild(retry);
+      }));
+    }
+  }
+  if (tasks.length) _setIndicator('syncing');
+  await Promise.all(tasks);
+  if (epoch === hydrationEpoch()) _setIndicator(errors ? 'error' : 'ok');
+}
 
-/**
- * Clear cached Zentao data for the currently visible tab and re-hydrate.
- * Callable from a header "刷新禅道" button — no page reload needed.
- */
+
 function refreshVisible() {
   let container = null;
   const minePanel = document.getElementById('tab-mine');

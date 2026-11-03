@@ -1,3 +1,4 @@
+import { operateTask } from '../components/task-operation.js';
 import { api } from '../api.js';
 import { renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
 import { showLoading, hideLoading } from '../components/common.js';
@@ -1084,26 +1085,13 @@ export async function ztOperate(taskId, action) {
       }
     }
   }
-  showLoading('正在同步禅道，请稍候…');
-  try {
-    const res = await (await api(`/workbench/tasks/${taskId}/operate`, {
-      method: 'POST', body: { action, ...(consumed !== undefined ? { consumed } : {}) },
-    })).json();
-    if (res.ok) {
-      const successText = action === 'reactivate'
-        ? '任务已重新激活，状态已同步禅道和各工作台'
-        : '操作已同步禅道';
-      window.showMessage && window.showMessage(successText, 'success');
-    }
-    else window.showMessage && window.showMessage('禅道操作有异常：' + (res.errors || []).join('；'), 'error');
-  } catch (err) {
-    window.showMessage && window.showMessage(err.message || '操作失败', 'error');
-  } finally {
-    hideLoading();
-  }
-  try { await fetchZentaoTasks(); } catch { /* 保留旧数据渲染 */ }
-  if (state.data) render(state.data);
-  renderZentaoPanel();
+  await operateTask(taskId, { action, ...(consumed !== undefined ? { consumed } : {}) }, {
+    onSuccess: async () => {
+      await fetchZentaoTasks();
+      if (state.data) render(state.data);
+      renderZentaoPanel();
+    },
+  });
 }
 
 // 看板列中的禅道任务卡

@@ -1,3 +1,4 @@
+import { wireImageViewer, closeImageViewer } from './image-viewer.js';
 import { api } from '../api.js';
 import { renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
 
@@ -10,6 +11,12 @@ const MODAL_ID = 'entityPreviewModal';
 const CACHE_TTL_MS = 60_000;
 const _cache = { story: new Map(), bug: new Map(), testcase: new Map(), task: new Map() };
 let _previewGeneration = 0;
+const _previewImageUrls = new Set();
+function releasePreviewImages() {
+  closeImageViewer();
+  _previewImageUrls.forEach(url => URL.revokeObjectURL(url));
+  _previewImageUrls.clear();
+}
 const _storyChangeSubmitting = new Set();
 
 function _cacheGet(type, id) {
@@ -116,13 +123,18 @@ function _sanitize(html) {
 // un-authenticated (which would render {"detail":"Not authenticated"}).
 async function _loadProxyImages(containerEl) {
   if (!containerEl) return;
+  wireImageViewer(containerEl);
+  const generation = _previewGeneration;
   const imgs = Array.from(containerEl.querySelectorAll('img[src^="/zentao/files/"]'));
-  await Promise.all(imgs.map(async (img) => {
+  await Promise.all(imgs.map(img => {
+    img._previewImagePromise = (async () => {
     const src = img.getAttribute('src');
     try {
       const resp = await api(src);
       const blob = await resp.blob();
+      if (generation !== _previewGeneration || !img.isConnected) return;
       const objUrl = URL.createObjectURL(blob);
+      _previewImageUrls.add(objUrl);
       img.src = objUrl;
       const anchor = img.closest('a[href^="/zentao/files/"]');
       if (anchor) {
@@ -131,9 +143,12 @@ async function _loadProxyImages(containerEl) {
         anchor.rel = 'noopener noreferrer';
       }
     } catch {
+      img.dataset.previewImageError = '1';
       img.alt = '图片加载失败';
       img.style.opacity = '0.5';
     }
+    })();
+    return img._previewImagePromise;
   }));
 }
 
@@ -236,6 +251,7 @@ function openModal() {
 }
 
 function close() {
+  releasePreviewImages();
   _previewGeneration++;
   const root = document.getElementById(MODAL_ID);
   if (!root) return;
@@ -286,6 +302,7 @@ function _renderError(messageHtml) {
 }
 
 function _renderLoading(kind, id) {
+  releasePreviewImages();
   const root = ensureModalRoot();
   const kindBadge = root.querySelector('#entityPreviewKindBadge');
   const title = root.querySelector('#entityPreviewTitle');
