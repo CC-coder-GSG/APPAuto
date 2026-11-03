@@ -370,6 +370,32 @@ function getRequirementById(reqId, preferredId = null) {
   return projectRequirementTask((state.currentMineData || []).find((r) => Number(r.id) === Number(reqId)), preferredId);
 }
 
+let finalPresenceRevision = 0;
+const finalPresenceEvents = new Map();
+
+function mergeFinalPresence(req, payload) {
+  const people = (req.final_test_people || []).filter(p => Number(p.user_id) !== Number(payload.user_id));
+  if (payload.test_completed || payload.testing) people.push({
+    user_id: payload.user_id, user_name: payload.user_name,
+    status: payload.test_completed ? 'completed' : 'testing',
+  });
+  req.final_test_people = people.sort((a, b) => a.user_id - b.user_id);
+  const myId = Number(state.currentUser?.id || window.currentUser?.id || 0);
+  if (myId === Number(payload.user_id)) {
+    req.testing = !!payload.testing && !payload.test_completed;
+    req.test_completed = !!payload.test_completed;
+    if (typeof payload.case_completed === 'boolean') req.case_completed = payload.case_completed;
+  }
+}
+
+function renderFinalTestPeople(req) {
+  if (!req.final_test) return '';
+  return `<span class="final-test-people" aria-label="最终测试人员状态">${(req.final_test_people || []).map(person => {
+    const done = person.status === 'completed';
+    return `<span class="final-test-person ${done ? 'is-completed' : 'is-testing'}">${done ? '✓' : '●'} ${escapeHtml(person.user_name)} · ${done ? '已测试完成' : '正在测试'}</span>`;
+  }).join('')}</span>`;
+}
+
 export function selectRequirementTask(reqId, taskId) {
   const req = (state.currentMineData || []).find(r => Number(r.id) === Number(reqId));
   if (!req || !(req.test_tasks || []).some(t => t.assigned_to_me && t.task_id === Number(taskId))) return;
@@ -1371,6 +1397,7 @@ export async function loadMyWorkbench({ background = false } = {}) {
     return;
   }
   const seq = ++mineLoadSeq;
+  const presenceRevision = finalPresenceRevision;
   mineLoadController?.abort();
   const controller = new AbortController();
   mineLoadController = controller;
@@ -1404,6 +1431,12 @@ export async function loadMyWorkbench({ background = false } = {}) {
 
     const mineData = await (await api(url, { signal: controller.signal })).json();
     if (!isCurrent()) return;
+    // An HTTP snapshot started before a live event must not undo that event.
+    for (const { revision, payload } of finalPresenceEvents.values()) {
+      if (revision <= presenceRevision) continue;
+      const row = mineData.find(r => r.final_test && Number(r.id) === Number(payload.requirement_id));
+      if (row) mergeFinalPresence(row, payload);
+    }
     const oldData = state.currentMineData;
     const oldById = new Map(oldData.map(row => [row.id, row]));
     const changedIds = new Set(mineData.filter(row => JSON.stringify(oldById.get(row.id)) !== JSON.stringify(row)).map(row => row.id));
@@ -1584,7 +1617,7 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
     return `
       <details class="mine-req-card" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; ${retestFailBorder} transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
-          <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${renderTaskStoryChangeBadge(req)}${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${generateCaseChip}${storyTaskHtml}</div>
+          <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${renderTaskStoryChangeBadge(req)}${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${generateCaseChip}${storyTaskHtml}${renderFinalTestPeople(baseReq)}</div>
           ${isFullyCompleted ? '<span style="color:#16a34a; font-size:14px; background:#f0fdf4; padding:4px 8px; border-radius:4px; border:1px solid #bbf7d0;">✅ 测试已完成</span>' : '<span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开卡片)</span>'}
         </summary>
         <div style="margin-top: 12px;">
@@ -1592,6 +1625,7 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
             ${renderTaskStartControl(req)}
             ${req.final_test
               ? `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'case_completed', this.checked, this)">✅用例完成</label>
+            ${!baseReq.test_completed ? `<label class="final-test-start"><input type="checkbox" ${baseReq.testing ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'testing', this.checked, this)">● 正在测试</label>` : ''}
             <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="setFinalTestStatus(${req.id}, 'test_completed', this.checked, this)">✅测试完成</label>`
               : `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked, this)">✅用例完成</label>
             <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">✅测试完成</label>`}
@@ -1741,14 +1775,31 @@ function bindMineSSE() {
     }, 400);
   });
   window.OmniQASSE.subscribe('final_test_requirement_status_changed', ({ payload }) => {
-    const myId = Number(state.currentUser?.id || window.currentUser?.id || 0);
-    if (payload?.user_id && myId && Number(payload.user_id) !== myId) return;
+    if (payload?.user_id && typeof payload.testing === 'boolean' && typeof payload.test_completed === 'boolean' && typeof payload.user_name === 'string') {
+      const eventKey = `${payload.requirement_id}:${payload.user_id}`;
+      finalPresenceEvents.delete(eventKey);
+      finalPresenceEvents.set(eventKey, { revision: ++finalPresenceRevision, payload });
+      if (finalPresenceEvents.size > 2000) finalPresenceEvents.delete(finalPresenceEvents.keys().next().value);
+      const row = (state.currentMineData || []).find(r => r.final_test && Number(r.id) === Number(payload.requirement_id));
+      if (!row) return;
+      mergeFinalPresence(row, payload);
+      document.querySelectorAll(`.mine-req-card[data-req-id="${Number(row.id)}"] .final-test-people`).forEach(el => {
+        el.outerHTML = renderFinalTestPeople(row);
+      });
+      const myId = Number(state.currentUser?.id || window.currentUser?.id || 0);
+      if (myId === Number(payload.user_id)) renderMineCards({ preserveCards: true, changedIds: new Set([row.id]) });
+      return;
+    }
+    if (!(state.currentMineData || []).some(row => row.final_test && Number(row.id) === Number(payload?.requirement_id))) return;
     if (!window.isWorkbenchSubtabActive?.('demand')) return;
     if (window._mineSSEFinalTestTimer) clearTimeout(window._mineSSEFinalTestTimer);
     window._mineSSEFinalTestTimer = setTimeout(() => {
       window._mineSSEFinalTestTimer = null;
       queueMineBackgroundReload(mineFilterKey());
     }, 400);
+  });
+  window.OmniQASSE.subscribe('connection_restored', () => {
+    if (window.isWorkbenchSubtabActive?.('demand')) queueMineBackgroundReload(mineFilterKey());
   });
   window.OmniQASSE.subscribe('retest_requirement_status_changed', ({ payload }) => {
     if (!Object.prototype.hasOwnProperty.call(payload || {}, 'test_completed')) return;
@@ -1918,7 +1969,12 @@ export async function setReqEstimatedHours(reqId, value) {
   }
 }
 
+const finalTestPending = new Set();
 export async function setFinalTestStatus(reqId, key, checked, checkboxEl) {
+  if (finalTestPending.has(reqId)) {
+    if (checkboxEl) checkboxEl.checked = !checked;
+    return;
+  }
   if (key === 'test_completed' && !checked) {
     const ok = confirm('确认取消该需求的【测试完成】状态吗？');
     if (!ok) {
@@ -1926,6 +1982,10 @@ export async function setFinalTestStatus(reqId, key, checked, checkboxEl) {
       return;
     }
   }
+  finalTestPending.add(reqId);
+  const controls = [...document.querySelectorAll(`.mine-req-card[data-req-id="${reqId}"] input[onchange*="setFinalTestStatus"]`)];
+  const disabled = controls.map(control => [control, control.disabled]);
+  controls.forEach(control => { control.disabled = true; });
   try {
     const payload = {};
     payload[key] = checked;
@@ -1943,7 +2003,11 @@ export async function setFinalTestStatus(reqId, key, checked, checkboxEl) {
     if (checkboxEl) checkboxEl.checked = !checked;
     window.showMessage && window.showMessage(err.message || '状态更新失败', 'error');
   } finally {
-    await refreshMineAfterStatus();
+    try { await refreshMineAfterStatus(); }
+    finally {
+      finalTestPending.delete(reqId);
+      disabled.forEach(([control, value]) => { if (control.isConnected) control.disabled = value; });
+    }
   }
 }
 

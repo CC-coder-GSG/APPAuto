@@ -34,6 +34,7 @@ class FinalTestRecord(Base):
 
     case_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     test_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    testing: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
     # Anchors the report's "executed requirement" time-bucketing for final test.
     test_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
 

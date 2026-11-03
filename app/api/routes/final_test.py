@@ -20,6 +20,7 @@ class FinalTestTogglePayload(BaseModel):
 
 
 class FinalTestStatusUpdatePayload(BaseModel):
+    testing: Optional[bool] = None
     case_completed: Optional[bool] = None
     test_completed: Optional[bool] = None
 
@@ -64,4 +65,5 @@ def patch_final_test_status(
         current_user,
         case_completed=payload.case_completed,
         test_completed=payload.test_completed,
+        testing=payload.testing,
     )

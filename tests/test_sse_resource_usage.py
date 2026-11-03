@@ -157,3 +157,22 @@ def test_one_timed_out_client_does_not_cancel_another_clients_wait():
             other_client.cancel()
 
     asyncio.run(check())
+
+
+def test_sync_worker_publish_wakes_all_streams_without_poll_delay():
+    async def check():
+        bus = SSEEventBus()
+        waiters = [asyncio.create_task(bus.wait_for_events(timeout=5)) for _ in range(3)]
+        await asyncio.sleep(0)
+        await asyncio.to_thread(bus.publish, 'final_test_requirement_status_changed', {'ok': True})
+        await asyncio.wait_for(asyncio.gather(*waiters), timeout=0.3)
+        assert len(bus.pull_since(0, channels={'global'})) == 1
+    asyncio.run(check())
+
+
+def test_restarted_service_resets_browser_cursor():
+    bus = SSEEventBus()
+    event_id = bus.publish('presence', {})
+    assert bus.resume_cursor(5000) == 0
+    assert bus.pull_since(bus.resume_cursor(5000), channels={'global'})[0].id == event_id
+    assert bus.resume_cursor(event_id) == event_id

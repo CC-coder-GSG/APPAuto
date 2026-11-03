@@ -61,6 +61,8 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
+        from app.db.final_test_upgrade import ensure_final_test_schema
+        ensure_final_test_schema(db)
         ensure_software_schema_compat(db)
         ensure_user_schema_compat(db)
         ensure_version_schema_compat(db)

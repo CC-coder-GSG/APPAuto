@@ -272,6 +272,7 @@ async function connect() {
 
   reconnectAttempts = 0;
   setConnectionState('connected');
+  emit('connection_restored', {});
   debugLog('connected');
 
   const decoder = new TextDecoder('utf-8');

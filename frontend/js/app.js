@@ -1,4 +1,4 @@
-import './realtime/sse.js?v=20260612-1';
+import './realtime/sse.js?v=20261103-final-presence-1';
 // 必须最先加载，确保 window.OmniQASSE 在各 tab 模块执行 bindXxxSSE() 前已就绪
 import './api.js?v=20260417-3';
 import './auth.js?v=20260417-3';
@@ -18,7 +18,7 @@ import { resizeAllCharts } from './components/charts.js?v=20260706-2';
 import { runGuardrails } from './guardrails.js?v=20260716-1';
 
 const OPTIONAL_TAB_MODULES = [
-  { name: 'mine', path: './tabs/mine.js?v=20261103-async-ui-1' },
+  { name: 'mine', path: './tabs/mine.js?v=20261103-final-presence-1' },
   { name: 'review-workbench', path: './tabs/review-workbench.js?v=20261014-2' },
   { name: 'task-workbench', path: './tabs/task-workbench.js?v=20261103-async-ui-1' },
   { name: 'task-board', path: './tabs/task-board.js?v=20261103-async-ui-1' },

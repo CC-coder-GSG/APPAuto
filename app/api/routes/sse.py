@@ -9,7 +9,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import get_current_user, get_db
 from app.models import User
-from app.services.sse_service import format_sse, sse_pull_since, sse_wait_for_events
+from app.services.sse_service import format_sse, sse_pull_since, sse_wait_for_events, sse_resume_cursor
 
 router = APIRouter()
 
@@ -39,7 +39,7 @@ async def sse_stream(
     await run_in_threadpool(db.close)
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        cursor = int(last_event_id or 0)
+        cursor = sse_resume_cursor(int(last_event_id or 0))
         idle_ticks = 0
         session_check_ticks = 0
         channels = {"global", f"user:{user_id}"}

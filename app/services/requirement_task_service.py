@@ -166,13 +166,10 @@ class RequirementTaskService:
         rows = self.rows_by_requirement([req])[req.id]
         self.reconcile(req, rows)
         if req.major_version.final_test_enabled and action in {"finish", "reactivate"}:
-            record = self.db.query(FinalTestRecord).filter_by(requirement_id=req.id, user_id=user.id).first()
-            if record is None:
-                record = FinalTestRecord(requirement_id=req.id, user_id=user.id)
-                self.db.add(record)
+            from app.services.final_test_service import write_final_state
             own = [t for t in rows if self.belongs_to_user(t, user)]
-            record.test_completed = bool(own) and all(t.status in self.DONE for t in own)
-            record.test_completed_at = local_now() if record.test_completed else None
+            done = bool(own) and all(t.status in self.DONE for t in own)
+            write_final_state(self.db, req.id, user.id, test_completed=done)
         if action == "finish" and minor_version_id is not None:
             prefix = f"任务 #{task_id}"
             execution = self.db.query(TestExecution).filter(
@@ -193,6 +190,15 @@ class RequirementTaskService:
         self.db.commit()
         from app.services.requirement_service import RequirementService
         RequirementService._publish_completion_status(req, source="requirement_linked_task")
+        if req.major_version.final_test_enabled and action in {"finish", "reactivate"}:
+            from app.services.sse_service import sse_publish
+            from app.models import FinalTestRecord
+            final_record = self.db.query(FinalTestRecord).filter_by(requirement_id=req.id, user_id=user.id).populate_existing().one()
+            sse_publish('final_test_requirement_status_changed',
+                        {'requirement_id':req.id, 'user_id':user.id, 'user_name':user.shown_name,
+                         'major_version_id':req.major_version_id, 'testing':bool(final_record.testing and not final_record.test_completed),
+                         'test_completed':bool(final_record.test_completed), 'case_completed':bool(final_record.case_completed)},
+                        channels=['global'])
         return {**result, "requirement_test_completed": bool(req.test_completed)}
 
     def edit(self, requirement_id, task_id, actor, *, owner_id=None, start=None, deadline=None):

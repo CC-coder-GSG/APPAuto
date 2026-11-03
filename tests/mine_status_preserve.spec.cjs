@@ -10,6 +10,7 @@ const root = path.resolve(__dirname, '..');
     const page = await browser.newPage({ viewport: { width: 1200, height: 720 } });
     const errors = [], requests = [];
     let navigations = 0, finalTest = false;
+    let holdSnapshot = false, releaseSnapshot;
     page.on('pageerror', error => errors.push(error.message));
     page.on('framenavigated', () => navigations++);
     page.on('dialog', dialog => dialog.accept());
@@ -22,12 +23,13 @@ const root = path.resolve(__dirname, '..');
     const start = index.indexOf('<section id="tab-mine"');
     const section = index.slice(start,index.indexOf('</section>',start)+10).replace('hidden card','card');
     const html = `<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/static/css/main.css">${section}
-      <script>window.currentSoftwareId=1;window.versions=[{id:1,version_type:'major',version_no:'V1'},{id:2,version_type:'minor',version_no:'V1.1',parent_id:1}];window.showMessage=()=>{};window.isWorkbenchSubtabActive=()=>true;</script>
+      <script>window.sseHandlers={};window.OmniQASSE={subscribe:(name,fn)=>{sseHandlers[name]=fn}};window.currentSoftwareId=1;window.versions=[{id:1,version_type:'major',version_no:'V1'},{id:2,version_type:'minor',version_no:'V1.1',parent_id:1}];window.showMessage=()=>{};window.isWorkbenchSubtabActive=()=>true;</script>
       <script type="module">
         import * as mine from '/static/js/tabs/mine.js';import {state} from '/static/js/state.js';
         window.mine=mine;window.state=state;window.loadMyWorkbench=()=>mine.loadMyWorkbench();
         window.setReqStatus=(...args)=>{window.beforeChangeTop=document.querySelector('.mine-req-card[data-req-id="11"]').getBoundingClientRect().top;return mine.setReqStatus(...args)};
         window.handleTestCompletedToggle=(...args)=>mine.handleTestCompletedToggle(...args);
+        window.setFinalTestStatus=(...args)=>mine.setFinalTestStatus(...args);
         window.confirmMineTestExecutionModal=()=>mine.confirmMineTestExecutionModal();
         state.currentUser={id:1};document.getElementById('mineMajorSelect').innerHTML='<option value="1">V1</option>';
         document.getElementById('mineMinorSelect').innerHTML='<option value="2">V1.1</option>';
@@ -41,7 +43,11 @@ const root = path.resolve(__dirname, '..');
         return route.fulfill({ contentType:file.endsWith('.css')?'text/css':'text/javascript', body:fs.readFileSync(file) });
       }
       requests.push(`${route.request().method()} ${url.pathname}`);
-      if (url.pathname === '/workbench/mine') return route.fulfill({ json:rows.map(row=>({...row,final_test:finalTest})) });
+      if (url.pathname === '/workbench/mine') {
+        const snapshot = JSON.parse(JSON.stringify(rows.map(row=>({...row,final_test:finalTest}))));
+        if (holdSnapshot) return new Promise(resolve => { releaseSnapshot = () => route.fulfill({json:snapshot}).then(resolve); });
+        return route.fulfill({json:snapshot});
+      }
       if (url.pathname === '/requirements/11/status' && route.request().method()==='PATCH') {
         Object.assign(rows[10],route.request().postDataJSON());return route.fulfill({json:{ok:true}});
       }
@@ -49,7 +55,10 @@ const root = path.resolve(__dirname, '..');
         rows[10].test_completed=true;return route.fulfill({json:{ok:true}});
       }
       if (url.pathname === '/final-test/requirements/11/status') {
-        Object.assign(rows[10],route.request().postDataJSON());return route.fulfill({json:{ok:true}});
+        Object.assign(rows[10],route.request().postDataJSON());
+        if (rows[10].test_completed) rows[10].testing=false;
+        rows[10].final_test_people=[...(rows[10].test_completed||rows[10].testing ? [{user_id:1,user_name:'Alice',status:rows[10].test_completed?'completed':'testing'}]:[])];
+        return route.fulfill({json:{ok:true}});
       }
       if (url.pathname === '/workbench/preflight-refresh') return route.fulfill({json:{bugs:{cached:true},testcases:{cached:true}}});
       if (url.pathname === '/workbench/refresh-task-status') return route.fulfill({json:{refreshed:false}});
@@ -96,6 +105,7 @@ const root = path.resolve(__dirname, '..');
     console.log('PASS unchecking completion keeps view state');
 
     finalTest=true;
+    rows[10].test_completed=false;
     await page.evaluate(()=>mine.loadMyWorkbench());
     await other.evaluate(el=>{el.dataset.preserved='yes';el.open=true;});
     await caseBox().check();
@@ -103,6 +113,36 @@ const root = path.resolve(__dirname, '..');
     assert.equal(await other.getAttribute('data-preserved'),'yes');
     assert.equal(await target.evaluate(el=>el.open),true);
     console.log('PASS final-test checkbox keeps unrelated cards');
+    const testingBox=()=>target.locator('input[onchange*="testing"]');
+    await testingBox().check();
+    await target.locator('.final-test-person.is-testing').waitFor();
+    assert.match(await target.locator('.final-test-people').innerText(),/Alice/);
+    await testBox().check();
+    await target.locator('.final-test-person.is-completed').waitFor();
+    assert.equal(await testingBox().count(),0);
+    assert.equal(await target.locator('.final-test-person.is-testing').count(),0);
+    const readsBeforePresence = requests.filter(x=>x==='GET /workbench/mine').length;
+    await page.evaluate(()=>sseHandlers.final_test_requirement_status_changed({payload:{requirement_id:11,user_id:2,user_name:'<Bob>',testing:true,test_completed:false}}));
+    await page.waitForFunction(()=>document.querySelector('.mine-req-card[data-req-id="11"] .final-test-people')?.textContent.includes('<Bob>'));
+    assert.equal(await target.locator('.final-test-people bob').count(),0);
+    assert.equal(requests.filter(x=>x==='GET /workbench/mine').length,readsBeforePresence,'live labels require no workbench request');
+    await page.evaluate(()=>sseHandlers.final_test_requirement_status_changed({payload:{requirement_id:11,user_id:2,user_name:'<Bob>',testing:false,test_completed:true}}));
+    assert.equal(await target.locator('.final-test-person.is-testing').count(),0);
+    assert.equal(await target.locator('.final-test-person.is-completed').count(),2);
+    holdSnapshot = true;
+    await page.evaluate(()=>{window.pendingSnapshot=mine.loadMyWorkbench({background:true});});
+    while (!releaseSnapshot) await new Promise(resolve=>setTimeout(resolve,10));
+    await page.evaluate(()=>sseHandlers.final_test_requirement_status_changed({payload:{requirement_id:11,user_id:2,user_name:'<Bob>',testing:true,test_completed:false}}));
+    holdSnapshot = false;
+    await releaseSnapshot();
+    await page.evaluate(()=>window.pendingSnapshot);
+    assert.match(await target.locator('.final-test-person.is-testing').innerText(),/Bob/,'an older HTTP snapshot must not erase the live tag');
+    rows[10].final_test_people.push({user_id:2,user_name:'<Bob>',status:'completed'});
+    await page.evaluate(()=>sseHandlers.connection_restored({}));
+    await page.waitForFunction(()=>document.querySelectorAll('.mine-req-card[data-req-id="11"] .final-test-person.is-completed').length===2);
+    assert.equal(await other.getAttribute('data-preserved'),'yes');
+    assert.equal(await target.evaluate(el=>el.open),true);
+    console.log('PASS final-test shared presence, completion hides testing, other-user SSE, escaped names and preserved cards');
     assert.deepEqual(errors,[]);
   } finally { await browser.close(); }
 })().catch(error=>{console.error(error);process.exitCode=1;});

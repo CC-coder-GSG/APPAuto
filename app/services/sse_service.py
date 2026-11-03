@@ -37,11 +37,14 @@ class SSEEventBus:
         self._lock = threading.Lock()
         # asyncio.Event used to wake up waiting SSE coroutines immediately on publish
         self._notify: asyncio.Event | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def _get_notify(self) -> asyncio.Event:
         """Lazily create the asyncio.Event bound to the running loop."""
-        if self._notify is None:
+        loop = asyncio.get_running_loop()
+        if self._notify is None or self._loop is not loop:
             self._notify = asyncio.Event()
+            self._loop = loop
         return self._notify
 
     def publish(self, event: str, data: dict[str, Any], *, channels: list[str] | None = None) -> int:
@@ -54,11 +57,11 @@ class SSEEventBus:
             while len(self._events) > self._max_events:
                 self._events.popleft()
         # Wake up any SSE stream coroutines waiting for new events.
-        # schedule_callback is thread-safe; get_event_loop may not exist in all threads,
-        # so we guard with a try/except.
+        # Sync endpoints run in worker threads without an event loop. Use the
+        # stream's saved loop, not the publishing thread's get_event_loop().
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running() and self._notify is not None:
+            loop = self._loop
+            if loop is not None and loop.is_running() and self._notify is not None:
                 loop.call_soon_threadsafe(self._notify.set)
         except RuntimeError:
             pass
@@ -67,6 +70,12 @@ class SSEEventBus:
     def pull_since(self, last_event_id: int, *, channels: set[str]) -> list[SSEEnvelope]:
         with self._lock:
             return [e for e in self._events if e.id > last_event_id and (set(e.channels) & channels)]
+
+    def resume_cursor(self, last_event_id: int) -> int:
+        with self._lock:
+            # Event IDs restart with the Windows service. A saved browser cursor
+            # must not suppress new events until the old counter is reached.
+            return last_event_id if last_event_id < self._next_id else 0
 
     async def wait_for_events(self, timeout: float = 1.0) -> None:
         """Async-safe wait: returns when new events are published or timeout expires.
@@ -99,6 +108,10 @@ def sse_publish(event: str, payload: dict[str, Any], *, channels: list[str] | No
 
 def sse_pull_since(last_event_id: int, *, channels: set[str]) -> list[SSEEnvelope]:
     return _BUS.pull_since(last_event_id, channels=channels)
+
+
+def sse_resume_cursor(last_event_id: int) -> int:
+    return _BUS.resume_cursor(last_event_id)
 
 
 async def sse_wait_for_events(timeout: float = 1.0) -> None:

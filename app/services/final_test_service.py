@@ -2,12 +2,42 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import case
+from sqlalchemy.dialects.sqlite import insert
+from app.models import AuditLog
 
 from app.models import FinalTestRecord, Requirement, User, Version, VersionType
 from app.services.audit_service import audit
 from app.services.sse_service import sse_publish
 from app.utils.time_utils import local_now
 from app.core.db_lifecycle import release_read_transaction
+
+
+def write_final_state(db, requirement_id, user_id, *, case_completed=None, test_completed=None, testing=None):
+    """Atomic per-user upsert. Completion wins over a late 'testing' request.
+
+    Only supplied columns are updated, so concurrent case/test changes do not
+    overwrite each other. The caller commits after all local work is prepared.
+    """
+    now = local_now()
+    values = dict(requirement_id=requirement_id, user_id=user_id,
+                  case_completed=bool(case_completed), test_completed=bool(test_completed),
+                  testing=bool(testing) and not bool(test_completed),
+                  test_completed_at=now if test_completed else None,
+                  created_at=now, updated_at=now)
+    updates = {'updated_at':now}
+    if case_completed is not None:
+        updates['case_completed'] = bool(case_completed)
+    if test_completed is not None:
+        updates['test_completed'] = bool(test_completed)
+        updates['test_completed_at'] = case(
+            (FinalTestRecord.test_completed.is_(True), FinalTestRecord.test_completed_at),
+            else_=now) if test_completed else None
+        updates['testing'] = False
+    elif testing is not None:
+        updates['testing'] = case((FinalTestRecord.test_completed.is_(True), False), else_=bool(testing))
+    db.execute(insert(FinalTestRecord).values(**values).on_conflict_do_update(
+        index_elements=['requirement_id', 'user_id'], set_=updates))
 
 
 class FinalTestService:
@@ -82,6 +112,7 @@ class FinalTestService:
         current_user: User,
         case_completed: bool | None = None,
         test_completed: bool | None = None,
+        testing: bool | None = None,
     ) -> dict:
         requirement = (
             self.db.query(Requirement)
@@ -145,39 +176,28 @@ class FinalTestService:
                 )
                 raise HTTPException(status_code=502, detail=f"禅道任务同步失败：{exc}") from exc
 
-        if case_completed is not None:
-            record.case_completed = bool(case_completed)
-        if test_completed is not None:
-            record.test_completed = bool(test_completed)
-            record.test_completed_at = local_now() if test_completed else None
-
-        self.db.add(record)
-        self.db.commit()
-        self.db.refresh(record)
-        audit(
-            self.db,
-            action="final_test.patch_status",
-            target_type="requirement",
-            actor_id=current_user.id,
-            target_id=str(requirement_id),
-            detail=f"case={record.case_completed},test={record.test_completed}",
-        )
-        sse_publish(
-            "final_test_requirement_status_changed",
-            {
-                "requirement_id": requirement_id,
-                "user_id": current_user.id,
-                "case_completed": bool(record.case_completed),
-                "test_completed": bool(record.test_completed),
-            },
-            channels=["global", f"user:{current_user.id}"],
-        )
-        return {
-            "message": "最终测试状态已更新",
-            "requirement_id": requirement_id,
-            "case_completed": record.case_completed,
-            "test_completed": record.test_completed,
-        }
+        user_id = current_user.id
+        user_name = current_user.shown_name
+        major_id = requirement.major_version_id
+        release_read_transaction(self.db)
+        try:
+            write_final_state(self.db, requirement_id, user_id, case_completed=case_completed,
+                              test_completed=test_completed, testing=testing)
+            self.db.add(AuditLog(action='final_test.patch_status', target_type='requirement',
+                                actor_id=user_id, target_id=str(requirement_id),
+                                detail=f'case={case_completed},test={test_completed},testing={testing}'))
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        record = self.db.query(FinalTestRecord).filter_by(requirement_id=requirement_id, user_id=user_id).populate_existing().one()
+        result = {'message':'最终测试状态已更新', 'requirement_id':requirement_id,
+                  'case_completed':record.case_completed, 'test_completed':record.test_completed,
+                  'testing':bool(record.testing and not record.test_completed)}
+        release_read_transaction(self.db)
+        sse_publish('final_test_requirement_status_changed',
+                    {**result, 'user_id':user_id, 'user_name':user_name, 'major_version_id':major_id}, channels=['global'])
+        return result
 
     # ---- assign-board aggregate ---------------------------------------
     def progress_for_major(self, major_version_id: int) -> dict:

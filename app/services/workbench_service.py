@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import time
@@ -231,11 +231,15 @@ class WorkbenchService:
 
         # 当前用户在该版本的最终测试勾选状态
         ft_record_map: dict[int, FinalTestRecord] = {}
+        ft_people = {}
         if final_test_mode and reqs:
-            ft_records = _load_matching(self.db.query(FinalTestRecord).filter(
-                FinalTestRecord.user_id == current_user.id,
-            ), [(FinalTestRecord.requirement_id, {r.id for r in reqs})])
-            ft_record_map = {rec.requirement_id: rec for rec in ft_records}
+            ft_records = _load_matching(self.db.query(FinalTestRecord).options(joinedload(FinalTestRecord.user)), [(FinalTestRecord.requirement_id, {r.id for r in reqs})])
+            ft_record_map = {rec.requirement_id: rec for rec in ft_records if rec.user_id == current_user.id}
+            for rec in sorted(ft_records, key=lambda item: item.user_id):
+                if rec.test_completed or rec.testing:
+                    ft_people.setdefault(rec.requirement_id, []).append({
+                        'user_id':rec.user_id, 'user_name':rec.user.shown_name if rec.user else '未知',
+                        'status':'completed' if rec.test_completed else 'testing'})
 
         def _case_done(r: Requirement) -> bool:
             if final_test_mode:
@@ -293,6 +297,8 @@ class WorkbenchService:
                 "zentao_req_id": r.zentao_req_id,
                 "title": r.title,
                 "final_test": final_test_mode,
+                "final_test_people": ft_people.get(r.id, []),
+                "testing": bool(ft_record_map.get(r.id) and ft_record_map[r.id].testing and not ft_record_map[r.id].test_completed),
                 "test_tasks": test_task_map.get(r.id, []),
                 "has_multiple_test_tasks": task_service.task_count(r, task_rows[r.id]) > 1,
                 "linked_test_task_total": task_service.task_count(r, task_rows[r.id]),
