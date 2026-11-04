@@ -26,7 +26,7 @@ class Version(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    version_no: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    version_no: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     version_type: Mapped[VersionType] = mapped_column(SAEnum(VersionType), nullable=False)
     parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("versions.id", ondelete="CASCADE"), nullable=True)
     software_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)

@@ -32,3 +32,5 @@ bugly-backups/
 uploads/database_compare/
 .codex-tmp/database-compare-*/
 .codex-tmp/database-comparison-*.sqlite
+# Local PostgreSQL binaries, credentials, production snapshot reports and rehearsal data.
+.tmp/pg-adaptation/

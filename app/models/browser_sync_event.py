@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -18,7 +18,7 @@ class BrowserSyncEvent(Base):
     entity_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     action: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
-    captured_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    captured_at: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     received_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
 
     top_href: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

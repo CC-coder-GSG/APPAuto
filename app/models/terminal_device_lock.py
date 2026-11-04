@@ -30,6 +30,7 @@ class TerminalDeviceLock(Base):
             "device_id",
             unique=True,
             sqlite_where=text("released_at IS NULL"),
+            postgresql_where=text("released_at IS NULL"),
         ),
         Index("ix_terminal_locks_device_active", "device_id", "released_at"),
     )

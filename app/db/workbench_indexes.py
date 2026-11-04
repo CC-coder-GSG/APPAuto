@@ -21,7 +21,8 @@ def ensure_workbench_indexes(db: Session) -> None:
     for model, columns in targets.items():
         table = model.__table__
         existing = [tuple(item['column_names']) for item in inspector.get_indexes(table.name)
-                    if item.get('dialect_options', {}).get('sqlite_where') is None]
+                    if not any(key.endswith('_where') and value is not None
+                               for key, value in item.get('dialect_options', {}).items())]
         existing += [tuple(item['column_names']) for item in inspector.get_unique_constraints(table.name)]
         for index in sorted(table.indexes, key=lambda item: item.name):
             names = tuple(col.name for col in index.columns)

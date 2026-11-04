@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from typing import Any
 
-from sqlalchemy import func, or_
+from sqlalchemy import Integer, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import BugSourceType, BugTracking, Requirement, TestCase, Version, VersionType, ZentaoTaskMirror, ZentaoTestCaseMirror
@@ -147,6 +147,8 @@ class WorkbenchLinkService:
                 rows = query.all()
             else:
                 ids = sorted(self._product_ids)
+                if isinstance(model.zentao_product_id.property.columns[0].type, Integer):
+                    ids = [int(value) for value in ids if value.isascii() and value.isdigit()]
                 rows = [row for start in range(0, len(ids), 400)
                         for row in query.filter(model.zentao_product_id.in_(ids[start:start + 400])).all()]
             for product_id, product_name, count in rows:

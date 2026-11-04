@@ -3,7 +3,8 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import case
-from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from app.models import AuditLog
 
 from app.models import FinalTestRecord, Requirement, User, Version, VersionType
@@ -19,6 +20,7 @@ def write_final_state(db, requirement_id, user_id, *, case_completed=None, test_
     Only supplied columns are updated, so concurrent case/test changes do not
     overwrite each other. The caller commits after all local work is prepared.
     """
+    insert = postgres_insert if db.get_bind().dialect.name == 'postgresql' else sqlite_insert
     now = local_now()
     values = dict(requirement_id=requirement_id, user_id=user_id,
                   case_completed=bool(case_completed), test_completed=bool(test_completed),

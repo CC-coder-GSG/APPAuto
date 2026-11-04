@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum as SAEnum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -52,7 +52,7 @@ class BugTracking(Base):
     zentao_bug_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     zentao_client_record_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
     zentao_source: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
-    zentao_captured_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    zentao_captured_at: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     zentao_top_href: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     zentao_product_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     zentao_product_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

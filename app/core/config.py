@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     app_name: str = '测量软件测试平台'
     app_version: str = '0.4.0'
     database_compare_root: str = 'uploads/database_compare'
+    database_pool_size: int = Field(default=5, ge=1, le=100)
+    database_max_overflow: int = Field(default=5, ge=0, le=100)
+    database_pool_timeout: int = Field(default=10, ge=1, le=120)
+    background_jobs_enabled: bool = True
     database_compare_worker_enabled: bool = True
     database_compare_max_file_mb: int = Field(default=256, ge=1, le=2048)
     database_compare_max_group_mb: int = Field(default=512, ge=1, le=4096)

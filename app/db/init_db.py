@@ -56,6 +56,11 @@ from app.models import (
 
 
 def init_db() -> None:
+    if engine.dialect.name == 'postgresql':
+        from app.db.schema_version import require_schema
+        require_schema(engine)
+        # No DDL, seed writes or bulk backfills during PostgreSQL app startup.
+        return
     from app.db.bugly_upgrade import backup_before_bugly_upgrade
     backup_before_bugly_upgrade(engine)
     Base.metadata.create_all(bind=engine)

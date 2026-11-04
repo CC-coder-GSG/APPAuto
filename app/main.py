@@ -147,7 +147,8 @@ from sqlalchemy.exc import OperationalError, TimeoutError as DatabasePoolTimeout
 @app.exception_handler(DatabasePoolTimeout)
 @app.exception_handler(OperationalError)
 async def database_error_handler(request: Request, exc: Exception) -> JSONResponse:
-    busy = isinstance(exc, DatabasePoolTimeout) or 'database is locked' in str(getattr(exc, 'orig', '')).lower()
+    from app.core.database_errors import is_database_busy
+    busy = is_database_busy(exc)
     # Do not log SQL parameters: login writes contain session credentials.
     logger.error('database request failed method=%s path=%s kind=%s busy=%s',
                  request.method, request.url.path, type(exc).__name__, busy)
@@ -251,6 +252,8 @@ def _reconcile_retest_aggregates() -> None:
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    if not settings.background_jobs_enabled:
+        return
     _ensure_database_compare_worker()
     if not scheduler.running:
         scheduler.add_job(_reconcile_retest_aggregates, IntervalTrigger(minutes=15),

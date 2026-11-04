@@ -1,27 +1,23 @@
-from sqlalchemy import create_engine, event
+from sqlalchemy import event
 import logging
 import time
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.core.config import settings
 from app.core.retest_aggregate_events import AppSession
+from app.db.engine import build_engine
 
 DATABASE_URL = settings.database_url
 logger = logging.getLogger(__name__)
 
-engine = create_engine(
+engine = build_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False},
+    pool_size=settings.database_pool_size,
+    max_overflow=settings.database_max_overflow,
+    pool_timeout=settings.database_pool_timeout,
 )
 
 
-@event.listens_for(engine, "connect")
-def set_sqlite_pragmas(dbapi_conn, _):
-    """开启 WAL 模式：读写互不阻塞，并发性能更好；synchronous=NORMAL 在性能和安全间取得平衡。"""
-    cursor = dbapi_conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.close()
 SessionLocal = sessionmaker(class_=AppSession, autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

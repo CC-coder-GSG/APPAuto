@@ -172,9 +172,11 @@ def test_read_only_get_never_repairs_stale_data_or_commits(env):
     add_bug(e)
     e['db'].commit()
     # Simulate a historical/out-of-band write, bypassing application hooks.
-    e['db'].connection().execute(text('UPDATE requirements SET retest_completed=0,retest_passed=NULL'))
+    e['db'].connection().execute(text('UPDATE requirements SET retest_completed=FALSE,retest_passed=NULL'))
     e['db'].commit()
     e['db'].expire_all()
+    # Establish the fixture's PostgreSQL savepoint before counting read SQL.
+    e['db'].connection()
     statements = []
     def record(conn, cursor, statement, params, context, many):
         statements.append(statement)
