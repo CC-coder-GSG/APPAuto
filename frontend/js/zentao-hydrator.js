@@ -29,7 +29,7 @@
  * Exposes: window.OmniQAZentao = { hydrateContainer, invalidate }
  */
 
-import { loadHydration, hydrationEpoch, invalidateHydration } from './components/hydration-queue.js';
+import { loadHydration, hydrationEpoch, invalidateHydration } from './components/hydration-queue.js?v=20261105-hydration-1';
 import { updateBugVersion } from './components/bug-version.js?v=20261022-found-version-1';
 
 // ─── One-time style injection ─────────────────────────────────────────────────
@@ -90,9 +90,47 @@ function _setIndicator(state) {
 
 // ─── In-memory cache ─────────────────────────────────────────────────────────
 const CACHE_TTL_MS = 60_000; // 60 seconds
+const STALE_TTL_MS = 24 * 60 * 60_000;
+const STORAGE_KEY = 'omniqa.zentao-labels.v1';
 
 const _bugCache   = new Map(); // id → { data | null, expiry }
 const _storyCache = new Map();
+let _saveTimer;
+
+// Session storage survives page reloads. Scope it to the authenticated user;
+// never store the JWT, password, or Zentao token with the label snapshot.
+function _cacheOwner() {
+  try {
+    const payload = (localStorage.getItem('token') || '').split('.')[1];
+    return JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))).sub || null;
+  } catch { return null; }
+}
+
+function _restoreCache() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY));
+    if (!saved || !saved.owner || saved.owner !== _cacheOwner()) return;
+    for (const [kind, map] of [['bugs', _bugCache], ['stories', _storyCache]]) {
+      for (const [id, entry] of (saved[kind] || []).slice(-200)) {
+        if (/^\d+$/.test(id) && entry?.data && Number.isFinite(entry.saved)
+            && Date.now() - entry.saved < STALE_TTL_MS) map.set(id, entry);
+      }
+    }
+  } catch { /* Storage may be disabled or full; memory caching still works. */ }
+}
+
+function _saveCache() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    try {
+      const owner = _cacheOwner();
+      if (!owner) return;
+      const recent = map => [...map].filter(([, e]) => e.data && Date.now() - e.saved < STALE_TTL_MS).slice(-200);
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ owner, bugs: recent(_bugCache), stories: recent(_storyCache) }));
+    } catch { /* Best effort only. */ }
+  }, 0);
+}
+_restoreCache();
 
 // null stored in cache = "confirmed not found in Zentao"
 // undefined from _cacheGet = "not in cache (or expired)" — fetch or error-retry
@@ -104,18 +142,23 @@ function _cacheGet(map, id) {
 }
 
 function _cacheSet(map, id, data) {
-  map.set(id, { data, expiry: Date.now() + CACHE_TTL_MS });
+  map.set(id, { data, saved: Date.now(), expiry: Date.now() + CACHE_TTL_MS });
+  _saveCache();
 }
 
 /** Clear all cached data (call after user changes Zentao binding). */
 function invalidate() {
   invalidateHydration();
+  clearTimeout(_saveTimer);
+  try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* Best effort. */ }
   _bugCache.clear();
   _storyCache.clear();
   document.querySelectorAll('.zt-story-slot, .zt-bug-slot').forEach(el => {
     el.replaceChildren();
     delete el.dataset.ztLoaded;
     delete el.dataset.ztPending;
+    delete el.dataset.ztStale;
+    el.removeAttribute('title');
   });
   _setIndicator('idle');
 }
@@ -290,6 +333,8 @@ function _upgradeStoryIdLinks(storySlots) {
  */
 function _fillSlot(el, kind, data) {
   delete el.dataset.ztPending;
+  delete el.dataset.ztStale;
+  el.removeAttribute('title');
   if (kind === 'bugs') {
     const parent = el.parentElement;
     el.innerHTML = _renderBugSlot(data, { showTitle: !parent?.querySelector('.qa-title-tip') && el.dataset.ztNoTitle !== '1' });
@@ -321,7 +366,12 @@ async function hydrateContainer(containerEl) {
       const cached = _cacheGet(cache, id);
       if (cached !== undefined) { _fillSlot(el, kind, cached); continue; }
       const stale = cache.get(id);
-      if (stale) { _fillSlot(el, kind, stale.data); delete el.dataset.ztLoaded; }
+      if (stale?.data && Date.now() - stale.saved < STALE_TTL_MS) {
+        _fillSlot(el, kind, stale.data);
+        delete el.dataset.ztLoaded;
+        el.dataset.ztStale = '1';
+        el.title = `上次同步：${new Date(stale.saved).toLocaleString()}，正在更新`;
+      }
       if (!el.textContent.trim()) el.innerHTML = '<span class="zt-loading-dots">···</span>';
       el.dataset.ztPending = '1';
       const rect = el.getBoundingClientRect();
@@ -335,6 +385,7 @@ async function hydrateContainer(containerEl) {
           return;
         }
         errors = true;
+        if (el.dataset.ztStale) el.title = `更新失败，显示上次成功同步的信息（${new Date(stale.saved).toLocaleString()}）`;
         el.querySelector('.zt-loading-dots')?.remove();
         el.querySelector('.zt-err')?.remove();
         const retry = document.createElement('button');
@@ -369,18 +420,19 @@ function refreshVisible() {
   }
   if (!container) return;
 
-  // Clear loaded state + cache for all slots in this tab
+  // Keep the last successful label visible while explicitly refreshing it.
+  invalidateHydration();
   for (const el of container.querySelectorAll('.zt-bug-slot[data-zt-bug-id]')) {
-    _bugCache.delete(el.dataset.ztBugId);
+    const entry = _bugCache.get(el.dataset.ztBugId);
+    if (entry) entry.expiry = 0;
     delete el.dataset.ztLoaded;
     delete el.dataset.ztPending;
-    el.innerHTML = '';
   }
   for (const el of container.querySelectorAll('.zt-story-slot[data-zt-story-id]')) {
-    _storyCache.delete(el.dataset.ztStoryId);
+    const entry = _storyCache.get(el.dataset.ztStoryId);
+    if (entry) entry.expiry = 0;
     delete el.dataset.ztLoaded;
     delete el.dataset.ztPending;
-    el.innerHTML = '';
   }
 
   hydrateContainer(container);

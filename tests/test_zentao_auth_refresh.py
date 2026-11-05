@@ -174,3 +174,47 @@ def test_server_expired_token_is_refreshed_once_and_original_read_retried(client
     response = client.get(f'/zentao/hydrate/{kind}?ids=101')
     assert response.status_code == 200 and response.json()['101']['id'] == 101
     assert tokens == ['expired-token', 'fresh-token'] and logins == [True]
+
+
+@pytest.mark.parametrize('kind', ['bugs', 'stories'])
+def test_token_retry_keeps_successes_and_only_refetches_failed_ids(client, monkeypatch, kind):
+    monkeypatch.setattr(zentao_hydrate, '_get_client_ctx', lambda *args: (object(), 'https://zentao.invalid'))
+    monkeypatch.setattr(zentao_hydrate, 'invalidate_token', lambda *args: None)
+    monkeypatch.setattr(zentao_hydrate, '_writeback_bug_fields', lambda *args: None)
+    reads = []
+
+    async def fetch(c, base, ids, *args):
+        reads.append(ids)
+        if len(reads) == 1:
+            return {'101': {'id': 101, 'status': 'active'}}, True, ['102']
+        return {'102': {'id': 102, 'status': 'closed'}}, False, []
+
+    monkeypatch.setattr(zentao_hydrate, f'_fetch_{kind}_concurrent', fetch)
+    # 103 is a confirmed missing item; it must not be fetched again with 102.
+    response = client.get(f'/zentao/hydrate/{kind}?ids=101,102,103')
+    assert response.status_code == 200
+    assert set(response.json()) == {'101', '102'}
+    assert reads == [[101, 102, 103], [102]]
+
+
+@pytest.mark.parametrize('kind', ['bugs', 'stories'])
+def test_partial_success_survives_token_renewal_failure(client, monkeypatch, kind):
+    from fastapi import HTTPException
+    calls = []
+
+    def context(*args):
+        calls.append(True)
+        if len(calls) == 1:
+            return object(), 'https://zentao.invalid'
+        raise HTTPException(502, 'temporary login failure')
+
+    async def fetch(*args):
+        return {'101': {'id': 101, 'status': 'active'}}, True, ['102']
+
+    monkeypatch.setattr(zentao_hydrate, '_get_client_ctx', context)
+    monkeypatch.setattr(zentao_hydrate, 'invalidate_token', lambda *args: None)
+    monkeypatch.setattr(zentao_hydrate, '_writeback_bug_fields', lambda *args: None)
+    monkeypatch.setattr(zentao_hydrate, f'_fetch_{kind}_concurrent', fetch)
+    response = client.get(f'/zentao/hydrate/{kind}?ids=101,102')
+    assert response.status_code == 200
+    assert response.json() == {'101': {'id': 101, 'status': 'active'}, '__fetch_errors__': ['102']}

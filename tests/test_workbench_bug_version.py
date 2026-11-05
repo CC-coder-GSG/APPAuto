@@ -98,16 +98,27 @@ def test_sync_preserves_missing_solution_field_and_clears_explicit_empty(db_sess
     assert bug.zentao_resolved_build == ''
 
 
-def test_existing_database_adds_solution_cache_without_losing_bugs(db_session):
-    bug_id = _bug(db_session).id
-    db_session.execute(text('ALTER TABLE bug_tracking DROP COLUMN zentao_resolved_build'))
-    db_session.commit()
-    ensure_bug_schema_compat(db_session)
-    ensure_bug_schema_compat(db_session)
-    row = db_session.execute(text('SELECT id, zentao_resolved_build FROM bug_tracking WHERE id=:id'),
+def test_existing_database_adds_solution_cache_without_losing_bugs():
+    # This is the legacy SQLite startup upgrade. PostgreSQL uses Alembic and
+    # must never run PRAGMA or drop a column in the shared PostgreSQL fixture.
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from app.db.base import Base
+    engine = create_engine('sqlite://')
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as db:
+            bug_id = _bug(db).id
+            db.execute(text('ALTER TABLE bug_tracking DROP COLUMN zentao_resolved_build'))
+            db.commit()
+            ensure_bug_schema_compat(db)
+            ensure_bug_schema_compat(db)
+            row = db.execute(text('SELECT id, zentao_resolved_build FROM bug_tracking WHERE id=:id'),
                              {'id': bug_id}).one()
-    assert row.id == bug_id
-    assert row.zentao_resolved_build is None
+            assert row.id == bug_id
+            assert row.zentao_resolved_build is None
+    finally:
+        engine.dispose()
 
 
 def test_cached_build_id_uses_local_version_name(db_session):
@@ -130,7 +141,7 @@ def test_hydration_resolves_numeric_build_and_deduplicates_requests(db_session):
         return {'id': build_id, 'name': '4.0.6'}
 
     client = SimpleNamespace(
-        get_bug_with_fallback=lambda bug_id: {'id': bug_id, 'status': 'resolved', 'resolvedBuild': '5262', 'openedBuild': '5262'},
+        get_bug=lambda bug_id: {'id': bug_id, 'status': 'resolved', 'resolvedBuild': '5262', 'openedBuild': '5262'},
         get_build=build,
     )
     data, got_401, errors = asyncio.run(_fetch_bugs_concurrent(client, 'http://zentao.test', [71040, 71041]))
@@ -149,7 +160,7 @@ def test_hydration_prefers_local_name_without_remote_build_request():
         pytest.fail('Local version mapping must avoid a remote build request')
 
     client = SimpleNamespace(
-        get_bug_with_fallback=lambda bug_id: {'id': bug_id, 'resolvedBuild': {'id': 5262}},
+        get_bug=lambda bug_id: {'id': bug_id, 'resolvedBuild': {'id': 5262}},
         get_build=unexpected,
     )
     data, _, errors = asyncio.run(_fetch_bugs_concurrent(client, 'http://zentao.test', [71040], {'5262': '4.0.6'}))
@@ -162,7 +173,7 @@ def test_build_lookup_failure_preserves_bug_status_and_can_retry(status):
         raise ZentaoAPIError(status, 'build lookup failed')
 
     client = SimpleNamespace(
-        get_bug_with_fallback=lambda bug_id: {'id': bug_id, 'status': 'closed', 'resolvedBuild': 5262},
+        get_bug=lambda bug_id: {'id': bug_id, 'status': 'closed', 'resolvedBuild': 5262},
         get_build=failed,
     )
     data, got_401, errors = asyncio.run(_fetch_bugs_concurrent(client, 'http://zentao.test', [71040]))
@@ -176,7 +187,7 @@ def test_build_lookup_failure_preserves_bug_status_and_can_retry(status):
 
 def test_hydration_rejects_wrong_build_and_resolves_multiple_build_references():
     client = SimpleNamespace(
-        get_bug_with_fallback=lambda bug_id: {'id': bug_id, 'resolvedBuild': [5262, {'name': '4.0.7'}, 5263]},
+        get_bug=lambda bug_id: {'id': bug_id, 'resolvedBuild': [5262, {'name': '4.0.7'}, 5263]},
         get_build=lambda build_id: {'id': build_id if build_id == 5262 else 99, 'name': '4.0.6'},
     )
     data, _, errors = asyncio.run(_fetch_bugs_concurrent(client, 'http://zentao.test', [71040]))

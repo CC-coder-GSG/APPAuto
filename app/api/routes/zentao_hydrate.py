@@ -15,9 +15,9 @@ shorter than our 2-hour assumption.
 
 Concurrency
 -----------
-Requests to Zentao are made concurrently (up to _MAX_CONCURRENCY at a
-time) using asyncio.gather + asyncio.to_thread, dramatically reducing
-total latency when a page contains many bugs/stories.
+Bounded workers fetch labels concurrently. A five-second batch deadline
+returns completed labels and marks unfinished IDs retryable. Optional
+build lookups have their own shorter budget and worker capacity.
 
 Error semantics
 ---------------
@@ -38,6 +38,8 @@ from app.core.db_lifecycle import release_read_transaction
 import asyncio
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
+from threading import BoundedSemaphore
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -100,7 +102,46 @@ def confirm_task_story_change(task_id: int, payload: StoryChangeConfirmPayload,
 _MAX_BATCH = 500
 # Maximum concurrent upstream requests per hydration call
 _MAX_CONCURRENCY = 10
+_BATCH_TIMEOUT = 5.0
+_BUILD_TIMEOUT = 0.75
+# Cancellation cannot stop a synchronous HTTP call. Keep its slot until the
+# actual worker finishes, so timeouts/retries cannot create unbounded threads.
+_HYDRATION_WORKERS = ThreadPoolExecutor(max_workers=20, thread_name_prefix="zt-hydrate")
+_HYDRATION_SLOTS = BoundedSemaphore(20)
+_BUILD_WORKERS = ThreadPoolExecutor(max_workers=2, thread_name_prefix="zt-build-label")
+_BUILD_SLOTS = BoundedSemaphore(2)
 _TASK_DETAIL_FALLBACK_LIMIT = 2000
+
+
+async def _upstream_call(func, *args, optional=False):
+    slots = _BUILD_SLOTS if optional else _HYDRATION_SLOTS
+    workers = _BUILD_WORKERS if optional else _HYDRATION_WORKERS
+    if not slots.acquire(blocking=False):
+        raise ZentaoAPIError(503, "禅道信息查询繁忙，请稍后重试")
+    try:
+        future = workers.submit(func, *args)
+    except BaseException:
+        slots.release()
+        raise
+    future.add_done_callback(lambda _: slots.release())
+    return await asyncio.wrap_future(future)
+
+
+async def _finish_batch(jobs, id_list, result, errors):
+    if not jobs:
+        return
+    tasks = [asyncio.create_task(job) for job in jobs]
+    try:
+        await asyncio.wait(tasks, timeout=_BATCH_TIMEOUT)
+    finally:
+        # Also clean up when the client disconnects or the route is cancelled.
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    for item_id, task in zip(id_list, tasks):
+        if task.cancelled() and str(item_id) not in result:
+            errors.append(str(item_id))
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +167,7 @@ async def hydrate_bugs(
     if not id_list:
         return {}
 
-    ctx = _get_client_ctx(user_id, db)
+    ctx = await asyncio.to_thread(_get_client_ctx, user_id, db)
     if ctx is None:
         return {"__fetch_errors__": [str(i) for i in id_list], "__auth_required__": True}
     client, base_url = ctx
@@ -136,13 +177,24 @@ async def hydrate_bugs(
     result, got_401, errors = await _fetch_bugs_concurrent(client, base_url, id_list, build_names)
 
     if got_401:
-        invalidate_token(user_id, db)
-        ctx2 = _get_client_ctx(user_id, db)
+        retry_ids = [i for i in id_list if str(i) in errors or (not errors and str(i) not in result)]
+        await asyncio.to_thread(invalidate_token, user_id, db)
+        try:
+            ctx2 = await asyncio.to_thread(_get_client_ctx, user_id, db)
+        except HTTPException:
+            if not result:
+                raise
+            _writeback_bug_fields(db, result, base_url)
+            return _build_response(result, [str(i) for i in retry_ids])
         if ctx2 is None:
-            return {"__fetch_errors__": [str(i) for i in id_list], "__auth_required__": True}
+            return {**result, "__fetch_errors__": [str(i) for i in retry_ids], "__auth_required__": True}
         client2, base_url2 = ctx2
         release_read_transaction(db)
-        result, got_401, errors = await _fetch_bugs_concurrent(client2, base_url2, id_list, build_names)
+        if retry_ids:
+            retried, got_401, errors = await _fetch_bugs_concurrent(client2, base_url2, retry_ids, build_names)
+            result.update(retried)
+        else:
+            got_401 = False
 
     # Write-back: persist title + URL for bugs that don't have them yet.
     # Matches on bug_id like "b#29009" → Zentao numeric ID 29009.
@@ -171,7 +223,7 @@ async def hydrate_stories(
     if not id_list:
         return {}
 
-    ctx = _get_client_ctx(user_id, db)
+    ctx = await asyncio.to_thread(_get_client_ctx, user_id, db)
     if ctx is None:
         return {"__fetch_errors__": [str(i) for i in id_list], "__auth_required__": True}
     client, base_url = ctx
@@ -180,13 +232,23 @@ async def hydrate_stories(
     result, got_401, errors = await _fetch_stories_concurrent(client, base_url, id_list)
 
     if got_401:
-        invalidate_token(user_id, db)
-        ctx2 = _get_client_ctx(user_id, db)
+        retry_ids = [i for i in id_list if str(i) in errors or (not errors and str(i) not in result)]
+        await asyncio.to_thread(invalidate_token, user_id, db)
+        try:
+            ctx2 = await asyncio.to_thread(_get_client_ctx, user_id, db)
+        except HTTPException:
+            if not result:
+                raise
+            return _build_response(result, [str(i) for i in retry_ids])
         if ctx2 is None:
-            return {"__fetch_errors__": [str(i) for i in id_list], "__auth_required__": True}
+            return {**result, "__fetch_errors__": [str(i) for i in retry_ids], "__auth_required__": True}
         client2, base_url2 = ctx2
         release_read_transaction(db)
-        result, got_401, errors = await _fetch_stories_concurrent(client2, base_url2, id_list)
+        if retry_ids:
+            retried, got_401, errors = await _fetch_stories_concurrent(client2, base_url2, retry_ids)
+            result.update(retried)
+        else:
+            got_401 = False
 
     response = _build_response(result, errors)
     if got_401:
@@ -456,7 +518,7 @@ async def _fetch_bugs_concurrent(
         if build_names and build_id in build_names:
             return build_names[build_id]
         try:
-            build = await asyncio.to_thread(client.get_build, int(build_id))
+            build = await asyncio.wait_for(_upstream_call(client.get_build, int(build_id), optional=True), _BUILD_TIMEOUT)
             if isinstance(build, dict) and str(build.get('id')) == build_id:
                 name = str(build.get('name') or build.get('title') or '').strip()
                 if name and not name.isdecimal():
@@ -487,14 +549,16 @@ async def _fetch_bugs_concurrent(
         nonlocal got_401
         async with sem:
             try:
-                raw = await asyncio.to_thread(client.get_bug_with_fallback, bug_id)
+                # Labels don't need action history; get_bug retains detail-page
+                # recovery only when REST detail itself is unavailable.
+                raw = await _upstream_call(client.get_bug, bug_id)
                 if raw:
                     data = normalize_bug(raw)
+                    data["zentao_url"] = f"{base_url}/bug-view-{bug_id}.html"
+                    result[str(bug_id)] = data
                     data['build'], data['resolved_build'] = await asyncio.gather(
                         _readable_build_name(data['build']), _readable_build_name(data['resolved_build']),
                     )
-                    data["zentao_url"] = f"{base_url}/bug-view-{bug_id}.html"
-                    result[str(bug_id)] = data
             except ZentaoAPIError as exc:
                 if exc.status_code == 401:
                     got_401 = True
@@ -506,7 +570,7 @@ async def _fetch_bugs_concurrent(
                 logger.warning("hydrate_bugs: bug_id=%s unexpected=%s", bug_id, exc)
                 errors.append(str(bug_id))
 
-    await asyncio.gather(*[_one(bug_id) for bug_id in id_list])
+    await _finish_batch([_one(bug_id) for bug_id in id_list], id_list, result, errors)
     return result, got_401, errors
 
 
@@ -529,7 +593,7 @@ async def _fetch_stories_concurrent(
         nonlocal got_401
         async with sem:
             try:
-                raw = await asyncio.to_thread(client.get_story, story_id)
+                raw = await _upstream_call(client.get_story, story_id)
                 if raw:
                     data = normalize_story(raw)
                     data["zentao_url"] = f"{base_url}/story-view-{story_id}.html"
@@ -545,7 +609,7 @@ async def _fetch_stories_concurrent(
                 logger.warning("hydrate_stories: story_id=%s unexpected=%s", story_id, exc)
                 errors.append(str(story_id))
 
-    await asyncio.gather(*[_one(story_id) for story_id in id_list])
+    await _finish_batch([_one(story_id) for story_id in id_list], id_list, result, errors)
     return result, got_401, errors
 
 
