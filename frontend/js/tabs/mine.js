@@ -388,6 +388,38 @@ function mergeFinalPresence(req, payload) {
   }
 }
 
+const finalTagFilter = { mode: 'all', selected: new Set() };
+const finalTagKey = person => `${person.user_id}:${person.status}`;
+function matchesFinalTags(req) {
+  const tags = new Set((req.final_test_people || []).map(finalTagKey));
+  const selected = [...finalTagFilter.selected];
+  if (finalTagFilter.mode === 'unmarked') return tags.size === 0;
+  if (!selected.length) return true;
+  if (finalTagFilter.mode === 'none') return selected.every(tag => !tags.has(tag));
+  if (finalTagFilter.mode === 'any') return selected.some(tag => tags.has(tag));
+  return selected.every(tag => tags.has(tag));
+}
+function renderFinalTagFilter() {
+  const tags = new Map();
+  for (const req of state.currentMineData || []) {
+    if (!req.final_test) continue;
+    for (const person of req.final_test_people || []) tags.set(finalTagKey(person), person);
+  }
+  return `<div style="margin-top:12px" aria-label="最终测试标签筛选">
+    <label>标签匹配 <select onchange="window.updateFinalTagFilter('mode', this.value)">
+    ${[['all', '包含全部所选标签'], ['any', '包含任一所选标签'], ['none', '不包含任何所选标签'], ['unmarked', '无人标记（无完成或正在测试标签）']].map(([value, label]) => `<option value="${value}" ${finalTagFilter.mode === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+    <button class="secondary" onclick="window.updateFinalTagFilter('reset')">清空筛选</button>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">${[...tags].map(([key, person]) => `<label><input type="checkbox" value="${escapeHtml(key)}" ${finalTagFilter.selected.has(key) ? 'checked' : ''} onchange="window.updateFinalTagFilter('tag', this.value, this.checked)">${escapeHtml(person.user_name)}${person.status === 'completed' ? '已测试完成' : '正在测试'}</label>`).join('') || '<span class="muted">暂无人员标签</span>'}</div>
+  </div>`;
+}
+window.updateFinalTagFilter = (action, value, checked) => {
+  if (action === 'reset') { finalTagFilter.mode = 'all'; finalTagFilter.selected.clear(); }
+  else if (action === 'mode') finalTagFilter.mode = value;
+  else if (checked) finalTagFilter.selected.add(value);
+  else finalTagFilter.selected.delete(value);
+  renderMineCards({ preserveCards: true });
+};
+
 function renderFinalTestPeople(req) {
   if (!req.final_test) return '';
   return `<span class="final-test-people" aria-label="最终测试人员状态">${(req.final_test_people || []).map(person => {
@@ -1547,6 +1579,7 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
   const searchKw = (document.getElementById('mineSearchInput')?.value || '').trim().toLowerCase();
   const onlyAssignedToMe = !!document.getElementById('mineAssignedToMe')?.checked;
   const filteredData = state.currentMineData.filter((req) => {
+    if (req.final_test && !matchesFinalTags(req)) return false;
     // 搜索：匹配需求编号/名称，或卡片内任一 bug 的编号/标题（卡片级过滤）
     if (searchKw) {
       const bugs = collectReqBugs(req);
@@ -1647,6 +1680,7 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
     ? `<div class="card" style="border:2px solid #f59e0b; background:#fffbeb; margin-bottom:16px;">
          <b style="color:#92400e;">🏁 该版本已进入「最终测试」阶段</b>
          <div class="muted" style="margin-top:4px;">以下为该版本全部需求（无视任务分配）。您的勾选独立记录，与原有测试状态互不影响。</div>
+         ${renderFinalTagFilter()}
        </div>`
     : '';
 
@@ -1787,7 +1821,7 @@ function bindMineSSE() {
         el.outerHTML = renderFinalTestPeople(row);
       });
       const myId = Number(state.currentUser?.id || window.currentUser?.id || 0);
-      if (myId === Number(payload.user_id)) renderMineCards({ preserveCards: true, changedIds: new Set([row.id]) });
+      renderMineCards({ preserveCards: true, changedIds: new Set([row.id]) });
       return;
     }
     if (!(state.currentMineData || []).some(row => row.final_test && Number(row.id) === Number(payload?.requirement_id))) return;
