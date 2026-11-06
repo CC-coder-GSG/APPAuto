@@ -366,6 +366,7 @@ function renderChart({ view = 'restore' } = {}) {
     // useDirtyRect：hover/tooltip 等局部变化只重绘脏矩形，大图收益显著
     state.chart = window.echarts.getInstanceByDom(dom) || window.echarts.init(dom, null, { useDirtyRect: true });
     state.chart.on('click', onNodeClick);
+    state.chart.on('dblclick', onNodeDoubleClick);
     window.addEventListener('resize', resize);
     bindRoamPersist();
     firstInit = true;
@@ -479,7 +480,28 @@ async function reload({ force = false } = {}) {
 }
 
 // ── 节点点击 → 操作浮层 ───────────────────────────────────
+let nodeClickTimer = null;
+function onNodeDoubleClick(params) {
+  clearTimeout(nodeClickTimer);
+  nodeClickTimer = null;
+  hideMenu();
+  const node = params.data && params.data._meta;
+  if (!node || state.copyMode || !(node.children || []).length) return;
+  const wasCollapsed = isCollapsed(node);
+  // 重置全部后代为折叠，确保再次展开只露出直接子节点。
+  const fold = n => {
+    if (!(n.children || []).length) return;
+    state.collapsed.add(n.id);
+    n.children.forEach(fold);
+  };
+  fold(node);
+  if (wasCollapsed) state.collapsed.delete(node.id);
+  persistCollapsed();
+  renderChart({ view: 'keep' });
+}
+
 function onNodeClick(params) {
+  clearTimeout(nodeClickTimer);
   const m = params.data && params.data._meta;
   if (!m) return;
   // 复制选择态：点击节点 = 选定目标，而非打开操作菜单
@@ -487,7 +509,11 @@ function onNodeClick(params) {
   const ev = params.event && params.event.event;
   const x = ev ? ev.clientX : window.innerWidth / 2;
   const y = ev ? ev.clientY : window.innerHeight / 2;
-  openMenu(m, x, y);
+  // 留出双击时间，避免第一次点击弹出的菜单遮挡第二次点击。
+  nodeClickTimer = setTimeout(() => {
+    nodeClickTimer = null;
+    openMenu(m, x, y);
+  }, 350);
 }
 
 // ── 复制节点（子树深拷贝到另一节点下，仅节点+备注，不含测试状态）─────
