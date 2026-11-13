@@ -58,6 +58,7 @@ from app.models.learning_quiz import (
     LearningSubmission,
 )
 from app.models.requirement import Requirement
+from app.models.requirement_change_retest import RequirementChangeRetest
 from app.models.requirement_retest_record import RequirementRetestRecord
 from app.models.requirement_status_history import RequirementStatusHistory
 from app.models.software import SoftwareProduct
@@ -134,6 +135,7 @@ __all__ = [
     "QuestionType",
     "SubmissionStatus",
     "Requirement",
+    "RequirementChangeRetest",
     "RequirementRetestRecord",
     "RequirementStatusHistory",
     "RequirementStatus",

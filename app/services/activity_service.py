@@ -13,6 +13,7 @@ from app.utils.time_utils import local_now
 
 
 ACTION_META: dict[str, dict[str, Any]] = {
+    "requirement.dispatch_change_retest": {"module": "requirement", "action_text": "派发变更重测", "level": "important", "important": True},
     "bug.create": {"module": "bug", "action_text": "创建 Bug", "level": "important", "important": True},
     "bug.update": {"module": "bug", "action_text": "更新 Bug", "level": "info", "important": False},
     "bug.delete": {"module": "bug", "action_text": "删除 Bug", "level": "critical", "important": True},

@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { renderRequirementChange } from '../components/requirement-change.js';
 import { state } from '../state.js';
 import { errorPanel } from '../components/workbench-activity.js';
 import { runZentaoOperation, operationPending, prepareOperationModal } from '../components/zentao-operation.js';
@@ -1601,7 +1602,10 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
     const caseDisabled = req.case_completed ? 'disabled' : '';
     const testDisabled = req.test_completed ? 'disabled' : '';
     const aggregateDone = baseReq.has_multiple_test_tasks ? baseReq.all_linked_test_tasks_completed : baseReq.test_completed;
-    const isFullyCompleted = aggregateDone && req.case_completed && (!req.final_test || baseReq.test_completed);
+    const changeRetestPending = req.final_test && (baseReq.change_retests || []).some(r => r.status !== 'completed');
+    const unhandledChange = req.task_story_change_pending || (baseReq.test_tasks || []).some(t => t.task_story_change_pending)
+      || (req.final_test && !(baseReq.change_retests || []).length && (baseReq.story_tasks || []).some(t => t.type === 'test' && t.task_story_change_pending));
+    const isFullyCompleted = aggregateDone && req.case_completed && (!req.final_test || baseReq.test_completed) && !changeRetestPending && !unhandledChange;
     const isOpen = Object.prototype.hasOwnProperty.call(foldStateMap, String(req.id)) ? !!foldStateMap[String(req.id)] : (!isFullyCompleted || req.task_story_change_pending);
     const taskChangeDisabled = req.selected_task_mode && !req.selected_test_task.can_operate ? 'disabled title="当前任务已流转给其他人员，仅可查看"' : req.task_story_change_pending && (!req.final_test || req.task_assigned_to_me) ? 'disabled title="请先查看并确认研发需求变更"' : '';
     const vTag = mode === 'all_pending' && req.major_version_name
@@ -1650,7 +1654,7 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
     return `
       <details class="mine-req-card" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; ${retestFailBorder} transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
-          <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${renderTaskStoryChangeBadge(req)}${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${generateCaseChip}${storyTaskHtml}${renderFinalTestPeople(baseReq)}</div>
+          <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${renderTaskStoryChangeBadge(req)}${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${generateCaseChip}${storyTaskHtml}${renderFinalTestPeople(baseReq)}${renderRequirementChange(baseReq)}</div>
           ${isFullyCompleted ? '<span style="color:#16a34a; font-size:14px; background:#f0fdf4; padding:4px 8px; border-radius:4px; border:1px solid #bbf7d0;">✅ 测试已完成</span>' : '<span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开卡片)</span>'}
         </summary>
         <div style="margin-top: 12px;">
@@ -1753,6 +1757,10 @@ document.addEventListener('zentao-story-change-confirmed', () => {
   if (window.isWorkbenchSubtabActive?.('demand')) loadMyWorkbench().catch(() => {});
 });
 
+document.addEventListener('requirement-change-dispatched', () => {
+  loadMyWorkbench({ background: true }).catch(error => console.warn('change retest refresh failed', error));
+});
+
 function bindMineSSE() {
   if (mineSseBound) return;
   if (!window.OmniQASSE?.subscribe) return;
@@ -1822,6 +1830,7 @@ function bindMineSSE() {
       });
       const myId = Number(state.currentUser?.id || window.currentUser?.id || 0);
       renderMineCards({ preserveCards: true, changedIds: new Set([row.id]) });
+      if (row.change_retests?.length) queueMineBackgroundReload(mineFilterKey());
       return;
     }
     if (!(state.currentMineData || []).some(row => row.final_test && Number(row.id) === Number(payload?.requirement_id))) return;

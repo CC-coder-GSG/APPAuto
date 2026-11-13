@@ -1,7 +1,7 @@
 """PostgreSQL starts only on an explicitly migrated database."""
 from sqlalchemy import inspect, text
 
-SCHEMA_REVISION = '20261104_01'
+SCHEMA_REVISION = '20261113_01'
 
 
 def require_schema(engine):

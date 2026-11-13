@@ -127,6 +127,24 @@ class FinalTestService:
         if not (requirement.major_version and requirement.major_version.final_test_enabled):
             raise HTTPException(status_code=400, detail="该需求所属大版本未处于最终测试阶段")
 
+        if test_completed:
+            from app.models import RequirementChangeRetest, ZentaoTaskMirror
+            rounds = self.db.query(RequirementChangeRetest).filter_by(
+                requirement_id=requirement_id, owner_id=current_user.id).all()
+            for change in rounds:
+                task = self.db.get(ZentaoTaskMirror, change.task_id) if change.task_id else None
+                if (change.status != 'active' or not task or task.status not in {'done', 'closed'}
+                        or task.task_story_change_pending is not False
+                        or (task.task_story_version or 0) < change.story_version):
+                    # Assigned tasks are finished through the normal task lifecycle below.
+                    # Their change acknowledgement must still be made by the assignee first.
+                    if (change.status == 'active' and task and task.task_id == requirement.zentao_task_id
+                            and task.task_story_change_pending is False
+                            and (task.task_story_version or 0) >= change.story_version
+                            and self._is_task_assignee(requirement, current_user)):
+                        continue
+                    raise HTTPException(409, '请先由本人确认需求变更并完成本轮重测任务')
+
         record = (
             self.db.query(FinalTestRecord)
             .filter(

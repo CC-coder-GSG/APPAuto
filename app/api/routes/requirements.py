@@ -562,6 +562,28 @@ def requirement_linked_tasks(requirement_id: int, refresh: bool = False,
     return {"tasks": RequirementTaskService(db).describe([req], current_user)[req.id], "refreshed": result}
 
 
+class ChangeRetestPayload(BaseModel):
+    source_task_id: int = Field(gt=0)
+    owner_id: int = Field(gt=0)
+    expected_story_version: int = Field(gt=0)
+
+
+@router.get('/requirements/{requirement_id}/change-retest')
+def preview_change_retest(requirement_id: int, current_user: User = Depends(get_current_user),
+                          db: Session = Depends(get_db)):
+    from app.services.requirement_change_service import RequirementChangeService
+    ensure_tab_access(current_user, 'mine')
+    return RequirementChangeService(db).preview(requirement_id, current_user)
+
+
+@router.post('/requirements/{requirement_id}/change-retest')
+def dispatch_change_retest(requirement_id: int, payload: ChangeRetestPayload,
+                           current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.services.requirement_change_service import RequirementChangeService
+    ensure_tab_access(current_user, 'mine')
+    return RequirementChangeService(db).dispatch(requirement_id, current_user, **payload.model_dump())
+
+
 @router.post("/requirements/{requirement_id}/linked-tasks/{task_id}/operate")
 def operate_requirement_linked_task(requirement_id: int, task_id: int, payload: LinkedTaskOperatePayload,
                                     current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

@@ -291,12 +291,18 @@ class WorkbenchService:
             # 未知指派人时保守视为“非本人”，避免误放开始/完成禅道任务的权限。
             return bool(my_account) and assignee == my_account
 
+        from app.services.requirement_change_service import RequirementChangeService
+        change_service = RequirementChangeService(self.db)
+        change_rounds = change_service.summaries([r.id for r in reqs])
+
         return [
             {
                 "id": r.id,
                 "zentao_req_id": r.zentao_req_id,
                 "title": r.title,
                 "final_test": final_test_mode,
+                "can_manage_changes": change_service.can_manage(current_user),
+                "change_retests": change_rounds.get(r.id, []),
                 "final_test_people": ft_people.get(r.id, []),
                 "testing": bool(ft_record_map.get(r.id) and ft_record_map[r.id].testing and not ft_record_map[r.id].test_completed),
                 "test_tasks": test_task_map.get(r.id, []),
