@@ -50,6 +50,7 @@ export async function api(url, options = {}) {
     }
     const error = new Error(message);
     error.status = response.status;
+    error.operationOutcome = response.headers.get('X-Operation-Outcome');
     throw error;
   }
 

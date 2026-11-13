@@ -41,3 +41,30 @@
 .qa-linked-task-form .row { display: flex; flex-wrap: wrap; gap: 14px; }
 .qa-linked-task-form .row label { flex: 1 1 160px; }
 .qa-linked-task-form [data-result] { overflow-wrap: anywhere; }
+
+/* Persistent assignment emphasis is independent of transient unread/SSE effects. */
+@property --qa-change-angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+@keyframes qaChangeFlow { to { --qa-change-angle: 360deg; } }
+.mine-req-card.mine-change-retest-pending { position: relative; isolation: isolate; }
+.mine-req-card.mine-change-retest-pending::before,
+#tab-mine details.mine-req-card.mine-change-retest-pending::before {
+  content: '';
+  position: absolute;
+  inset: -2px !important;
+  width: auto !important;
+  border-radius: inherit !important;
+  padding: 2px;
+  pointer-events: none;
+  opacity: 1 !important;
+  clip-path: none !important;
+  transform: none !important;
+  background: conic-gradient(from var(--qa-change-angle), #f59e0b, #f97316 28%, #fef08a 50%, #fbbf24 65%, #d97706 85%, #f59e0b) !important;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: destination-out;
+  mask-composite: exclude;
+  animation: qaChangeFlow 4.8s linear infinite !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mine-req-card.mine-change-retest-pending::before,
+  #tab-mine details.mine-req-card.mine-change-retest-pending::before { animation: none !important; }
+}

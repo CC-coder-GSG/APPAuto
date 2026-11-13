@@ -38,7 +38,7 @@ async function showChange(requirementId) {
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     dialog.innerHTML = `<h3 style="margin-top:0">处理变更 · ${h(data.title)}</h3>
       <p>当前大版本：${h(data.major_version_name)}。请选择需要重测的任务和负责人。</p>
-      <p class="muted">默认重新激活并指派原任务，跨版本也保留原任务编号及所属版本。需要新建时可另选处理方式。需求变更由接手人本人阅读并确认。</p>
+      <p class="muted">默认重新激活并指派原任务后暂停，跨版本也保留原任务编号及所属版本。接手人确认需求变更、开始测试后才计时。需要新建时可另选处理方式。</p>
       ${!data.can_manage ? '<p role="status">你可以查看变更；派发重测需要需求分配权限。</p>' : ''}
       ${data.can_manage && data.tasks.some(t => t.can_create || t.mode === 'create') ? `<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px"><label>重测预计开始日期 <input type="date" data-change-start value="${today}"></label><label>重测预计结束日期 <input type="date" data-change-deadline></label><span class="muted">仅选择新建重测任务时需填写完整日期。</span></div>` : ''}
       <div style="overflow:auto"><table class="table"><thead><tr><th>选择</th><th>任务 / 需求版本</th><th>所属执行 / 处理方式</th><th>负责人</th><th>结果</th></tr></thead><tbody>

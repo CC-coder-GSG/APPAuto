@@ -129,11 +129,13 @@ class RequirementTaskService:
             from app.services.zentao_system_client import get_user_zentao_client
             client = get_user_zentao_client(actor.id, self.db)
         if client is None:
-            raise HTTPException(502, "找不到可用的禅道账号绑定")
+            raise HTTPException(502, "找不到可用的禅道账号绑定", headers={'X-Operation-Outcome': 'not-started'})
         try:
-            task = client.get_task(row.task_id)
+            from app.services.zentao_task_read_service import read_task_with_fallback
+            task = read_task_with_fallback(client, row.task_id, row.execution_id)
         except Exception as exc:
-            raise HTTPException(502, "无法读取所选任务，未执行修改") from exc
+            raise HTTPException(502, "无法读取所选任务，未执行修改",
+                                headers={'X-Operation-Outcome': 'not-started'}) from exc
         from app.services.zentao_task_schedule_service import _id
 
         explicit_change = self.db.query(RequirementChangeRetest.id).filter_by(

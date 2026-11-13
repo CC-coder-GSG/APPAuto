@@ -18,7 +18,7 @@ function dock() {
   let element = document.getElementById('wb-operation-dock');
   if (!element) { element = document.createElement('div'); element.id = 'wb-operation-dock'; document.body.appendChild(element); }
   element.hidden = operations.size === 0;
-  element.innerHTML = [...operations.values()].map((op, i) => `<div class="wb-activity-row"><div>${op.state === 'running' ? '<span class="wb-spin"></span> ' : '⚠ '}${esc(op.label)}</div><div>${op.state === 'running' ? '正在同步禅道，可收起弹窗后继续查看' : esc(op.error)}</div><button class="wb-text-button" data-open="${i}">查看</button>${op.state === 'uncertain' ? `<button class="wb-text-button" data-check="${i}">核对结果</button>` : ''}${op.state === 'failed' ? `<button class="wb-text-button" data-dismiss="${i}">忽略</button>` : ''}</div>`).join('');
+  element.innerHTML = [...operations.values()].map((op, i) => `<div class="wb-activity-row"><div>${['running','checking'].includes(op.state) ? '<span class="wb-spin"></span> ' : '⚠ '}${esc(op.label)}</div><div>${op.state === 'running' ? '正在同步禅道，可收起弹窗后继续查看' : op.state === 'checking' ? '正在读取禅道核对结果…' : esc(op.error)}</div><button class="wb-text-button" data-open="${i}">查看</button>${op.state === 'uncertain' ? `<button class="wb-text-button" data-check="${i}">核对结果</button>` : ''}${op.state === 'failed' ? `<button class="wb-text-button" data-dismiss="${i}">忽略</button>` : ''}</div>`).join('');
   const rows = [...operations.values()];
   element.querySelectorAll('[data-open]').forEach(btn => btn.onclick = () => rows[btn.dataset.open].open());
   element.querySelectorAll('[data-check]').forEach(btn => btn.onclick = () => check(rows[btn.dataset.check]));
@@ -32,9 +32,14 @@ function notice(op) {
     node = document.createElement('div'); node.className = 'wb-operation-status';
     (op.modal.querySelector('.effort-dialog') || op.modal.firstElementChild || op.modal).prepend(node);
   }
-  node.setAttribute('role', op.state === 'running' ? 'status' : 'alert');
-  node.toggleAttribute('data-error', op.state !== 'running');
-  node.innerHTML = `${op.state === 'running' ? '<span class="wb-spin"></span>' : '⚠'}<span>${esc(op.state === 'running' ? `${op.label}：正在同步禅道…` : op.error)}</span>`;
+  const busy = ['running','checking'].includes(op.state);
+  node.setAttribute('role', busy ? 'status' : 'alert');
+  node.toggleAttribute('data-error', !busy);
+  node.innerHTML = `${busy ? '<span class="wb-spin"></span>' : '⚠'}<span>${esc(op.state === 'running' ? `${op.label}：正在同步禅道…` : op.state === 'checking' ? '正在读取禅道核对结果…' : op.error)}</span>`;
+  if (op.state === 'uncertain') {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'wb-text-button'; button.textContent = '核对结果';
+    button.onclick = () => check(op); node.appendChild(button);
+  }
   if (op.state === 'running') {
     const hide = document.createElement('button'); hide.type = 'button'; hide.className = 'wb-text-button'; hide.textContent = '收起';
     hide.onclick = () => { op.modal.style.display = 'none'; }; node.appendChild(hide);
@@ -61,12 +66,22 @@ async function complete(op, result) {
 
 async function check(op) {
   if (op.state === 'checking') return;
-  op.state = 'checking'; dock();
+  op.state = 'checking'; notice(op); dock();
+  op.checkCount = (op.checkCount || 0) + 1;
   let result = null;
-  try { result = await op.verify?.(); } catch { /* keep uncertain */ }
+  let timeout;
+  let timedOut = false;
+  const controller = new AbortController();
+  try {
+    result = await Promise.race([
+      Promise.resolve().then(() => op.verify?.({signal:controller.signal})),
+      new Promise((_, reject) => { timeout = setTimeout(() => { timedOut = true; controller.abort(); reject(new Error('verification timeout')); }, 20000); }),
+    ]);
+  } catch { /* keep uncertain; checking always ends and does not replay a write */ }
+  finally { clearTimeout(timeout); }
   if (result === true || result?.confirmed) { await complete(op, result?.data); return; }
   op.state = result === false ? 'failed' : 'uncertain';
-  op.error = (op.originalError ? `${op.originalError}。` : '') + (result === false ? '已核对：操作未完成，可查看原输入后重试。' : '结果尚未确认，请先核对禅道。不会自动重复提交。');
+  op.error = (op.originalError ? `${op.originalError}。` : '') + (result === false ? '已核对：操作未完成，可查看原输入后重试。' : `${timedOut ? '核对超时' : `第 ${op.checkCount} 次核对仍未确认成功`}，请先核对禅道。不会自动重复提交。`);
   notice(op); dock();
 }
 
@@ -137,7 +152,8 @@ export async function runZentaoOperation(config) {
     await complete(op, result);
   } catch (error) {
     op.error = op.originalError = error.message || '操作失败';
-    op.state = error.status && error.status < 500 ? 'failed' : 'uncertain';
+    op.state = error.operationOutcome === 'not-started' || (error.status && error.status < 500) ? 'failed' : 'uncertain';
+    if (error.operationOutcome === 'not-started') op.error += '。本次未提交修改，可重试。';
     if (op.state === 'uncertain') await check(op);
     if (operations.has(op.key)) {
       op.activity.fail(op.error);

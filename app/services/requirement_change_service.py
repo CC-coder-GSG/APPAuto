@@ -150,16 +150,18 @@ class RequirementChangeService:
         for row in sorted(rows, key=lambda r: r.id):
             task = tasks.get(row.task_id)
             personal = records.get((row.requirement_id, row.owner_id))
-            completed = bool(row.status == 'active' and task and task.status in {'done', 'closed'}
+            test_completed = bool(row.status == 'active' and task and task.status in {'done', 'closed'}
                              and task.task_story_change_pending is False
                              and (task.task_story_version or 0) >= row.story_version
-                             and personal and personal.case_completed and personal.test_completed)
+                             and personal and personal.test_completed)
+            completed = bool(test_completed and personal.case_completed)
             previous = json.loads(row.previous_state) if row.previous_state else {}
             result.setdefault(row.requirement_id, []).append({
                 'id': row.id, 'source_task_id': row.source_task_id, 'task_id': row.task_id,
                 'story_version': row.story_version, 'owner_id': row.owner_id,
                 'owner_name': users[row.owner_id].shown_name if row.owner_id in users else '未知',
                 'status': 'completed' if completed else row.status,
+                'test_completed': test_completed,
                 'previous_test_completed': bool(previous.get('test_completed')),
                 'previous_test_completed_at': previous.get('test_completed_at'),
                 'dispatch_error': previous.get('dispatch_error'),
@@ -174,6 +176,37 @@ class RequirementChangeService:
                 or task.get('isParent') in (True, 1, '1') or task.get('deleted') in (True, 1, '1')
                 or task.get('team') or task.get('mode') in {'linear', 'multi'}):
             raise HTTPException(409, '任务关联、类型或成员已变化，请刷新后处理；多人任务请在禅道处理')
+
+    def _pause_reopened_task(self, client, req, task_id, execution):
+        """Dispatch is a handoff, not a timed work segment; never submit effort here."""
+        task = client.get_task(task_id)
+        self.validate_task(task, req, task_id)
+        if _id(task.get('execution')) != execution:
+            raise HTTPException(409, '原任务所属执行已变化，未执行暂停')
+        if effective_task_status(task) == 'pause':
+            return
+        if effective_task_status(task) not in {'doing', 'changed'}:
+            raise HTTPException(502, '原任务尚未确认重新激活，未完成派发')
+        failure = None
+        try:
+            client.pause_task(task_id, comment='变更重测派发后暂停，待负责人开始测试')
+        except Exception as exc:
+            failure = exc
+        task = client.get_task(task_id)
+        self.validate_task(task, req, task_id)
+        if _id(task.get('execution')) != execution:
+            raise HTTPException(409, '原任务所属执行已变化，请刷新核对')
+        if effective_task_status(task) == 'pause':
+            return
+        if failure and getattr(failure, 'outcome_unknown', False):
+            raise HTTPException(502, '原任务暂停结果待核实，请刷新后重试') from failure
+        from app.services.zentao_system_client import get_system_zentao_web_login
+        from app.services.zentao_web_session import pause_task_via_web
+        login = getattr(client, 'web_login', None) or get_system_zentao_web_login(self.db)
+        client_account = (getattr(client, 'account', '') or '').strip().lower()
+        if login is None or (client_account and login.account.strip().lower() != client_account):
+            raise HTTPException(502, '原任务暂停未生效，请检查禅道管理账号的网页绑定后重试')
+        pause_task_via_web(login, task_id, comment='变更重测派发后暂停，待负责人开始测试')
 
     def dispatch(self, requirement_id, user, *, source_task_id, owner_id, expected_story_version,
                  task_start_date=None, task_deadline=None, retry_unconfirmed=False, mode='reactivate'):
@@ -298,6 +331,8 @@ class RequirementChangeService:
                     # It never acknowledges a requirement on behalf of its next assignee.
                     client.restart_task(source_task_id, consumed=float(task.get('consumed') or 0),
                                         left=req.estimated_test_hours or 4, assigned_to=wanted)
+                stage = 'pause'
+                self._pause_reopened_task(client, req, source_task_id, execution)
             stage = 'verify'
             task = client.get_task(target_id)
             self.validate_task(task, req, target_id)
@@ -308,7 +343,7 @@ class RequirementChangeService:
                 client.reassign_task(target_id, wanted)
                 task = client.get_task(target_id)
                 self.validate_task(task, req, target_id)
-            if (effective_task_status(task) not in {'wait', 'doing', 'changed'}
+            if (effective_task_status(task) not in ({'wait', 'doing', 'changed'} if create else {'pause'})
                     or account(task.get('assignedTo')).lower() != wanted.lower()
                     or _id(task.get('execution')) != execution):
                 raise HTTPException(502, '禅道任务未确认恢复或指派未生效，请刷新后重试')
@@ -328,7 +363,7 @@ class RequirementChangeService:
                 self.db.add(mirror)
             ZentaoTaskMirrorService(self.db)._apply_task_data(mirror, task)
             # Old submitted effort stays in Zentao; only the new local timing segment starts here.
-            mirror.local_started_at = local_now() if effective_task_status(task) in {'doing', 'changed'} else None
+            mirror.local_started_at = local_now() if create and effective_task_status(task) in {'doing', 'changed'} else None
             mirror.consumed_accum = 0
             mirror.efforts_submitted = 0
             previous = self.db.query(FinalTestRecord).filter_by(requirement_id=req.id, user_id=owner_id).first()
@@ -362,6 +397,7 @@ class RequirementChangeService:
                 f'禅道创建已拒绝：{exc.message}；修正后可重试' if rejected else
                 f'禅道读取失败：{exc.message}' if stage == 'recover' and isinstance(exc, ZentaoAPIError) else
                 '禅道创建结果待核实，请先核对任务；已有任务将被复用' if stage == 'create' else
+                '原任务已重新打开，但暂停结果未确认，请刷新核对后重试' if stage == 'pause' else
                 '禅道处理结果待核实，请刷新后重试；已有任务将被复用')
             logger.warning('change retest failed requirement=%s source=%s receipt=%s stage=%s kind=%s rejected=%s',
                            req.id, source_task_id, receipt.id, stage, type(exc).__name__, rejected)

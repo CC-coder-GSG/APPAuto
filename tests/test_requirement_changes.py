@@ -9,6 +9,9 @@ from app.models import FinalTestRecord, RequirementChangeRetest, ZentaoTaskMirro
 from app.services.final_test_service import FinalTestService
 from app.services.requirement_change_service import RequirementChangeService
 from app.services.workbench_service import WorkbenchService
+from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+
+REAL_AUTO_CONSUMED_HOURS = ZentaoTaskMirrorService._auto_consumed_hours
 
 
 @pytest.fixture
@@ -55,7 +58,7 @@ def test_reopens_closed_changed_task_without_acknowledging_and_archives_owner_on
     result = dispatch(e)
     task = e['client'].tasks[101]
     assert result['task_id'] == 101 and not result['created']
-    assert task['status'] == 'doing' and task['assignedTo'] == 'alice'
+    assert task['status'] == 'pause' and task['assignedTo'] == 'alice'
     assert task['storyVersion'] == 2  # only the assignee may acknowledge v6 later
     assert task['consumed'] == 3
     assert e['req'].owner_id == e['alice'].id and not e['req'].test_completed
@@ -156,7 +159,11 @@ def test_round_needs_confirmed_task_and_current_personal_completion(changed):
     record = e['db'].query(FinalTestRecord).filter_by(user_id=e['alice'].id).one()
     e['db'].commit()
     assert e['change'].summaries([e['req'].id])[e['req'].id][0]['status'] == 'active'
-    record.case_completed = record.test_completed = True
+    record.test_completed = True
+    e['db'].commit()
+    summary = e['change'].summaries([e['req'].id])[e['req'].id][0]
+    assert summary['test_completed'] is True and summary['status'] == 'active'
+    record.case_completed = True
     e['db'].commit()
     assert e['change'].summaries([e['req'].id])[e['req'].id][0]['status'] == 'completed'
 
@@ -312,7 +319,7 @@ def test_cross_version_defaults_to_original_task_and_keeps_acknowledgement_pendi
     assert result['task_id'] == 102 and not result['created']
     assert len(e['client'].tasks) == 2
     task = e['client'].tasks[102]
-    assert task['status'] == 'doing' and task['assignedTo'] == 'alice'
+    assert task['status'] == 'pause' and task['assignedTo'] == 'alice'
     assert task['execution'] == 999 and task['storyVersion'] == 2
     assert 102 in {t.task_id for t in e['service'].rows_by_requirement([e['req']])[e['req'].id]}
     # After the assignee confirms the new requirement, the explicit old-execution
@@ -382,3 +389,59 @@ def test_switching_to_original_can_choose_a_different_assignee(changed):
     assert state['prior_dispatch']['owner_id'] == e['alice'].id
     assert state['prior_dispatch']['previous_state']['test_completed'] is True
     assert state['test_completed'] is True
+
+
+def test_dispatch_pauses_without_settling_or_submitting_work_hours(changed, monkeypatch):
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+    e = changed
+    monkeypatch.setattr(ZentaoTaskMirrorService, '_try_submit_segment_efforts',
+                        lambda *a, **kw: pytest.fail('dispatch must not submit effort'))
+    dispatch(e)
+    mirror = e['db'].get(ZentaoTaskMirror, 101)
+    assert mirror.status == 'pause' and mirror.local_started_at is None
+    assert mirror.consumed_accum == 0 and mirror.efforts_submitted == 0
+    assert e['req'].task_started_at is None
+    assert e['client'].tasks[101]['consumed'] == 3
+
+
+def test_dispatch_pause_uses_same_account_web_fallback(changed, monkeypatch):
+    from types import SimpleNamespace
+    from app.services.zentao_v2_protocol import ZentaoAPIError
+    e = changed
+    e['client'].account = 'admin'
+    e['client'].web_login = SimpleNamespace(account='admin')
+    def unsupported(*a, **kw):
+        raise ZentaoAPIError(501, 'pause requires web')
+    monkeypatch.setattr(e['client'], 'pause_task', unsupported)
+    calls = []
+    def pause_web(login, task_id, **kw):
+        calls.append((login.account, task_id))
+        e['client'].tasks[task_id]['status'] = 'pause'
+    monkeypatch.setattr('app.services.zentao_web_session.pause_task_via_web', pause_web)
+    assert dispatch(e)['ok']
+    assert calls == [('admin', 101)]
+
+
+def test_unverified_pause_does_not_reset_personal_progress(changed, monkeypatch):
+    e = changed
+    monkeypatch.setattr(e['client'], 'pause_task', lambda *a, **kw: None)
+    with pytest.raises(HTTPException) as exc:
+        dispatch(e)
+    assert '暂停' in exc.value.detail
+    assert e['db'].query(FinalTestRecord).filter_by(user_id=e['alice'].id).one().test_completed
+    assert e['db'].query(RequirementChangeRetest).one().status == 'unknown'
+
+
+def test_paused_original_never_falls_back_to_old_real_start_for_timing(changed):
+    from datetime import timedelta
+    from app.utils.time_utils import local_now
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+    e = changed
+    mirror = e['db'].get(ZentaoTaskMirror, 101)
+    mirror.status = 'pause'
+    mirror.real_started = local_now() - timedelta(days=90)
+    mirror.local_started_at = None
+    mirror.consumed_accum = mirror.efforts_submitted = 0
+    service = ZentaoTaskMirrorService(e['db'])
+    assert service._local_segment_start(mirror) is None
+    assert REAL_AUTO_CONSUMED_HOURS(service, mirror, local_now()) == 0

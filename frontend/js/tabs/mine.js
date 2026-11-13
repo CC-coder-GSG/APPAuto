@@ -1603,6 +1603,9 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
     const testDisabled = req.test_completed ? 'disabled' : '';
     const aggregateDone = baseReq.has_multiple_test_tasks ? baseReq.all_linked_test_tasks_completed : baseReq.test_completed;
     const changeRetestPending = req.final_test && (baseReq.change_retests || []).some(r => r.status !== 'completed');
+    const myId = Number(state.currentUser?.id || window.currentUser?.id || 0);
+    const emphasizeChange = req.final_test && (baseReq.change_retests || []).some(r =>
+      Number(r.owner_id) === myId && r.task_id && r.status === 'active' && !r.test_completed);
     const unhandledChange = req.task_story_change_pending || (baseReq.test_tasks || []).some(t => t.task_story_change_pending)
       || (req.final_test && !(baseReq.change_retests || []).length && (baseReq.story_tasks || []).some(t => t.type === 'test' && t.task_story_change_pending));
     const isFullyCompleted = aggregateDone && req.case_completed && (!req.final_test || baseReq.test_completed) && !changeRetestPending && !unhandledChange;
@@ -1652,7 +1655,7 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
     const retestFailBorder = retestFailed ? 'border:2px solid #ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.12);' : '';
 
     return `
-      <details class="mine-req-card" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; ${retestFailBorder} transition: all 0.3s;">
+      <details class="mine-req-card${emphasizeChange ? ' mine-change-retest-pending' : ''}" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; ${retestFailBorder} transition: all 0.3s;">
         <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
           <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${renderTaskStoryChangeBadge(req)}${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${generateCaseChip}${storyTaskHtml}${renderFinalTestPeople(baseReq)}${renderRequirementChange(baseReq)}</div>
           ${isFullyCompleted ? '<span style="color:#16a34a; font-size:14px; background:#f0fdf4; padding:4px 8px; border-radius:4px; border:1px solid #bbf7d0;">✅ 测试已完成</span>' : '<span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开卡片)</span>'}
@@ -1694,8 +1697,16 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
     const changeBanner = pendingCount ? `<div role="status" style="background:#fff7ed; color:#9a3412; border:1px solid #fdba74; padding:10px 14px; border-radius:8px; margin-bottom:12px;">⚠ 有 ${pendingCount} 项研发需求变更待确认，请点击需求卡片上的橙色标签查看内容并确认。</div>` : '';
     const existingList = mineCards.querySelector('#mine-requirements-panel');
     if (preserveCards && existingList) {
+      let scrollHost = existingList.parentElement;
+      while (scrollHost && scrollHost !== document.body && scrollHost !== document.documentElement) {
+        if (/(auto|scroll)/.test(getComputedStyle(scrollHost).overflowY) && scrollHost.scrollHeight > scrollHost.clientHeight) break;
+        scrollHost = scrollHost.parentElement;
+      }
+      if (scrollHost === document.body || scrollHost === document.documentElement) scrollHost = null;
+      const viewportTop = scrollHost ? scrollHost.getBoundingClientRect().top : 0;
+      const savedScroll = scrollHost ? scrollHost.scrollTop : window.scrollY;
       const anchor = [...existingList.querySelectorAll('.mine-req-card')]
-        .find(el => el.getBoundingClientRect().bottom > 0) || existingList.querySelector('.mine-req-card');
+        .find(el => el.getBoundingClientRect().bottom > viewportTop) || existingList.querySelector('.mine-req-card');
       const anchorId = anchor?.dataset.reqId;
       const anchorTop = anchor?.getBoundingClientRect().top;
       const changeSlot = mineCards.querySelector('#mine-change-banner');
@@ -1728,7 +1739,12 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
       if (!freshCards.length) existingList.innerHTML = '<div class="muted" style="padding:20px; text-align:center;">当前筛选条件下没有需求</div>';
       else if (existingList.children.length === 1 && existingList.firstElementChild?.classList.contains('muted')) existingList.firstElementChild.remove();
       const updatedAnchor = anchorId && existingList.querySelector(`.mine-req-card[data-req-id="${anchorId}"]`);
-      if (updatedAnchor && Number.isFinite(anchorTop)) window.scrollBy(0, updatedAnchor.getBoundingClientRect().top - anchorTop);
+      if (updatedAnchor && Number.isFinite(anchorTop)) {
+        const delta = updatedAnchor.getBoundingClientRect().top - anchorTop;
+        if (scrollHost) scrollHost.scrollTop += delta;
+        else window.scrollBy(0, delta);
+      } else if (scrollHost) scrollHost.scrollTop = savedScroll;
+      else window.scrollTo(window.scrollX, savedScroll);
     } else {
       mineCards.innerHTML = `<div id="mine-change-banner">${changeBanner}</div><div id="mine-final-banner">${finalTestBanner}</div>`
         + `<div id="mine-feedback-panel">${state.currentFeedbackTodoHtml || ''}</div>`
@@ -1754,7 +1770,7 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
 }
 
 document.addEventListener('zentao-story-change-confirmed', () => {
-  if (window.isWorkbenchSubtabActive?.('demand')) loadMyWorkbench().catch(() => {});
+  if (window.isWorkbenchSubtabActive?.('demand')) loadMyWorkbench({ background: true }).catch(() => {});
 });
 
 document.addEventListener('requirement-change-dispatched', () => {
@@ -1981,9 +1997,9 @@ async function runRequirementTaskAction(reqId, action) {
       if (data.errors?.length) return {...data,ok:false};
       return data;
     },
-    verify:async () => {
+    verify:async ({signal} = {}) => {
       if (!req.zentao_task_id) return null;
-      const task = await (await api(`/zentao/task/${req.zentao_task_id}/detail`)).json();
+      const task = await (await api(`/zentao/task/${req.zentao_task_id}/detail`, {signal})).json();
       return task.status === (action === 'start' ? 'doing' : 'pause') ? true : null;
     },
     onSuccess:refreshMineAfterStatus,

@@ -935,7 +935,7 @@ class ZentaoTaskMirrorService:
                 # the immediately following task read is temporarily stale.
                 if action == "finish" and _response_confirms_status(resp, _expected):
                     return resp
-                after_rest = dict(cli.get_task(task_id) or {})
+                after_rest = dict(self._fetch_one_task(cli, task_id) or {})
                 if _status_matches(after_rest):
                     return resp
                 if action == "finish" and task_finish_side_effect_observed(before_finish, resp, after_rest):
@@ -964,10 +964,11 @@ class ZentaoTaskMirrorService:
                     }
             except Exception as exc:  # noqa: BLE001 — REST 失败/未生效都尝试网页会话
                 logger.warning("%s via REST (%s) task %s failed: %s", action, label, task_id, exc)
-                if getattr(exc, "outcome_unknown", False):
+                if action != 'finish' or getattr(exc, "outcome_unknown", False):
                     verified = self._fetch_one_task(cli, row.task_id)
                     if _status_matches(verified):
                         return verified
+                if getattr(exc, "outcome_unknown", False):
                     raise
             if isinstance(resp, dict) and resp.get("status") == "success":
                 from app.services.zentao_client_service import ZentaoAPIError
@@ -1154,6 +1155,11 @@ class ZentaoTaskMirrorService:
         real_started 是首次开始，回退会把已结算的时段重复计入。"""
         if row.local_started_at:
             return row.local_started_at
+        # A normal pause settles its explicit segment after status readback.
+        # Once that segment is cleared, never accrue a paused task from its
+        # historical Zentao realStarted (including newly dispatched retests).
+        if row.status == 'pause':
+            return None
         if not float(row.consumed_accum or 0.0) and not float(row.efforts_submitted or 0.0):
             return row.real_started
         return None
@@ -1284,7 +1290,15 @@ class ZentaoTaskMirrorService:
 
     def _fetch_one_task(self, client, task_id: int) -> Optional[dict]:
         try:
-            t = client.get_task(task_id) or {}
+            t = client.get_task(task_id)
+            if isinstance(t, dict) and t and (not t.get('id') or str(t.get('id')) == str(task_id)):
+                return t
+        except Exception as exc:
+            logger.warning('fetch task detail failed task=%s kind=%s', task_id, type(exc).__name__)
+        try:
+            from app.services.zentao_task_read_service import read_task_with_fallback
+            row = self.db.get(ZentaoTaskMirror, task_id)
+            t = read_task_with_fallback(client, task_id, row.execution_id if row else None, skip_detail=True)
         except Exception as exc:  # noqa: BLE001
             logger.warning("fetch one task %s failed: %s", task_id, exc)
             return None
