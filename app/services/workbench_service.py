@@ -293,7 +293,7 @@ class WorkbenchService:
 
         from app.services.requirement_change_service import RequirementChangeService
         change_service = RequirementChangeService(self.db)
-        change_rounds = change_service.summaries([r.id for r in reqs])
+        change_rounds = change_service.summaries([r.id for r in reqs], records=task_service.change_records)
 
         return [
             {

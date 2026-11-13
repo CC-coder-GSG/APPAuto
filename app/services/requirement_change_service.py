@@ -74,7 +74,7 @@ class RequirementChangeService:
                              and r.story_version == row.task_latest_story_version), None)
             existing = existing or next((r for r in receipts if r.source_task_id == row.task_id
                                         and r.status != 'active'), None)
-            if existing and existing.status == 'active':
+            if existing and existing.status == 'active' and existing.task_id == row.task_id:
                 continue
             # Closed is a sentinel, never an owner. Completion is only a suggestion.
             owner = by_account.get((row.assigned_to or '').strip().lower())
@@ -94,7 +94,9 @@ class RequirementChangeService:
                 'execution_id': row.execution_id,
                 'execution_name': row.execution_name_cache or str(row.execution_id),
                 'story_version': row.task_story_version, 'latest_story_version': row.task_latest_story_version,
-                'mode': 'reactivate' if row.execution_id == req.major_version.zentao_execution_id else 'create',
+                'mode': 'reactivate',
+                'can_create': row.execution_id != req.major_version.zentao_execution_id,
+                'existing_task_id': existing.task_id if existing else None,
                 'suggested_owner_id': owner.id if owner else None, 'owner_reason': reason,
                 'dispatch_status': existing.status if existing else None,
                 'needs_create_confirmation': bool(existing and existing.status == 'unknown' and not existing.task_id
@@ -132,11 +134,11 @@ class RequirementChangeService:
                         return candidate
         return None
 
-    def summaries(self, requirement_ids):
+    def summaries(self, requirement_ids, *, records=None):
         if not requirement_ids:
             return {}
         from app.services.workbench_link_service import _load_matching
-        rows = _load_matching(self.db.query(RequirementChangeRetest),
+        rows = records if records is not None else _load_matching(self.db.query(RequirementChangeRetest),
                               [(RequirementChangeRetest.requirement_id, set(requirement_ids))])
         tasks = {t.task_id: t for t in _load_matching(self.db.query(ZentaoTaskMirror),
                  [(ZentaoTaskMirror.task_id, {r.task_id for r in rows if r.task_id})], identity='task_id')}
@@ -161,6 +163,7 @@ class RequirementChangeService:
                 'previous_test_completed': bool(previous.get('test_completed')),
                 'previous_test_completed_at': previous.get('test_completed_at'),
                 'dispatch_error': previous.get('dispatch_error'),
+                'replaced_task_id': previous.get('replaced_task_id'),
             })
         return result
 
@@ -173,7 +176,9 @@ class RequirementChangeService:
             raise HTTPException(409, '任务关联、类型或成员已变化，请刷新后处理；多人任务请在禅道处理')
 
     def dispatch(self, requirement_id, user, *, source_task_id, owner_id, expected_story_version,
-                 task_start_date=None, task_deadline=None, retry_unconfirmed=False):
+                 task_start_date=None, task_deadline=None, retry_unconfirmed=False, mode='reactivate'):
+        if mode not in {'reactivate', 'create'}:
+            raise HTTPException(400, '不支持的变更处理方式')
         if not self.can_manage(user):
             raise HTTPException(403, '仅有需求分配权限的人员可派发变更重测')
         with sync_lock(self.db, f'change_retest:{requirement_id}', ttl_seconds=600) as acquired:
@@ -181,7 +186,7 @@ class RequirementChangeService:
                 raise HTTPException(409, '该需求正在派发变更重测，请稍后刷新')
             try:
                 return self._dispatch(requirement_id, user, source_task_id, owner_id, expected_story_version,
-                                      task_start_date, task_deadline, retry_unconfirmed)
+                                      task_start_date, task_deadline, retry_unconfirmed, mode)
             except HTTPException:
                 raise
             except Exception as exc:
@@ -192,7 +197,7 @@ class RequirementChangeService:
                 raise HTTPException(502, '无法核对禅道任务或可指派人员，请稍后重试') from exc
 
     def _dispatch(self, requirement_id, user, source_task_id, owner_id, expected_story_version,
-                  task_start_date, task_deadline, retry_unconfirmed):
+                  task_start_date, task_deadline, retry_unconfirmed, mode):
         from app.services.zentao_system_client import get_system_zentao_client
         from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
         from app.services.requirement_service import RequirementService
@@ -215,24 +220,31 @@ class RequirementChangeService:
             raise HTTPException(409, '无法确认源任务所属执行，请先核对禅道任务')
         if _id(source.get('latestStoryVersion')) != expected_story_version:
             raise HTTPException(409, '需求版本已变化，请重新查看变更后派发')
-        execution = req.major_version.zentao_execution_id
+        create = mode == 'create' and _id(source.get('execution')) != req.major_version.zentao_execution_id
+        execution = req.major_version.zentao_execution_id if create else _id(source.get('execution'))
         assignable = client.list_assignable_users(execution)
         if wanted.lower() not in {a.strip().lower() for a in assignable}:
-            raise HTTPException(400, '所选负责人不在当前大版本的禅道可指派人员中')
+            raise HTTPException(400, '所选负责人不在目标任务所属执行的禅道可指派人员中')
         receipt = self.db.query(RequirementChangeRetest).filter_by(
             requirement_id=req.id, source_task_id=source_task_id, story_version=expected_story_version).first()
         receipt = receipt or self.db.query(RequirementChangeRetest).filter(
             RequirementChangeRetest.requirement_id == req.id,
             RequirementChangeRetest.source_task_id == source_task_id,
             RequirementChangeRetest.status != 'active').order_by(RequirementChangeRetest.id.desc()).first()
-        if receipt and receipt.owner_id != owner_id:
+        converting = bool(receipt and receipt.task_id and receipt.task_id != source_task_id and not create)
+        owner_changed = bool(receipt and receipt.owner_id != owner_id)
+        if owner_changed and not converting:
             raise HTTPException(409, '该变更已派发给其他人员，请刷新查看')
-        if receipt and receipt.status == 'active':
+        was_active = bool(receipt and receipt.status == 'active')
+        if was_active and not converting:
             return {'ok': True, 'task_id': receipt.task_id, 'already_dispatched': True}
+        if create and receipt and receipt.task_id == source_task_id:
+            raise HTTPException(409, '该变更已选择原任务重开，请继续使用原任务')
+        if converting and receipt.task_id == req.zentao_task_id:
+            raise HTTPException(409, '新任务已被设为需求主任务，请先调整主任务关联再切回原任务')
         if receipt:
             receipt.story_version = expected_story_version
             self.db.commit()
-        create = _id(source.get('execution')) != execution
         fresh = receipt is None
         if fresh:
             if effective_task_status(source) not in {'done', 'closed'} or task_story_change_pending(source) is not True:
@@ -245,6 +257,7 @@ class RequirementChangeService:
             self.db.add(receipt)
             self.db.commit()  # Reserve before external writes; retries reuse this receipt.
         marker = f'[change-retest:{receipt.id}]'
+        target_id = receipt.task_id if create else source_task_id
         stage = 'recover'
         try:
             if create:
@@ -275,6 +288,7 @@ class RequirementChangeService:
                 self.db.commit()
                 if not receipt.task_id:
                     raise HTTPException(502, '禅道未返回新任务编号，结果待核实')
+                target_id = receipt.task_id
             else:
                 stage = 'reactivate'
                 task = client.get_task(source_task_id)
@@ -285,23 +299,31 @@ class RequirementChangeService:
                     client.restart_task(source_task_id, consumed=float(task.get('consumed') or 0),
                                         left=req.estimated_test_hours or 4, assigned_to=wanted)
             stage = 'verify'
-            task = client.get_task(receipt.task_id)
-            self.validate_task(task, req, receipt.task_id)
+            task = client.get_task(target_id)
+            self.validate_task(task, req, target_id)
             if _id(task.get('execution')) != execution:
-                raise HTTPException(409, '重测任务不属于当前大版本')
+                raise HTTPException(409, '重测任务所属执行已变化，请刷新核对')
             if account(task.get('assignedTo')).lower() != wanted.lower():
                 stage = 'reassign'
-                client.reassign_task(receipt.task_id, wanted)
-                task = client.get_task(receipt.task_id)
-                self.validate_task(task, req, receipt.task_id)
+                client.reassign_task(target_id, wanted)
+                task = client.get_task(target_id)
+                self.validate_task(task, req, target_id)
             if (effective_task_status(task) not in {'wait', 'doing', 'changed'}
                     or account(task.get('assignedTo')).lower() != wanted.lower()
                     or _id(task.get('execution')) != execution):
                 raise HTTPException(502, '禅道任务未确认恢复或指派未生效，请刷新后重试')
             stage = 'save_local'
-            mirror = self.db.get(ZentaoTaskMirror, receipt.task_id)
+            state = json.loads(receipt.previous_state or '{}')
+            if converting:
+                if owner_changed:
+                    state = {'prior_dispatch': {'owner_id': receipt.owner_id, 'task_id': receipt.task_id,
+                                                'previous_state': state}}
+                state['replaced_task_id'] = receipt.task_id
+            receipt.task_id = target_id
+            receipt.owner_id = owner_id
+            mirror = self.db.get(ZentaoTaskMirror, target_id)
             if mirror is None:
-                mirror = ZentaoTaskMirror(task_id=receipt.task_id, execution_id=execution,
+                mirror = ZentaoTaskMirror(task_id=target_id, execution_id=execution,
                     name=task.get('name') or req.title, story=req.zentao_story_id, type='test')
                 self.db.add(mirror)
             ZentaoTaskMirrorService(self.db)._apply_task_data(mirror, task)
@@ -310,10 +332,14 @@ class RequirementChangeService:
             mirror.consumed_accum = 0
             mirror.efforts_submitted = 0
             previous = self.db.query(FinalTestRecord).filter_by(requirement_id=req.id, user_id=owner_id).first()
-            receipt.previous_state = json.dumps({key: (value.isoformat() if hasattr(value, 'isoformat') else value)
-                for key in ['case_completed', 'test_completed', 'testing', 'test_completed_at']
-                for value in [getattr(previous, key, None)]}, ensure_ascii=False)
-            if previous:
+            if not was_active or owner_changed:
+                state.update({key: (value.isoformat() if hasattr(value, 'isoformat') else value)
+                    for key in ['case_completed', 'test_completed', 'testing', 'test_completed_at']
+                    for value in [getattr(previous, key, None)]})
+            state.pop('dispatch_error', None)
+            state.pop('dispatch_stage', None)
+            receipt.previous_state = json.dumps(state, ensure_ascii=False)
+            if previous and (not was_active or owner_changed):
                 previous.case_completed = False
                 previous.test_completed = False
                 previous.testing = False

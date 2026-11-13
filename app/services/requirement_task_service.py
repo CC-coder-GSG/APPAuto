@@ -1,13 +1,14 @@
 """Scoped test-task selection without changing a requirement's primary binding."""
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from collections import defaultdict
 
 from fastapi import HTTPException
 from sqlalchemy import or_
 
-from app.models import FinalTestRecord, Requirement, User, Version
+from app.models import FinalTestRecord, Requirement, RequirementChangeRetest, User, Version
 from app.models.zentao_task_mirror import ZentaoTaskMirror
 from app.utils.time_utils import local_now
 
@@ -22,6 +23,13 @@ class RequirementTaskService:
         from app.services.workbench_link_service import _load_matching
 
         ids = {r.zentao_task_id for r in reqs if r.zentao_task_id}
+        req_ids = {r.id for r in reqs}
+        self.change_records = [c for c in _load_matching(self.db.query(RequirementChangeRetest).join(
+            Requirement, Requirement.id == RequirementChangeRetest.requirement_id),
+            [(Requirement.major_version_id, {r.major_version_id for r in reqs})])
+            if c.requirement_id in req_ids]
+        change_rows = [c for c in self.change_records if c.status == 'active']
+        ids.update(r.task_id for r in change_rows if r.task_id)
         stories = {r.zentao_story_id for r in reqs if r.zentao_story_id}
         query = self.db.query(ZentaoTaskMirror).filter(
             ZentaoTaskMirror.is_parent == 0, ZentaoTaskMirror.type == "test",
@@ -40,6 +48,16 @@ class RequirementTaskService:
             primary = by_id.get(req.zentao_task_id)
             if primary and primary.execution_id == execution_id:
                 matches[primary.task_id] = primary
+            for change in change_rows:
+                if change.requirement_id != req.id:
+                    continue
+                selected = by_id.get(change.task_id)
+                if selected and selected.story == req.zentao_story_id:
+                    matches[selected.task_id] = selected
+                # Preserve previous generated copies as history, outside this round's progress.
+                replaced = json.loads(change.previous_state or '{}').get('replaced_task_id')
+                if replaced and replaced != req.zentao_task_id:
+                    matches.pop(replaced, None)
             result[req.id] = [matches[key] for key in sorted(matches)]
         return result
 
@@ -118,8 +136,12 @@ class RequirementTaskService:
             raise HTTPException(502, "无法读取所选任务，未执行修改") from exc
         from app.services.zentao_task_schedule_service import _id
 
+        explicit_change = self.db.query(RequirementChangeRetest.id).filter_by(
+            requirement_id=req.id, task_id=row.task_id, status='active').first()
+        execution_id = row.execution_id if explicit_change else req.major_version.zentao_execution_id
+
         if (not isinstance(task, dict) or _id(task.get("id")) != row.task_id or
-                _id(task.get("execution")) != req.major_version.zentao_execution_id or
+                _id(task.get("execution")) != execution_id or
                 (req.zentao_story_id and _id(task.get("story")) != req.zentao_story_id) or
                 task.get("type") != "test" or task.get("deleted") in (True, 1, "1") or
                 task.get("isParent") in (True, 1, "1") or task.get("status") == "cancel"):

@@ -21,7 +21,7 @@ const root = path.resolve(__dirname, '..');
       {task_id: 101, name: '当前版本任务', status: 'closed', execution_name: 'V4.0.5.0',
         mode: 'reactivate', story_version: 2, latest_story_version: 6, suggested_owner_id: 7, owner_reason: '上次完成者'},
       {task_id: 102, name: '<img src=x onerror="window.injected=1">旧任务', status: 'closed', execution_name: 'V4.0.4.10',
-        mode: 'create', story_version: 2, latest_story_version: 6, suggested_owner_id: null, owner_reason: '请手动选择',
+        mode: 'reactivate', can_create: true, story_version: 2, latest_story_version: 6, suggested_owner_id: null, owner_reason: '请手动选择',
         needs_create_confirmation: true, dispatch_error: '上次创建结果待核实'},
     ];
     const html = `<!doctype html><meta charset="utf-8"><select id="mineMajorSelect"><option value="470">V4.0.5.0</option></select><div id="mineCards"></div>
@@ -55,7 +55,9 @@ const root = path.resolve(__dirname, '..');
     assert.equal(await card.locator('summary [style*="line-through"]').count(), 0, 'changed requirement must not look complete');
     await card.getByRole('button', {name: '处理变更', exact: true}).click();
     const dialog = page.getByRole('dialog', {name: '处理需求变更'});
-    await dialog.getByText('重新激活并指派', {exact: true}).waitFor();
+    await dialog.getByText('重新激活并指派原任务', {exact: true}).first().waitFor();
+    assert.equal(await dialog.getByLabel('任务 102 的处理方式').inputValue(), 'reactivate');
+    await dialog.getByLabel('任务 102 的处理方式').selectOption('create');
     assert.match(await dialog.innerText(), /在当前大版本新建重测任务/);
     assert.equal(await dialog.locator('img,script').count(), 0);
     await dialog.getByLabel('选择任务 101', {exact: true}).check();
@@ -73,9 +75,9 @@ const root = path.resolve(__dirname, '..');
     await dialog.getByRole('button', {name: '派发选中的重测任务'}).click();
     await dialog.getByText('已成功派发 1 / 2 个任务。失败项可核对后重试。').waitFor();
     assert.deepEqual(calls, [
-      {source_task_id: 101, owner_id: 7, expected_story_version: 6},
+      {source_task_id: 101, owner_id: 7, expected_story_version: 6, mode: 'reactivate'},
       {source_task_id: 102, owner_id: 8, expected_story_version: 6,
-        task_start_date: '2026-11-13', task_deadline: '2026-11-16', retry_unconfirmed: true},
+        task_start_date: '2026-11-13', task_deadline: '2026-11-16', retry_unconfirmed: true, mode: 'create'},
     ]);
     assert(await dialog.getByLabel('选择任务 101', {exact: true}).isDisabled());
     failSecond = false;
@@ -91,6 +93,16 @@ const root = path.resolve(__dirname, '..');
     await card.getByRole('button', {name: '处理变更', exact: true}).click();
     await dialog.getByText('你可以查看变更；派发重测需要需求分配权限。').waitFor();
     assert.equal(await dialog.getByRole('button', {name: '派发选中的重测任务'}).count(), 0);
+    await dialog.getByRole('button', {name: '关闭', exact: true}).click();
+    canManage = true;
+    await card.getByRole('button', {name: '处理变更', exact: true}).click();
+    await dialog.getByLabel('任务 102 的处理方式').waitFor();
+    await dialog.getByLabel('选择任务 102', {exact: true}).check();
+    await dialog.getByLabel('任务 102 的负责人').selectOption('8');
+    // Default reactivation neither creates a copy nor requires dates/creation confirmation.
+    await dialog.getByRole('button', {name: '派发选中的重测任务'}).click();
+    await dialog.getByText('已成功派发 1 / 1 个任务。失败项可核对后重试。').waitFor();
+    assert.deepEqual(calls.at(-1), {source_task_id: 102, owner_id: 8, expected_story_version: 6, mode: 'reactivate'});
     assert.equal(await page.evaluate(() => window.injected), undefined);
     assert.deepEqual(errors, []);
     console.log('PASS: changed completion badge, version scope, escaped content, owner validation, partial results, safe retries, read-only permissions');

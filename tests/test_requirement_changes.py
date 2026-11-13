@@ -47,7 +47,7 @@ def changed(env, monkeypatch):
 def dispatch(e, source=101, owner=None):
     return e['change'].dispatch(e['req'].id, e['admin'], source_task_id=source,
                                 owner_id=(owner or e['alice']).id, expected_story_version=6,
-                                task_start_date='2026-11-13', task_deadline='2026-11-16')
+                                task_start_date='2026-11-13', task_deadline='2026-11-16', mode='create')
 
 
 def test_reopens_closed_changed_task_without_acknowledging_and_archives_owner_only(changed):
@@ -193,7 +193,7 @@ def test_retry_after_another_requirement_change_keeps_same_receipt(changed):
         dispatch(e)
     e['client'].tasks[101]['latestStoryVersion'] = 7
     result = e['change'].dispatch(e['req'].id, e['admin'], source_task_id=101,
-                                 owner_id=e['alice'].id, expected_story_version=7)
+                                 owner_id=e['alice'].id, expected_story_version=7, mode='create')
     assert result['ok'] and len(e['client'].tasks) == 3
     assert e['db'].query(RequirementChangeRetest).one().story_version == 7
 
@@ -225,7 +225,7 @@ def test_new_task_dates_validated_before_reserving_or_creating(changed, start, e
     e['client'].tasks[101]['execution'] = 999
     with pytest.raises(HTTPException) as exc:
         e['change'].dispatch(e['req'].id, e['admin'], source_task_id=101, owner_id=e['alice'].id,
-                             expected_story_version=6, task_start_date=start, task_deadline=end)
+                             expected_story_version=6, task_start_date=start, task_deadline=end, mode='create')
     assert exc.value.status_code == 400
     assert e['db'].query(RequirementChangeRetest).count() == 0
     assert len(e['client'].tasks) == 2
@@ -269,7 +269,7 @@ def test_legacy_unknown_receipt_requires_confirmation_before_recreating(changed)
     assert e['change'].preview(e['req'].id, e['admin'])['tasks'][0]['needs_create_confirmation']
     result = e['change'].dispatch(e['req'].id, e['admin'], source_task_id=101, owner_id=e['alice'].id,
                                  expected_story_version=6, task_start_date='2026-11-13',
-                                 task_deadline='2026-11-16', retry_unconfirmed=True)
+                                 task_deadline='2026-11-16', retry_unconfirmed=True, mode='create')
     assert result['ok'] and len(e['client'].tasks) == 3
     assert e['db'].query(RequirementChangeRetest).one().id == receipt.id
 
@@ -285,7 +285,7 @@ def test_confirmed_retry_still_recovers_remote_task_before_creating(changed):
     with pytest.raises(HTTPException):
         dispatch(e)
     result = e['change'].dispatch(e['req'].id, e['admin'], source_task_id=101, owner_id=e['alice'].id,
-                                 expected_story_version=6, retry_unconfirmed=True)
+                                 expected_story_version=6, retry_unconfirmed=True, mode='create')
     assert result['ok'] and len(e['client'].tasks) == 3
 
 
@@ -300,3 +300,85 @@ def test_failed_recovery_does_not_turn_safe_create_into_unknown(changed, monkeyp
             dispatch(e)
     assert e['db'].query(RequirementChangeRetest).one().status == 'prepared'
     assert dispatch(e)['ok']
+
+
+def test_cross_version_defaults_to_original_task_and_keeps_acknowledgement_pending(changed):
+    e = changed
+    e['client'].tasks[102]['execution'] = 999
+    e['db'].get(ZentaoTaskMirror, 102).execution_id = 999
+    e['db'].commit()
+    result = e['change'].dispatch(e['req'].id, e['admin'], source_task_id=102,
+                                 owner_id=e['alice'].id, expected_story_version=6)
+    assert result['task_id'] == 102 and not result['created']
+    assert len(e['client'].tasks) == 2
+    task = e['client'].tasks[102]
+    assert task['status'] == 'doing' and task['assignedTo'] == 'alice'
+    assert task['execution'] == 999 and task['storyVersion'] == 2
+    assert 102 in {t.task_id for t in e['service'].rows_by_requirement([e['req']])[e['req'].id]}
+    # After the assignee confirms the new requirement, the explicit old-execution
+    # task remains operable through this requirement's existing task endpoint.
+    task['storyVersion'] = 6
+    assert e['service'].operate(e['req'].id, 102, e['alice'], action='finish', consumed=1)['ok']
+
+
+def test_existing_generated_task_can_switch_to_original_without_erasing_history(changed):
+    e = changed
+    e['req'].zentao_task_id = None
+    e['client'].tasks[101]['status'] = 'cancel'
+    e['db'].get(ZentaoTaskMirror, 101).status = 'cancel'
+    e['client'].tasks[102]['execution'] = 999
+    e['db'].get(ZentaoTaskMirror, 102).execution_id = 999
+    e['db'].commit()
+    created = dispatch(e, source=102)['task_id']
+    record = e['db'].query(FinalTestRecord).filter_by(user_id=e['alice'].id).one()
+    record.case_completed = True
+    e['db'].commit()
+    preview = e['change'].preview(e['req'].id, e['admin'])
+    row = next(t for t in preview['tasks'] if t['task_id'] == 102)
+    assert row['mode'] == 'reactivate' and row['existing_task_id'] == created
+    result = e['change'].dispatch(e['req'].id, e['admin'], source_task_id=102,
+                                 owner_id=e['alice'].id, expected_story_version=6)
+    assert result['task_id'] == 102
+    assert e['client'].tasks[created]['status'] == 'wait'  # never cancel/delete the previous copy
+    receipt = e['db'].query(RequirementChangeRetest).one()
+    state = json.loads(receipt.previous_state)
+    assert state['replaced_task_id'] == created and state['test_completed'] is True
+    assert record.case_completed
+    rows = e['service'].rows_by_requirement([e['req']])[e['req'].id]
+    assert 102 in {r.task_id for r in rows} and created not in {r.task_id for r in rows}
+    calls = len(e['client'].calls)
+    assert e['change'].dispatch(e['req'].id, e['admin'], source_task_id=102,
+        owner_id=e['alice'].id, expected_story_version=6)['already_dispatched']
+    assert len(e['client'].calls) == calls
+    e['client'].tasks[102]['storyVersion'] = 6
+    e['service'].operate(e['req'].id, 102, e['alice'], action='finish', consumed=1)
+    assert e['req'].test_completed
+    assert e['change'].summaries([e['req'].id])[e['req'].id][0]['status'] == 'completed'
+
+
+def test_failed_switch_keeps_previous_task_binding(changed, monkeypatch):
+    e = changed
+    e['client'].tasks[102]['execution'] = 999
+    created = dispatch(e, source=102)['task_id']
+    monkeypatch.setattr(e['client'], 'restart_task', lambda *a, **kw: None)
+    with pytest.raises(HTTPException):
+        e['change'].dispatch(e['req'].id, e['admin'], source_task_id=102,
+                             owner_id=e['alice'].id, expected_story_version=6)
+    receipt = e['db'].query(RequirementChangeRetest).one()
+    assert receipt.status == 'active' and receipt.task_id == created
+    assert 'replaced_task_id' not in json.loads(receipt.previous_state)
+
+
+def test_switching_to_original_can_choose_a_different_assignee(changed):
+    e = changed
+    e['client'].tasks[102]['execution'] = 999
+    dispatch(e, source=102)
+    result = e['change'].dispatch(e['req'].id, e['admin'], source_task_id=102,
+                                 owner_id=e['bob'].id, expected_story_version=6)
+    assert result['task_id'] == 102 and e['client'].tasks[102]['assignedTo'] == 'bob'
+    receipt = e['db'].query(RequirementChangeRetest).one()
+    assert receipt.owner_id == e['bob'].id
+    state = json.loads(receipt.previous_state)
+    assert state['prior_dispatch']['owner_id'] == e['alice'].id
+    assert state['prior_dispatch']['previous_state']['test_completed'] is True
+    assert state['test_completed'] is True

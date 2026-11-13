@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -569,6 +569,7 @@ class ChangeRetestPayload(BaseModel):
     task_start_date: Optional[str] = None
     task_deadline: Optional[str] = None
     retry_unconfirmed: bool = False
+    mode: Literal['reactivate', 'create'] = 'reactivate'
 
 
 @router.get('/requirements/{requirement_id}/change-retest')
