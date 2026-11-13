@@ -71,17 +71,20 @@ async function check(op) {
   let result = null;
   let timeout;
   let timedOut = false;
+  let verificationError = '';
   const controller = new AbortController();
   try {
     result = await Promise.race([
       Promise.resolve().then(() => op.verify?.({signal:controller.signal})),
       new Promise((_, reject) => { timeout = setTimeout(() => { timedOut = true; controller.abort(); reject(new Error('verification timeout')); }, 20000); }),
     ]);
-  } catch { /* keep uncertain; checking always ends and does not replay a write */ }
+  } catch (error) { verificationError = error.message || '读取失败'; }
   finally { clearTimeout(timeout); }
   if (result === true || result?.confirmed) { await complete(op, result?.data); return; }
   op.state = result === false ? 'failed' : 'uncertain';
-  op.error = (op.originalError ? `${op.originalError}。` : '') + (result === false ? '已核对：操作未完成，可查看原输入后重试。' : `${timedOut ? '核对超时' : `第 ${op.checkCount} 次核对仍未确认成功`}，请先核对禅道。不会自动重复提交。`);
+  op.error = (op.originalError ? `上次提交错误：${op.originalError}。` : '')
+    + (result === false ? '已核对：操作未完成，可查看原输入后重试。'
+      : `${timedOut ? '核对超时' : `第 ${op.checkCount} 次核对仍未确认成功`}${verificationError && !timedOut ? `；本次核对读取失败：${verificationError}` : ''}，请先核对禅道。不会自动重复提交。`);
   notice(op); dock();
 }
 
@@ -152,7 +155,8 @@ export async function runZentaoOperation(config) {
     await complete(op, result);
   } catch (error) {
     op.error = op.originalError = error.message || '操作失败';
-    op.state = error.operationOutcome === 'not-started' || (error.status && error.status < 500) ? 'failed' : 'uncertain';
+    op.state = error.operationOutcome === 'unknown' ? 'uncertain'
+      : error.operationOutcome === 'not-started' || (error.status && error.status < 500) ? 'failed' : 'uncertain';
     if (error.operationOutcome === 'not-started') op.error += '。本次未提交修改，可重试。';
     if (op.state === 'uncertain') await check(op);
     if (operations.has(op.key)) {

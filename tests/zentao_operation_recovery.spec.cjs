@@ -8,7 +8,7 @@ const root = path.resolve(__dirname, '..');
   const browser = await chromium.launch({channel: 'chrome', headless: true});
   try {
     const page = await browser.newPage();
-    let posts = 0, reads = 0, outcome = 'not-started', succeed = false, status = 'doing';
+    let posts = 0, reads = 0, outcome = 'not-started', succeed = false, status = 'doing', httpStatus = 502;
     const errors = [];
     page.on('pageerror', e => errors.push(e.stack));
     const html = `<!doctype html><meta charset="utf-8"><script type="module">
@@ -29,7 +29,7 @@ const root = path.resolve(__dirname, '..');
       if (url.pathname.startsWith('/static/')) return route.fulfill({contentType:'text/javascript',body:fs.readFileSync(path.join(root,'frontend',url.pathname.slice(8)))});
       if (url.pathname === '/pause') {
         posts++;
-        return succeed ? route.fulfill({json:{ok:true}}) : route.fulfill({status:502,
+        return succeed ? route.fulfill({json:{ok:true}}) : route.fulfill({status:httpStatus,
           headers:outcome?{'X-Operation-Outcome':outcome}:{},json:{detail:'无法读取所选任务，未执行修改'}});
       }
       if (url.pathname === '/state') { reads++; return route.fulfill({json:{status}}); }
@@ -46,6 +46,17 @@ const root = path.resolve(__dirname, '..');
     await dialog.getByRole('button',{name:'重试',exact:true}).click();
     await page.waitForFunction(()=>document.querySelectorAll('[role="dialog"]').length===0);
     assert.equal(posts,2,'explicit retry is unlocked');
+    outcome='unknown';httpStatus=409;succeed=false;
+    await page.evaluate(()=>window.pause());
+    await dialog.getByText('第 1 次核对仍未确认成功',{exact:false}).waitFor();
+    const unknownPosts=posts;
+    await page.evaluate(()=>window.pause());
+    assert.equal(posts,unknownPosts,'409 with unknown effort outcome must not permit resubmission');
+    assert.equal(await dialog.getByRole('button',{name:'重试',exact:true}).count(),0);
+    status='pause';
+    await dialog.getByRole('button',{name:'核对结果',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelectorAll('[role="dialog"]').length===0);
+    httpStatus=502;status='doing';
     outcome=null;succeed=false;
     await page.evaluate(()=>window.pause());
     await dialog.getByText('第 1 次核对仍未确认成功',{exact:false}).waitFor();

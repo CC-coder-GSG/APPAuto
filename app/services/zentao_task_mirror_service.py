@@ -11,6 +11,8 @@ import logging
 from datetime import date, datetime
 from typing import Any, Optional
 
+from fastapi import HTTPException
+
 from sqlalchemy.orm import Session
 
 from app.models import Requirement, User, Version, VersionType
@@ -528,7 +530,6 @@ class ZentaoTaskMirrorService:
         可指派人、需求走禅道实时接口（单项失败不阻塞，收进 errors）；
         父任务候选读本地镜像（顶层且未取消/关闭的任务）。
         """
-        from fastapi import HTTPException
 
         major = self.db.query(Version).filter(Version.id == major_version_id).first()
         if not major or not major.zentao_execution_id:
@@ -595,7 +596,6 @@ class ZentaoTaskMirrorService:
         创建人优先用本人禅道绑定（禅道正确记录 openedBy），无绑定回退系统账号。
         parent 在 create 时被禅道忽略，创建成功后再 PUT 挂父（失败降级为警告）。
         """
-        from fastapi import HTTPException
 
         name = (name or "").strip()
         if not name:
@@ -688,7 +688,6 @@ class ZentaoTaskMirrorService:
         assigned_to: Optional[str] = None,
     ) -> dict:
         """对禅道任务执行操作。除 assign（面向所有用户开放）外，仅任务指派人本人可操作。"""
-        from fastapi import HTTPException
 
         if action not in self._OP_ACTIONS:
             raise HTTPException(status_code=400, detail=f"不支持的操作：{action}")
@@ -1216,7 +1215,8 @@ class ZentaoTaskMirrorService:
             return submit_day_efforts(login, row.task_id, day_rows, left_before=float(row.left or 0.0), task_name=row.name)
         except Exception as exc:  # noqa: BLE001 — 提交失败退回本地累计，不阻塞暂停
             if getattr(exc, 'outcome_unknown', False):
-                raise HTTPException(409, "禅道工时提交结果不明，已停止自动补交，请先刷新核实") from exc
+                raise HTTPException(409, "禅道工时提交结果不明，已停止自动补交，请先刷新核实",
+                                    headers={'X-Operation-Outcome': 'unknown'}) from exc
             logger.warning("task %s pause: submit efforts failed, fall back to local accum: %s", row.task_id, exc)
             return None
 
@@ -1247,7 +1247,8 @@ class ZentaoTaskMirrorService:
                     return max(remainder, 0.1)
                 except Exception as exc:  # noqa: BLE001 — 拆分提交失败退回一次性
                     if getattr(exc, 'outcome_unknown', False):
-                        raise HTTPException(409, "禅道工时提交结果不明，已停止自动补交，请先刷新核实") from exc
+                        raise HTTPException(409, "禅道工时提交结果不明，已停止自动补交，请先刷新核实",
+                                            headers={'X-Operation-Outcome': 'unknown'}) from exc
                     logger.warning("task %s finish: pre-submit efforts failed, fall back to lump sum: %s", row.task_id, exc)
             total = round(remainder + sum(h for _, h in prev_rows), 2)
         else:
@@ -1260,7 +1261,6 @@ class ZentaoTaskMirrorService:
         if started is not None:
             # 已计时但不足一分钟/当日不计工时：禅道要求完成工时 >0，按最小值提交。
             return 0.1
-        from fastapi import HTTPException
         raise HTTPException(
             status_code=400,
             detail="未检测到平台计时记录，请确认实际工时后再完成任务",
@@ -1268,7 +1268,6 @@ class ZentaoTaskMirrorService:
 
     def assignable_users(self, task_id: int) -> dict:
         """任务所在执行的可指派人列表（指派弹窗数据源，面向所有用户）。"""
-        from fastapi import HTTPException
 
         row = self.db.query(ZentaoTaskMirror).filter(ZentaoTaskMirror.task_id == task_id).first()
         if not row:

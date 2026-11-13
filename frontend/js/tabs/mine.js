@@ -501,6 +501,11 @@ async function requestSelectedRequirementTask(req, action, extra = {}) {
   });
 }
 
+function requirementTaskOperationKey(req) {
+  return req?.selected_task_mode && req.zentao_task_id
+    ? `task:${req.zentao_task_id}` : `requirement:${req?.id}`;
+}
+
 function getMinorOptionsByMajor(majorId) {
   const allVersions = window.versions || [];
   return allVersions.filter((v) => v.version_type === 'minor' && Number(v.parent_id) === Number(majorId));
@@ -560,7 +565,7 @@ function openTestExecutionModal(reqId, checkboxEl) {
 export function closeMineTestExecutionModal() {
   const modal = document.getElementById('mineTestExecModal');
   if (modal) closeModal(modal);
-  if (operationPending(`requirement:${modalState.reqId}`)) return;
+  if (operationPending(modalState.taskId ? `task:${modalState.taskId}` : `requirement:${modalState.reqId}`)) return;
   if (modalState.checkboxEl) modalState.checkboxEl.checked = false;
   modalState.reqId = null;
   modalState.taskId = null;
@@ -1124,7 +1129,7 @@ export async function confirmMineTestExecutionModal() {
 
   const snapshot = modalState;
   await runZentaoOperation({
-    key: `requirement:${reqId}`, label: `需求 #${reqId} 提交测试完成`,
+    key: requirementTaskOperationKey(req), label: `需求 #${reqId}${req.selected_task_mode ? ` / 任务 #${req.zentao_task_id}` : ''} 提交测试完成`,
     locks: req.zentao_task_id ? [`task:${req.zentao_task_id}`] : [],
     modal: 'mineTestExecModal', isCurrent: () => modalState === snapshot,
     restore: () => { modalState = snapshot; },
@@ -1988,8 +1993,8 @@ async function runRequirementTaskAction(reqId, action) {
   const req = getRequirementById(reqId);
   if (!req) return;
   await runZentaoOperation({
-    key:`requirement:${reqId}`, locks:req.zentao_task_id ? [`task:${req.zentao_task_id}`] : [],
-    label:`需求 #${reqId} ${action === 'start' ? '开始' : '暂停'}任务`,
+    key:req.zentao_task_id ? `task:${req.zentao_task_id}` : `requirement:${reqId}`, locks:[],
+    label:`需求 #${reqId}${req.zentao_task_id ? ` / 任务 #${req.zentao_task_id}` : ''} ${action === 'start' ? '开始' : '暂停'}任务`,
     run:async () => {
       const response = req.selected_task_mode ? await requestSelectedRequirementTask(req, action)
         : await api(`/requirements/${reqId}/task/${action}`, {method:'POST',body:{}});

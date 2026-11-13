@@ -53,3 +53,44 @@ def test_preflight_rejects_task_from_wrong_execution(env, monkeypatch):
         e['service'].operate(e['req'].id, 102, e['alice'], action='pause')
     assert exc.value.headers['X-Operation-Outcome'] == 'not-started'
     assert e['client'].calls == []
+
+
+def test_pause_effort_timeout_returns_unknown_not_name_error(env, monkeypatch):
+    from types import SimpleNamespace
+    from app.utils.time_utils import local_now
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+    from app.services.zentao_web_session import ZentaoWebSessionError
+    e = env
+    e['client'].tasks[102]['status'] = 'doing'
+    monkeypatch.setattr(ZentaoTaskMirrorService, '_split_segment_by_day', lambda *a: [(local_now().date(), 1)])
+    monkeypatch.setattr('app.services.zentao_task_mirror_service.get_user_zentao_web_login', lambda *a: SimpleNamespace())
+    submitted = []
+    def timeout(*a, **kw):
+        submitted.append(1)
+        raise ZentaoWebSessionError('effort response timeout', outcome_unknown=True)
+    monkeypatch.setattr('app.services.zentao_task_mirror_service.submit_day_efforts', timeout)
+    with pytest.raises(HTTPException) as exc:
+        e['service'].operate(e['req'].id, 102, e['alice'], action='pause')
+    assert exc.value.status_code == 409
+    assert exc.value.headers['X-Operation-Outcome'] == 'unknown'
+    assert submitted == [1] and e['client'].calls == []
+
+
+def test_finish_effort_timeout_preserves_unknown_outcome(env, monkeypatch):
+    from datetime import timedelta
+    from types import SimpleNamespace
+    from app.utils.time_utils import local_now
+    from app.models import ZentaoTaskMirror
+    from app.services.zentao_task_mirror_service import ZentaoTaskMirrorService
+    from app.services.zentao_web_session import ZentaoWebSessionError
+    e = env
+    monkeypatch.setattr(ZentaoTaskMirrorService, '_split_segment_by_day', lambda *a: [(local_now().date()-timedelta(days=1), 1)])
+    monkeypatch.setattr('app.services.zentao_task_mirror_service.get_user_zentao_web_login', lambda *a: SimpleNamespace())
+    def timeout(*a, **kw):
+        raise ZentaoWebSessionError('effort response timeout', outcome_unknown=True)
+    monkeypatch.setattr('app.services.zentao_task_mirror_service.submit_day_efforts', timeout)
+    with pytest.raises(HTTPException) as exc:
+        ZentaoTaskMirrorService(e['db'])._prepare_finish_consumed(
+            e['db'].get(ZentaoTaskMirror, 102), e['alice'], local_now(), explicit=None)
+    assert exc.value.status_code == 409
+    assert exc.value.headers['X-Operation-Outcome'] == 'unknown'
