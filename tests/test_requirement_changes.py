@@ -31,10 +31,12 @@ def changed(env, monkeypatch):
     e['db'].commit()
     e['client'].list_assignable_users = lambda _: {'alice': 'Alice', 'bob': 'Bob'}
     def create(execution, **kw):
+        assert kw['est_started'] and kw['deadline'], 'Retest tasks must carry planned dates'
         tid = max(e['client'].tasks) + 1
         task = dict(id=tid, execution=execution, story=kw['story'], type='test', isParent=0,
                     status='wait', assignedTo=kw['assigned_to'], name=kw['name'], desc=kw['desc'],
-                    storyVersion=6, latestStoryVersion=6, estimate=kw['estimate'])
+                    storyVersion=6, latestStoryVersion=6, estimate=kw['estimate'],
+                    estStarted=kw['est_started'], deadline=kw['deadline'])
         e['client'].tasks[tid] = task
         return deepcopy(task)
     e['client'].create_execution_task = create
@@ -44,7 +46,8 @@ def changed(env, monkeypatch):
 
 def dispatch(e, source=101, owner=None):
     return e['change'].dispatch(e['req'].id, e['admin'], source_task_id=source,
-                                owner_id=(owner or e['alice']).id, expected_story_version=6)
+                                owner_id=(owner or e['alice']).id, expected_story_version=6,
+                                task_start_date='2026-11-13', task_deadline='2026-11-16')
 
 
 def test_reopens_closed_changed_task_without_acknowledging_and_archives_owner_only(changed):
@@ -87,6 +90,7 @@ def test_old_execution_creates_current_task_and_preserves_old_task(changed):
     target = e['client'].tasks[result['task_id']]
     assert target['execution'] == 123 and target['story'] == 333
     assert target['assignedTo'] == 'alice'
+    assert target['estStarted'] == '2026-11-13' and target['deadline'] == '2026-11-16'
     rows = WorkbenchService(e['db']).get_my_workbench(current_user=e['alice'], major_version_id=e['major'].id)
     assert any(t['task_id'] == result['task_id'] for t in rows[0]['test_tasks'])
     assert rows[0]['change_retests'][0]['previous_test_completed']
@@ -212,3 +216,87 @@ def test_change_retest_api_permissions_and_request_validation(changed):
         app.dependency_overrides[get_current_user] = lambda: e['admin']
         assert client.post(url, json={**body, 'source_task_id': -1}).status_code == 422
         assert client.post(url, json=body).json()['task_id'] == 101
+
+
+@pytest.mark.parametrize('start,end', [(None, None), ('2026-11-13', None),
+                                      ('2026-11-16', '2026-11-13'), ('bad', '2026-11-16')])
+def test_new_task_dates_validated_before_reserving_or_creating(changed, start, end):
+    e = changed
+    e['client'].tasks[101]['execution'] = 999
+    with pytest.raises(HTTPException) as exc:
+        e['change'].dispatch(e['req'].id, e['admin'], source_task_id=101, owner_id=e['alice'].id,
+                             expected_story_version=6, task_start_date=start, task_deadline=end)
+    assert exc.value.status_code == 400
+    assert e['db'].query(RequirementChangeRetest).count() == 0
+    assert len(e['client'].tasks) == 2
+
+
+def test_explicit_create_rejection_is_saved_and_retryable(changed):
+    from app.services.zentao_v2_protocol import ZentaoAPIError
+    e = changed
+    e['client'].tasks[101]['execution'] = 999
+    create = e['client'].create_execution_task
+    def reject(*args, **kwargs):
+        raise ZentaoAPIError(422, '禅道校验未通过：estStarted, deadline')
+    e['client'].create_execution_task = reject
+    with pytest.raises(HTTPException) as exc:
+        dispatch(e)
+    assert 'estStarted, deadline' in exc.value.detail
+    receipt = e['db'].query(RequirementChangeRetest).one()
+    assert receipt.status == 'rejected'
+    assert json.loads(receipt.previous_state)['dispatch_stage'] == 'create'
+    task = next(t for t in e['change'].preview(e['req'].id, e['admin'])['tasks'] if t['task_id'] == 101)
+    assert 'deadline' in task['dispatch_error'] and not task['needs_create_confirmation']
+    e['client'].create_execution_task = create
+    assert dispatch(e)['ok']
+    assert len(e['client'].tasks) == 3
+    assert e['db'].query(RequirementChangeRetest).count() == 1
+
+
+def test_legacy_unknown_receipt_requires_confirmation_before_recreating(changed):
+    e = changed
+    e['client'].tasks[101]['execution'] = 999
+    source = e['db'].get(ZentaoTaskMirror, 101)
+    source.execution_id = 999
+    receipt = RequirementChangeRetest(requirement_id=e['req'].id, source_task_id=101,
+        story_version=6, owner_id=e['alice'].id, actor_id=e['admin'].id, status='unknown')
+    e['db'].add(receipt)
+    e['db'].commit()
+    with pytest.raises(HTTPException) as exc:
+        dispatch(e)
+    assert exc.value.status_code == 409
+    assert len(e['client'].tasks) == 2
+    assert e['change'].preview(e['req'].id, e['admin'])['tasks'][0]['needs_create_confirmation']
+    result = e['change'].dispatch(e['req'].id, e['admin'], source_task_id=101, owner_id=e['alice'].id,
+                                 expected_story_version=6, task_start_date='2026-11-13',
+                                 task_deadline='2026-11-16', retry_unconfirmed=True)
+    assert result['ok'] and len(e['client'].tasks) == 3
+    assert e['db'].query(RequirementChangeRetest).one().id == receipt.id
+
+
+def test_confirmed_retry_still_recovers_remote_task_before_creating(changed):
+    e = changed
+    e['client'].tasks[101]['execution'] = 999
+    create = e['client'].create_execution_task
+    def timeout(*args, **kwargs):
+        create(*args, **kwargs)
+        raise TimeoutError()
+    e['client'].create_execution_task = timeout
+    with pytest.raises(HTTPException):
+        dispatch(e)
+    result = e['change'].dispatch(e['req'].id, e['admin'], source_task_id=101, owner_id=e['alice'].id,
+                                 expected_story_version=6, retry_unconfirmed=True)
+    assert result['ok'] and len(e['client'].tasks) == 3
+
+
+def test_failed_recovery_does_not_turn_safe_create_into_unknown(changed, monkeypatch):
+    e = changed
+    e['client'].tasks[101]['execution'] = 999
+    def unavailable(*args):
+        raise TimeoutError()
+    with monkeypatch.context() as patch:
+        patch.setattr(e['client'], 'list_execution_tasks', unavailable)
+        with pytest.raises(HTTPException):
+            dispatch(e)
+    assert e['db'].query(RequirementChangeRetest).one().status == 'prepared'
+    assert dispatch(e)['ok']

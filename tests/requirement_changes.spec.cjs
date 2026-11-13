@@ -21,7 +21,8 @@ const root = path.resolve(__dirname, '..');
       {task_id: 101, name: '当前版本任务', status: 'closed', execution_name: 'V4.0.5.0',
         mode: 'reactivate', story_version: 2, latest_story_version: 6, suggested_owner_id: 7, owner_reason: '上次完成者'},
       {task_id: 102, name: '<img src=x onerror="window.injected=1">旧任务', status: 'closed', execution_name: 'V4.0.4.10',
-        mode: 'create', story_version: 2, latest_story_version: 6, suggested_owner_id: null, owner_reason: '请手动选择'},
+        mode: 'create', story_version: 2, latest_story_version: 6, suggested_owner_id: null, owner_reason: '请手动选择',
+        needs_create_confirmation: true, dispatch_error: '上次创建结果待核实'},
     ];
     const html = `<!doctype html><meta charset="utf-8"><select id="mineMajorSelect"><option value="470">V4.0.5.0</option></select><div id="mineCards"></div>
       <script type="module">
@@ -42,7 +43,7 @@ const root = path.resolve(__dirname, '..');
           tasks, owners: [{id: 7, name: '王超'}, {id: 8, name: '李四'}], rounds: []}});
         const body = route.request().postDataJSON();
         calls.push(body);
-        if (body.source_task_id === 102 && failSecond) return route.fulfill({status: 502, json: {detail: '禅道结果待核实，请重试'}});
+        if (body.source_task_id === 102 && failSecond) return route.fulfill({status: 502, json: {detail: '禅道创建结果待核实，请先核对任务；已有任务将被复用'}});
         return route.fulfill({json: {ok: true, task_id: body.source_task_id + 1000}});
       }
       if (url.pathname === '/workbench/mine') return route.fulfill({json: [requirement]});
@@ -63,13 +64,25 @@ const root = path.resolve(__dirname, '..');
     assert.equal(calls.length, 0, 'validate all assignees before dispatching');
     await dialog.getByLabel('任务 102 的负责人').selectOption('8');
     await dialog.getByRole('button', {name: '派发选中的重测任务'}).click();
+    assert.equal(calls.length, 0, 'validate planned dates before dispatching any tasks');
+    await dialog.locator('[data-change-start]').fill('2026-11-13');
+    await dialog.locator('[data-change-deadline]').fill('2026-11-16');
+    await dialog.getByRole('button', {name: '派发选中的重测任务'}).click();
+    assert.equal(calls.length, 0, 'legacy unknown create requires confirmation');
+    await dialog.getByLabel('任务 102 确认未创建，允许重新派发', {exact: true}).check();
+    await dialog.getByRole('button', {name: '派发选中的重测任务'}).click();
     await dialog.getByText('已成功派发 1 / 2 个任务。失败项可核对后重试。').waitFor();
     assert.deepEqual(calls, [
       {source_task_id: 101, owner_id: 7, expected_story_version: 6},
-      {source_task_id: 102, owner_id: 8, expected_story_version: 6},
+      {source_task_id: 102, owner_id: 8, expected_story_version: 6,
+        task_start_date: '2026-11-13', task_deadline: '2026-11-16', retry_unconfirmed: true},
     ]);
     assert(await dialog.getByLabel('选择任务 101', {exact: true}).isDisabled());
     failSecond = false;
+    assert.equal(await dialog.getByLabel('任务 102 确认未创建，允许重新派发', {exact: true}).isChecked(), false);
+    await dialog.getByRole('button', {name: '派发选中的重测任务'}).click();
+    assert.equal(calls.length, 2, 'another ambiguous response requires fresh confirmation');
+    await dialog.getByLabel('任务 102 确认未创建，允许重新派发', {exact: true}).check();
     await dialog.getByRole('button', {name: '派发选中的重测任务'}).click();
     await dialog.getByText('已成功派发 1 / 1 个任务。失败项可核对后重试。').waitFor();
     assert.equal(calls.filter(c => c.source_task_id === 101).length, 1);

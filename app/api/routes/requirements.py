@@ -566,6 +566,9 @@ class ChangeRetestPayload(BaseModel):
     source_task_id: int = Field(gt=0)
     owner_id: int = Field(gt=0)
     expected_story_version: int = Field(gt=0)
+    task_start_date: Optional[str] = None
+    task_deadline: Optional[str] = None
+    retry_unconfirmed: bool = False
 
 
 @router.get('/requirements/{requirement_id}/change-retest')
