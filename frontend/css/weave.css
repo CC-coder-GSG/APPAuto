@@ -3661,3 +3661,185 @@ html.epv-open { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .epv-overlay, .epv-panel, .epv-skel, #entityPreviewModal img.is-loading { animation: none !important; }
 }
+
+/* ============================================================
+   R11 复测工作台排版 v2（2026-11-24）
+   模板见 js/tabs/retest.js：卡片沿用 mrc-*（R6）、tw-*（R8）、rv-field（R9）；
+   #tab-retest 挂在 #tab-mine 的复测面板里，所以 #tab-mine .mrc-* 规则同样生效。
+   悬停上浮 / 流光环 / 左沿竖线仍由 §10/§11/R5.4 提供，这里只管排版与配色。
+   ============================================================ */
+#tab-retest .rt-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-bottom: 14px;
+}
+#tab-retest .rt-toolbar-group { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+#tab-retest .rt-toolbar-release {
+  padding: 4px 4px 4px 12px;
+  border-radius: 10px;
+  background: rgba(28, 25, 23, 0.04);
+}
+#tab-retest .rv-field select { height: 34px; min-height: 0 !important; min-width: 110px; }
+#tab-retest button.tw-refresh,
+#tab-retest button.rt-push {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  height: 34px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 12px !important;
+  font-size: 13px !important;
+}
+#tab-retest button.tw-refresh .ui-ic, #tab-retest button.rt-push .ui-ic { width: 15px; height: 15px; }
+#tab-retest .rt-stats { margin-bottom: 14px; }
+#tab-retest .rt-stats:empty { display: none; }
+#tab-mine #tab-retest button.tw-stat.is-alert:not(.is-on) b { background: rgba(220, 38, 38, 0.12); color: #b91c1c; }
+
+/* 状态面板：加载 / 空 / 失败 / 最终测试暂停 */
+#tab-retest .rt-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 36px 16px;
+  border: 1px dashed var(--w-hairline-strong);
+  border-radius: 14px;
+  font-size: 13px;
+  color: var(--w-ink-faint);
+  text-align: center;
+}
+#tab-retest .rt-state--ok { border-style: solid; border-color: rgba(22, 163, 74, 0.25); background: rgba(22, 163, 74, 0.05); color: #15803d; }
+#tab-retest .rt-state--error { border-style: solid; border-color: rgba(220, 38, 38, 0.25); background: rgba(220, 38, 38, 0.05); color: #b91c1c; }
+#tab-retest .rt-state--error button { height: 30px !important; min-height: 0 !important; padding: 0 14px !important; margin: 0 !important; }
+#tab-retest .rt-final {
+  padding: 22px 24px;
+  border: 1px solid rgba(217, 119, 6, 0.3);
+  border-radius: 14px;
+  background: rgba(245, 158, 11, 0.08);
+  color: #92400e;
+  font-size: 13px;
+  line-height: 1.7;
+  text-align: center;
+}
+#tab-retest .rt-final strong { display: block; margin-bottom: 4px; font-size: 16px; }
+#tab-retest .rt-final small { display: block; margin-top: 2px; font-size: 12px; opacity: 0.8; }
+
+/* 卡片外壳（对应 R6 的需求卡） */
+#tab-retest details.retest-req-card.rt-card {
+  padding: 0 !important;
+  margin-bottom: 10px !important;
+  border-radius: 14px !important;
+}
+#tab-retest details.rt-card:not(:hover) { background: var(--w-raised) !important; }
+#tab-retest details.rt-card.is-mine-passed:not(:hover) { background: var(--w-surface) !important; }
+#tab-retest details.rt-card.is-failed:not(:hover) {
+  border-color: rgba(220, 38, 38, 0.55) !important;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.10) !important;
+}
+#tab-retest details.rt-card > summary.mrc-head {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  padding: 12px 16px !important;
+  border: none !important;
+  list-style: none;
+  cursor: pointer;
+  outline: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--w-ink);
+}
+#tab-retest details.rt-card > summary.mrc-head::-webkit-details-marker { display: none; }
+#tab-retest details.rt-card[open] > summary .mrc-chev { transform: rotate(90deg); }
+#tab-retest details.rt-card.is-mine-passed .mrc-name { color: var(--w-ink-faint); text-decoration: line-through; text-decoration-color: rgba(28, 25, 23, 0.25); }
+#tab-retest details.rt-card.is-mine-passed .mrc-id { color: var(--w-ink-faint); }
+#tab-retest .mrc-title .mrc-chip .tw-ic { width: 12px; height: 12px; }
+#tab-retest .mrc-chip--solid-bad { background: #dc2626; color: #fff; font-weight: 600; }
+
+/* 通过按钮：被复测问题挡住时显示为不可用（仍可点，点了会给出原因） */
+#tab-mine #tab-retest button.rt-pass { height: 30px !important; padding: 0 14px !important; }
+#tab-mine #tab-retest button.rt-pass.is-blocked {
+  background: rgba(28, 25, 23, 0.07) !important;
+  color: var(--w-ink-faint) !important;
+  box-shadow: none !important;
+  cursor: not-allowed;
+}
+
+/* 展开内容 */
+#tab-retest .rt-facts { margin-bottom: 12px; }
+#tab-retest .rt-verdicts, #tab-retest .rt-tasks { flex-wrap: wrap; row-gap: 6px; }
+#tab-retest .rt-tasks .qa-task-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+#tab-retest .rt-notes {
+  margin-bottom: 12px;
+  padding: 10px 14px 12px;
+  border: 1px solid rgba(8, 145, 178, 0.22);
+  border-radius: 10px;
+  background: rgba(8, 145, 178, 0.05);
+}
+#tab-retest .rt-notes-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: #0e7490;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+#tab-retest .rt-notes-head .tw-ic, #tab-retest .rt-notes.is-empty .tw-ic { width: 15px; height: 15px; }
+#tab-retest .rt-notes-head em { margin-left: auto; font-style: normal; font-weight: 400; font-size: 12px; color: var(--w-ink-faint); }
+#tab-retest .rt-notes .qa-rich-view { font-size: 13px; color: var(--w-ink); }
+#tab-retest .rt-notes.is-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-style: dashed;
+  border-color: var(--w-hairline-strong);
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--w-ink-faint);
+}
+#tab-retest .rt-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+#tab-mine #tab-retest .rt-columns > .mrc-section { margin-top: 0 !important; }
+#tab-retest .rt-case-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 13px; }
+#tab-retest .rt-case-id { font-weight: 600; color: var(--w-ink); }
+#tab-retest .rt-bug-note { font-size: 12px; color: var(--w-ink-faint); white-space: nowrap; }
+#tab-retest .rt-dismiss {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  margin: 0 !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  color: var(--w-ink-soft) !important;
+  white-space: nowrap;
+  cursor: pointer;
+}
+#tab-retest .rt-dismiss input { width: 14px; height: 14px; min-height: 0 !important; margin: 0; accent-color: #dc2626; }
+#tab-mine #tab-retest button.rt-activate { height: 26px !important; padding: 0 10px !important; font-size: 12px !important; }
+#tab-mine #tab-retest .rt-evidence { border-color: rgba(217, 119, 6, 0.3) !important; }
+#tab-retest .rt-evidence .mrc-section-head { flex-wrap: wrap; background: rgba(245, 158, 11, 0.10); color: #b45309; }
+#tab-retest .rt-evidence .mrc-section-head em { margin-left: auto; font-style: normal; font-weight: 400; font-size: 12px; color: var(--w-ink-faint); }
+
+@media (max-width: 900px) {
+  #tab-retest .rt-columns { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  #tab-retest details.rt-card > summary.mrc-head { padding: 10px 12px !important; gap: 8px !important; flex-wrap: wrap; }
+  #tab-retest details.rt-card > summary .mrc-title { flex: 1 1 0; }
+  #tab-retest details.rt-card .mrc-status { width: 100%; justify-content: flex-end; }
+  #tab-retest .rt-toolbar-release { width: 100%; }
+  #tab-retest .rt-notes-head em { margin-left: 0; width: 100%; }
+}

@@ -4,13 +4,13 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css?v=20261103-final-presence-ui-2">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261124-preview-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261124-retestwb-1">
   <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261124-preview-1"></script>
+  <script type="module" src="/static/js/app.js?v=20261124-retestwb-1"></script>
   <script src="/static/js/weave-motion.js?v=20261124-shell-v2-2" defer></script>
   <script src="/static/js/shell.js?v=20261124-theme-1" defer></script>
   <script>
@@ -1059,20 +1059,26 @@
 
   <section id="tab-retest" class="hidden card">
     <h2>复测工作台</h2>
-    <div class="row" style="margin-bottom: 16px;">
-      <label>查看模式</label>
-      <select id="retestDisplayMode" onchange="toggleRetestMode()">
-        <option value="version">按大版本查看</option>
-        <option value="all_pending">查看所有待复测需求</option>
-      </select>
-      <span id="retestVersionWrap" class="row" style="display:flex;">
-        <label>大版本</label><select id="retestMajorSelect"></select>
-      </span>
-      <button onclick="loadRetest()">加载待复测需求</button>
-      <label style="margin-left:16px; border-left:1px solid #cbd5e1; padding-left:16px;">当前复测发包(小版本)</label>
-      <select id="retestMinorSelect"></select>
-      <button class="secondary" onclick="pushRetest()">📢 推送复测结果</button>
+    <p class="tw-desc">复测其他测试人员已完成测试的需求：对照原用例与 Bug 核对修复情况，确认无误后标记通过；发现未修好可直接激活 Bug。</p>
+    <div class="rt-toolbar">
+      <div class="rt-toolbar-group">
+        <label class="rv-field">查看
+          <select id="retestDisplayMode" onchange="toggleRetestMode()">
+            <option value="version">按大版本查看</option>
+            <option value="all_pending">查看所有待复测需求</option>
+          </select>
+        </label>
+        <span id="retestVersionWrap" style="display:flex;">
+          <label class="rv-field">大版本<select id="retestMajorSelect"></select></label>
+        </span>
+        <button type="button" class="tw-refresh" onclick="loadRetest()"><svg class="ui-ic"><use href="#i-refresh"/></svg>加载待复测需求</button>
+      </div>
+      <div class="rt-toolbar-group rt-toolbar-release">
+        <label class="rv-field" title="点「通过」时记录为在该小版本上复测">当前复测发包<select id="retestMinorSelect"></select></label>
+        <button type="button" class="secondary rt-push" onclick="pushRetest()"><svg class="ui-ic"><use href="#i-external"/></svg>推送复测结果</button>
+      </div>
     </div>
+    <div id="retestStats" class="rt-stats"></div>
     <div id="retestCardsArea"></div>
   </section>
 

@@ -22,17 +22,17 @@ function getRetestMode() {
 }
 
 function renderAutoLinkedBadge(label = '自动归集') {
-  return `<span class="badge" style="background:#ecfeff; color:#0f766e; border:1px solid #99f6e4; margin-left:6px; padding:1px 6px;">${label}</span>`;
+  return `<span class="mrc-chip mrc-chip--info">${label}</span>`;
 }
 
 // 禅道校对徽章：本地关联的用例/Bug 与禅道镜像比对不一致时提示（与 mine.js 一致）
 function renderZentaoCheckBadge(item) {
   if (item.zentao_deleted) {
-    return '<span title="禅道侧该记录已删除，本地关联可能已失效" style="background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; padding:1px 5px; border-radius:4px; font-size:10px; font-weight:600; margin-left:4px;">⚠禅道已删除</span>';
+    return '<span class="mrc-chip mrc-chip--bad" title="禅道侧该记录已删除，本地关联可能已失效">禅道已删除</span>';
   }
   if (item.story_mismatch) {
-    const sid = item.mirror_story_id || item.zentao_story_id || '?';
-    return `<span title="禅道上该记录归属另一需求（story #${sid}），与本需求不一致，请核实关联" style="background:#fffbeb; color:#b45309; border:1px solid #fde68a; padding:1px 5px; border-radius:4px; font-size:10px; font-weight:600; margin-left:4px;">⚠归属不一致</span>`;
+    const sid = escapeHtml(item.mirror_story_id || item.zentao_story_id || '?');
+    return `<span class="mrc-chip mrc-chip--warn" title="禅道上该记录归属另一需求（story #${sid}），与本需求不一致，请核实关联">归属不一致</span>`;
   }
   return '';
 }
@@ -82,7 +82,7 @@ function renderCrossMajorBadge(req, b) {
   const cross = b.major_version_id && req.major_version_id
     && Number(b.major_version_id) !== Number(req.major_version_id) && b.major_version_no;
   if (!cross) return '';
-  return `<span title="该Bug记录在其他大版本下" style="background:#ede9fe; color:#6d28d9; padding:1px 5px; border-radius:4px; font-size:10px; font-weight:600; margin-left:4px;">🔀来自 ${escapeHtml(b.major_version_no)}</span>`;
+  return `<span class="mrc-chip mrc-chip--purple" title="该Bug记录在其他大版本下">来自 ${escapeHtml(b.major_version_no)}</span>`;
 }
 
 // Return the shared Promise so one sync only schedules one silent reload.
@@ -180,13 +180,14 @@ export async function loadRetest({ background = false } = {}) {
   if (!keepCards) {
     state.currentRetestData = [];
     retestRenderedKey = null;
-    if (container) container.innerHTML = '<div class="muted" role="status" style="padding:20px; text-align:center;">正在加载复测需求，请稍候…</div>';
+    renderRetestStats([]);
+    if (container) container.innerHTML = rtState('正在加载复测需求，请稍候…', 'loading');
   }
   container?.setAttribute('aria-busy', 'true');
 
   try {
     if (mode === 'version' && !majorId) {
-      if (container) container.innerHTML = '<div class="muted" role="status" style="padding:20px; text-align:center;">请选择大版本后加载复测需求</div>';
+      if (container) container.innerHTML = rtState('请选择大版本后加载复测需求');
       window.showMessage && window.showMessage('请选择大版本', 'error');
       return;
     }
@@ -207,10 +208,11 @@ export async function loadRetest({ background = false } = {}) {
         state.currentRetestData = [];
         const container = document.getElementById('retestCardsArea');
         if (container) {
-          container.innerHTML = `<div class="card" style="padding:24px; text-align:center; border:2px solid #fcd34d; background:#fffbeb;">
-            <div style="font-size:18px; font-weight:700; color:#92400e;">🏁 当前版本已进入最终测试阶段</div>
-            <div class="muted" style="margin-top:8px; color:#92400e;">复测流程已暂停，不再统计待复测需求。请前往「我的工作台」对全部需求进行处理。</div>
-            <div class="muted" style="margin-top:4px; font-size:12px;">在「任务分配台」取消最终测试状态后，复测将自动恢复正常。</div>
+          renderRetestStats([]);
+          container.innerHTML = `<div class="rt-final" role="status">
+            <strong>当前版本已进入最终测试阶段</strong>
+            <div>复测流程已暂停，不再统计待复测需求。请前往「我的工作台」对全部需求进行处理。</div>
+            <small>在「任务分配台」取消最终测试状态后，复测将自动恢复正常。</small>
           </div>`;
         }
         return;
@@ -230,7 +232,7 @@ export async function loadRetest({ background = false } = {}) {
     if (!isCurrent() || controller.signal.aborted) return;
     if (!keepCards && container) {
       state.currentRetestData = [];
-      container.innerHTML = `<div role="alert" style="padding:20px; text-align:center; color:#b91c1c;">加载复测需求失败：${escapeHtml(err.message || '请稍后重试')} <button type="button" onclick="window.OmniQARetestTab.loadRetest().catch(() => {})">重试</button></div>`;
+      container.innerHTML = `<div class="rt-state rt-state--error" role="alert"><span>加载复测需求失败：${escapeHtml(err.message || '请稍后重试')}</span><button type="button" class="secondary" onclick="window.OmniQARetestTab.loadRetest().catch(() => {})">重试</button></div>`;
     }
     throw err;
   } finally {
@@ -242,173 +244,200 @@ export async function loadRetest({ background = false } = {}) {
   }
 }
 
-function renderRetestCards(data, mode, sid) {
+// ── 卡片渲染（2026-11-24 排版 v2：与需求卡共用 mrc-* 结构，样式见 weave.css R6/R8/R11） ──
+
+const RT_FILTERS = [
+  ['all', '全部'],
+  ['pending', '待复测'],
+  ['failed', '出现问题'],
+  ['passed', '已通过'],
+];
+let retestFilter = 'all';
+const rtIcon = (id) => `<svg class="ui-ic tw-ic" aria-hidden="true"><use href="#i-${id}"/></svg>`;
+const rtChip = (text, tone = '', title = '') =>
+  `<span class="mrc-chip${tone ? ` mrc-chip--${tone}` : ''}"${title ? ` title="${escapeHtml(title)}"` : ''}>${text}</span>`;
+const rtConclusion = (req) => req.retest_conclusion || 'pending';
+
+function rtState(html, tone = '') {
+  return `<div class="rt-state${tone ? ` rt-state--${tone}` : ''}" role="status">${html}</div>`;
+}
+
+// 顶部状态统计 = 筛选（数字为该结论下的需求数）
+function renderRetestStats(data) {
+  const el = document.getElementById('retestStats');
+  if (!el) return;
+  if (!data || !data.length) { el.innerHTML = ''; return; }
+  const count = (key) => (key === 'all' ? data.length : data.filter((r) => rtConclusion(r) === key).length);
+  el.innerHTML = `<div class="tw-stat-group" role="group" aria-label="按复测结论筛选">${RT_FILTERS.map(([key, label]) => `
+    <button type="button" class="tw-stat${retestFilter === key ? ' is-on' : ''}${key === 'failed' && count(key) ? ' is-alert' : ''}" aria-pressed="${retestFilter === key}"
+      onclick="window.OmniQARetestTab.setRetestFilter('${key}')"><span>${label}</span><b>${count(key)}</b></button>`).join('')}
+  </div>`;
+}
+
+export function setRetestFilter(key) {
+  retestFilter = RT_FILTERS.some(([k]) => k === key) ? key : 'all';
+  const { mode, sid } = getRetestSelection();
+  renderRetestCards(state.currentRetestData || [], mode, sid, { skipPreflight: true });
+}
+
+// 复测问题相关的行内控件：问题标签 +「取消复测结论」误报勾选 + 旧 Bug 的「激活」入口
+//（走禅道真实激活弹窗，成功后记录复测激活留痕）
+function rtProblemBits(req, b) {
+  const bits = [];
+  const ztNumeric = (b.bug_id || '').replace(/\D/g, '') || String(b.zentao_bug_id || '').replace(/\D/g, '');
+  if (b.retest_problem_kind) {
+    if (b.retest_problem) {
+      bits.push(rtChip('复测出现的 Bug', 'solid-bad'));
+      if (b.retest_problem_kind === 'activated') {
+        bits.push(rtChip(`复测激活${b.retest_activated_by_name ? ` · ${escapeHtml(b.retest_activated_by_name)}` : ''}`, 'bad'));
+      }
+    } else {
+      bits.push(rtChip('已标记误报', 'muted'));
+    }
+    bits.push(`<label class="rt-dismiss" title="勾选表示该问题属误发现，不计入复测结论"><input type="checkbox" ${b.retest_dismissed ? 'checked' : ''} onchange="window.OmniQARetestTab.retestDismissBug(${Number(b.id)}, ${Number(req.id)}, this.checked)">取消复测结论</label>`);
+  } else if (!b.retest_activated && ztNumeric) {
+    bits.push(`<button type="button" class="mrc-btn tw-btn tw-btn--danger secondary rt-activate" title="在禅道中重新激活该 Bug，并记录为复测发现未修好"
+      onclick="window.OmniQARetestTab.retestActivateBug(${Number(b.id)}, ${Number(ztNumeric)}, ${Number(req.id)})">${rtIcon('rotate')}<span>激活</span></button>`);
+  }
+  return bits.join('');
+}
+
+function rtBugRow(req, b, { note = '', extraTags = '' } = {}) {
+  const ztBugId = (b.bug_id || '').replace(/\D/g, '');
+  const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}"></span>` : '';
+  const found = note || `发现于 ${escapeHtml(b.found_minor_version_no || '未知')}`;
+  return `<div class="badge mrc-bug rt-bug${b.retest_problem ? ' is-retest-problem' : ''}">
+    <span class="mrc-bug-main">${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)}<span class="rt-bug-note">${found}</span></span>
+    <span class="mrc-bug-tags">${renderCrossMajorBadge(req, b)}${extraTags}${b.auto_linked ? renderAutoLinkedBadge('自动归集') : ''}${renderZentaoCheckBadge(b)}${rtProblemBits(req, b)}</span>
+  </div>`;
+}
+
+function rtCaseItem(req, c) {
+  const caseZtId = String(c.zentao_case_id || '').replace(/\D/g, '');
+  const bugs = (c.bugs || []).map((b) => rtBugRow(req, b)).join('');
+  return `<div class="case-item rt-case">
+    <div class="case-item-head rt-case-head">
+      <span class="rt-case-id">${renderCaseLink(c)}</span>${renderPreviewBtn('testcase', caseZtId)}
+      ${c.auto_linked ? renderAutoLinkedBadge('自动归集用例') : ''}${renderZentaoCheckBadge(c)}
+      ${bugs ? rtChip(`${(c.bugs || []).length} 个 Bug`, 'outline') : rtChip('无关联 Bug', 'ok')}
+    </div>
+    ${bugs ? `<div class="case-bugs">${bugs}</div>` : ''}
+  </div>`;
+}
+
+function rtNotes(req) {
+  // 原测试人填写的测试要点（只读展示，编辑仍在需求工作台）：优先富文本版
+  const inner = req.test_notes_html || (req.test_notes ? escapeHtml(req.test_notes).replace(/\n/g, '<br>') : '');
+  if (!inner) return `<div class="rt-notes is-empty">${rtIcon('book')}<span>原测试人未填写测试要点</span></div>`;
+  const meta = [req.test_notes_updated_by_name, req.test_notes_updated_at ? new Date(req.test_notes_updated_at).toLocaleString() : '']
+    .filter(Boolean).join(' · ');
+  return `<div class="rt-notes">
+    <div class="rt-notes-head">${rtIcon('book')}<span>原测试人填写的测试要点</span>${meta ? `<em>${escapeHtml(meta)}</em>` : ''}</div>
+    <div class="qa-rich-view">${inner}</div>
+  </div>`;
+}
+
+function renderRetestCard(req, mode) {
+  // 复测结论（后端统一判定）：pending 未处理 / failed 复测出现问题 / passed 复测通过
+  const conclusion = rtConclusion(req);
+  const activeProblems = Number(req.retest_active_problem_count || 0);
+  const isCompleted = req.my_retest_completed;
+
+  // 需求标题：禅道需求号由 hydrator 升级为链接，并附预览按钮
+  const ztStoryId = (req.zentao_req_id || '').replace(/\D/g, '');
+  const ztStorySlot = ztStoryId ? `<span class="zt-story-slot" data-zt-story-id="${ztStoryId}"></span>` : '';
+  const reqIdHtml = ztStoryId
+    ? `<span class="qa-story-id-nohref" data-zt-story-id="${ztStoryId}">${escapeHtml(req.zentao_req_id)}</span>`
+    : escapeHtml(req.zentao_req_id || '');
+
+  const conclusionChip = conclusion === 'failed'
+    ? rtChip('复测出现问题', 'solid-bad')
+    : conclusion === 'passed' ? rtChip('复测通过', 'ok') : rtChip('待复测', 'outline');
+  const passBlocked = activeProblems > 0;
+  const passBtn = `<button type="button" class="mrc-btn tw-btn rt-pass${passBlocked ? ' is-blocked' : ' tw-btn--start'}"
+      title="${passBlocked ? '存在复测问题 Bug，无法通过；若属误报请先勾选「取消复测结论」' : '确认该需求复测通过'}"
+      aria-disabled="${passBlocked}" onclick="event.preventDefault(); event.stopPropagation(); setRetest(${Number(req.id)}, true, ${activeProblems})">${rtIcon('check')}<span>通过</span></button>`;
+
+  // 复测结论：我的显式结论 + 所有复测人记录 + 问题归属人
+  const myTag = isCompleted
+    ? (req.my_retest_passed ? rtChip('我已通过', 'ok') : rtChip('我已打回（历史）', 'bad'))
+    : '';
+  const records = (req.retest_records || []).map((rec) =>
+    rtChip(`${rec.passed ? '✓' : '✗'} ${escapeHtml(rec.user_name || '')}${rec.is_me ? '（我）' : ''}`, rec.passed ? 'ok' : 'bad')).join('');
+  const failActors = (req.retest_fail_actors || []).map((n) => rtChip(`✗ ${escapeHtml(n)} 复测未通过`, 'bad')).join('');
+  const verdictRow = (myTag || records || failActors)
+    ? `<span class="tw-fact rt-verdicts"><em>复测结论</em>${myTag}${records}${failActors}</span>` : '';
+  const taskChips = renderStoryTaskChips(req.story_tasks, 'retest', req.id);
+
+  const cases = req.test_cases || [];
+  const freeBugs = req.free_bugs || [];
+  const evidenceBugs = req.retest_evidence_bugs || [];
+  const caseHtml = cases.length
+    ? cases.map((c) => rtCaseItem(req, c)).join('')
+    : '<span class="mrc-empty">原测试人员未建立用例</span>';
+  const freeHtml = freeBugs.length
+    ? freeBugs.map((b) => rtBugRow(req, b)).join('')
+    : '<span class="mrc-empty">暂无自由 Bug</span>';
+  const evidenceHtml = evidenceBugs.map((b) => rtBugRow(req, b, {
+    note: `测后自动归集${b.zentao_opened_by_name ? ` · ${escapeHtml(b.zentao_opened_by_name)} 提出` : ''}`,
+    extraTags: b.closed ? rtChip('已闭环', 'ok') : rtChip('未闭环', 'warn'),
+  })).join('');
+
+  // 出现问题的卡片保持展开并红框醒目；我已通过的折叠置灰
+  const cardOpen = conclusion === 'failed' || !isCompleted;
+  const cls = ['retest-req-card', 'rt-card', `is-${conclusion}`];
+  if (isCompleted && req.my_retest_passed) cls.push('is-mine-passed');
+
+  return `
+    <details class="${cls.join(' ')}" data-req-id="${req.id}" ${cardOpen ? 'open' : ''} ontoggle="window.scheduleWorkbenchViewportResize?.()">
+      <summary class="mrc-head">
+        <svg class="mrc-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+        <div class="mrc-title">
+          <span class="mrc-id">${reqIdHtml}</span>
+          <span class="mrc-name">${escapeHtml(req.title || '')}</span>
+          ${ztStorySlot}${renderPreviewBtn('story', ztStoryId)}
+          ${mode === 'all_pending' ? rtChip(escapeHtml(req.major_version_name || '未知版本'), 'info') : ''}
+          ${rtChip(`${rtIcon('user')}原测试 ${escapeHtml(req.owner || '未知')}`, 'outline', '原测试人')}
+          ${req.auto_linked_case_count > 0 ? renderAutoLinkedBadge(`自动归集用例 ${req.auto_linked_case_count}`) : ''}
+        </div>
+        <div class="mrc-status">${conclusionChip}${passBtn}</div>
+      </summary>
+      <div class="mrc-body">
+        ${(verdictRow || taskChips) ? `<div class="tw-facts rt-facts">${verdictRow}${taskChips ? `<span class="tw-fact rt-tasks"><em>关联任务</em>${taskChips}</span>` : ''}</div>` : ''}
+        ${rtNotes(req)}
+        <div class="rt-columns">
+          <div class="mrc-section">
+            <div class="mrc-section-head">原测试用例与关联 Bug <span class="n">${cases.length}</span></div>
+            <div class="mrc-section-list">${caseHtml}</div>
+          </div>
+          <div class="mrc-section">
+            <div class="mrc-section-head">原测试发现的自由 Bug <span class="n">${freeBugs.length}</span></div>
+            <div class="mrc-section-list">${freeHtml}</div>
+          </div>
+        </div>
+        ${evidenceBugs.length ? `
+        <div class="mrc-section rt-evidence">
+          <div class="mrc-section-head">系统归集：测试完成后新增 Bug 候选 <span class="n">${evidenceBugs.length}</span>
+            <em>${req.test_completed_at ? `测试完成于 ${escapeHtml(new Date(req.test_completed_at).toLocaleString())}` : '该需求暂无测试完成时间，归集结果可能不完整'}</em></div>
+          <div class="mrc-section-list">${evidenceHtml}</div>
+        </div>` : ''}
+      </div>
+    </details>`;
+}
+
+function renderRetestCards(data, mode, sid, { skipPreflight = false } = {}) {
   const container = document.getElementById('retestCardsArea');
   if (!container) return;
+  renderRetestStats(data);
   if (!data || data.length === 0) {
-    container.innerHTML = '<div class="muted" style="padding: 20px; text-align: center; background: #f8fafc; border-radius: 8px;">🎉 当前筛选条件下没有需要您复测的需求</div>';
-    if (sid) scheduleRetestPreflightBackgroundRefresh(sid);
+    container.innerHTML = rtState('🎉 当前筛选条件下没有需要您复测的需求', 'ok');
+    if (sid && !skipPreflight) scheduleRetestPreflightBackgroundRefresh(sid);
     return;
   }
-
-  container.innerHTML = data.map((req) => {
-    // 复测结论（后端统一判定）：pending 未处理 / failed 复测出现问题 / passed 复测通过
-    const conclusion = req.retest_conclusion || 'pending';
-    const activeProblems = Number(req.retest_active_problem_count || 0);
-
-    // 复测问题相关的行内控件：问题徽章（着重色）+「取消复测结论」误报勾选 +
-    // 旧 Bug 的「激活」入口（走禅道真实激活弹窗，成功后记录复测激活留痕）
-    const problemBits = (b) => {
-      const bits = [];
-      const ztNumeric = (b.bug_id || '').replace(/\D/g, '') || String(b.zentao_bug_id || '').replace(/\D/g, '');
-      if (b.retest_problem_kind) {
-        if (b.retest_problem) {
-          bits.push('<span style="background:#dc2626; color:#fff; padding:1px 6px; border-radius:4px; font-size:11px; font-weight:700;">🚨复测出现的bug</span>');
-          if (b.retest_problem_kind === 'activated') {
-            bits.push(`<span style="background:#fee2e2; color:#b91c1c; border:1px solid #ef4444; padding:1px 6px; border-radius:4px; font-size:11px; font-weight:700;">🔄复测激活bug${b.retest_activated_by_name ? '·' + escapeHtml(b.retest_activated_by_name) : ''}</span>`);
-          }
-        } else {
-          bits.push('<span style="background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0; padding:1px 6px; border-radius:4px; font-size:11px;">已标记误报</span>');
-        }
-        bits.push(`<label style="font-size:12px; color:#64748b; display:flex; align-items:center; gap:4px; margin:0;" title="勾选表示该问题属误发现，不计入复测结论"><input type="checkbox" ${b.retest_dismissed ? 'checked' : ''} onchange="window.OmniQARetestTab.retestDismissBug(${b.id}, ${req.id}, this.checked)"> 取消复测结论</label>`);
-      } else if (!b.retest_activated && ztNumeric) {
-        bits.push(`<button class="secondary" style="padding:1px 8px; font-size:12px; color:#b91c1c; border-color:#fecaca;" title="在禅道中重新激活该 Bug，并记录为复测发现未修好" onclick="window.OmniQARetestTab.retestActivateBug(${b.id}, ${ztNumeric}, ${req.id})">🔄激活</button>`);
-      }
-      return bits.join('');
-    };
-    // 问题 Bug 整条着重显示
-    const problemStyle = (b, base) => (b.retest_problem
-      ? 'background:#fef2f2; color:#b91c1c; border:1.5px solid #ef4444; font-weight:700; padding: 2px 6px;'
-      : base);
-
-    const caseHtml = (req.test_cases || []).map((c) => {
-      const bugs = (c.bugs || []).map((b) => {
-        const ztBugId = (b.bug_id || '').replace(/\D/g, '');
-        const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
-        const linkedBadge = b.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
-        return `<div style="margin-top:4px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-          <span class="badge" style="${problemStyle(b, 'background:#fef2f2; color:#dc2626; padding: 2px 6px;')}">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${renderCrossMajorBadge(req, b)}${linkedBadge}${renderZentaoCheckBadge(b)}
-          ${problemBits(b)}
-        </div>`;
-      }).join('');
-      const caseZtId = String(c.zentao_case_id || '').replace(/\D/g, '');
-      return `<div style="margin-bottom: 10px; padding-left: 12px; border-left: 3px solid #cbd5e1;">
-        <div style="font-weight: bold; color: #475569;">🧪 用例 [${renderCaseLink(c)}]${renderPreviewBtn('testcase', caseZtId)}${c.auto_linked ? renderAutoLinkedBadge('自动归集用例') : ''}${renderZentaoCheckBadge(c)}</div>
-        <div style="margin-top: 4px;">${bugs || '<span class="muted" style="font-size:12px;">✓ 完美通过，无关联Bug</span>'}</div>
-      </div>`;
-    }).join('');
-
-    const freeBugHtml = (req.free_bugs || []).map((b) => {
-      const ztBugId = (b.bug_id || '').replace(/\D/g, '');
-      const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
-      const linkedBadge = b.auto_linked ? renderAutoLinkedBadge('自动归集Bug') : '';
-      return `<div style="margin-bottom:6px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-      <span class="badge" style="${problemStyle(b, 'background:#fff7ed; color:#ea580c; padding: 2px 6px;')}">🐛 ${renderBugLink(b)}${ztSlot}${renderPreviewBtn('bug', ztBugId)} <span style="color:#94a3b8;font-size:11px;">(发现于: 🏷️${b.found_minor_version_no || '未知'})</span></span>${renderCrossMajorBadge(req, b)}${linkedBadge}${renderZentaoCheckBadge(b)}
-      ${problemBits(b)}
-    </div>`;
-    }).join('');
-
-    const evidenceBugs = req.retest_evidence_bugs || [];
-    const evidenceBugHtml = evidenceBugs.map((b) => {
-      const ztBugId = (b.bug_id || '').replace(/\D/g, '');
-      const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:3px;"></span>` : '';
-      const closedTag = b.closed
-        ? '<span class="badge" style="background:#dcfce7; color:#166534; margin-left:6px; padding:1px 6px;">✅已闭环</span>'
-        : '<span class="badge" style="background:#fef9c3; color:#854d0e; margin-left:6px; padding:1px 6px;">⏳未闭环</span>';
-      return `<div style="margin-bottom:6px; display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-      <span class="badge" style="${problemStyle(b, 'background:#fff7ed; color:#c2410c; padding: 2px 6px;')}">🐛 ${renderBugLink(b)}${ztSlot} <span style="color:#94a3b8;font-size:11px;">(测后自动归集${b.zentao_opened_by_name ? '·' + escapeHtml(b.zentao_opened_by_name) + '提出' : ''})</span></span>${renderCrossMajorBadge(req, b)}${closedTag}${renderAutoLinkedBadge('自动归集Bug')}
-      ${problemBits(b)}
-    </div>`;
-    }).join('');
-
-    // 需求级结论标签（全员可见）
-    const conclusionTag = conclusion === 'failed'
-      ? '<span class="badge" style="background:#dc2626; color:#fff; border:1.5px solid #b91c1c; font-weight:700;">🚨复测出现问题</span>'
-      : conclusion === 'passed'
-        ? '<span class="badge" style="background:#dcfce7; color:#166534; border:1px solid #bbf7d0;">✅复测通过</span>'
-        : '<span class="badge" style="background:#f1f5f9; color:#64748b; border:1px solid #e2e8f0;">未处理</span>';
-    // 我的显式结论（点过通过才有；历史打回记录保留展示）
-    const isCompleted = req.my_retest_completed;
-    const myTag = isCompleted
-      ? (req.my_retest_passed ? '<span class="badge" style="background:#dcfce7;color:#166534;">✅我已通过</span>' : '<span class="badge" style="background:#fee2e2;color:#b91c1c;">❌我已打回(历史)</span>')
-      : '';
-    // 所有复测人的结论：显式记录 + 问题归属人（某人激活/提出 Bug → 某人复测未通过）
-    const retestRecordsHtml = (req.retest_records || []).map((rec) => {
-      const tone = rec.passed
-        ? 'background:#dcfce7;color:#166534;border:1px solid #bbf7d0;'
-        : 'background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;';
-      return `<span class="badge" style="${tone} margin-left:4px;">${rec.passed ? '✅' : '❌'} ${rec.user_name}${rec.is_me ? '（我）' : ''}</span>`;
-    }).join('');
-    const failActorHtml = (req.retest_fail_actors || []).map((n) =>
-      `<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #ef4444; font-weight:600; margin-left:4px;">❌ ${escapeHtml(n)} 复测未通过</span>`).join('');
-    const retestRecordsBar = (retestRecordsHtml || failActorHtml)
-      ? `<span style="margin-left:8px; font-size:12px; color:#64748b;">复测结论:</span>${retestRecordsHtml}${failActorHtml}`
-      : '';
-
-    // 需求标题：禅道需求号渲染为可跳转的蓝色链接（由 hydrator 升级），并附预览按钮（对齐需求/测试工作台）
-    const ztStoryId = (req.zentao_req_id || '').replace(/\D/g, '');
-    const ztStorySlot = ztStoryId ? `<span class="zt-story-slot" data-zt-story-id="${ztStoryId}" style="margin-left:6px; vertical-align:middle;"></span>` : '';
-    const reqIdHtml = ztStoryId
-      ? `<span class="qa-story-id-nohref" data-zt-story-id="${ztStoryId}">${req.zentao_req_id}</span>`
-      : (req.zentao_req_id || '');
-    const previewBtn = renderPreviewBtn('story', ztStoryId);
-
-    // 原测试人填写的测试要点（只读展示，编辑仍在需求工作台）：优先富文本版
-    const notesInner = req.test_notes_html
-      || (req.test_notes ? escapeHtml(req.test_notes).replace(/\n/g, '<br>') : '');
-    const notesMeta = [req.test_notes_updated_by_name, req.test_notes_updated_at ? new Date(req.test_notes_updated_at).toLocaleString() : '']
-      .filter(Boolean).join(' · ');
-    const notesBlock = notesInner
-      ? `<div style="margin-bottom:12px; padding:10px 12px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:6px;">
-          <div style="font-weight:bold; color:#0369a1; margin-bottom:6px; font-size:13px;">📝 原测试人填写的测试要点${notesMeta ? `<span style="font-weight:normal; font-size:12px; color:#64748b; margin-left:8px;">${escapeHtml(notesMeta)}</span>` : ''}</div>
-          <div class="qa-rich-view">${notesInner}</div>
-        </div>`
-      : '<div class="muted" style="margin-bottom:12px; font-size:12px;">📝 原测试人未填写测试要点</div>';
-
-    // 出现问题的卡片保持展开并红框醒目；通过的折叠置灰
-    const cardOpen = conclusion === 'failed' || !isCompleted;
-    const cardBorder = conclusion === 'failed'
-      ? 'border: 2px solid #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,.12);'
-      : 'border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05);';
-    return `
-      <details class="card retest-req-card" data-req-id="${req.id}" ${cardOpen ? 'open' : ''} ontoggle="window.scheduleWorkbenchViewportResize?.()" style="${cardBorder} border-radius: 8px; margin-bottom: 16px; background: ${conclusion === 'passed' ? '#f8fafc' : '#fff'}; transition: all 0.3s;">
-        <summary style="outline:none; cursor:pointer; list-style:none; display: flex; justify-content: space-between; align-items: center; border-bottom: ${cardOpen ? '1px dashed #cbd5e1' : 'none'}; padding-bottom: ${cardOpen ? '12px' : '0'}; margin-bottom: ${cardOpen ? '12px' : '0'};">
-          <div style="flex:1; min-width:0;">
-            <span style="font-size: 16px; font-weight: bold; color: ${conclusion === 'passed' ? '#94a3b8; text-decoration:line-through;' : '#0f172a'};">📄 ${reqIdHtml} ${req.title}</span>${ztStorySlot}${previewBtn}
-            <span style="margin-left:8px;">${conclusionTag}</span>
-            ${mode === 'all_pending' ? `<span class="badge" style="margin-left:8px; background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd;">🏷️${req.major_version_name || '未知版本'}</span>` : ''}
-            <span class="badge" style="margin-left: 12px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;">👤 原测试人: ${req.owner || '未知'}</span>
-            ${req.auto_linked_case_count > 0 ? renderAutoLinkedBadge(`自动归集用例 ${req.auto_linked_case_count}`) : ''}
-            ${myTag ? `<span style="margin-left:8px;">${myTag}</span>` : ''}
-            ${retestRecordsBar}
-            ${renderStoryTaskChips(req.story_tasks, 'retest', req.id)}
-          </div>
-          <div onclick="event.stopPropagation()">
-            <button style="background:${activeProblems > 0 ? '#94a3b8' : '#16a34a'};" title="${activeProblems > 0 ? '存在复测问题 Bug，无法通过；若属误报请先勾选「取消复测结论」' : '确认该需求复测通过'}" onclick='setRetest(${req.id}, true, ${activeProblems})'>✅通过</button>
-          </div>
-        </summary>
-
-        <div style="margin-top: 12px;">
-          ${notesBlock}
-          <div class="row" style="align-items: flex-start; margin: 0;">
-            <div style="flex: 1; padding-right: 16px; border-right: 1px dashed #e2e8f0;">
-              <div style="font-weight: bold; margin-bottom: 12px; color: #334155; font-size: 13px;">【原测试用例 & 关联Bug】</div>
-              ${caseHtml || '<div class="muted">原测试人员未建立用例</div>'}
-            </div>
-            <div style="flex: 1; padding-left: 16px;">
-              <div style="font-weight: bold; margin-bottom: 12px; color: #334155; font-size: 13px;">【原测试发现的自由Bug】</div>
-              <div>${freeBugHtml || '<div class="muted">暂无自由Bug</div>'}</div>
-            </div>
-          </div>
-          ${evidenceBugs.length > 0 ? `
-          <div style="margin-top:12px; border-top:1px dashed #e2e8f0; padding-top:12px; background:#fffbeb; padding:10px; border-radius:6px;">
-            <div style="font-weight:bold; color:#c2410c; margin-bottom:8px;">【系统归集：测试完成后新增 Bug 候选】</div>
-            <div class="muted" style="font-size:12px; margin-bottom:6px;">${req.test_completed_at ? `测试完成时间：${new Date(req.test_completed_at).toLocaleString()}` : '该需求暂无测试完成时间，归集结果可能不完整'}</div>
-            <div>${evidenceBugHtml}</div>
-          </div>` : ''}
-        </div>
-      </details>`;
-  }).join('');
+  const visible = retestFilter === 'all' ? data : data.filter((req) => rtConclusion(req) === retestFilter);
+  container.innerHTML = visible.length
+    ? visible.map((req) => renderRetestCard(req, mode)).join('')
+    : rtState('当前筛选下没有需求，可切换上方状态查看其他需求。');
   // 复测台仅展示原测试人的要点；禁用勾选项，避免产生“已修改但未保存”的错觉。
   container.querySelectorAll('.qa-rich-view input.qa-notes-check[type="checkbox"]').forEach((checkbox) => {
     checkbox.disabled = true;
@@ -421,7 +450,7 @@ function renderRetestCards(data, mode, sid) {
     });
   }
   window.OmniQAZentao?.hydrateContainer(container);
-  if (sid) scheduleRetestPreflightBackgroundRefresh(sid);
+  if (sid && !skipPreflight) scheduleRetestPreflightBackgroundRefresh(sid);
 }
 
 export async function setRetest(id, passed, activeProblemCount) {
@@ -484,7 +513,7 @@ export async function pushRetest() {
   window.showMessage && window.showMessage('复测结果已推送');
 }
 
-window.OmniQARetestTab = { loadRetest, toggleRetestMode, setRetest, retestActivateBug, retestDismissBug, pushRetest };
+window.OmniQARetestTab = { loadRetest, toggleRetestMode, setRetest, retestActivateBug, retestDismissBug, pushRetest, setRetestFilter };
 
 function bindRetestSSE() {
   if (retestSseBound) return;
