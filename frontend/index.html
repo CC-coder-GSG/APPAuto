@@ -4,15 +4,15 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css?v=20261103-final-presence-ui-2">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261124-retestwb-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261124-datamgr-1">
   <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261124-retestwb-1"></script>
+  <script type="module" src="/static/js/app.js?v=20261124-datamgr-1"></script>
   <script src="/static/js/weave-motion.js?v=20261124-shell-v2-2" defer></script>
-  <script src="/static/js/shell.js?v=20261124-theme-1" defer></script>
+  <script src="/static/js/shell.js?v=20261124-datamgr-1" defer></script>
   <script>
     /* 壳层布局标记 + 侧栏收起态需在首帧前生效，避免加载时宽度跳变（shell.js 负责后续切换） */
     document.documentElement.classList.add('omniqa-shell');
@@ -1749,172 +1749,186 @@
 
   <section id="tab-data" class="hidden card">
     <h2>数据管理台</h2>
-    <div id="dataReadonlyHint" class="hidden muted" style="margin-bottom:12px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc;">
+    <div id="dataReadonlyHint" class="hidden dm-hint">
       当前账号为只读访问，可查看数据与日志，但不能执行创建、编辑、删除等管理操作。
     </div>
+
+    <!-- 分区切换（2026-11-24 排版 v2）：原先十余张卡片纵向堆叠，现按用途分四个面板，元素 id 均保持不变 -->
+    <div class="dm-subnav" role="tablist" aria-label="数据管理分区">
+      <button type="button" role="tab" data-dm-tab="create" data-admin-only><svg class="ui-ic"><use href="#i-sparkles"/></svg>录入与创建</button>
+      <button type="button" role="tab" data-dm-tab="zentao" data-admin-only><svg class="ui-ic"><use href="#i-refresh"/></svg>禅道同步</button>
+      <button type="button" role="tab" data-dm-tab="users"><svg class="ui-ic"><use href="#i-assign"/></svg>用户与权限</button>
+      <button type="button" role="tab" data-dm-tab="assets"><svg class="ui-ic"><use href="#i-tree"/></svg>质量资产大盘</button>
+    </div>
+
     <div id="dataAdminControls">
-    <div class="card">
-      <h3>新增与导入需求</h3>
-      <div class="row">
-        <input id="createReqTitle" placeholder="需求标题">
-        <div class="prefix-input"><span>r#</span><input id="createReqNo" inputmode="numeric" placeholder="请输入数字" oninput="digitsOnly(this)"></div>
-        <select id="createReqMajorSelect"></select>
-        <button id="createReqBtn" onclick="createReq()">单条创建</button>
-        <button class="secondary" onclick="document.getElementById('importReqFile').click()">批量导入(Excel/CSV)</button>
-        <input type="file" id="importReqFile" accept=".xlsx, .xls, .csv" class="hidden" onchange="handleReqFileSelect(event)">
-      </div>
-
-      <div id="importPreviewArea" class="hidden" style="margin-top: 16px; padding: 16px; background: #f8fafc; border: 1px dashed #94a3b8; border-radius: 8px;">
-        <div style="font-weight: bold; margin-bottom: 12px; color: #334155;">📊 导入预览 (共解析到 <span id="previewCount" style="color: #2563eb; font-size: 18px;">0</span> 条有效数据)</div>
-        <div style="max-height: 200px; overflow-y: auto; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; padding: 10px; font-size: 13px; margin-bottom: 12px;" id="previewList"></div>
-        <div class="row">
-          <label>导入到大版本：</label>
-          <select id="importMajorSelect"></select>
-          <button onclick="confirmImport()">确认并导入</button>
-          <button class="secondary" onclick="cancelImport()" style="background: #94a3b8;">取消</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>新增软件</h3>
-      <div class="row">
-        <input id="createSoftwareName" placeholder="软件名称（如：WoSense）">
-        <button onclick="createSoftware()">创建软件</button>
-      </div>
-      <div class="muted" style="margin:10px 0 6px;">或：从禅道项目一键建软件并拉取版本（会把所选禅道项目锚定到该软件）</div>
-      <div class="row" style="align-items:flex-end; flex-wrap:wrap; gap:8px;">
-        <div>
-          <label style="font-size:12px; color:#64748b; display:block; margin-bottom:4px;">禅道项目</label>
-          <select id="createSoftwareZtProject" style="min-width:200px;"><option value="">-- 点右侧加载 --</option></select>
-        </div>
-        <div>
-          <label style="font-size:12px; color:#64748b; display:block; margin-bottom:4px;">同步子版本</label>
-          <select id="createSoftwareZtSyncMinor"><option value="1">是</option><option value="0">否</option></select>
-        </div>
-        <button class="secondary" onclick="loadCreateSoftwareZtProjects()">加载禅道项目</button>
-        <button id="createSoftwareFromZtBtn" onclick="createSoftwareFromZentao()">建软件并拉取</button>
-      </div>
-      <div class="muted" style="margin-top:6px; font-size:12px;">软件名留空时默认用所选禅道项目名。需先在右上角「🔌 禅道」完成账号绑定。</div>
-      <div id="createSoftwareFromZtResult" style="margin-top:10px; font-size:13px; color:#475569; display:none;"></div>
-    </div>
-
-    <div class="card">
-      <h3>新增版本</h3>
-      <div class="row">
-        <input id="createVersionNo" placeholder="版本号(如: 4030 / 40300097)">
-        <select id="createVersionType" onchange="toggleCreateVersionParent()"><option value="major">大版本</option><option value="minor">子版本</option></select>
-        <select id="createVersionParent" disabled><option value="">父大版本（minor必选）</option></select>
-        <button onclick="createVersion()">创建版本</button>
-      </div>
-    </div>
-
-      <div class="card">
-        <h3>从禅道同步版本</h3>
-        <div class="row" style="align-items: flex-end; flex-wrap: wrap; gap: 8px;">
-        <div>
-          <label style="font-size:12px; color:#64748b; display:block; margin-bottom:4px;">禅道项目</label>
-          <select id="ztProjectSelect" style="min-width:180px;"><option value="">-- 加载中... --</option></select>
-        </div>
-        <div>
-          <label style="font-size:12px; color:#64748b; display:block; margin-bottom:4px;">同步子版本</label>
-          <select id="ztSyncMinorSelect"><option value="1">是</option><option value="0">否</option></select>
-        </div>
-        <button id="ztLoadProjectsBtn" class="secondary" onclick="loadZtProjects()">刷新项目列表</button>
-        <button id="ztSyncVersionsBtn" onclick="syncZtVersions()">开始同步</button>
-        </div>
-        <div id="ztSyncResult" style="margin-top:10px; font-size:13px; color:#475569; display:none;"></div>
-      </div>
-
-      <div class="card">
-        <h3>本地 vs 禅道 小版本对账</h3>
-        <div class="muted" style="margin-bottom:10px;">选一个本地大版本，比对该大版本绑定的禅道执行下小版本是否一致。差异行可一键修复。</div>
-        <div class="row" style="align-items:flex-end; flex-wrap:wrap; gap:8px;">
-          <div>
-            <label style="font-size:12px; color:#64748b; display:block; margin-bottom:4px;">本地大版本</label>
-            <select id="ztVersionDiffMajorSelect" style="min-width:220px;"><option value="">请选择</option></select>
+      <div class="dm-panel" data-dm-panel="create" role="tabpanel" hidden>
+        <div class="dm-grid">
+          <div class="dm-card dm-card--wide">
+            <div class="dm-card-head">
+              <h3>新增与导入需求</h3>
+              <p>单条录入，或从 Excel / CSV 批量导入到指定大版本。</p>
+            </div>
+            <div class="dm-form">
+              <label class="dm-field dm-field--grow"><span>需求标题</span><input id="createReqTitle" placeholder="需求标题"></label>
+              <label class="dm-field"><span>需求编号</span><div class="prefix-input"><span>r#</span><input id="createReqNo" inputmode="numeric" placeholder="请输入数字" oninput="digitsOnly(this)"></div></label>
+              <label class="dm-field"><span>所属大版本</span><select id="createReqMajorSelect"></select></label>
+              <div class="dm-actions">
+                <button id="createReqBtn" type="button" onclick="createReq()">单条创建</button>
+                <button type="button" class="secondary" onclick="document.getElementById('importReqFile').click()">批量导入（Excel / CSV）</button>
+                <input type="file" id="importReqFile" accept=".xlsx, .xls, .csv" class="hidden" onchange="handleReqFileSelect(event)">
+              </div>
+            </div>
+            <div id="importPreviewArea" class="hidden dm-import">
+              <div class="dm-import-head">导入预览：共解析到 <b id="previewCount">0</b> 条有效数据</div>
+              <div id="previewList" class="dm-import-list"></div>
+              <div class="dm-form">
+                <label class="dm-field"><span>导入到大版本</span><select id="importMajorSelect"></select></label>
+                <div class="dm-actions">
+                  <button type="button" onclick="confirmImport()">确认并导入</button>
+                  <button type="button" class="secondary" onclick="cancelImport()">取消</button>
+                </div>
+              </div>
+            </div>
           </div>
-          <button class="secondary" onclick="openVersionDiffModal()">开始对账</button>
+
+          <div class="dm-card">
+            <div class="dm-card-head">
+              <h3>新增软件</h3>
+              <p>直接新建，或选一个禅道项目一键建软件并拉取版本（会把该项目锚定到新软件）。</p>
+            </div>
+            <div class="dm-form">
+              <label class="dm-field dm-field--grow"><span>软件名称</span><input id="createSoftwareName" placeholder="如：WoSense；从禅道建时留空则用项目名"></label>
+              <div class="dm-actions"><button type="button" onclick="createSoftware()">创建软件</button></div>
+            </div>
+            <div class="dm-divider"><span>或从禅道项目创建</span></div>
+            <div class="dm-form">
+              <label class="dm-field dm-field--grow"><span>禅道项目</span><select id="createSoftwareZtProject"><option value="">-- 点「加载项目」 --</option></select></label>
+              <label class="dm-field"><span>同步子版本</span><select id="createSoftwareZtSyncMinor"><option value="1">是</option><option value="0">否</option></select></label>
+              <div class="dm-actions">
+                <button type="button" class="secondary" onclick="loadCreateSoftwareZtProjects()">加载项目</button>
+                <button id="createSoftwareFromZtBtn" type="button" onclick="createSoftwareFromZentao()">建软件并拉取</button>
+              </div>
+            </div>
+            <div class="dm-note">需先在右上角账户菜单完成禅道账号绑定。</div>
+            <div id="createSoftwareFromZtResult" class="dm-result" style="display:none;"></div>
+          </div>
+
+          <div class="dm-card">
+            <div class="dm-card-head">
+              <h3>新增版本</h3>
+              <p>大版本对应一个测试周期；子版本（发包）需挂在某个大版本下。</p>
+            </div>
+            <div class="dm-form">
+              <label class="dm-field dm-field--grow"><span>版本号</span><input id="createVersionNo" placeholder="如：4030 / 40300097"></label>
+              <label class="dm-field"><span>类型</span><select id="createVersionType" onchange="toggleCreateVersionParent()"><option value="major">大版本</option><option value="minor">子版本</option></select></label>
+              <label class="dm-field dm-field--grow"><span>父大版本</span><select id="createVersionParent" disabled><option value="">父大版本（子版本必选）</option></select></label>
+              <div class="dm-actions"><button type="button" onclick="createVersion()">创建版本</button></div>
+            </div>
+          </div>
+
+          <div class="dm-card">
+            <div class="dm-card-head">
+              <h3>新增用户</h3>
+              <p>创建后可在「用户与权限」里设置页面权限与禅道账号。</p>
+            </div>
+            <div class="dm-form">
+              <label class="dm-field dm-field--grow"><span>用户名</span><input id="createUsername" placeholder="用户名" autocomplete="off"></label>
+              <label class="dm-field dm-field--grow"><span>密码</span><input id="createPassword" type="password" placeholder="密码" autocomplete="new-password"></label>
+              <label class="dm-field"><span>角色</span><select id="createUserRole"><option value="user">普通用户</option><option value="admin">管理员</option></select></label>
+              <div class="dm-actions"><button type="button" onclick="createUser()">创建用户</button></div>
+            </div>
+          </div>
         </div>
-        <div id="ztVersionDiffArea" style="margin-top:14px;"></div>
       </div>
 
-      <div class="card">
-        <h3>禅道后台同步任务</h3>
-        <div class="muted" style="margin-bottom:10px;">用于验证定时任务链路。最近同步会拉取最近变更的 Bug 和用例；夜间全量对账会跑整软件全量 Bug 与 testcase 同步。</div>
-        <div class="row" style="align-items:flex-start; flex-wrap:wrap; gap:10px;">
-          <button id="ztRunRecentSyncBtn" class="secondary" onclick="runZentaoRecentSync()">手动执行最近同步</button>
-          <button id="ztRunNightlyFullSyncBtn" onclick="runZentaoNightlyFullSync()">手动执行夜间全量对账</button>
-        </div>
-        <div id="ztBackgroundSyncResult" style="margin-top:10px; font-size:13px; color:#475569; display:none;"></div>
-        <pre id="ztBackgroundSyncDetail" style="display:none; margin-top:10px; max-height:260px; overflow:auto; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px; white-space:pre-wrap; word-break:break-word;"></pre>
-      </div>
+      <div class="dm-panel" data-dm-panel="zentao" role="tabpanel" hidden>
+        <div class="dm-grid">
+          <div class="dm-card">
+            <div class="dm-card-head">
+              <h3>从禅道同步版本</h3>
+              <p>把禅道项目下的执行同步为大版本、构建同步为子版本（写入当前顶栏所选软件）。</p>
+            </div>
+            <div class="dm-form">
+              <label class="dm-field dm-field--grow"><span>禅道项目</span><select id="ztProjectSelect"><option value="">-- 加载中... --</option></select></label>
+              <label class="dm-field"><span>同步子版本</span><select id="ztSyncMinorSelect"><option value="1">是</option><option value="0">否</option></select></label>
+              <div class="dm-actions">
+                <button id="ztLoadProjectsBtn" type="button" class="secondary" onclick="loadZtProjects()">刷新项目</button>
+                <button id="ztSyncVersionsBtn" type="button" onclick="syncZtVersions()">开始同步</button>
+              </div>
+            </div>
+            <div id="ztSyncResult" class="dm-result" style="display:none;"></div>
+          </div>
 
-      <div class="card">
-        <h3>新增用户</h3>
-        <div class="row">
-        <input id="createUsername" placeholder="用户名">
-        <input id="createPassword" type="password" placeholder="密码">
-        <select id="createUserRole"><option value="user">普通用户</option><option value="admin">管理员</option></select>
-        <button onclick="createUser()">创建用户</button>
+          <div class="dm-card">
+            <div class="dm-card-head">
+              <h3>禅道后台同步任务</h3>
+              <p>手动触发定时任务，验证同步链路：最近同步拉取近期变更的 Bug 与用例；夜间全量对账跑整软件的 Bug 与用例。</p>
+            </div>
+            <div class="dm-actions">
+              <button id="ztRunRecentSyncBtn" type="button" class="secondary" onclick="runZentaoRecentSync()">执行最近同步</button>
+              <button id="ztRunNightlyFullSyncBtn" type="button" onclick="runZentaoNightlyFullSync()">执行夜间全量对账</button>
+            </div>
+            <div id="ztBackgroundSyncResult" class="dm-result" style="display:none;"></div>
+            <pre id="ztBackgroundSyncDetail" class="dm-log" style="display:none;"></pre>
+          </div>
+
+          <div class="dm-card dm-card--wide">
+            <div class="dm-card-head">
+              <h3>本地 vs 禅道 小版本对账</h3>
+              <p>选一个本地大版本，比对它绑定的禅道执行下的子版本是否一致；差异行可一键修复。</p>
+            </div>
+            <div class="dm-form">
+              <label class="dm-field dm-field--grow"><span>本地大版本</span><select id="ztVersionDiffMajorSelect"><option value="">请选择</option></select></label>
+              <div class="dm-actions"><button type="button" class="secondary" onclick="openVersionDiffModal()">开始对账</button></div>
+            </div>
+            <div id="ztVersionDiffArea" class="dm-diff"></div>
+          </div>
+        </div>
       </div>
     </div>
+
+    <div class="dm-panel" data-dm-panel="users" role="tabpanel" hidden>
+      <!-- 原「视图控制」由分区切换取代；保留节点供 setDataView / setDataViewBatch 兼容 -->
+      <div class="card hidden" aria-hidden="true">
+        <input id="toggleDataUsers" type="checkbox" checked onchange="setDataView('users', this.checked)">
+        <input id="toggleDataVersions" type="checkbox" checked onchange="setDataView('versions', this.checked)">
+      </div>
+      <div id="dataUsersCard" class="dm-card dm-card--flush">
+        <div class="dm-card-head dm-card-head--row">
+          <div><h3>用户管理</h3><p>角色、组员身份、页面权限与禅道账号。</p></div>
+          <span id="dataUsersCount" class="dm-count"></span>
+        </div>
+        <div id="dataUsers" class="dm-users"></div>
+      </div>
+      <details id="dataLinkLogsBlock" class="dm-card dm-logs">
+        <summary><span>关联记录日志明细</span><em>跨大版本关联需求的操作记录</em></summary>
+        <div class="dm-logs-body">
+          <div class="dm-actions dm-actions--end"><button type="button" class="secondary" onclick="loadRequirementLinkLogs()">加载日志</button></div>
+          <div class="dm-table-wrap">
+            <table>
+              <thead>
+                <tr><th>时间</th><th>操作人</th><th>来源大版本</th><th>目标大版本</th><th>来源需求</th><th>目标需求</th></tr>
+              </thead>
+              <tbody id="dataLinkLogs"><tr><td colspan="6" class="muted" style="text-align:center;">点击“加载日志”后显示内容</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </details>
     </div>
 
-    <div class="card">
-      <h3>视图控制</h3>
-      <div class="row" style="justify-content: space-between; align-items: center;">
-        <div class="row" style="gap: 16px;">
-          <label style="font-weight: 600; color: #334155;">
-            <input id="toggleDataUsers" type="checkbox" checked onchange="setDataView('users', this.checked)"> 显示用户信息
-          </label>
-          <label style="font-weight: 600; color: #334155;">
-            <input id="toggleDataVersions" type="checkbox" checked onchange="setDataView('versions', this.checked)"> 显示版本信息
-          </label>
-        </div>
-        <div class="row" style="gap: 8px;">
-          <button class="secondary" onclick="setDataViewBatch(true)">全部显示</button>
-          <button class="secondary" onclick="setDataViewBatch(false)">全部隐藏</button>
+    <div class="dm-panel" data-dm-panel="assets" role="tabpanel" hidden>
+      <div class="dm-assets-head">
+        <div><h3>质量资产大盘</h3><p>按大版本树形追溯：发包履历 → 需求 → 用例 → Bug。</p></div>
+        <div class="dm-actions">
+          <button type="button" class="secondary" onclick="window.expandAllMajorBodies && expandAllMajorBodies()">全部展开</button>
+          <button type="button" class="secondary" onclick="exportTreePdf()">导出 PDF</button>
+          <button type="button" class="tw-refresh" onclick="loadDataOverview()"><svg class="ui-ic"><use href="#i-refresh"/></svg>刷新大盘</button>
         </div>
       </div>
+      <p id="dataDangerHint" class="dm-danger">危险操作：删除大版本会级联删除其下需求、用例和 Bug。</p>
+      <div id="dataTreeArea"></div>
     </div>
-
-    <div id="dataUsersCard" class="card">
-      <h3>用户管理</h3>
-      <div id="dataUsers"></div>
-    </div>
-
-    <details id="dataLinkLogsBlock" class="card">
-      <summary style="cursor:pointer; font-weight:700; color:#0f172a;">关联记录日志明细</summary>
-      <div style="margin-top:10px;">
-        <div class="row" style="justify-content:flex-end; margin-bottom:8px;">
-          <button class="secondary" onclick="loadRequirementLinkLogs()">加载日志</button>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>操作人</th>
-              <th>来源大版本</th>
-              <th>目标大版本</th>
-              <th>来源需求</th>
-              <th>目标需求</th>
-            </tr>
-          </thead>
-          <tbody id="dataLinkLogs"><tr><td colspan="6" class="muted" style="text-align:center;">点击“加载日志”后显示内容</td></tr></tbody>
-        </table>
-      </div>
-    </details>
-
-    <p id="dataDangerHint" class="warn">危险操作：删除大版本会级联删除其下需求、用例和Bug。</p>
-    <div class="row" style="justify-content: space-between; align-items: center; margin-top: 24px; margin-bottom: 12px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">
-      <h3 style="margin: 0;">🌳 质量资产大盘 (树形追溯)</h3>
-      <div>
-        <button class="secondary" onclick="exportTreePdf()" style="margin-right: 8px;">导出树状图 (PDF)</button>
-        <button onclick="loadDataOverview()">刷新大盘</button>
-      </div>
-    </div>
-    <div id="dataTreeArea"></div>
   </section>
 
   <div id="auditTimelineModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">

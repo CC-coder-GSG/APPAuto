@@ -24,23 +24,60 @@ const TAB_PERMISSION_OPTIONS = [
   { key: 'learning', label: '学习中心' },
 ];
 
+// ── 分区切换（2026-11-24 排版 v2）：录入与创建 / 禅道同步 / 用户与权限 / 质量资产大盘 ──
+const DM_PANEL_KEY = 'omniqa.dataPanel';
+let dmIsAdmin = true;
+
+function dmStoredPanel() {
+  try { return localStorage.getItem(DM_PANEL_KEY) || ''; } catch { return ''; }
+}
+
+export function showDataPanel(key, { remember = true } = {}) {
+  const root = document.getElementById('tab-data');
+  if (!root) return;
+  const tabs = [...root.querySelectorAll('[data-dm-tab]')].filter((b) => !b.hidden);
+  if (!tabs.some((b) => b.dataset.dmTab === key)) key = tabs[0]?.dataset.dmTab || 'assets';
+  root.querySelectorAll('[data-dm-tab]').forEach((b) => {
+    const on = b.dataset.dmTab === key;
+    b.classList.toggle('is-on', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  root.querySelectorAll('[data-dm-panel]').forEach((panel) => { panel.hidden = panel.dataset.dmPanel !== key; });
+  if (remember) { try { localStorage.setItem(DM_PANEL_KEY, key); } catch { /* 隐私模式 */ } }
+}
+
+// 只读账号看不到录入/同步两个分区
+function syncDataSubnav(isAdmin) {
+  dmIsAdmin = isAdmin;
+  const root = document.getElementById('tab-data');
+  if (!root) return;
+  root.querySelectorAll('[data-dm-tab][data-admin-only]').forEach((b) => { b.hidden = !isAdmin; });
+  const current = root.querySelector('[data-dm-tab].is-on')?.dataset.dmTab;
+  showDataPanel(current || dmStoredPanel() || (isAdmin ? 'create' : 'assets'), { remember: false });
+}
+
+document.addEventListener('click', (e) => {
+  const tab = e.target.closest?.('#tab-data [data-dm-tab]');
+  if (tab) showDataPanel(tab.dataset.dmTab);
+});
+syncDataSubnav(String(window.currentUser?.role || 'admin') === 'admin');
+
+const DM_STATUS_TONE = { active: 'bad', resolved: 'warn', closed: 'ok', rejected: 'muted' };
+const dmChip = (text, tone = '', title = '') =>
+  `<span class="mrc-chip${tone ? ` mrc-chip--${tone}` : ''}"${title ? ` title="${title}"` : ''}>${text}</span>`;
+const dmIcon = (id) => `<svg class="ui-ic tw-ic" aria-hidden="true"><use href="#i-${id}"/></svg>`;
+const dmBtn = (label, onclick, { kind = 'ghost', icon = '', title = '' } = {}) =>
+  `<button type="button" class="mrc-btn tw-btn tw-btn--${kind}${kind === 'ghost' || kind === 'danger' ? ' secondary' : ''}"${title ? ` title="${title}"` : ''} onclick="${onclick}">${icon ? dmIcon(icon) : ''}<span>${label}</span></button>`;
+
 function bugZentaoMeta(b) {
   const parts = [];
-  const statusColors = { active: '#dc2626', resolved: '#d97706', closed: '#16a34a', rejected: '#6b7280' };
   if (b.zentao_live_status) {
-    const color = statusColors[b.zentao_live_status.toLowerCase()] || '#475569';
-    parts.push(`<span class="badge" style="background:#f8fafc; color:${color}; border:1px solid ${color}40;">${b.zentao_live_status}</span>`);
+    parts.push(dmChip(escapeHtmlData(b.zentao_live_status), DM_STATUS_TONE[String(b.zentao_live_status).toLowerCase()] || ''));
   }
-  if (b.zentao_deleted) {
-    parts.push(`<span class="badge" style="background:#fee2e2; color:#b91c1c;">已删除</span>`);
-  }
-  if (b.zentao_closed_by_name) {
-    parts.push(`<span class="badge" style="background:#ecfdf5; color:#047857;">关闭: ${b.zentao_closed_by_name}</span>`);
-  }
-  if (b.last_zentao_synced_at) {
-    parts.push(`<span class="badge" style="background:#f8fafc; color:#94a3b8; font-size:11px;">同步 ${b.last_zentao_synced_at}</span>`);
-  }
-  return parts.length ? ` &nbsp;${parts.join('')}` : '';
+  if (b.zentao_deleted) parts.push(dmChip('禅道已删除', 'bad'));
+  if (b.zentao_closed_by_name) parts.push(dmChip(`关闭：${escapeHtmlData(b.zentao_closed_by_name)}`, 'ok'));
+  if (b.last_zentao_synced_at) parts.push(dmChip(`同步 ${escapeHtmlData(b.last_zentao_synced_at)}`, 'muted'));
+  return parts.join('');
 }
 
 function isMajorExpanded(majorId) {
@@ -296,37 +333,45 @@ export function renderDataOverview() {
   if (adminControls) adminControls.classList.toggle('hidden', !isAdmin);
   if (readOnlyHint) readOnlyHint.classList.toggle('hidden', isAdmin);
   if (dangerHint) dangerHint.classList.toggle('hidden', !isAdmin);
+  if (isAdmin !== dmIsAdmin || !document.querySelector('#tab-data [data-dm-tab].is-on')) syncDataSubnav(isAdmin);
+  const usersCount = document.getElementById('dataUsersCount');
+  if (usersCount) usersCount.textContent = (data.users || []).length ? `${(data.users || []).length} 人` : '';
   const usersCard = document.getElementById('dataUsersCard');
   if (usersCard) usersCard.classList.toggle('hidden', !state.dataViewState.showUsers);
   const dataUsers = document.getElementById('dataUsers');
   if (state.dataViewState.showUsers && dataUsers) {
     dataUsers.innerHTML = (data.users || []).length === 0
-      ? '<div class="muted" style="padding: 12px 8px;">暂无用户数据</div>'
+      ? '<div class="dm-empty">暂无用户数据</div>'
       : (data.users || []).map((u) => {
         const safeUsername = String(u.username || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const safeDisplayName = String(u.display_name || u.username || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const safeZentaoAcc = String(u.zentao_account || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const safeAllowedTabs = encodeURIComponent(JSON.stringify(u.allowed_tabs || []));
-        return `<div class="card" style="margin-bottom:12px; padding:14px 16px; border:1px solid #e2e8f0; box-shadow:none;">
-          <div style="display:grid; grid-template-columns:minmax(220px, 1fr) auto; gap:12px; align-items:center;">
-            <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-              <span style="font-weight:700; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${u.display_name || u.username}</span>
-              <span class="badge" style="background:#f8fafc; color:#64748b;">账号: ${u.username}</span>
-              <span class="badge" style="background:${u.role === 'admin' ? '#dbeafe' : '#f1f5f9'}; color:${u.role === 'admin' ? '#1d4ed8' : '#475569'}">${u.role === 'admin' ? '管理员' : '普通用户'}</span>
-              <span class="badge" style="background:${u.is_team_member ? '#dcfce7' : '#fee2e2'}; color:${u.is_team_member ? '#166534' : '#991b1b'}">${u.is_team_member ? '组员' : '编外'}</span>
-              ${Array.isArray(u.allowed_tabs) && u.allowed_tabs.length ? `<span class="badge" style="background:#eef2ff; color:#4338ca;">页面权限 ${u.allowed_tabs.length} 项</span>` : ''}
-              <span class="badge" style="background:${u.zentao_account ? '#fef3c7' : '#f1f5f9'}; color:${u.zentao_account ? '#b45309' : '#94a3b8'};">禅道账号: ${u.zentao_account || '未设置'}</span>
-            </div>
-            <div class="row" style="justify-content:flex-end; gap:8px; margin:0; flex-wrap:wrap; ${isAdmin ? '' : 'display:none;'}">
-              <button class="secondary" onclick="openUserTabPermissionModal(${u.id}, '${safeUsername}', decodeURIComponent('${safeAllowedTabs}'))">页面权限</button>
-              <button class="secondary" onclick="renameUserDisplayName(${u.id}, '${safeDisplayName}', '${safeUsername}')">重命名</button>
-              <button class="secondary" onclick="editUserZentaoAccount(${u.id}, '${safeZentaoAcc}', '${safeUsername}')">禅道账号</button>
-              <button onclick="toggleRole(${u.id},'${u.role}')">设为${u.role === 'admin' ? '普通用户' : '管理员'}</button>
-              <button class="secondary" onclick="toggleTeamMember(${u.id}, ${u.is_team_member ? false : true})">${u.is_team_member ? '设为编外人员' : '设为组员'}</button>
-              <button class="secondary" onclick="resetUserPassword(${u.id}, '${safeUsername}')">重置密码</button>
-              <button class="danger" onclick="removeUser(${u.id}, '${safeUsername}')">删除</button>
+        const shown = escapeHtmlData(u.display_name || u.username || '');
+        const initial = escapeHtmlData(Array.from(String(u.display_name || u.username || '?'))[0].toUpperCase());
+        const perms = Array.isArray(u.allowed_tabs) && u.allowed_tabs.length
+          ? dmChip(`页面权限 ${u.allowed_tabs.length} 项`, 'purple') : '';
+        const actions = isAdmin ? `<div class="dm-user-actions">
+            ${dmBtn('页面权限', `openUserTabPermissionModal(${u.id}, '${safeUsername}', decodeURIComponent('${safeAllowedTabs}'))`, { icon: 'lock' })}
+            ${dmBtn('重命名', `renameUserDisplayName(${u.id}, '${safeDisplayName}', '${safeUsername}')`)}
+            ${dmBtn('禅道账号', `editUserZentaoAccount(${u.id}, '${safeZentaoAcc}', '${safeUsername}')`, { icon: 'plug' })}
+            ${dmBtn(`设为${u.role === 'admin' ? '普通用户' : '管理员'}`, `toggleRole(${u.id},'${u.role}')`)}
+            ${dmBtn(u.is_team_member ? '设为编外' : '设为组员', `toggleTeamMember(${u.id}, ${u.is_team_member ? false : true})`)}
+            ${dmBtn('重置密码', `resetUserPassword(${u.id}, '${safeUsername}')`)}
+            ${dmBtn('删除', `removeUser(${u.id}, '${safeUsername}')`, { kind: 'danger' })}
+          </div>` : '';
+        return `<div class="dm-user">
+          <span class="dm-avatar${u.role === 'admin' ? ' is-admin' : ''}" aria-hidden="true">${initial}</span>
+          <div class="dm-user-main">
+            <div class="dm-user-name"><b title="${shown}">${shown}</b><span>@${escapeHtmlData(u.username || '')}</span></div>
+            <div class="dm-user-tags">
+              ${u.role === 'admin' ? dmChip('管理员', 'warn') : dmChip('普通用户', 'outline')}
+              ${u.is_team_member ? dmChip('组员', 'ok') : dmChip('编外', 'muted')}
+              ${perms}
+              ${u.zentao_account ? dmChip(`禅道 ${escapeHtmlData(u.zentao_account)}`, 'info') : dmChip('未绑定禅道', 'muted')}
             </div>
           </div>
+          ${actions}
         </div>`;
       }).join('');
   } else if (dataUsers) {
@@ -369,11 +414,11 @@ export function renderDataOverview() {
     const majorOpen = isMajorExpanded(major.id);
     let minorHtml = majorMinors.map((m) => {
       const actionHtml = isAdmin
-        ? ` <a href="javascript:void(0)" title="编辑" onclick="editVersion(${m.id},'${m.version_no}','minor',${major.id})" style="color:#3b82f6;margin-left:4px;text-decoration:none;">✎</a><a href="javascript:void(0)" title="删除" onclick="removeVersion(${m.id})" style="color:#ef4444;margin-left:2px;text-decoration:none;">×</a>`
+        ? `<button type="button" class="dm-mini" title="编辑子版本" onclick="editVersion(${m.id},'${m.version_no}','minor',${major.id})">✎</button><button type="button" class="dm-mini is-danger" title="删除子版本" onclick="removeVersion(${m.id})">×</button>`
         : '';
-      return `<span class="badge" style="background:#e0f2fe;color:#0369a1;margin-right:8px;">🏷️ ${m.version_no}${actionHtml}</span>`;
+      return `<span class="dm-minor">${escapeHtmlData(m.version_no)}${actionHtml}</span>`;
     }).join('');
-    if (!minorHtml) minorHtml = '<span class="muted" style="font-size:13px;">暂无发包记录</span>';
+    if (!minorHtml) minorHtml = '<span class="dm-empty-inline">暂无发包记录</span>';
     let reqHtml = reqs.map((req) => {
       const safeReqNo = String(req.zentao_req_id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       const safeReqTitle = String(req.title || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -385,87 +430,79 @@ export function renderDataOverview() {
         ? `最后更新：${req.test_notes_updated_by_name || '未知'} ${new Date(req.test_notes_updated_at).toLocaleString()}`
         : '';
       const storyBadge = req.zentao_story_id
-        ? `<span class="badge" style="background:#ecfeff; color:#0f766e; margin-left:8px;">Story ${req.zentao_story_id}</span>`
-        : `<span class="badge" style="background:#f8fafc; color:#94a3b8; margin-left:8px;">未绑定 Story</span>`;
+        ? dmChip(`Story ${req.zentao_story_id}`, 'info')
+        : dmChip('未绑定 Story', 'muted');
+      const bugLine = (b, label) => {
+        const actions = isAdmin
+          ? `<button type="button" class="dm-mini" title="编辑 Bug" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button type="button" class="dm-mini is-danger" title="删除 Bug" onclick="removeBug(${b.id})">×</button>`
+          : '';
+        return `<div class="dm-bug">
+          <span class="dm-bug-main"><em>${label}</em>${renderBugLink(b)}<span class="dm-bug-build">发包 ${escapeHtmlData(minorMap[b.found_minor_version_id] || '未知')}</span></span>
+          <span class="dm-bug-tags">${bugZentaoMeta(b)}<button type="button" class="dm-mini" title="Bug 时间线" onclick="openAuditTimelineModal('bug', ${b.id}, 'Bug 时间线')">${dmIcon('clock')}</button>${actions}</span>
+        </div>`;
+      };
       const casesListHtml = (req.case_ids || []).map((cId) => {
         const relatedBugs = caseBugs.filter((b) => b.source_ref === cId);
-        let bHtml = relatedBugs.map((b) => {
-          const actions = isAdmin
-            ? `<button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button>`
-            : '';
-          return `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 关联 Bug: ${renderBugLink(b)}${bugZentaoMeta(b)} <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="openAuditTimelineModal('bug', ${b.id}, 'Bug 时间线')">🕓</button>${actions}</div>`;
-        }).join('');
-        if (!bHtml) bHtml = '<div style="margin-left:24px; color:#10b981; font-size:13px; margin-top:4px;">↳ ✓ 完美通过，无关联Bug</div>';
+        const bHtml = relatedBugs.length
+          ? relatedBugs.map((b) => bugLine(b, '关联 Bug')).join('')
+          : '<div class="dm-bug is-clean">完美通过，无关联 Bug</div>';
         const caseObj = (req.test_cases || []).find((x) => String(x.zentao_case_id) === String(cId));
-        return `<div style="margin-top:12px;">🧪 <b>用例 [${caseObj ? renderCaseLink(caseObj) : cId}]</b> ${bHtml}</div>`;
+        return `<div class="dm-case"><div class="dm-case-head">用例 ${caseObj ? renderCaseLink(caseObj) : escapeHtmlData(cId)}</div>${bHtml}</div>`;
       }).join('');
-      const freeBugsHtml = freeBugs.map((b) => {
-        const actions = isAdmin
-          ? `<button class="text-btn" onclick="editBug(${b.id},'${b.bug_id}')">✎</button><button class="text-btn" onclick="removeBug(${b.id})">×</button>`
-          : '';
-        return `<div style="margin-left:24px; color:#475569; font-size:13px; margin-top:4px;">↳ 🐛 自由 Bug: ${renderBugLink(b)}${bugZentaoMeta(b)} <span style="color:#94a3b8">[发包: 🏷️ ${minorMap[b.found_minor_version_id] || '未知'}]</span> <button class="text-btn" onclick="openAuditTimelineModal('bug', ${b.id}, 'Bug 时间线')">🕓</button>${actions}</div>`;
-      }).join('');
+      const freeBugsHtml = freeBugs.map((b) => bugLine(b, '自由 Bug')).join('');
       const reqActionButtons = isAdmin
-        ? `
-            <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); openRequirementStoryBindingModal(${req.id}, '${safeReqNo}', '${safeReqTitle}', ${req.zentao_story_id || 'null'})">修正自动归集</button>
-            <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); editReq(${req.id},'${req.zentao_req_id}','${req.title}',${major.id})">编辑</button>
-            <button class="danger" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); removeReq(${req.id})">删除</button>
-          `
+        ? dmBtn('修正自动归集', `event.stopPropagation(); openRequirementStoryBindingModal(${req.id}, '${safeReqNo}', '${safeReqTitle}', ${req.zentao_story_id || 'null'})`)
+          + dmBtn('编辑', `event.stopPropagation(); editReq(${req.id},'${req.zentao_req_id}','${req.title}',${major.id})`)
+          + dmBtn('删除', `event.stopPropagation(); removeReq(${req.id})`, { kind: 'danger' })
         : '';
       return `
-      <div style="border:1px solid #e2e8f0; border-radius:6px; margin-bottom:12px; background:#fff;">
-        <div style="padding:10px 12px; cursor:pointer; background:#f8fafc; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;" onclick="document.getElementById('req_body_${req.id}').classList.toggle('hidden')">
-          <span style="font-size:14px;">📄 <b>${req.zentao_req_id}</b> ${req.title}${storyBadge}</span>
-          <span>
-            <button class="secondary" style="padding:4px 8px; font-size:12px;" onclick="event.stopPropagation(); openAuditTimelineModal('requirement', ${req.id}, '需求时间线')">时间线</button>
-            ${reqActionButtons}
-          </span>
+      <div class="dm-req">
+        <div class="dm-req-head" onclick="document.getElementById('req_body_${req.id}').classList.toggle('hidden')">
+          <svg class="dm-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          <span class="dm-req-title"><b>${escapeHtmlData(req.zentao_req_id)}</b><span>${escapeHtmlData(req.title)}</span>${storyBadge}</span>
+          <span class="dm-req-meta">${dmChip(`用例 ${(req.case_ids || []).length}`, 'outline')}${reqBugs.length ? dmChip(`Bug ${reqBugs.length}`, 'bad') : ''}</span>
+          <span class="dm-req-actions">${dmBtn('时间线', `event.stopPropagation(); openAuditTimelineModal('requirement', ${req.id}, '需求时间线')`, { icon: 'clock' })}${reqActionButtons}</span>
         </div>
-        <div id="req_body_${req.id}" class="hidden" style="padding:12px; background:#fff;">
-          <div style="margin-bottom:12px; padding:10px; border:1px dashed #cbd5e1; border-radius:6px; background:#f8fafc;">
-            <div style="font-weight:bold; color:#334155; margin-bottom:6px;">[测试要点]</div>
-            <div style="color:${notesSummary ? '#334155' : '#94a3b8'}; font-size:13px; line-height:1.5;">
-              ${notesSummary ? (notesSummary.length > 60 ? `${notesSummary.slice(0, 60)}...` : notesSummary) : '无'}
-            </div>
-            ${notesMeta ? `<div class="muted" style="margin-top:6px; font-size:12px;">${notesMeta}</div>` : ''}
+        <div id="req_body_${req.id}" class="hidden dm-req-body">
+          <div class="dm-notes${notesSummary ? '' : ' is-empty'}">
+            <b>测试要点</b>
+            <span>${notesSummary ? escapeHtmlData(notesSummary.length > 60 ? `${notesSummary.slice(0, 60)}...` : notesSummary) : '无'}</span>
+            ${notesMeta ? `<em>${escapeHtmlData(notesMeta)}</em>` : ''}
           </div>
-          <div style="margin-bottom:16px;">
-            <div style="font-weight:bold; color:#334155; border-bottom:1px solid #f1f5f9; padding-bottom:4px;">[区块 A：测试用例与关联 Bug]</div>
-            ${casesListHtml || '<div class="muted" style="margin-left:24px; margin-top:8px;">暂无用例</div>'}
-          </div>
-          <div>
-            <div style="font-weight:bold; color:#334155; border-bottom:1px solid #f1f5f9; padding-bottom:4px;">[区块 B：自由 Bug 池]</div>
-            ${freeBugsHtml || '<div class="muted" style="margin-left:24px; margin-top:8px;">暂无自由Bug</div>'}
+          <div class="dm-req-cols">
+            <div class="dm-block"><div class="dm-block-head">测试用例与关联 Bug</div>${casesListHtml || '<div class="dm-empty-inline">暂无用例</div>'}</div>
+            <div class="dm-block"><div class="dm-block-head">自由 Bug 池</div>${freeBugsHtml || '<div class="dm-empty-inline">暂无自由 Bug</div>'}</div>
           </div>
         </div>
       </div>`;
     }).join('');
-    if (!reqHtml) reqHtml = '<div class="muted" style="font-size:13px;">暂无下辖需求</div>';
+    if (!reqHtml) reqHtml = '<div class="dm-empty-inline">暂无下辖需求</div>';
     const majorActionButtons = isAdmin
-      ? `
-          <button class="secondary" onclick="event.stopPropagation(); editVersion(${major.id},'${major.version_no}','major',null)">编辑版本</button>
-          <button class="danger" onclick="event.stopPropagation(); removeVersion(${major.id})">删除整体</button>
-        `
+      ? dmBtn('编辑版本', `event.stopPropagation(); editVersion(${major.id},'${major.version_no}','major',null)`)
+        + dmBtn('删除整体', `event.stopPropagation(); removeVersion(${major.id})`, { kind: 'danger', title: '会级联删除其下需求、用例和 Bug' })
       : '';
+    const majorBugCount = (data.bugs || []).filter((b) => reqs.some((r) => r.id === b.requirement_id)).length;
     treeHtml += `
-    <div style="border:2px solid #cbd5e1; border-radius:8px; margin-bottom:16px; background:#fff; overflow:hidden;">
-      <div style="padding:12px 16px; background:#f1f5f9; border-bottom:1px solid #cbd5e1; cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="toggleMajorBody(${major.id})">
-        <span style="font-size:16px; font-weight:bold; color:#0f172a;">📦 大版本：${major.version_no}</span>
-        <span>${majorActionButtons}</span>
+    <div class="dm-major">
+      <div class="dm-major-head" onclick="toggleMajorBody(${major.id})">
+        <svg class="dm-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+        <span class="dm-major-title"><em>大版本</em><b>${escapeHtmlData(major.version_no)}</b></span>
+        <span class="dm-major-meta">${dmChip(`子版本 ${majorMinors.length}`, 'outline')}${dmChip(`需求 ${reqs.length}`, 'info')}${majorBugCount ? dmChip(`Bug ${majorBugCount}`, 'bad') : ''}</span>
+        <span class="dm-major-actions">${majorActionButtons}</span>
       </div>
-      <div id="major_body_${major.id}" class="${majorOpen ? '' : 'hidden'}" style="padding:16px; background:#f8fafc;">
-        ${state.dataViewState.showVersions ? `<div style="margin-bottom:20px; padding-bottom:12px; border-bottom:1px dashed #cbd5e1;">
-          <div style="font-weight:bold; margin-bottom:8px; color:#334155;">【版本发包履历】</div>
-          <div>${minorHtml}</div>
-        </div>` : '<div class="muted" style="margin-bottom:20px; padding-bottom:12px; border-bottom:1px dashed #cbd5e1;">版本信息已隐藏（可在上方视图控制中开启）</div>'}
-        <div>
-          <div style="font-weight:bold; margin-bottom:12px; color:#334155;">【下辖需求清单】</div>
+      <div id="major_body_${major.id}" class="dm-major-body ${majorOpen ? '' : 'hidden'}">
+        ${state.dataViewState.showVersions ? `<div class="dm-block">
+          <div class="dm-block-head">版本发包履历</div>
+          <div class="dm-minors">${minorHtml}</div>
+        </div>` : '<div class="dm-empty-inline">版本信息已隐藏</div>'}
+        <div class="dm-block">
+          <div class="dm-block-head">下辖需求清单 <span>${reqs.length}</span></div>
           ${reqHtml}
         </div>
       </div>
     </div>`;
   });
-  document.getElementById('dataTreeArea').innerHTML = treeHtml || '<div class="muted" style="padding: 20px; text-align: center;">系统中暂无数据，请先创建大版本</div>';
+  document.getElementById('dataTreeArea').innerHTML = treeHtml || '<div class="dm-empty">系统中暂无数据，请先创建大版本</div>';
 }
 
 
