@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import httpx
@@ -25,6 +26,8 @@ from app.services.zentao_v2_protocol import (
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT = 15.0
+# Bug 预览：v2 详情与页面 JSON（含流转记录）并行拉取用的小线程池（只读请求）
+_BUG_PAGE_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="zentao-bug-page")
 
 
 def _positive_object_id(value: Any) -> int | None:
@@ -502,21 +505,27 @@ class ZentaoClient:
 
         401 交给调用方刷新 Token。缺少操作历史时从保留页面补充，
         页面字段不会覆盖 v2 已返回的字段。
+
+        v2 详情几乎从不带 actions，原先是"先 v2、再页面"两次串行往返；
+        两个都是只读请求，这里并行发出，预览等待时间从两次之和降为较慢的一次。
         """
+        page_future = _BUG_PAGE_POOL.submit(self.get_page, f"bug-view-{bug_id}.json")
         raw: dict | list | None = None
         try:
             raw = self.get_bug(bug_id)
         except ZentaoAPIError as exc:
             if exc.status_code == 401:
+                page_future.cancel()
                 raise
             logger.info("get_bug_with_fallback: v2 失败 bug_id=%s status=%s，回退页面 JSON",
                         bug_id, exc.status_code)
             raw = None
         if raw and 'actions' in raw:
+            page_future.cancel()
             return raw
 
         try:
-            page = self.get_page(f"bug-view-{bug_id}.json")
+            page = page_future.result()
         except Exception:
             if not raw:
                 raise

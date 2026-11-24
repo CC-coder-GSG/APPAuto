@@ -3300,3 +3300,364 @@ details:not([open]) > .lift-ring { display: none !important; }
 @media (max-width: 560px) {
   #tab-mine details.review-req-card .rv-owner { display: none; }
 }
+
+/* ============================================================
+   R10 禅道预览弹窗 v2（2026-11-24）：需求 / Bug / 用例 / 任务共用
+   结构见 js/components/entity-preview-modal.js（.epv-*），图片查看器样式在 image-viewer.js 内。
+   z-index 高于业务弹窗（10000），低于图片查看器（20000），从任意弹窗里点预览都不会被盖住。
+   ============================================================ */
+html.epv-open { overflow: hidden; }
+.epv-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: rgba(28, 25, 23, 0.42);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  animation: epvFade var(--w-fast) ease-out;
+}
+.epv-overlay[hidden] { display: none !important; }
+@keyframes epvFade { from { opacity: 0; } }
+@keyframes epvRise { from { opacity: 0; transform: translateY(12px) scale(0.985); } }
+.epv-panel:focus { outline: none; }
+.epv-panel {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 980px;
+  margin: auto 0;
+  border-radius: 18px;
+  background: var(--w-raised);
+  box-shadow: 0 24px 64px rgba(28, 25, 23, 0.28), 0 0 0 1px rgba(28, 25, 23, 0.06);
+  animation: epvRise var(--w-base) var(--w-spring);
+}
+
+/* 标题栏：吸顶，长内容滚动时仍能看到是哪条、能直接关 */
+.epv-head {
+  position: sticky;
+  top: -40px;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--w-hairline);
+  border-radius: 18px 18px 0 0;
+  background: color-mix(in srgb, var(--w-raised) 92%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+.epv-head-main { flex: 1 1 auto; min-width: 0; }
+.epv-kicker { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.epv-kind {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(28, 25, 23, 0.06);
+  color: var(--w-ink-soft);
+}
+.epv-kind--story { background: rgba(37, 99, 235, 0.10); color: #1d4ed8; }
+.epv-kind--bug { background: rgba(220, 38, 38, 0.10); color: #b91c1c; }
+.epv-kind--testcase { background: rgba(22, 163, 74, 0.10); color: #15803d; }
+.epv-kind--task { background: rgba(217, 119, 6, 0.12); color: #b45309; }
+.epv-id { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px; font-weight: 600; color: var(--w-ink-faint); }
+.epv-title { display: block !important; margin: 0 !important; font-size: 19px !important; font-weight: 650 !important; line-height: 1.4 !important; color: var(--w-ink) !important; white-space: normal !important; overflow-wrap: anywhere; word-break: break-word; }
+.epv-title::before, .epv-title::after { content: none !important; display: none !important; }
+.epv-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.epv-meta:empty { display: none; }
+.epv-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(28, 25, 23, 0.06);
+  color: var(--w-ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.epv-chip--ok { background: rgba(22, 163, 74, 0.10); color: #15803d; }
+.epv-chip--info { background: rgba(8, 145, 178, 0.10); color: #0e7490; }
+.epv-chip--warn { background: rgba(245, 158, 11, 0.14); color: #b45309; }
+.epv-chip--bad { background: rgba(220, 38, 38, 0.09); color: #b91c1c; }
+.epv-chip--purple { background: rgba(124, 58, 237, 0.09); color: #6d28d9; }
+.epv-chip--muted { color: var(--w-ink-faint); }
+
+.epv-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.epv-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--w-hairline-strong);
+  background: var(--w-raised);
+  color: var(--w-ink) !important;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none !important;
+  white-space: nowrap;
+  transition: border-color var(--w-fast) ease-out, background var(--w-fast) ease-out;
+}
+.epv-open[hidden] { display: none; }
+.epv-open:hover { border-color: rgba(28, 25, 23, 0.26); background: var(--w-surface); }
+.epv-open svg, .epv-close svg, .epv-section-head svg, .epv-file svg, .epv-error svg {
+  width: 16px; height: 16px; flex: 0 0 auto;
+  fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round;
+}
+.epv-panel button.epv-close {
+  display: inline-grid !important;
+  place-items: center;
+  width: 34px !important;
+  height: 34px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 8px !important;
+  background: rgba(28, 25, 23, 0.06) !important;
+  color: var(--w-ink-soft) !important;
+  box-shadow: none !important;
+}
+.epv-panel button.epv-close:hover { background: rgba(220, 38, 38, 0.10) !important; color: #b91c1c !important; }
+.epv-panel button.epv-close svg { width: 18px; height: 18px; }
+
+.epv-body { padding: 18px 22px 8px; }
+.epv-foot { padding: 4px 22px 16px; font-size: 11.5px; color: var(--w-ink-faint); text-align: right; }
+.epv-foot:empty { display: none; }
+
+/* 信息格 */
+.epv-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  margin: 0 0 16px;
+  overflow: hidden;
+  border: 1px solid var(--w-hairline);
+  border-radius: 12px;
+  background: var(--w-surface);
+}
+/* 分隔线画在格子右/下外侧，靠容器 overflow 裁掉最外一圈，不足一行时不留灰块 */
+.epv-facts > div { min-width: 0; padding: 10px 14px; box-shadow: 1px 0 0 var(--w-hairline), 0 1px 0 var(--w-hairline); }
+.epv-facts dt { margin: 0 0 3px; font-size: 11.5px; color: var(--w-ink-faint); }
+.epv-facts dd { margin: 0; font-size: 13px; color: var(--w-ink); line-height: 1.5; word-break: break-word; }
+
+/* 分区卡片 */
+.epv-section {
+  margin-bottom: 14px;
+  overflow: hidden;
+  border: 1px solid var(--w-hairline);
+  border-radius: 12px;
+  background: var(--w-raised);
+}
+.epv-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--w-hairline);
+  background: var(--w-surface);
+  color: var(--w-ink);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.epv-section-head svg { color: var(--w-icon); }
+.epv-section--bad .epv-section-head svg { color: #dc2626; }
+.epv-section--ok .epv-section-head svg { color: #16a34a; }
+.epv-section--warn .epv-section-head svg { color: #d97706; }
+.epv-count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(28, 25, 23, 0.07);
+  color: var(--w-ink-soft);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+}
+.epv-section-body { padding: 14px 16px; }
+.epv-empty { color: var(--w-ink-faint); font-size: 13px; }
+.epv-rich { color: var(--w-ink) !important; }
+.epv-rich img {
+  display: block;
+  width: auto !important;
+  height: auto !important;
+  max-width: 100%;
+  max-height: 360px;
+  margin: 8px 0 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 0 0 1px var(--w-hairline);
+  cursor: zoom-in;
+  transition: box-shadow var(--w-fast) ease-out, transform var(--w-fast) var(--w-pop);
+}
+.epv-rich img:hover { box-shadow: 0 0 0 2px var(--w-accent), 0 6px 18px rgba(28, 25, 23, 0.14); }
+.epv-rich a { color: var(--w-accent-ink) !important; }
+#entityPreviewModal img.is-loading { min-width: 80px; min-height: 60px; background: linear-gradient(90deg, rgba(28,25,23,.05), rgba(28,25,23,.10), rgba(28,25,23,.05)); background-size: 200% 100%; animation: epvShimmer 1.2s linear infinite; }
+#entityPreviewModal img.is-broken { opacity: 0.5; cursor: default; }
+
+/* 附件：图片画廊 + 文件 */
+.epv-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.epv-thumb { margin: 0; min-width: 0; }
+.epv-thumb img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 10px;
+  background: var(--w-surface);
+  box-shadow: 0 0 0 1px var(--w-hairline);
+  cursor: zoom-in;
+  transition: box-shadow var(--w-fast) ease-out, transform var(--w-fast) var(--w-pop);
+}
+.epv-thumb img:hover { transform: translateY(-2px); box-shadow: 0 0 0 2px var(--w-accent), 0 10px 22px rgba(28, 25, 23, 0.16); }
+.epv-thumb figcaption { margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--w-ink-soft); }
+.epv-gallery + .epv-files { margin-top: 14px; }
+.epv-files { display: flex; flex-wrap: wrap; gap: 8px; }
+.epv-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--w-hairline-strong);
+  border-radius: 8px;
+  background: var(--w-raised);
+  color: var(--w-ink) !important;
+  font-size: 12.5px;
+  text-decoration: none !important;
+  cursor: pointer;
+}
+.epv-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.epv-file svg { color: var(--w-icon); }
+.epv-file:hover { border-color: var(--w-accent); color: var(--w-accent-ink) !important; }
+.epv-file.is-busy { opacity: 0.5; pointer-events: none; }
+
+/* 流转记录时间线 */
+.epv-timeline { list-style: none; margin: 0; padding: 0; }
+.epv-timeline > li { position: relative; padding: 0 0 14px 20px; }
+.epv-timeline > li:last-child { padding-bottom: 0; }
+.epv-timeline > li::before {
+  content: "";
+  position: absolute;
+  left: 3px; top: 6px;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--w-raised);
+  box-shadow: inset 0 0 0 2px var(--w-accent);
+}
+.epv-timeline > li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 7px; top: 18px; bottom: 2px;
+  width: 1px;
+  background: var(--w-hairline-strong);
+}
+.epv-tl-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; color: var(--w-ink-soft); }
+.epv-tl-head b { color: var(--w-ink); font-weight: 600; }
+.epv-tl-head time { margin-left: auto; font-size: 12px; color: var(--w-ink-faint); font-variant-numeric: tabular-nums; }
+.epv-tl-body { margin-top: 6px; padding: 8px 12px; border-radius: 8px; background: var(--w-surface); font-size: 13px !important; }
+
+/* 用例步骤表 */
+.epv-table-wrap { overflow-x: auto; margin: -14px -16px; }
+.epv-steps { width: 100%; border-collapse: collapse; font-size: 13px; }
+.epv-steps th {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--w-hairline);
+  background: var(--w-surface);
+  color: var(--w-ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+.epv-steps th:first-child, .epv-steps td:first-child { width: 48px; color: var(--w-ink-faint); font-variant-numeric: tabular-nums; }
+.epv-steps td { padding: 10px 12px; border-top: 1px solid var(--w-hairline); vertical-align: top; }
+.epv-steps tr:first-child td { border-top: none; }
+
+/* 加载骨架 / 错误 / 提示 */
+.epv-skel {
+  display: block;
+  height: 14px;
+  margin: 10px 0;
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(28,25,23,.06), rgba(28,25,23,.11), rgba(28,25,23,.06));
+  background-size: 200% 100%;
+  animation: epvShimmer 1.2s linear infinite;
+}
+.epv-title .epv-skel { height: 22px; margin: 2px 0; }
+.epv-skel--chip { display: inline-block; width: 64px; height: 24px; margin: 0; border-radius: 999px; }
+.epv-skel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; margin-bottom: 18px; }
+.epv-skel--block { height: 52px; margin: 0; border-radius: 10px; }
+@keyframes epvShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.epv-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  background: rgba(220, 38, 38, 0.06);
+  color: #991b1b;
+  font-size: 13px;
+}
+.epv-error svg { width: 20px; height: 20px; color: #dc2626; }
+.epv-error > div { flex: 1 1 auto; min-width: 0; }
+.epv-error strong { display: block; margin-bottom: 2px; }
+.epv-banner { margin-bottom: 14px; }
+.epv-callout { padding: 12px 16px; margin-bottom: 14px; border-radius: 12px; font-size: 13px; }
+.epv-callout b { display: block; margin-bottom: 4px; font-size: 14px; }
+.epv-callout.is-warn { background: rgba(245, 158, 11, 0.12); color: #92400e; }
+.epv-callout.is-ok { background: rgba(22, 163, 74, 0.10); color: #166534; }
+.epv-warn-text { margin: 10px 0; color: #b45309; font-size: 13px; }
+.epv-warn-text.is-ok { color: #15803d; }
+.epv-warn-text:empty { display: none; }
+.epv-compare { margin: 0 0 14px; padding: 12px 16px; border: 1px solid var(--w-hairline); border-radius: 12px; }
+.epv-compare > summary { cursor: pointer; font-weight: 600; color: var(--w-accent-ink); }
+.epv-compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 14px; margin-top: 12px; }
+.epv-compare-grid > section { min-width: 0; padding: 12px; border-radius: 10px; background: var(--w-surface); }
+.epv-compare-grid > section.is-latest { background: rgba(22, 163, 74, 0.06); }
+.epv-section-body h4, .epv-compare-grid h4 { margin: 12px 0 6px; font-size: 13px; color: var(--w-ink-soft); }
+.epv-section-body h4:first-child { margin-top: 0; }
+.epv-sticky-actions {
+  position: sticky;
+  bottom: -40px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 -22px;
+  padding: 12px 22px;
+  border-top: 1px solid var(--w-hairline);
+  background: var(--w-raised);
+  font-size: 12px;
+  color: var(--w-ink-soft);
+}
+
+@media (max-width: 640px) {
+  .epv-overlay { padding: 0; }
+  .epv-panel { min-height: 100%; border-radius: 0; }
+  .epv-head { top: 0; padding: 14px 16px 12px; padding-top: calc(14px + env(safe-area-inset-top, 0px)); border-radius: 0; flex-wrap: wrap; }
+  .epv-actions { order: -1; width: 100%; justify-content: space-between; }
+  .epv-body { padding: 14px 16px 6px; }
+  .epv-foot { padding: 4px 16px 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .epv-title { font-size: 17px !important; }
+  .epv-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .epv-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .epv-sticky-actions { margin: 0 -16px; padding: 12px 16px; bottom: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .epv-overlay, .epv-panel, .epv-skel, #entityPreviewModal img.is-loading { animation: none !important; }
+}

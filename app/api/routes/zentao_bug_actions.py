@@ -31,7 +31,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx as _httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -630,7 +630,9 @@ def proxy_zentao_file(
                 raise HTTPException(status_code=400, detail="禅道认证刷新失败")
             resp = refreshed.get_file(file_id)
         content_type = resp.headers.get("content-type", "application/octet-stream")
-        return StreamingResponse(iter([resp.content]), media_type=content_type)
+        # 禅道附件按 ID 不可变：允许浏览器私有缓存，重复打开预览不再经后端回源禅道
+        return Response(content=resp.content, media_type=content_type,
+                        headers={"Cache-Control": "private, max-age=604800, immutable"})
     except HTTPException:
         raise
     except ZentaoAPIError as exc:

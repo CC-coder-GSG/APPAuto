@@ -4,13 +4,13 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css?v=20261103-final-presence-ui-2">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261124-reviewwb-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261124-preview-1">
   <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261124-reviewwb-1"></script>
+  <script type="module" src="/static/js/app.js?v=20261124-preview-1"></script>
   <script src="/static/js/weave-motion.js?v=20261124-shell-v2-2" defer></script>
   <script src="/static/js/shell.js?v=20261124-theme-1" defer></script>
   <script>
@@ -1984,45 +1984,6 @@
       <div style="display:flex; gap:10px; justify-content:flex-end;">
         <button class="secondary" onclick="closeS5AssignModal()">取消</button>
         <button onclick="submitS5Assign()">确认指派</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Zentao Bug Preview Modal -->
-  <div id="zentaoBugPreviewModal" class="hidden" onclick="closeZentaoBugPreview()" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
-    <div onclick="event.stopPropagation()" style="width:min(860px, 96vw); max-height:92vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:18px;">
-        <div>
-          <div id="zentaoBugPreviewMeta" style="font-size:12px; color:#64748b; margin-bottom:6px;">Bug 详情</div>
-          <h3 id="zentaoBugPreviewTitle" style="margin:0; color:#0f172a; font-size:18px; line-height:1.5;">加载中...</h3>
-        </div>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <a id="zentaoBugPreviewLink" class="hidden" href="#" target="_blank" rel="noopener noreferrer" style="display:inline-flex; align-items:center; gap:4px; border:1px solid #2563eb; background:#2563eb; color:#fff; border-radius:6px; padding:6px 12px; text-decoration:none; font-size:12px; font-weight:600;">在禅道打开 ↗</a>
-          <button class="secondary" onclick="closeZentaoBugPreview()">关闭</button>
-        </div>
-      </div>
-      <div id="zentaoBugPreviewError" style="display:none; color:#dc2626; font-size:13px; margin-bottom:12px;"></div>
-      <div id="zentaoBugPreviewBody">
-        <div style="color:#64748b; font-size:13px;">正在加载禅道 Bug 详情...</div>
-      </div>
-    </div>
-  </div>
-
-  <div id="zentaoBugImageLightbox" class="hidden" onclick="closeZentaoBugImageLightbox(event)" style="position:fixed; inset:0; background:rgba(2,6,23,.82); z-index:10010; display:none; align-items:center; justify-content:center; padding:24px;">
-    <div onclick="event.stopPropagation()" style="width:min(1100px, 96vw); max-height:92vh; display:flex; flex-direction:column; gap:12px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; color:#e2e8f0;">
-        <div style="display:flex; flex-direction:column; gap:4px; min-width:0;">
-          <div id="zentaoBugImageLightboxTitle" style="font-size:13px; line-height:1.6; word-break:break-word;">图片预览</div>
-          <div id="zentaoBugImageLightboxIndex" style="font-size:12px; color:#94a3b8;"></div>
-        </div>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <button id="zentaoBugImageLightboxPrev" class="secondary" onclick="prevZentaoBugImageLightbox()" style="padding:6px 10px; font-size:13px;">上一张</button>
-          <button id="zentaoBugImageLightboxNext" class="secondary" onclick="nextZentaoBugImageLightbox()" style="padding:6px 10px; font-size:13px;">下一张</button>
-          <button class="secondary" onclick="closeZentaoBugImageLightbox()" style="padding:6px 10px; font-size:13px;">关闭</button>
-        </div>
-      </div>
-      <div style="flex:1; min-height:0; display:flex; align-items:center; justify-content:center; background:rgba(15,23,42,.45); border:1px solid rgba(148,163,184,.28); border-radius:16px; overflow:hidden;">
-        <img id="zentaoBugImageLightboxImg" src="" alt="图片预览" style="max-width:100%; max-height:78vh; object-fit:contain; display:block;">
       </div>
     </div>
   </div>

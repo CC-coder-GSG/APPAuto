@@ -21,6 +21,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -372,21 +373,66 @@ def request_page_via_web(login: ZentaoWebLogin, path: str, *, params=None, data=
         client.close()
 
 
+# 预览里的附件图片会一次并发请求多张。原先每张图都"登录 → 取文件 → 登出"，
+# N 张图 = N 次网页登录（禅道登录很慢）。附件读取是只读 GET，这里按
+# (站点, 账号) 缓存已登录会话一小段时间：并发请求排队等同一次登录，之后并行取图。
+# 会话过期/被踢时取到的是登录页（HTML），丢弃缓存重新登录后重试一次。
+_FILE_SESSION_TTL = 120.0
+_FILE_SESSIONS: dict[tuple[str, str], tuple[httpx.Client, float]] = {}
+_FILE_SESSION_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+_FILE_SESSION_LOCKS_GUARD = threading.Lock()
+
+
+def _retire_file_session(client: httpx.Client, base: str) -> None:
+    # 其它线程可能仍在用这个会话取图，延迟登出关闭
+    def _close():
+        _logout_quietly(client, base)
+        client.close()
+    timer = threading.Timer(30.0, _close)
+    timer.daemon = True
+    timer.start()
+
+
+def _file_session(login: ZentaoWebLogin, *, stale: httpx.Client | None = None) -> httpx.Client:
+    key = (login.base_url.rstrip('/'), login.account)
+    with _FILE_SESSION_LOCKS_GUARD:
+        lock = _FILE_SESSION_LOCKS.setdefault(key, threading.Lock())
+    with lock:
+        entry = _FILE_SESSIONS.get(key)
+        now = time.monotonic()
+        if entry and entry[0] is not stale and entry[1] > now:
+            return entry[0]
+        if entry:
+            _FILE_SESSIONS.pop(key, None)
+            _retire_file_session(entry[0], login.base_url)
+        client = _open_web_session(login)
+        _FILE_SESSIONS[key] = (client, now + _FILE_SESSION_TTL)
+        return client
+
+
 def fetch_file_via_web(login: ZentaoWebLogin, file_id: int):
     if int(file_id) <= 0:
         raise ZentaoAPIError(400, "附件编号无效")
-    client = _open_web_session(login)
-    try:
-        response = client.get(f"{login.base_url}/file-read-{int(file_id)}.html")
+    url = f"{login.base_url}/file-read-{int(file_id)}.html"
+    client = None
+    for attempt in range(2):
+        client = _file_session(login, stale=client)
+        try:
+            response = client.get(url)
+        except Exception as exc:
+            if attempt == 0:
+                continue
+            raise ZentaoAPIError(0, "禅道附件获取失败") from exc
+        is_page = 'text/html' in response.headers.get('content-type', '').lower()
+        if response.status_code == 200 and not is_page:
+            response.read()
+            return response
+        if attempt == 0:
+            continue  # 缓存会话可能已过期：重新登录再试一次
         if response.status_code != 200:
             raise ZentaoAPIError(response.status_code, "禅道附件获取失败")
-        if 'text/html' in response.headers.get('content-type', '').lower():
-            raise ZentaoAPIError(502, "禅道附件返回了页面，请检查权限")
-        response.read()
-        return response
-    finally:
-        _logout_quietly(client, login.base_url)
-        client.close()
+        raise ZentaoAPIError(502, "禅道附件返回了页面，请检查权限")
+    raise ZentaoAPIError(502, "禅道附件获取失败")
 
 
 def _logout_quietly(client: httpx.Client, base: str) -> None:
