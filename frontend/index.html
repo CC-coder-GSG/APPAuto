@@ -4,148 +4,20 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css?v=20261103-final-presence-ui-2">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261020-bug-version-2">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261124-shell-v2-2">
   <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
   <script type="module" src="/static/js/app.js?v=20261105-hydration-1"></script>
-  <script src="/static/js/weave-motion.js?v=20261027-tools-1" defer></script>
-  <style>
-    /* Header layout */
-    .app-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      padding: 14px 20px;
-      background: var(--card-bg);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-md);
-      margin-bottom: 14px;
-      border: 1px solid rgba(226, 232, 240, 0.7);
-    }
-    .app-header-brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-shrink: 0;
-    }
-    .app-header-brand img {
-      height: 40px;
-      filter: drop-shadow(0 2px 6px rgba(79,70,229,0.18));
-    }
-    .app-header-brand-text h1 {
-      margin: 0;
-      font-size: 22px;
-      font-weight: 900;
-      color: var(--primary);
-      letter-spacing: -0.5px;
-      line-height: 1.1;
-    }
-    .app-header-brand-text span {
-      font-size: 11px;
-      color: var(--text-faint);
-      font-weight: 600;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      margin-top: 1px;
-      display: block;
-    }
-    .app-header-controls {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-    .header-software-pill {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      background: var(--bg-muted);
-      padding: 5px 10px 5px 12px;
-      border-radius: 999px;
-      border: 1px solid var(--border-light);
-    }
-    .header-software-pill label {
-      font-size: 11px;
-      color: var(--text-muted);
-      font-weight: 700;
-      white-space: nowrap;
-      letter-spacing: 0.04em;
-    }
-    .header-software-pill select {
-      border: none;
-      background: transparent;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-main);
-      padding: 0;
-      min-width: 140px;
-      cursor: pointer;
-    }
-    .header-software-pill select:focus { box-shadow: none; }
-    .header-user-pill {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: var(--bg-muted);
-      padding: 5px 14px 5px 6px;
-      border-radius: 999px;
-      border: 1px solid var(--border-light);
-    }
-    .header-user-avatar {
-      width: 28px; height: 28px;
-      border-radius: 50%;
-      background: var(--primary);
-      color: #fff;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 14px;
-      flex-shrink: 0;
-    }
-    .header-user-pill span {
-      font-size: 13px;
-      font-weight: 700;
-      color: var(--text-main);
-      white-space: nowrap;
-    }
-    .header-action-group {
-      display: flex;
-      gap: 6px;
-    }
-    .header-action-group button {
-      background: transparent;
-      color: var(--text-muted);
-      border: 1px solid var(--border-light);
-      font-size: 12.5px;
-      padding: 6px 12px;
-      font-weight: 600;
-      box-shadow: none;
-    }
-    .header-action-group button:hover {
-      background: var(--bg-muted);
-      transform: none;
-      box-shadow: none;
-    }
-    .header-action-group button.danger-btn {
-      color: #dc2626;
-      border-color: #fecaca;
-      background: #fff5f5;
-    }
-    .header-action-group button.danger-btn:hover {
-      background: #fee2e2;
-      border-color: #f87171;
-    }
-    /* Tab nav */
-    #tabs {
-      padding: 6px 10px !important;
-      gap: 2px !important;
-      margin-bottom: 16px !important;
-    }
-    #tabs button { position: relative; }
-  </style>
+  <script src="/static/js/weave-motion.js?v=20261124-shell-v2-2" defer></script>
+  <script src="/static/js/shell.js?v=20261124-shell-v2-2" defer></script>
+  <script>
+    /* 壳层布局标记 + 侧栏收起态需在首帧前生效，避免加载时宽度跳变（shell.js 负责后续切换） */
+    document.documentElement.classList.add('omniqa-shell');
+    try { if (localStorage.getItem('omniqa.navCollapsed') === '1') document.documentElement.classList.add('nav-collapsed'); } catch (e) {}
+  </script>
   <link rel="stylesheet" href="/static/css/assign-progress.css?v=20261022-1">
   <link rel="stylesheet" href="/static/css/requirement-tasks.css?v=20261022-2">
 </head>
@@ -153,35 +25,89 @@
 <div class="toast-wrap" id="toastWrap"></div>
 <div class="container">
 
-  <!-- Header -->
+  <!-- ── 图标精灵（线性 24px，currentColor 描边）── -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-mine" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
+      <symbol id="i-board" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M8 7v7"/><path d="M12 7v4"/><path d="M16 7v9"/></symbol>
+      <symbol id="i-assign" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+      <symbol id="i-feedback" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8"/><path d="M8 13h5"/></symbol>
+      <symbol id="i-cases" viewBox="0 0 24 24"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></symbol>
+      <symbol id="i-field" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></symbol>
+      <symbol id="i-build" viewBox="0 0 24 24"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></symbol>
+      <symbol id="i-jenkins" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="m10 8.5 5.5 3.5-5.5 3.5z"/></symbol>
+      <symbol id="i-cad" viewBox="0 0 24 24"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></symbol>
+      <symbol id="i-bug" viewBox="0 0 24 24"><path d="M9 7.13v-1a3 3 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.5 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M21 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></symbol>
+      <symbol id="i-report" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol>
+      <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+      <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="m16.2 7.8-2.1 6.3-6.3 2.1 2.1-6.3z"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+      <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/><path d="M19 3v4"/><path d="M21 5h-4"/></symbol>
+      <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></symbol>
+      <symbol id="i-book" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></symbol>
+      <symbol id="i-data" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></symbol>
+      <symbol id="i-external" viewBox="0 0 24 24"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.3-4.3"/></symbol>
+      <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+      <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+      <symbol id="i-tree" viewBox="0 0 24 24"><rect x="16" y="16" width="6" height="6" rx="1.2"/><rect x="2" y="16" width="6" height="6" rx="1.2"/><rect x="9" y="2" width="6" height="6" rx="1.2"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></symbol>
+      <symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+      <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></symbol>
+      <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></symbol>
+      <symbol id="i-sidebar" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2.5"/><path d="M9 3v18"/></symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    </defs>
+  </svg>
+
+  <!-- Header：面包屑 + 快速跳转 + 软件上下文 + 账户菜单 -->
   <div class="app-header">
-    <div class="app-header-brand">
-      <img src="/static/omniqa-logo.png" alt="测量软件测试平台 Logo">
-      <div class="app-header-brand-text">
-        <h1>测量软件测试平台</h1>
-        <span>测试管理系统</span>
-      </div>
+    <div class="topbar-left">
+      <button type="button" id="navDrawerBtn" class="topbar-icon-btn topbar-drawer-btn" title="打开导航" aria-label="打开导航"><svg class="ui-ic"><use href="#i-menu"/></svg></button>
+      <nav class="topbar-crumb" aria-label="当前位置">
+        <span id="topbarGroup" class="topbar-crumb-group">工作台</span>
+        <svg class="ui-ic topbar-crumb-sep"><use href="#i-chevron-right"/></svg>
+        <span id="topbarPage" class="topbar-crumb-page"></span>
+      </nav>
     </div>
     <div class="app-header-controls">
-      <div class="header-software-pill">
-        <label>软件</label>
+      <button type="button" id="cmdkBtn" class="topbar-search" title="快速跳转到页面（Ctrl + K）">
+        <svg class="ui-ic"><use href="#i-search"/></svg>
+        <span>跳转到页面…</span>
+        <kbd>Ctrl K</kbd>
+      </button>
+      <div class="header-software-pill" title="切换当前软件">
+        <label for="softwareSwitch">软件</label>
         <select id="softwareSwitch" onchange="onSoftwareChange()"></select>
       </div>
-      <button id="featureTreeMapBtn" class="ftree-entry-btn" onclick="window.OmniQAFeatureTreeTab?.open('design')" title="查看 / 编辑该软件的功能图谱（设计态）">🌳 功能图谱</button>
-      <div class="header-user-pill">
-        <div class="header-user-avatar">👤</div>
-        <span id="me"></span>
-      </div>
-      <div class="header-action-group">
-        <!-- 自检/探测/体检：不常用，默认隐藏腾出空间（功能保留，可在控制台调用） -->
-        <button onclick="runFrontendSelfCheck()" style="display:none;">🩺 自检</button>
-        <button onclick="runOnlineApiCheck()" style="display:none;">🌐 探测</button>
-        <button onclick="runFullHealthCheck()" style="display:none;">🧭 体检</button>
-        <button onclick="changeMyPassword()">🔐 密码</button>
-        <button id="aiConfigBtn" onclick="window.OmniQAAIConfig?.open()" title="管理个人 AI（DeepSeek）API Key">🤖 AI密钥</button>
-        <button id="zentaoBindingBtn" onclick="window.OmniQAZentaoBinding?.open()" title="管理禅道账号绑定">🔌 禅道<span id="ztSyncDot" data-state="none" title=""></span></button>
-        <button onclick="window.OmniQAZentao?.refreshVisible()" title="刷新当前页面的禅道同步数据" style="padding:4px 8px; font-size:13px;">🔄</button>
-        <button class="danger-btn" onclick="logout()">退出</button>
+      <button id="featureTreeMapBtn" class="ftree-entry-btn topbar-text-btn" onclick="window.OmniQAFeatureTreeTab?.open('design')" title="查看 / 编辑该软件的功能图谱（设计态）"><svg class="ui-ic"><use href="#i-tree"/></svg><span>功能图谱</span></button>
+      <span class="topbar-sep" aria-hidden="true"></span>
+      <button id="zentaoBindingBtn" class="topbar-icon-btn" onclick="window.OmniQAZentaoBinding?.open()" title="禅道账号绑定" aria-label="禅道账号绑定"><svg class="ui-ic"><use href="#i-plug"/></svg><span id="ztSyncDot" data-state="none" title=""></span></button>
+      <button class="topbar-icon-btn" onclick="window.OmniQAZentao?.refreshVisible()" title="刷新当前页面的禅道同步数据" aria-label="刷新禅道数据"><svg class="ui-ic"><use href="#i-refresh"/></svg></button>
+      <div class="user-menu" id="userMenu">
+        <button type="button" id="userMenuBtn" class="user-menu-trigger" aria-haspopup="menu" aria-expanded="false">
+          <span class="header-user-avatar" id="userAvatar">·</span>
+          <span id="me"></span>
+          <svg class="ui-ic user-menu-caret"><use href="#i-chevron-down"/></svg>
+        </button>
+        <div class="user-menu-pop hidden" id="userMenuPop" role="menu">
+          <div class="user-menu-head">
+            <span class="header-user-avatar" id="userMenuAvatar">·</span>
+            <div><strong id="userMenuName"></strong><small>当前登录账号</small></div>
+          </div>
+          <!-- 自检/探测/体检：不常用，默认隐藏（功能保留，可在控制台调用） -->
+          <button onclick="runFrontendSelfCheck()" hidden>自检</button>
+          <button onclick="runOnlineApiCheck()" hidden>探测</button>
+          <button onclick="runFullHealthCheck()" hidden>体检</button>
+          <button type="button" role="menuitem" onclick="changeMyPassword()"><svg class="ui-ic"><use href="#i-lock"/></svg>修改密码</button>
+          <button type="button" role="menuitem" id="aiConfigBtn" onclick="window.OmniQAAIConfig?.open()" title="管理个人 AI（DeepSeek）API Key"><svg class="ui-ic"><use href="#i-bot"/></svg>AI 密钥</button>
+          <button type="button" role="menuitem" onclick="window.OmniQAZentaoBinding?.open()"><svg class="ui-ic"><use href="#i-plug"/></svg>禅道账号绑定</button>
+          <div class="user-menu-divider"></div>
+          <button type="button" role="menuitem" class="danger-btn" onclick="logout()"><svg class="ui-ic"><use href="#i-logout"/></svg>退出登录</button>
+        </div>
       </div>
     </div>
   </div>
@@ -195,28 +121,69 @@
     <div id="healthPanelBody" style="margin-top:8px; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12.5px;"></div>
   </div>
 
-  <!-- Tab navigation -->
+  <!-- Tab navigation：分组侧栏（≥901px 固定左侧；≤900px 退回顶部横滑条） -->
   <div id="tabs" class="card row">
-    <button id="tabAssignBtn" onclick="showTab('assign')">任务分配台</button>
-    <button id="tabTaskBoardBtn" onclick="showTab('task-board')">任务看板<span id="tabTaskBoardBadge" class="nav-badge hidden"></span></button>
-    <button id="tabMineBtn" onclick="showTab('mine')">我的工作台<span id="tabMinePrimaryBadge" class="nav-badge hidden"></span><span id="tabMineSecondaryBadge" class="nav-badge nav-badge--sub hidden"></span></button>
-    <button id="tabFeedbackBtn" onclick="showTab('feedback')">反馈记录与处理<span id="tabFeedbackBadge" class="nav-badge hidden"></span></button>
-    <button id="tabFieldTestBtn" onclick="showTab('field-test')">外业测试</button>
-    <button id="tabBuildRecordsBtn" class="hidden" onclick="showTab('build-records')">构建记录</button>
-    <button id="tabTestcaseCenterBtn" class="hidden" onclick="showTab('testcase-center')">用例中心</button>
-    <button id="tabReportBtn" onclick="showTab('report')">报表中心</button>
-    <button id="tabActivityBtn" class="hidden" onclick="showTab('activity')">活动中心</button>
-    <button id="tabDataBtn" onclick="showTab('data')">数据管理台</button>
-    <button id="tabDispatchBtn" class="hidden" onclick="showTab('dispatch')">BUG特派</button>
-    <button id="tabZentaoAiBtn" class="hidden" onclick="showTab('zentao-ai')">禅道AI用例生成</button>
-    <button id="tabJenkinsBtn" class="hidden" onclick="showTab('jenkins')">Jenkins</button>
-    <button id="tabCadTestBtn" class="hidden" onclick="showTab('cad-test')">CAD测试统计</button>
-    <button id="tabToolsBtn" class="hidden" onclick="showTab('tools')">实用工具</button>
-    <button id="tabTerminalBtn" class="hidden" onclick="showTab('terminal')">终端控制台</button>
-    <button id="tabLearningBtn" class="hidden" onclick="showTab('learning')">学习中心</button>
-    <button id="tabCompetitorAnalysisBtn" class="hidden" onclick="window.location.href='/competitor-analysis'">竞品分析工作台</button>
-    <button id="tabBuglyBtn" class="hidden" onclick="window.location.href='/bugly'">Bugly 问题中心</button>
-    <span id="sseConnectionState" class="sse-conn-badge hidden" aria-live="polite">实时连接中</span>
+    <div class="nav-brand">
+      <img src="/static/omniqa-logo.png" alt="OmniQA">
+      <div class="nav-brand-text">
+        <strong>测量软件测试平台</strong>
+        <span>OmniQA</span>
+      </div>
+    </div>
+    <div class="nav-scroll">
+      <div class="nav-group" data-group="工作台">
+        <div class="nav-group-label">工作台</div>
+        <button id="tabMineBtn" onclick="showTab('mine')"><svg class="nav-ic"><use href="#i-mine"/></svg><span class="nav-label">我的工作台</span><span id="tabMinePrimaryBadge" class="nav-badge hidden"></span><span id="tabMineSecondaryBadge" class="nav-badge nav-badge--sub hidden"></span></button>
+        <button id="tabTaskBoardBtn" onclick="showTab('task-board')"><svg class="nav-ic"><use href="#i-board"/></svg><span class="nav-label">任务看板</span><span id="tabTaskBoardBadge" class="nav-badge hidden"></span></button>
+        <button id="tabAssignBtn" onclick="showTab('assign')"><svg class="nav-ic"><use href="#i-assign"/></svg><span class="nav-label">任务分配台</span></button>
+        <button id="tabFeedbackBtn" onclick="showTab('feedback')"><svg class="nav-ic"><use href="#i-feedback"/></svg><span class="nav-label">反馈记录与处理</span><span id="tabFeedbackBadge" class="nav-badge hidden"></span></button>
+      </div>
+      <div class="nav-group" data-group="测试执行">
+        <div class="nav-group-label">测试执行</div>
+        <button id="tabTestcaseCenterBtn" class="hidden" onclick="showTab('testcase-center')"><svg class="nav-ic"><use href="#i-cases"/></svg><span class="nav-label">用例中心</span></button>
+        <button id="tabFieldTestBtn" onclick="showTab('field-test')"><svg class="nav-ic"><use href="#i-field"/></svg><span class="nav-label">外业测试</span></button>
+        <button id="tabBuildRecordsBtn" class="hidden" onclick="showTab('build-records')"><svg class="nav-ic"><use href="#i-build"/></svg><span class="nav-label">构建记录</span></button>
+        <button id="tabJenkinsBtn" class="hidden" onclick="showTab('jenkins')"><svg class="nav-ic"><use href="#i-jenkins"/></svg><span class="nav-label">Jenkins</span></button>
+        <button id="tabCadTestBtn" class="hidden" onclick="showTab('cad-test')"><svg class="nav-ic"><use href="#i-cad"/></svg><span class="nav-label">CAD测试统计</span></button>
+        <button id="tabDispatchBtn" class="hidden" onclick="showTab('dispatch')"><svg class="nav-ic"><use href="#i-bug"/></svg><span class="nav-label">BUG特派</span></button>
+      </div>
+      <div class="nav-group" data-group="分析洞察">
+        <div class="nav-group-label">分析洞察</div>
+        <button id="tabReportBtn" onclick="showTab('report')"><svg class="nav-ic"><use href="#i-report"/></svg><span class="nav-label">报表中心</span></button>
+        <button id="tabActivityBtn" class="hidden" onclick="showTab('activity')"><svg class="nav-ic"><use href="#i-activity"/></svg><span class="nav-label">活动中心</span></button>
+        <button id="tabCompetitorAnalysisBtn" class="hidden" data-nav-external onclick="window.location.href='/competitor-analysis'"><svg class="nav-ic"><use href="#i-compass"/></svg><span class="nav-label">竞品分析工作台</span><svg class="nav-ext-ic"><use href="#i-external"/></svg></button>
+        <button id="tabBuglyBtn" class="hidden" data-nav-external onclick="window.location.href='/bugly'"><svg class="nav-ic"><use href="#i-alert"/></svg><span class="nav-label">Bugly 问题中心</span><svg class="nav-ext-ic"><use href="#i-external"/></svg></button>
+      </div>
+      <div class="nav-group" data-group="效率工具">
+        <div class="nav-group-label">效率工具</div>
+        <button id="tabZentaoAiBtn" class="hidden" onclick="showTab('zentao-ai')"><svg class="nav-ic"><use href="#i-sparkles"/></svg><span class="nav-label">禅道AI用例生成</span></button>
+        <button id="tabToolsBtn" class="hidden" onclick="showTab('tools')"><svg class="nav-ic"><use href="#i-wrench"/></svg><span class="nav-label">实用工具</span></button>
+        <button id="tabTerminalBtn" class="hidden" onclick="showTab('terminal')"><svg class="nav-ic"><use href="#i-terminal"/></svg><span class="nav-label">终端控制台</span></button>
+        <button id="tabLearningBtn" class="hidden" onclick="showTab('learning')"><svg class="nav-ic"><use href="#i-book"/></svg><span class="nav-label">学习中心</span></button>
+      </div>
+      <div class="nav-group" data-group="系统">
+        <div class="nav-group-label">系统</div>
+        <button id="tabDataBtn" onclick="showTab('data')"><svg class="nav-ic"><use href="#i-data"/></svg><span class="nav-label">数据管理台</span></button>
+      </div>
+    </div>
+    <div class="nav-footer">
+      <span id="sseConnectionState" class="sse-conn-badge hidden" aria-live="polite">实时连接中</span>
+      <button type="button" id="navCollapseBtn" class="nav-collapse-btn" title="收起侧栏" aria-label="收起侧栏"><svg class="ui-ic"><use href="#i-sidebar"/></svg></button>
+    </div>
+  </div>
+  <div class="nav-scrim" id="navScrim" aria-hidden="true"></div>
+
+  <!-- 快速跳转面板（Ctrl + K） -->
+  <div id="cmdkOverlay" class="cmdk-overlay hidden" aria-hidden="true">
+    <div class="cmdk-panel" role="dialog" aria-label="快速跳转">
+      <div class="cmdk-input-wrap">
+        <svg class="ui-ic"><use href="#i-search"/></svg>
+        <input id="cmdkInput" type="text" placeholder="输入页面名称，如：工作台、报表、用例…" autocomplete="off" spellcheck="false">
+        <kbd>Esc</kbd>
+      </div>
+      <div id="cmdkList" class="cmdk-list" role="listbox"></div>
+      <div class="cmdk-foot"><span><kbd>↑</kbd><kbd>↓</kbd> 选择</span><span><kbd>Enter</kbd> 打开</span></div>
+    </div>
   </div>
 
   <section id="tab-feature-tree" class="hidden card ftree-section">
@@ -292,7 +259,7 @@
       <summary style="cursor:pointer; font-weight:700; color:#0f172a; list-style:none;">任务创建台<span id="assignReqCount" class="badge" style="margin-left:8px; font-weight:600; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe;">共 0 个需求</span></summary>
       <div style="margin-top:10px;">
       <div class="row" style="flex-wrap:wrap;"><label>大版本</label><select id="assignMajorSelect" onchange="loadAssignBoard()"></select><button data-assign-lock onclick="loadAssignBoard()">加载</button><button data-assign-lock class="secondary" onclick="syncAssignRequirementsFromZentao()">同步禅道需求</button><button data-assign-action onclick="publishAssign()" disabled>一键发布（所选需求）</button><button data-assign-action class="secondary" onclick="createZentaoTasks()" title="仅创建/改派所选需求的测试任务，不发送企微通知；已有任务不重复创建" disabled>更新禅道任务（所选需求）</button><button data-assign-action class="secondary" onclick="updateZentaoTaskDates()" disabled>修改预计起止时间</button><button id="finalTestToggleBtn" class="secondary" onclick="toggleFinalTest()">最终测试</button></div>
-      <div class="row" style="margin-top:6px; flex-wrap:wrap;"><label>禅道任务起止</label><input type="date" id="assignTaskStartDate" title="预计开始日期" aria-label="禅道任务预计开始日期"><span style="color:#64748b;">至</span><input type="date" id="assignTaskDeadline" title="预计结束日期" aria-label="禅道任务预计结束日期"><span class="muted" style="font-size:12px;">操作前需设置有效日期；修改起止时间仅更新已有子任务。</span></div>
+      <div class="row" style="margin-top:6px; flex-wrap:wrap;"><label>禅道任务起止</label><input type="date" id="assignTaskStartDate" data-range-role="start" data-range-pair="assignTaskDeadline" title="预计开始日期" aria-label="禅道任务预计开始日期"><span style="color:#64748b;">至</span><input type="date" id="assignTaskDeadline" data-range-role="end" data-range-pair="assignTaskStartDate" title="预计结束日期" aria-label="禅道任务预计结束日期"><span class="muted" style="font-size:12px;">操作前需设置有效日期；修改起止时间仅更新已有子任务。</span></div>
       <div class="assign-selection-bar"><span id="assignSelectionCount">已选 0 个需求</span><span class="muted">已有任务不重复创建，保留改派和取消任务重建逻辑。</span></div>
       <div id="assignBatchResult" class="assign-batch-result" hidden></div>
       <div style="overflow-x:auto;"><table class="assign-requirements"><thead><tr><th style="width:48px;"><input type="checkbox" id="assignSelectAll" aria-label="全选当前版本需求" onchange="toggleAssignSelectAll(this.checked)" disabled></th><th>需求</th><th>负责人</th><th>禅道子任务 / 预计起止</th></tr></thead><tbody id="assignTable"></tbody></table></div>
@@ -545,11 +512,11 @@
         </div>
         <div>
           <label style="display:block; margin-bottom:4px;">日程规划 · 预计开始 <span style="color:#dc2626;">*</span></label>
-          <input type="date" id="taskBoardZtEstStarted" required style="width:100%;">
+          <input type="date" id="taskBoardZtEstStarted" data-range-role="start" data-range-pair="taskBoardZtDeadline" required style="width:100%;">
         </div>
         <div>
           <label style="display:block; margin-bottom:4px;">日程规划 · 截止日期 <span style="color:#dc2626;">*</span></label>
-          <input type="date" id="taskBoardZtDeadline" required style="width:100%;">
+          <input type="date" id="taskBoardZtDeadline" data-range-role="end" data-range-pair="taskBoardZtEstStarted" required style="width:100%;">
         </div>
         <div>
           <label style="display:block; margin-bottom:4px;">优先级</label>
@@ -1325,11 +1292,11 @@
       </div>
       <div>
         <label>开始日期</label>
-        <input type="date" id="buildRecordsDateFrom" onchange="onBuildRecordsFilterChange()">
+        <input type="date" id="buildRecordsDateFrom" data-range-role="start" data-range-pair="buildRecordsDateTo" onchange="onBuildRecordsFilterChange()">
       </div>
       <div>
         <label>结束日期</label>
-        <input type="date" id="buildRecordsDateTo" onchange="onBuildRecordsFilterChange()">
+        <input type="date" id="buildRecordsDateTo" data-range-role="end" data-range-pair="buildRecordsDateFrom" onchange="onBuildRecordsFilterChange()">
       </div>
       <button id="buildRecordsMajorLogBtn" onclick="openMajorBuildLogModal()" disabled>查看大版本修改日志</button>
       <button class="secondary" onclick="loadBuildRecordsBoard()">刷新</button>
@@ -1352,8 +1319,8 @@
     <h2>报表中心</h2>
     <div class="row">
       <label>大版本</label><select id="reportMajorSelect"></select>
-      <label>开始日期</label><input type="date" id="reportStartDate">
-      <label>结束日期</label><input type="date" id="reportEndDate">
+      <label>开始日期</label><input type="date" id="reportStartDate" data-range-role="start" data-range-pair="reportEndDate">
+      <label>结束日期</label><input type="date" id="reportEndDate" data-range-role="end" data-range-pair="reportStartDate">
       <span id="reportUserWrap" class="row hidden"><label>人员</label><select id="reportUserSelect"></select></span>
       <button onclick="queryReport()">查询报表</button>
       <button class="secondary" onclick="exportReportPdf()">导出 PDF</button>
@@ -2523,14 +2490,10 @@ window.switchWorkbenchSubtab = switchWorkbenchSubtab;
   function stickyTopPx(){
     const appHeaderTop=appHeader ? (parseFloat(getComputedStyle(appHeader).top)||0) : 0;
     const appHeaderBottom=appHeader ? appHeaderTop+appHeader.offsetHeight : 0;
-    // ≥901px 时 #tabs 是左侧 fixed rail，高度接近整个视口，与纵向吸顶偏移无关。
-    if(!narrowLayout.matches || !tabs || !tabs.offsetHeight){
-      return Math.round(appHeaderBottom+6)||8;
-    }
-    // 窄屏下 #tabs 才是顶部横向导航，需要排在它的实际底边之后。
-    const tabsTop=parseFloat(getComputedStyle(tabs).top);
-    const tabsBottom=(Number.isFinite(tabsTop) ? tabsTop : appHeaderBottom)+tabs.offsetHeight;
-    return Math.round(Math.max(appHeaderBottom, tabsBottom)+6);
+    // 壳层 v2：#tabs 在宽屏是左侧 fixed 侧栏、窄屏是左侧抽屉，都不占纵向空间，
+    // 吸顶只需排在顶栏之后（tabs/narrowLayout 保留以兼容旧布局判断）。
+    void tabs; void narrowLayout;
+    return Math.round(appHeaderBottom+6)||8;
   }
   function clearStuckState(){
     header.classList.remove('is-stuck');

@@ -33,11 +33,15 @@
   function ensureIndicator() {
     const tabs = document.getElementById("tabs");
     if (!tabs) return null;
-    if (!indicator || !indicator.isConnected) {
+    // 壳层 v2：导航项位于可滚动的 .nav-scroll（position:relative）内，
+    // 指示器必须与它们同处一个滚动容器，offsetTop 才对得上且随列表滚动
+    const host = tabs.querySelector(".nav-scroll") || tabs;
+    if (!indicator || !indicator.isConnected || indicator.parentElement !== host) {
+      if (indicator && indicator.isConnected) indicator.remove();
       indicator = document.createElement("div");
       indicator.id = "weaveRailIndicator";
       indicator.setAttribute("aria-hidden", "true");
-      tabs.prepend(indicator);
+      host.prepend(indicator);
     }
     return indicator;
   }
@@ -173,8 +177,12 @@
     // 因此以"实际可见的 section"为准，而非入参
     const name = currentVisibleTab() || ALIAS[requestedName] || requestedName;
     markActive(name);
-    // 等按钮 hidden 状态/布局稳定后再定位指示器
-    requestAnimationFrame(moveIndicator);
+    // 等按钮 hidden 状态/布局稳定后再定位指示器；选中项在侧栏可视区外时滚入
+    requestAnimationFrame(() => {
+      moveIndicator();
+      const active = document.querySelector("#tabs button.active-tab");
+      if (active && active.offsetParent) active.scrollIntoView({ block: "nearest" });
+    });
     staggerSection(name);
     const section = document.getElementById("tab-" + (ALIAS[name] || name));
     if (section) countUpIn(section);
