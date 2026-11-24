@@ -1028,7 +1028,7 @@ function ztActionsHtml(t) {
   const isAdmin = !!(window.currentUser && window.currentUser.role === 'admin');
   const id = t.task_id;
   const btn = (label, action, style) =>
-    `<button style="padding:2px 8px; font-size:11px; ${style}" onclick="event.stopPropagation(); window.OmniQATaskBoardTab.ztOperate(${id}, '${action}')">${label}</button>`;
+    `<button style="padding:2px 8px; font-size:11px; ${style}" data-op-key="task:${id}" onclick="event.stopPropagation(); window.OmniQATaskBoardTab.ztOperate(${id}, '${action}')">${label}</button>`;
   const parts = [];
   if (mine) {
     if (t.status === 'wait') parts.push(btn('▶ 开始', 'start', 'background:#16a34a;'));
@@ -1049,7 +1049,7 @@ function ztActionsHtml(t) {
   parts.push(`<button class="secondary" style="padding:2px 8px; font-size:11px; color:#0f766e; border:1px solid #99f6e4;"
     onclick="event.stopPropagation(); window.openTaskEffortModal(${id})" title="查看、修改或删除该任务已提交的禅道工时记录">🕒 工时</button>`);
   // 指派面向所有用户开放（复用任务工作台的指派弹窗，来源标记 board 以便回刷看板）
-  parts.push(`<button class="secondary" style="padding:2px 8px; font-size:11px; color:#7c3aed; border:1px solid #ddd6fe;"
+  parts.push(`<button class="secondary" style="padding:2px 8px; font-size:11px; color:#7c3aed; border:1px solid #ddd6fe;" data-op-key="task:${id}"
     onclick="event.stopPropagation(); window.OmniQATaskWorkbenchTab && window.OmniQATaskWorkbenchTab.openTaskAssign(${id}, 'board')">👤 指派</button>`);
   return `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>`;
 }

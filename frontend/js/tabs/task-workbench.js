@@ -74,9 +74,10 @@ function isOverdue(t) {
  * 操作按钮。kind：start 绿 / warn 琥珀 / primary 主色 / info 天蓝 / ghost 描边 / danger 红字描边。
  * onclick 为原样拼进属性的 JS 表达式（调用方保证只含数字 id）。
  */
-function twBtn(kind, icon, label, onclick, title = '') {
+function twBtn(kind, icon, label, onclick, title = '', opKey = '') {
   const secondary = kind === 'ghost' || kind === 'danger' ? ' secondary' : '';
-  return `<button type="button" class="mrc-btn tw-btn tw-btn--${kind}${secondary}"${title ? ` title="${escapeHtml(title)}"` : ''}
+  // data-op-key：该任务的禅道操作进行中时，zentao-operation.js 会统一锁定这些按钮，防止重复提交
+  return `<button type="button" class="mrc-btn tw-btn tw-btn--${kind}${secondary}"${title ? ` title="${escapeHtml(title)}"` : ''}${opKey ? ` data-op-key="${opKey}"` : ''}
     onclick="event.stopPropagation(); ${onclick}">${twIcon(icon)}<span>${escapeHtml(label)}</span></button>`;
 }
 const twHint = (text) => `<span class="tw-hint">${escapeHtml(text)}</span>`;
@@ -86,8 +87,11 @@ function renderTaskActions(t) {
   const link = t.linked_requirement;
   const id = Number(t.task_id);
   const op = (action) => `taskWorkbenchOperate(${id}, '${action}')`;
+  const opKey = `task:${id}`;
+  // 会写禅道的按钮都带上 opKey（twBtn 第 6 个参数）
+  const act = (kind, icon, label, onclick, title = '') => twBtn(kind, icon, label, onclick, title, opKey);
   // 指派（转派）面向所有用户开放：任何任务都可以指派给指定的人。
-  const assignBtn = twBtn('ghost', 'user', '指派', `openTaskAssign(${id})`, '把该任务指派给指定的人（所有人可用）');
+  const assignBtn = act('ghost', 'user', '指派', `openTaskAssign(${id})`, '把该任务指派给指定的人（所有人可用）');
   // 工时记录（查看对所有人开放；本人的记录可在弹窗里修改或删除）
   const effortBtn = twBtn('ghost', 'clock', '工时记录', `window.openTaskEffortModal(${id})`, '查看、修改或删除该任务已提交的禅道工时记录');
   const main = [], aux = [], danger = [];
@@ -103,9 +107,9 @@ function renderTaskActions(t) {
     main.push(twBtn('primary', 'external', '跳转到关联需求',
       `jumpToLinkedRequirement(${Number(link.id)}, ${Number(link.major_version_id) || 0})`, '跳转到需求工作台中该需求的位置'));
     if (t.assigned_to_me && (status === 'done' || isClosedStatus(status))) {
-      main.push(twBtn('info', 'rotate', '重新激活', op('reactivate'), '重新激活任务，并同步取消需求工作台的测试完成状态'));
+      main.push(act('info', 'rotate', '重新激活', op('reactivate'), '重新激活任务，并同步取消需求工作台的测试完成状态'));
     }
-    if (status === 'done' && t.assigned_to_me) danger.push(twBtn('danger', 'x-circle', '关闭', op('close')));
+    if (status === 'done' && t.assigned_to_me) danger.push(act('danger', 'x-circle', '关闭', op('close')));
     aux.push(effortBtn, assignBtn);
   } else if (!t.can_operate) {
     // 不可操作：任务未指派给本人（且不是可跳转的自有需求）。查看工时/指派仍开放。
@@ -115,35 +119,35 @@ function renderTaskActions(t) {
     // 父任务与禅道一致：状态由子任务驱动，子任务未完成时只能暂停/取消；
     // 子任务全部完成后禅道自动置为已完成，此时可关闭。
     if (status === 'pause') {
-      main.push(twBtn('start', 'play', '继续', op('start')));
-      danger.push(twBtn('danger', 'ban', '取消', op('cancel')));
+      main.push(act('start', 'play', '继续', op('start')));
+      danger.push(act('danger', 'ban', '取消', op('cancel')));
     } else if (isClosedStatus(status)) {
       hint = twHint(status === 'cancel' ? '任务已取消' : '任务已关闭');
-      main.push(twBtn('info', 'rotate', '重新激活', op('reactivate')));
+      main.push(act('info', 'rotate', '重新激活', op('reactivate')));
     } else if (status === 'done') {
-      danger.push(twBtn('danger', 'x-circle', '关闭', op('close')));
+      danger.push(act('danger', 'x-circle', '关闭', op('close')));
     } else { // wait / doing
-      main.push(twBtn('warn', 'pause', '暂停', op('pause')));
-      danger.push(twBtn('danger', 'ban', '取消', op('cancel')));
+      main.push(act('warn', 'pause', '暂停', op('pause')));
+      danger.push(act('danger', 'ban', '取消', op('cancel')));
       hint = twHint('父任务由子任务驱动，子任务全部完成后自动完成');
     }
     aux.push(effortBtn, assignBtn);
   } else if (isClosedStatus(status)) {
     // 可操作：独立任务，或需求归属他人的衍生任务（本人是任务指派人）。
     hint = twHint('任务已关闭');
-    main.push(twBtn('info', 'rotate', '重新激活', op('reactivate')));
+    main.push(act('info', 'rotate', '重新激活', op('reactivate')));
     aux.push(effortBtn, assignBtn);
   } else {
     // 开始（未开始或已暂停时；已暂停时「开始」即继续）；进行中显示「暂停」。
-    if (status === 'doing' || status === 'changed') main.push(twBtn('warn', 'pause', '暂停', op('pause')));
-    else if (status === 'pause') main.push(twBtn('start', 'play', '继续', op('start')));
-    else if (status !== 'done') main.push(twBtn('start', 'play', '开始', op('start')));
+    if (status === 'doing' || status === 'changed') main.push(act('warn', 'pause', '暂停', op('pause')));
+    else if (status === 'pause') main.push(act('start', 'play', '继续', op('start')));
+    else if (status !== 'done') main.push(act('start', 'play', '开始', op('start')));
     // 完成 / 重新激活
-    if (status === 'done') main.push(twBtn('info', 'rotate', '重新激活', op('reactivate')));
-    else main.push(twBtn('primary', 'check', '完成', op('finish')));
+    if (status === 'done') main.push(act('info', 'rotate', '重新激活', op('reactivate')));
+    else main.push(act('primary', 'check', '完成', op('finish')));
     // 设置工时（预计）/ 工时记录（已消耗明细）
-    aux.push(twBtn('ghost', 'timer', '设置工时', `taskWorkbenchSetTime(${id})`), effortBtn, assignBtn);
-    danger.push(twBtn('danger', 'x-circle', '关闭', op('close')));
+    aux.push(act('ghost', 'timer', '设置工时', `taskWorkbenchSetTime(${id})`), effortBtn, assignBtn);
+    danger.push(act('danger', 'x-circle', '关闭', op('close')));
   }
 
   const sep = main.length && aux.length ? '<span class="tw-sep" aria-hidden="true"></span>' : '';

@@ -1534,13 +1534,13 @@ function renderTaskStartControl(req) {
   if (!req.task_assigned_to_me) return '';
   if (status === 'doing' || status === 'changed') {
     // 进行中：可暂停（禅道同步暂停）。
-    return `<button class="mrc-btn mrc-btn--warn" onclick="pauseReqTask(${req.id})" title="暂停任务，禅道子任务同步暂停">⏸ 暂停</button>`;
+    return `<button class="mrc-btn mrc-btn--warn" data-op-key="task:${req.zentao_task_id}" onclick="pauseReqTask(${req.id})" title="暂停任务，禅道子任务同步暂停">⏸ 暂停</button>`;
   }
   if (status === 'pause') {
     // 已暂停：用「开始」继续（后端识别暂停态走 restart 继续）。
-    return `<button class="mrc-btn mrc-btn--start" onclick="startReqTask(${req.id})" title="继续任务，禅道子任务同步继续">▶ 继续</button>`;
+    return `<button class="mrc-btn mrc-btn--start" data-op-key="task:${req.zentao_task_id}" onclick="startReqTask(${req.id})" title="继续任务，禅道子任务同步继续">▶ 继续</button>`;
   }
-  return `<button class="mrc-btn mrc-btn--start" onclick="startReqTask(${req.id})" title="开始测试，禅道子任务同步开始">▶ 开始</button>`;
+  return `<button class="mrc-btn mrc-btn--start" data-op-key="task:${req.zentao_task_id}" onclick="startReqTask(${req.id})" title="开始测试，禅道子任务同步开始">▶ 开始</button>`;
 }
 
 // 子任务标签 + 预览 + 预计用时输入。预计用时仅在「任务指派给本人」时可编辑；
@@ -1674,7 +1674,7 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
             ${!baseReq.test_completed ? `<label class="final-test-start"><input type="checkbox" ${baseReq.testing ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'testing', this.checked, this)"><span class="final-test-toggle" aria-hidden="true"></span><span>正在测试</span></label>` : ''}
             <label class="mrc-check"><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="setFinalTestStatus(${req.id}, 'test_completed', this.checked, this)">测试完成</label>`
               : `<label class="mrc-check"><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked, this)">用例完成</label>
-            <label class="mrc-check"><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">测试完成</label>`}
+            <label class="mrc-check"><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} data-op-key="${req.zentao_task_id ? `task:${req.zentao_task_id}` : `requirement:${req.id}`}" onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">测试完成</label>`}
             ${renderTaskMeta(req)}
             ${baseReq.has_multiple_test_tasks ? `<span class="muted qa-task-progress">关联测试任务完成 ${baseReq.linked_test_task_done ?? (baseReq.test_tasks || []).filter(t => ['done', 'closed'].includes(t.status)).length} / ${baseReq.linked_test_task_total ?? (baseReq.test_tasks || []).length}</span>` : ''}
             ${syncSummary}
