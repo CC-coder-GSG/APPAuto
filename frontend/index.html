@@ -4,13 +4,13 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css?v=20261103-final-presence-ui-2">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261124-taskwb-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261124-reviewwb-1">
   <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261124-taskwb-1"></script>
+  <script type="module" src="/static/js/app.js?v=20261124-reviewwb-1"></script>
   <script src="/static/js/weave-motion.js?v=20261124-shell-v2-2" defer></script>
   <script src="/static/js/shell.js?v=20261124-theme-1" defer></script>
   <script>
@@ -724,18 +724,18 @@
           <div class="workbench-panel" data-workbench-panel="review">
             <div class="workbench-panel-inner">
               <h2>审查工作台</h2>
-              <div class="row" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px; align-items: center; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                <div style="display:flex; align-items:center;">
-                  <label style="margin-right:8px; font-weight:bold; color:#475569;">大版本</label>
-                  <select id="reviewMajorSelect" onchange="loadReviewWorkbench()" style="padding: 6px; border-radius: 4px; border: 1px solid #cbd5e1;"></select>
-                </div>
-                <div class="prefix-input" style="flex:1; min-width: 200px; background: #fff;">
-                  <span>🔍</span>
-                  <input id="reviewSearchInput" oninput="window.OmniQAReviewTab && window.OmniQAReviewTab.renderReviewCards()" placeholder="搜索需求编号/名称/负责人或用例编号/标题..." style="width:100%; border:none; outline:none; background:transparent;">
-                </div>
-                <button onclick="loadReviewWorkbench()">刷新工作台</button>
+              <p class="tw-desc">所选大版本的全部需求（不按负责人过滤），所有人都可以对用例进行审查。</p>
+              <div class="rv-toolbar">
+                <label class="rv-field">大版本
+                  <select id="reviewMajorSelect" onchange="loadReviewWorkbench()"></select>
+                </label>
+                <label class="rv-search">
+                  <svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg>
+                  <input id="reviewSearchInput" type="search" oninput="window.OmniQAReviewTab && window.OmniQAReviewTab.renderReviewCards()" placeholder="搜索需求编号 / 名称 / 负责人，或用例编号 / 标题" aria-label="搜索需求或用例">
+                </label>
+                <button type="button" class="tw-refresh" onclick="loadReviewWorkbench()"><svg class="ui-ic"><use href="#i-refresh"/></svg>刷新</button>
               </div>
-              <div id="reviewStatsBar" style="margin-bottom: 16px; background:#f5f6fa; padding: 10px 16px; border-radius: 6px; border-left: 4px solid #8b8fd9;"></div>
+              <div id="reviewStatsBar" class="rv-stats"></div>
               <div id="reviewCards"></div>
             </div>
           </div>

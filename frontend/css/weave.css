@@ -3126,3 +3126,177 @@ details:not([open]) > .lift-ring { display: none !important; }
 @media (max-width: 560px) {
   #tab-mine details.task-card .mrc-status .tw-due { display: none; }
 }
+
+/* ============================================================
+   R9 审查工作台排版 v2（2026-11-24）
+   模板见 js/tabs/review-workbench.js：卡片共用 mrc-*（R6）与 tw-facts / tw-btn（R8），
+   这里补工具栏、审查进度面板、用例行（左信息、右审查操作）。
+   ============================================================ */
+#tab-mine .rv-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin-bottom: 14px; }
+#tab-mine .rv-field {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  margin: 0 !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--w-ink-soft) !important;
+  white-space: nowrap;
+}
+#tab-mine .rv-field select { height: 34px; min-height: 0 !important; min-width: 120px; }
+#tab-mine .rv-search {
+  position: relative;
+  display: flex !important;
+  align-items: center;
+  flex: 1 1 280px;
+  min-width: 0;
+  margin: 0 !important;
+}
+#tab-mine .rv-search .ui-ic {
+  position: absolute;
+  left: 11px;
+  width: 15px;
+  height: 15px;
+  color: var(--w-ink-faint);
+  pointer-events: none;
+}
+#tab-mine .rv-search input {
+  width: 100% !important;
+  height: 34px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 12px 0 34px !important;
+}
+
+/* 审查进度：进度条 + 计数 + 审查人 */
+#tab-mine .rv-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 28px;
+  margin-bottom: 16px;
+  padding: 14px 18px;
+  border: 1px solid var(--w-hairline);
+  border-radius: 14px;
+  background: var(--w-raised);
+}
+#tab-mine .rv-stats:empty { display: none; }
+#tab-mine .rv-stats-empty { font-size: 13px; color: var(--w-ink-faint); }
+#tab-mine .rv-progress { flex: 1 1 280px; min-width: 0; }
+#tab-mine .rv-progress-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+#tab-mine .rv-progress-head strong { font-size: 14px; color: var(--w-ink); }
+#tab-mine .rv-progress-pct { font-size: 20px; font-weight: 650; color: var(--w-ink); font-variant-numeric: tabular-nums; }
+#tab-mine .rv-progress-sub { font-size: 12.5px; color: var(--w-ink-faint); }
+#tab-mine .rv-progress-bar {
+  display: flex;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.18);
+}
+#tab-mine .rv-progress-bar > i { display: block; height: 100%; }
+#tab-mine .rv-progress-bar > i.is-pass { background: #16a34a; }
+#tab-mine .rv-progress-bar > i.is-fail { background: #dc2626; }
+#tab-mine .rv-progress-bar > i + i.is-fail { box-shadow: -2px 0 0 var(--w-raised); }
+#tab-mine .rv-counts { display: flex; gap: 22px; }
+#tab-mine .rv-count { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--w-ink-faint); }
+#tab-mine .rv-count b { font-size: 18px; font-weight: 650; line-height: 1.1; font-variant-numeric: tabular-nums; }
+#tab-mine .rv-count--ok b { color: #15803d; }
+#tab-mine .rv-count--bad b { color: #b91c1c; }
+#tab-mine .rv-count--warn b { color: #b45309; }
+#tab-mine .rv-reviewers { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; flex: 1 1 100%; padding-top: 12px; border-top: 1px solid var(--w-hairline); }
+#tab-mine .rv-reviewers-label { margin-right: 4px; font-size: 12px; color: var(--w-ink-faint); }
+#tab-mine .rv-reviewer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 4px 0 3px;
+  border-radius: 999px;
+  background: rgba(28, 25, 23, 0.05);
+  font-size: 12.5px;
+  color: var(--w-ink);
+}
+#tab-mine .rv-reviewer i {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--w-accent-2), var(--w-accent));
+  color: #fff;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 600;
+}
+#tab-mine .rv-reviewer b {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--w-raised);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+  color: var(--w-ink-soft);
+}
+
+/* 卡片 */
+#tab-mine .rv-owner { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 500; color: var(--w-ink-soft); white-space: nowrap; }
+#tab-mine .rv-owner .tw-ic { width: 14px; height: 14px; color: var(--w-icon); }
+#tab-mine .rv-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+#tab-mine .rv-info .tw-facts { margin-bottom: 0; }
+#tab-mine .rv-info .tw-fact .mrc-chip { height: 20px; }
+#tab-mine .rv-cases { margin-top: 14px !important; }
+
+/* 用例行：左侧编号/标题/元信息，右侧审查标签与操作 */
+#tab-mine .rv-cases .mrc-section-list > .rv-case {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  position: relative;
+  transition: background var(--w-fast) ease-out;
+}
+#tab-mine .rv-cases .mrc-section-list > .rv-case:hover { background: rgba(28, 25, 23, 0.025) !important; }
+#tab-mine .rv-case::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 10px; bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: transparent;
+}
+#tab-mine .rv-case--failed::before { background: #dc2626; }
+#tab-mine .rv-case--passed::before { background: #16a34a; }
+#tab-mine .rv-case-main { flex: 1 1 320px; min-width: 0; }
+#tab-mine .rv-case-title { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; }
+#tab-mine .rv-case-title > a:first-child { flex: 0 0 auto; font-weight: 600; }
+#tab-mine .rv-case-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--w-ink); }
+#tab-mine .rv-case-meta { margin-top: 3px; font-size: 12px; color: var(--w-ink-faint); }
+#tab-mine .rv-case-review { flex: 0 1 auto; display: flex; justify-content: flex-end; margin-left: auto; }
+#tab-mine .rv-case-review .case-review-box { justify-content: flex-end; }
+#tab-mine .rv-case .case-review-btn {
+  height: 26px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 10px !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+#tab-mine .rv-case .case-review-tag { height: 24px; padding: 0 9px !important; }
+
+@media (max-width: 760px) {
+  #tab-mine .rv-stats { padding: 12px 14px; gap: 12px 18px; }
+  #tab-mine .rv-case-review { margin-left: 0; justify-content: flex-start; }
+  #tab-mine .rv-case-review .case-review-box { justify-content: flex-start; }
+}
+@media (max-width: 560px) {
+  #tab-mine details.review-req-card .rv-owner { display: none; }
+}
