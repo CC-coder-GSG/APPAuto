@@ -97,7 +97,9 @@ class CadTestService:
         item_ids = [i.id for i in items]
 
         # 关联禅道 Bug 信息（用于预览/跳转）。
-        bug_ids = [i.zentao_bug_id for i in items if i.zentao_bug_id]
+        # CadItem.zentao_bug_id 是整型、BugTracking.zentao_bug_id 是字符串列：
+        # PostgreSQL 不做隐式转换（varchar = integer 报错），查询前转成字符串。
+        bug_ids = [str(i.zentao_bug_id) for i in items if i.zentao_bug_id]
         bug_map: dict[int, BugTracking] = {}
         if bug_ids:
             for bug in self.db.query(BugTracking).filter(BugTracking.zentao_bug_id.in_(bug_ids)).all():

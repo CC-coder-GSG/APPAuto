@@ -7,6 +7,8 @@ POST /zentao/sync-versions     Sync executions → MAJOR versions and
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -16,6 +18,7 @@ from app.services.permission_service import ensure_tab_access
 from app.services.zentao_version_sync_service import ZentaoVersionSyncService
 
 router = APIRouter(prefix="/zentao", tags=["zentao_version"])
+logger = logging.getLogger(__name__)
 
 
 class VersionSyncPayload(BaseModel):
@@ -60,12 +63,19 @@ async def sync_versions(
 
     ensure_tab_access(current_user, "data")
     service = ZentaoVersionSyncService(db)
-    result = await service.sync_versions(
-        user_id=current_user.id,
-        software_id=payload.software_id,
-        zentao_project_id=payload.zentao_project_id,
-        sync_minor=payload.sync_minor,
-    )
+    try:
+        result = await service.sync_versions(
+            user_id=current_user.id,
+            software_id=payload.software_id,
+            zentao_project_id=payload.zentao_project_id,
+            sync_minor=payload.sync_minor,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — 给页面一个可读原因，完整堆栈进日志
+        db.rollback()
+        logger.exception('sync-versions failed software=%s project=%s', payload.software_id, payload.zentao_project_id)
+        raise HTTPException(status_code=500, detail=f'版本同步失败（{type(exc).__name__}），本次未写入任何版本，请联系管理员查看服务日志') from exc
 
     return {
         'created_major': result.created_major,

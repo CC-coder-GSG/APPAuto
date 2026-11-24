@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
 
+from app.core.db_lifecycle import release_read_transaction
 from app.models import Version, VersionType
 from app.models.user_zentao_binding import UserZentaoBinding
 from app.services.zentao_auth_service import get_valid_token
@@ -37,7 +38,22 @@ from app.services.zentao_utils import is_placeholder_name, normalize_version_nam
 logger = logging.getLogger(__name__)
 
 _MAX_CONCURRENCY = 5
+# 解析禅道产品时最多查看的执行详情数（同一项目下各执行挂的是同一产品）。
+# 原先逐个请求全部历史执行（Survey Master 5.0 有 137 个，约 2.5 分钟），
+# 而禅道 v2 执行详情常常不带 products，等于每次都白跑一整圈。
+_PRODUCT_PROBE_LIMIT = 5
 _PURE_S_PATTERN = re.compile(r'^s(\d{4,})$', re.IGNORECASE)
+
+
+def _as_int(value) -> int | None:
+    """禅道 v2 列表里的 id 是字符串（"1647"）。直接拿去和整型列比较，
+    SQLAlchemy + psycopg3 会渲染成 ``integer = $1::VARCHAR``，PostgreSQL 报
+    「操作符不存在」（SQLite 宽松比较，所以迁移前一直没暴露）。入库/查询前统一转 int。"""
+    try:
+        number = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
 
 
 def _execution_to_version_no(name: str) -> str:
@@ -113,16 +129,23 @@ class ZentaoVersionSyncService:
         software_id: int,
         zentao_project_id: int,
         sync_minor: bool = True,
+        resolve_products: bool = False,
     ) -> VersionSyncResult:
         """
         Sync MAJOR versions (executions) and optionally MINOR versions (builds).
         Returns a VersionSyncResult with counts of created / updated / skipped.
+
+        ``resolve_products``：只有「新建软件」需要回填禅道产品；单纯同步版本不查，
+        省掉一轮逐个请求执行详情。
         """
         result = VersionSyncResult()
         client = self._get_client(user_id)
         if not client:
             logger.warning('sync_versions: no client for user_id=%s', user_id)
             return result
+        # 下面要等禅道好几轮网络请求：先把只读事务还给连接池，
+        # 避免整次同步占着一个数据库连接（线上日志见过 205s）。
+        release_read_transaction(self.db)
 
         # ── Step 1: fetch executions ──────────────────────────────────────
         # 用客户端的 list_project_executions（status=all + 分页）拉全部执行，
@@ -141,16 +164,17 @@ class ZentaoVersionSyncService:
             logger.warning('sync_versions: fetch executions failed: %s', exc)
             return result
 
-        result.zentao_products = await asyncio.to_thread(
-            self._resolve_products_from_executions,
-            client,
-            executions,
-        )
+        if resolve_products:
+            result.zentao_products = await asyncio.to_thread(
+                self._resolve_products_from_executions,
+                client,
+                executions,
+            )
 
         # ── Step 2: upsert major versions ─────────────────────────────────
         exec_id_to_major: dict[int, Version] = {}
         for exc_row in executions:
-            exec_id = exc_row.get('id')
+            exec_id = _as_int(exc_row.get('id'))
             exec_name = (exc_row.get('name') or '').strip()
             if not exec_id or not exec_name:
                 continue
@@ -191,8 +215,13 @@ class ZentaoVersionSyncService:
                     logger.warning('sync_versions: builds exec_id=%s err=%s', exec_id, exc)
                     return
 
-                for b in (bdata or {}).get('builds', []):
-                    build_id = b.get('id')
+                rows = bdata.get('builds') if isinstance(bdata, dict) else None
+                if isinstance(rows, dict):
+                    rows = list(rows.values())
+                for b in rows if isinstance(rows, list) else []:
+                    if not isinstance(b, dict):
+                        continue
+                    build_id = _as_int(b.get('id'))
                     build_name = (b.get('name') or '').strip()
                     if not build_id or not build_name:
                         continue
@@ -260,7 +289,7 @@ class ZentaoVersionSyncService:
             return result
 
         for b in builds:
-            build_id = b.get("id")
+            build_id = _as_int(b.get("id"))
             build_name = (b.get("name") or "").strip()
             if not build_id or not build_name:
                 continue
@@ -332,6 +361,7 @@ class ZentaoVersionSyncService:
         zentao_execution_name_cache: str,
         result: VersionSyncResult,
     ) -> Version | None:
+        zentao_execution_id = _as_int(zentao_execution_id)
         # 0. Pending insert in this session (autoflush=False guard)
         v = self._find_pending(VersionType.MAJOR, version_no, software_id)
 
@@ -384,6 +414,7 @@ class ZentaoVersionSyncService:
         zentao_build_name_cache: str,
         result: VersionSyncResult,
     ) -> Version | None:
+        zentao_build_id = _as_int(zentao_build_id)
         # 0. Pending insert in this session (autoflush=False guard)
         v = self._find_pending(VersionType.MINOR, version_no, software_id)
 
@@ -497,10 +528,12 @@ class ZentaoVersionSyncService:
         products as ``[{"id": ..., "name": ...}]``.
         """
         products: dict[int, dict] = {}
-        for execution in executions:
-            execution_id = execution.get("id")
-            if not execution_id:
-                continue
+        # 只看最近的几个执行（id 越大越新），不再遍历全部历史执行
+        candidates = sorted(
+            {_as_int(e.get("id")) for e in executions if isinstance(e, dict)} - {None},
+            reverse=True,
+        )[:_PRODUCT_PROBE_LIMIT]
+        for execution_id in candidates:
             try:
                 detail = client.get(f"executions/{int(execution_id)}") or {}
             except Exception as exc:

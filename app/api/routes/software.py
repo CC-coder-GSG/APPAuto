@@ -103,6 +103,7 @@ async def create_software_from_zentao(
         software_id=item.id,
         zentao_project_id=payload.zentao_project_id,
         sync_minor=payload.sync_minor,
+        resolve_products=True,
     )
 
     resolved_products = result.zentao_products
