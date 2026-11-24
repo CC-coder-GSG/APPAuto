@@ -19,6 +19,54 @@ let boardLoading = false;
 let assignBusy = false;
 let lastBatchResult = null;
 
+// ── 空状态 / 加载骨架（2026-11-24 排版 v2）：进入页面不再只剩一行表头 ──
+const AS_ICON = {
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  alert: '<path d="m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+};
+function renderAssignState(kind, message = '') {
+  const table = document.getElementById('assignTable');
+  if (!table) return;
+  if (kind === 'loading') {
+    table.innerHTML = Array.from({ length: 4 }, () => `<tr class="as-skel-row" aria-hidden="true">
+      <td><span class="as-skel as-skel--box"></span></td>
+      <td><span class="as-skel" style="width:${55 + Math.round(Math.random() * 35)}%"></span></td>
+      <td><span class="as-skel as-skel--select"></span></td>
+      <td><span class="as-skel" style="width:70%"></span></td></tr>`).join('');
+    return;
+  }
+  const states = {
+    idle: ['users', '选择一个大版本开始分配', '在上方选择大版本后点「加载」，即可为需求分配负责人并创建禅道测试子任务。', ''],
+    empty: ['inbox', '该版本还没有需求', '可以点「同步禅道需求」从禅道拉取，或在下方「关联版本需求」从其他版本复制。',
+      '<button type="button" class="secondary" onclick="syncAssignRequirementsFromZentao().then(() => loadAssignBoard({ skipSync: true }))">同步禅道需求</button>'],
+    error: ['alert', '需求加载失败', message || '请稍后重试。', '<button type="button" class="secondary" onclick="loadAssignBoard()">重试</button>'],
+  };
+  const [icon, title, desc, action] = states[kind] || states.idle;
+  table.innerHTML = `<tr class="as-state-row"><td colspan="4"><div class="as-state${kind === 'error' ? ' is-error' : ''}">
+    <svg class="as-state-icon" viewBox="0 0 24 24" aria-hidden="true">${AS_ICON[icon]}</svg>
+    <strong>${escapeHtml(title)}</strong><span>${escapeHtml(desc)}</span>${action}</div></td></tr>`;
+}
+
+// 进入页面自动加载：只读本地数据（skipSync），不在进入时就去禅道同步；
+// 「全部版本」可能很大，不自动加载；版本列表还没就绪时稍等片刻。
+let activating = null;
+export function activateAssignTab() {
+  if (activating) return activating;
+  activating = (async () => {
+    const select = document.getElementById('assignMajorSelect');
+    for (let i = 0; i < 40 && select && !select.options.length; i++) await new Promise(r => setTimeout(r, 150));
+    const majorId = Number(select?.value || 0);
+    if (!majorId) {
+      if (!(state.assignReqs || []).length || loadedContext !== currentAssignContext()) renderAssignState('idle');
+      return;
+    }
+    if (boardLoading || assignBusy || loadedContext === currentAssignContext()) return;
+    await loadAssignBoard({ skipSync: true });
+  })().finally(() => { activating = null; });
+  return activating;
+}
+
 function currentAssignContext() {
   return `${Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0)}:${Number(document.getElementById('assignMajorSelect')?.value || 0)}`;
 }
@@ -106,6 +154,7 @@ export async function loadAssignBoard(options = {}) {
   }
   boardLoading = true;
   updateAssignSelectionUI();
+  if (!sameContext || !document.querySelector('#assignTable [data-assign-id]')) renderAssignState('loading');
   try {
     syncLinkSourceMajorOptions();
 
@@ -140,25 +189,33 @@ export async function loadAssignBoard(options = {}) {
     const assignTable = document.getElementById('assignTable');
     if (!assignTable) return;
     const users = getUsers();
-    assignTable.innerHTML = state.assignReqs.map((r) => {
+    if (!state.assignReqs.length) renderAssignState('empty');
+    else assignTable.innerHTML = state.assignReqs.map((r) => {
       const sid = String(r.zentao_req_id || '').replace(/\D/g, '');
       const idHtml = sid
         ? `<span class="qa-story-id-nohref" data-zt-story-id="${sid}">${escapeHtml(r.zentao_req_id)}</span>`
         : escapeHtml(r.zentao_req_id || '');
-      const ztSlot = sid ? ` <span class="zt-story-slot" data-zt-story-id="${sid}" style="margin-left:4px;"></span>` : '';
-      const aiSlot = sid ? ` <span class="ai-result-slot" data-story-id="${sid}"></span>` : '';
+      const ztSlot = sid ? `<span class="zt-story-slot" data-zt-story-id="${sid}"></span>` : '';
+      const aiSlot = sid ? `<span class="ai-result-slot" data-story-id="${sid}"></span>` : '';
+      // 子任务列固定一行：任务号 · 起止（或「日期待同步」）· 编辑图标，避免行高参差
+      const dates = r.task_dates_synced === false
+        ? '<span class="as-task-pending">日期待同步</span>'
+        : `<span class="as-task-dates">${escapeHtml(r.task_start_date || '未设置')} → ${escapeHtml(r.task_deadline || '未设置')}</span>`;
+      const task = r.zentao_task_id
+        ? `<span class="as-task-id">#${Number(r.zentao_task_id)}</span>${dates}`
+        : '<span class="as-task-none">未创建子任务</span>';
       return `
       <tr>
         <td><input type="checkbox" data-assign-id="${r.id}" aria-label="选择需求 ${escapeHtml(r.zentao_req_id || r.id)}" ${selectedRequirements.has(Number(r.id)) ? 'checked' : ''} onchange="toggleAssignRequirement(${r.id}, this.checked)"></td>
-        <td>${idHtml} ${escapeHtml(r.title || '')}${ztSlot}${renderPreviewBtn('story', sid)}${aiSlot}</td>
+        <td><div class="as-req"><span class="as-req-id">${idHtml}</span><span class="as-req-title" title="${escapeHtml(r.title || '')}">${escapeHtml(r.title || '')}</span>${ztSlot}${renderPreviewBtn('story', sid)}${aiSlot}</div></td>
         <td>
-          <select id='o_${r.id}'>
+          <select id='o_${r.id}' aria-label="负责人">
             <option value=''>未分配</option>
             ${(r.owner_id && !users.some((u) => Number(u.id) === Number(r.owner_id))) ? `<option value='${r.owner_id}' selected>原负责人(账号不存在 #${r.owner_id})</option>` : ''}
             ${users.map((u) => `<option value='${u.id}' ${u.id === r.owner_id ? 'selected' : ''}>${escapeHtml(u.display_name || u.username)}</option>`).join('')}
           </select>
         </td>
-        <td class="assign-task-dates">${r.zentao_task_id ? `<span>任务 #${Number(r.zentao_task_id)}</span><small>${r.task_dates_synced === false ? '日期待同步' : `${escapeHtml(r.task_start_date || '未设置')} → ${escapeHtml(r.task_deadline || '未设置')}`}</small>` : '<span class="muted">未创建子任务</span>'}<button type="button" class="secondary" onclick="openAssignLinkedTasks(${Number(r.id)})">选择关联任务并修改</button></td>
+        <td class="assign-task-dates"><div class="as-task">${task}<button type="button" class="as-task-edit" title="选择关联任务并修改" aria-label="选择关联任务并修改" onclick="openAssignLinkedTasks(${Number(r.id)})"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span>修改</span></button></div></td>
       </tr>`;
     }).join('');
     ownerDrafts.forEach((value, id) => {
@@ -174,6 +231,7 @@ export async function loadAssignBoard(options = {}) {
   } catch (err) {
     if (sequence === loadSequence) {
       loadedContext = '';
+      if (!document.querySelector('#assignTable [data-assign-id]')) renderAssignState('error', err.message);
       window.showMessage?.(err.message || '需求加载失败，请重试', 'error');
     }
   } finally {
@@ -205,17 +263,9 @@ export async function refreshFinalTestState() {
   }
   if (captured !== currentAssignContext()) return;
 
-  if (enabled) {
-    btn.textContent = '关闭最终测试';
-    btn.className = '';
-    btn.style.background = '#d97706';
-    btn.style.color = '#fff';
-  } else {
-    btn.textContent = '进入最终测试';
-    btn.className = 'secondary';
-    btn.style.background = '';
-    btn.style.color = '';
-  }
+  btn.textContent = enabled ? '关闭最终测试' : '进入最终测试';
+  btn.className = enabled ? 'as-final is-on' : 'secondary as-final';
+  btn.title = enabled ? '该版本处于最终测试阶段：所有人都能看到全部需求并各自勾选' : '让该版本进入最终测试阶段';
 }
 
 export async function toggleFinalTest() {
@@ -402,27 +452,27 @@ export async function loadLinkCandidates() {
   if (allEl) allEl.checked = false;
 
   if (!targetMajorId) {
-    area.innerHTML = '<div class="muted">当前处于“全部版本”模式，请先选择一个目标大版本再做关联</div>';
+    area.innerHTML = '<div class="as-link-empty">当前处于「全部版本」模式，请先选择一个目标大版本再做关联</div>';
     return;
   }
   if (!sourceMajorId) {
-    area.innerHTML = '<div class="muted">请选择来源大版本</div>';
+    area.innerHTML = '<div class="as-link-empty">请选择来源大版本</div>';
     return;
   }
   if (targetMajorId === sourceMajorId) {
-    area.innerHTML = '<div class="muted">来源大版本不能与目标大版本相同</div>';
+    area.innerHTML = '<div class="as-link-empty">来源大版本不能与目标大版本相同</div>';
     return;
   }
-  area.innerHTML = '<div class="muted">正在加载来源需求...</div>';
+  area.innerHTML = '<div class="as-link-empty">正在加载来源需求…</div>';
   try {
     const data = await (await api(`/requirements/admin/link-options?source_major_version_id=${sourceMajorId}&target_major_version_id=${targetMajorId}`)).json();
     if (!data || data.length === 0) {
-      area.innerHTML = '<div class="muted">来源版本暂无可关联需求</div>';
+      area.innerHTML = '<div class="as-link-empty">来源版本暂无可关联需求</div>';
       return;
     }
     const canLinkCount = data.filter((x) => !x.already_linked).length;
     if (canLinkCount === 0) {
-      area.innerHTML = '<div class="muted">来源版本需求均已存在于当前目标版本，无需重复关联</div>';
+      area.innerHTML = '<div class="as-link-empty">来源版本需求均已存在于当前目标版本，无需重复关联</div>';
       return;
     }
 
@@ -430,20 +480,17 @@ export async function loadLinkCandidates() {
       const sid = String(r.zentao_req_id || '').replace(/\D/g, '');
       const aiSlot = sid ? ` <span class="ai-result-slot" data-story-id="${sid}"></span>` : '';
       return `
-      <label class="row" style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px dashed #e2e8f0; padding:8px 0;">
-        <span style="display:flex; align-items:flex-start; gap:8px;">
-          <input type="checkbox" class="link-req-check" value="${r.id}" ${r.already_linked ? 'disabled' : ''}>
-          <span>
-            <b>${r.zentao_req_id}</b> ${r.title || ''}${aiSlot}
-            <span class="muted" style="margin-left:8px;">负责人：${r.owner_name || '未分配'} ｜ 用例：${r.case_count || 0}</span>
-          </span>
-        </span>
-        ${r.already_linked ? '<span class="badge" style="background:#ecfeff;color:#0369a1;">已在目标版本</span>' : ''}
+      <label class="as-link-row${r.already_linked ? ' is-linked' : ''}">
+        <input type="checkbox" class="link-req-check" value="${r.id}" ${r.already_linked ? 'disabled' : ''}>
+        <span class="as-req-id">${escapeHtml(r.zentao_req_id || '')}</span>
+        <span class="as-link-title">${escapeHtml(r.title || '')}${aiSlot}</span>
+        <span class="as-link-meta">负责人 ${escapeHtml(r.owner_name || '未分配')} · 用例 ${Number(r.case_count || 0)}</span>
+        ${r.already_linked ? '<span class="as-link-tag">已在目标版本</span>' : ''}
       </label>`;
     }).join('');
     window.OmniQAStoryAI?.refreshSlots?.(area);
   } catch (err) {
-    area.innerHTML = '<div class="muted" style="color:#dc2626;">来源需求加载失败</div>';
+    area.innerHTML = '<div class="as-link-empty is-error">来源需求加载失败</div>';
     window.showMessage && window.showMessage(err.message || '来源需求加载失败', 'error');
   }
 }
@@ -503,6 +550,7 @@ export async function confirmLinkRequirements() {
 }
 
 window.OmniQAAssignTab = {
+  activate: activateAssignTab,
   loadAssignBoard,
   loadAssignProgress,
   toggleAssignProgressPendingOnly,

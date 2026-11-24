@@ -4264,3 +4264,315 @@ html.epv-open { overflow: hidden; }
 #tab-data .mrc-chip--purple { background: rgba(124, 58, 237, 0.09); color: #6d28d9; }
 #tab-data .mrc-chip--muted { color: var(--w-ink-faint); }
 #tab-data .mrc-chip--outline { background: transparent; box-shadow: inset 0 0 0 1px var(--w-hairline-strong); }
+
+/* ============================================================
+   R13 任务分配台排版 v2（2026-11-24）
+   结构见 index.html #tab-assign 与 js/tabs/assign.js：进入即自动加载 + 空状态/骨架、
+   工具栏与批量操作区分层、需求表固定行高（子任务列单行）、关联版本需求卡片。
+   ============================================================ */
+#tab-assign .as-block {
+  padding: 0 !important;
+  overflow: hidden;
+  border: 1px solid var(--w-hairline) !important;
+  border-radius: 16px !important;
+  background: var(--w-raised) !important;
+}
+#tab-assign .as-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 16px 20px;
+  cursor: pointer;
+  list-style: none;
+}
+#tab-assign .as-summary::-webkit-details-marker { display: none; }
+#tab-assign .as-chev {
+  width: 16px; height: 16px; flex: 0 0 auto;
+  fill: none; stroke: var(--w-ink-faint); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  transition: transform var(--w-base) var(--w-spring);
+}
+#tab-assign .as-block[open] > .as-summary .as-chev { transform: rotate(90deg); }
+#tab-assign .as-title { font-size: 16px; font-weight: 650; color: var(--w-ink); }
+#tab-assign .as-count {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--w-accent-soft);
+  color: var(--w-accent-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+#tab-assign .as-summary-note { margin-left: auto; font-size: 12.5px; color: var(--w-ink-faint); }
+#tab-assign .as-body { padding: 0 20px 20px; }
+
+/* 工具栏：左侧版本与加载，右侧最终测试开关 */
+#tab-assign .as-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+#tab-assign .as-toolbar-group { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+#tab-assign .rv-field {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  margin: 0 !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--w-ink-soft) !important;
+  white-space: nowrap;
+}
+#tab-assign .rv-field select { height: 34px; min-height: 0 !important; min-width: 140px; }
+#tab-assign .as-toolbar button,
+#tab-assign .as-batch button {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  height: 34px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 14px !important;
+  font-size: 13px !important;
+}
+#tab-assign .as-toolbar button .ui-ic { width: 15px; height: 15px; }
+#tab-assign button.as-final.is-on { background: #b45309 !important; color: #fff !important; }
+#tab-assign button.as-final.is-on:hover { background: #92400e !important; }
+#tab-assign .as-toggle {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  margin: 0 !important;
+  font-size: 13px !important;
+  color: var(--w-ink-soft) !important;
+  cursor: pointer;
+}
+#tab-assign .as-toggle input { width: 15px; height: 15px; min-height: 0 !important; margin: 0; accent-color: var(--w-accent); }
+
+/* 批量操作区：起止日期 + 已选计数 + 针对所选需求的操作 */
+#tab-assign .as-batch {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--w-surface);
+  border: 1px solid var(--w-hairline);
+}
+#tab-assign .as-batch-dates { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+#tab-assign .as-label { font-size: 13px; font-weight: 500; color: var(--w-ink-soft); }
+#tab-assign .as-batch-dates input[type="date"] { width: 160px; height: 34px; min-height: 0 !important; margin: 0 !important; }
+#tab-assign .as-sep { font-size: 13px; color: var(--w-ink-faint); }
+#tab-assign .as-hint { font-size: 12px; color: var(--w-ink-faint); }
+#tab-assign .as-batch-actions.assign-selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin: 12px 0 0 !important;
+  padding-top: 12px;
+  border-top: 1px dashed var(--w-hairline-strong);
+}
+#tab-assign #assignSelectionCount { font-size: 13px; font-weight: 600; color: var(--w-ink); }
+#tab-assign .as-batch-buttons { display: inline-flex; flex-wrap: wrap; gap: 8px; }
+#tab-assign .as-batch-buttons button:disabled { opacity: 0.45; }
+#tab-assign .as-note { margin-top: 8px; font-size: 12px; color: var(--w-ink-faint); }
+
+/* 需求表：固定列宽 + 单行单元格 → 行高统一 */
+#tab-assign .as-table-wrap {
+  margin-top: 14px;
+  overflow-x: auto;
+  border: 1px solid var(--w-hairline);
+  border-radius: 12px;
+}
+#tab-assign table.assign-requirements { width: 100%; min-width: 760px; margin: 0 !important; border-collapse: collapse; table-layout: fixed; }
+#tab-assign .as-col-check { width: 48px; }
+#tab-assign .as-col-owner { width: 168px; }
+#tab-assign .as-col-task { width: 330px; }
+#tab-assign table.assign-requirements thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 40px;
+  padding: 0 12px !important;
+  border-bottom: 1px solid var(--w-hairline) !important;
+  background: var(--w-surface) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: var(--w-ink-soft) !important;
+  text-align: left;
+}
+#tab-assign table.assign-requirements tbody td {
+  height: 52px;
+  padding: 0 12px !important;
+  border-top: 1px solid var(--w-hairline) !important;
+  border-bottom: none !important;
+  vertical-align: middle;
+}
+#tab-assign table.assign-requirements tbody tr:first-child td { border-top: none !important; }
+#tab-assign table.assign-requirements tbody tr:not(.as-state-row):not(.as-skel-row):hover td { background: rgba(var(--w-accent-rgb), 0.035); }
+#tab-assign table.assign-requirements tbody tr:has(input[data-assign-id]:checked) td { background: rgba(var(--w-accent-rgb), 0.06); }
+#tab-assign table.assign-requirements select { width: 100%; min-width: 0 !important; height: 32px; min-height: 0 !important; margin: 0 !important; font-size: 13px; }
+#tab-assign .as-req { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#tab-assign .as-req-id {
+  flex: 0 0 auto;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--w-accent-ink);
+}
+#tab-assign .as-req-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; color: var(--w-ink); }
+#tab-assign .as-req .qa-preview-btn { flex: 0 0 auto; margin-left: 0; }
+#tab-assign .as-req .zt-story-slot, #tab-assign .as-req .ai-result-slot { flex: 0 0 auto; }
+#tab-assign td.assign-task-dates { min-width: 0; }
+#tab-assign .as-task { display: flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; }
+#tab-assign .as-task-id {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: rgba(28, 25, 23, 0.06);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--w-ink);
+}
+#tab-assign .as-task-dates { overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; color: var(--w-ink-soft); font-variant-numeric: tabular-nums; }
+#tab-assign .as-task-pending {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 500;
+}
+#tab-assign .as-task-none { font-size: 12.5px; color: var(--w-ink-faint); }
+#tab-assign button.as-task-edit {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  flex: 0 0 auto;
+  height: 28px !important;
+  min-height: 0 !important;
+  margin: 0 0 0 auto !important;
+  padding: 0 10px !important;
+  border: 1px solid var(--w-hairline-strong) !important;
+  border-radius: 8px !important;
+  background: var(--w-raised) !important;
+  color: var(--w-ink-soft) !important;
+  font-size: 12px !important;
+  box-shadow: none !important;
+}
+#tab-assign button.as-task-edit svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#tab-assign button.as-task-edit:hover:not(:disabled) { color: var(--w-ink) !important; border-color: rgba(28, 25, 23, 0.26) !important; }
+
+/* 空状态 / 骨架 */
+#tab-assign .as-state-row td { height: auto !important; padding: 0 !important; }
+#tab-assign .as-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 44px 16px;
+  text-align: center;
+}
+#tab-assign .as-state-icon {
+  width: 44px; height: 44px; margin-bottom: 6px; padding: 10px;
+  border-radius: 14px;
+  background: var(--w-accent-soft);
+  fill: none; stroke: var(--w-accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+  box-sizing: border-box;
+}
+#tab-assign .as-state.is-error .as-state-icon { background: rgba(220, 38, 38, 0.08); stroke: #b91c1c; }
+#tab-assign .as-state strong { font-size: 15px; font-weight: 600; color: var(--w-ink); }
+#tab-assign .as-state span { max-width: 460px; font-size: 13px; line-height: 1.6; color: var(--w-ink-faint); }
+#tab-assign .as-state button { height: 32px !important; min-height: 0 !important; margin: 8px 0 0 !important; padding: 0 14px !important; font-size: 13px !important; }
+#tab-assign .as-skel {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(28,25,23,.06), rgba(28,25,23,.11), rgba(28,25,23,.06));
+  background-size: 200% 100%;
+  animation: asShimmer 1.2s linear infinite;
+}
+#tab-assign .as-skel--box { width: 16px; height: 16px; border-radius: 4px; }
+#tab-assign .as-skel--select { width: 100%; height: 30px; border-radius: 8px; }
+@keyframes asShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* 关联版本需求 */
+#tab-assign .as-link.card {
+  margin-top: 16px !important;
+  padding: 18px 20px !important;
+  border: 1px solid var(--w-hairline) !important;
+  border-radius: 16px !important;
+  background: var(--w-raised) !important;
+}
+#tab-assign .as-link-head { margin-bottom: 12px; }
+#tab-assign .as-link-head h3 { margin: 0 0 4px !important; font-size: 15px !important; font-weight: 650 !important; }
+#tab-assign .as-link-head p { margin: 0; font-size: 12.5px; color: var(--w-ink-faint); }
+#tab-assign .as-link-list {
+  margin-top: 12px;
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--w-hairline);
+  border-radius: 12px;
+}
+#tab-assign .as-link-empty { padding: 22px 16px; font-size: 13px; color: var(--w-ink-faint); text-align: center; }
+#tab-assign .as-link-empty.is-error { color: #b91c1c; }
+#tab-assign .as-link-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  padding: 10px 14px !important;
+  border-top: 1px solid var(--w-hairline);
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  color: var(--w-ink) !important;
+  cursor: pointer;
+}
+#tab-assign .as-link-row:first-child { border-top: none; }
+#tab-assign .as-link-row:hover { background: rgba(28, 25, 23, 0.025); }
+#tab-assign .as-link-row.is-linked { cursor: default; color: var(--w-ink-faint) !important; }
+#tab-assign .as-link-row input { width: 15px; height: 15px; min-height: 0 !important; margin: 0; accent-color: var(--w-accent); }
+#tab-assign .as-link-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tab-assign .as-link-meta { flex: 0 0 auto; font-size: 12px; color: var(--w-ink-faint); }
+#tab-assign .as-link-tag {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(8, 145, 178, 0.10);
+  color: #0e7490;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  #tab-assign .as-summary-note { display: none; }
+  #tab-assign .as-body { padding: 0 14px 16px; }
+  #tab-assign .as-summary { padding: 14px; }
+}
+@media (max-width: 640px) {
+  #tab-assign .as-batch-dates input[type="date"] { width: calc(50% - 22px); }
+  #tab-assign .as-batch-buttons { width: 100%; }
+  #tab-assign .as-batch-buttons button { flex: 1 1 auto; justify-content: center; }
+  #tab-assign .as-link-meta { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #tab-assign .as-skel { animation: none; }
+}
+#tab-assign .card.assign-progress-panel {
+  margin-top: 16px !important;
+  padding: 18px 20px !important;
+  border: 1px solid var(--w-hairline) !important;
+  border-radius: 16px !important;
+  background: var(--w-raised) !important;
+}
+@media (max-width: 900px) { #tab-assign .card.assign-progress-panel { padding: 14px !important; } }
