@@ -21,9 +21,13 @@
 
   /* 极光 accent */
   --w-aurora: linear-gradient(120deg, #5b8cff, #8b5cf6 35%, #d946a0 70%, #f59e0b);
-  --w-accent:      #5b5bd6;
-  --w-accent-hover: #4a4ac4;
-  --w-accent-soft: rgba(91, 91, 214, 0.10);
+  /* 主色：深橙（2026-11-24 用户由靛蓝改为橙色）。#cc4e0b 与白字对比 4.5:1，
+     作文字用时取更深的 --w-accent-ink；浅底染色用更亮的橙 */
+  --w-accent:      #cc4e0b;
+  --w-accent-hover: #b03d09;
+  --w-accent-ink:  #b8430e;
+  --w-accent-rgb:  234, 88, 12;
+  --w-accent-soft: rgba(234, 88, 12, 0.10);
 
   /* 非线性缓动 */
   --w-spring: linear(0, 0.009, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%,
@@ -41,7 +45,7 @@
   --primary: var(--w-accent);
   --primary-hover: var(--w-accent-hover);
   --primary-light: var(--w-accent-soft);
-  --primary-ring: rgba(91, 91, 214, 0.22);
+  --primary-ring: rgba(234, 88, 12, 0.22);
   --bg-color: var(--w-canvas);
   --bg-muted: var(--w-surface);
   --card-bg: var(--w-raised);
@@ -75,7 +79,7 @@ h1, h2, h3 {
   font-family: inherit !important;
 }
 h1, h2, h3 { color: var(--w-ink) !important; }
-a, .qa-ext-link { color: var(--w-accent); }
+a, .qa-ext-link { color: var(--w-accent-ink); }
 a:hover, .qa-ext-link:hover { color: var(--w-accent-hover); }
 .muted { color: var(--w-ink-soft) !important; }
 label { color: var(--w-ink-soft) !important; }
@@ -226,7 +230,7 @@ html.nav-animating body { transition: padding-left var(--w-base) var(--w-swift);
 }
 #tabs .nav-scroll button.active-tab {
   background: transparent !important;   /* 底色由流体指示器提供 */
-  color: var(--w-accent) !important;
+  color: var(--w-accent-ink) !important;
   font-weight: 600 !important;
 }
 #tabs .nav-ic {
@@ -242,7 +246,7 @@ html.nav-animating body { transition: padding-left var(--w-base) var(--w-swift);
   transition: color var(--w-fast) ease-out;
 }
 #tabs .nav-scroll button:hover .nav-ic { color: var(--w-ink-soft); }
-#tabs .nav-scroll button.active-tab .nav-ic { color: var(--w-accent); }
+#tabs .nav-scroll button.active-tab .nav-ic { color: var(--w-accent-ink); }
 #tabs .nav-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 #tabs .nav-ext-ic {
   width: 13px; height: 13px; flex: 0 0 auto;
@@ -290,7 +294,7 @@ html.nav-animating body { transition: padding-left var(--w-base) var(--w-swift);
   bottom: 8px;
   width: 3px;
   border-radius: 0 3px 3px 0;
-  background: linear-gradient(#5b8cff, #8b5cf6, #d946a0);
+  background: linear-gradient(#fbbf24, #ea580c, #e11d48);
 }
 
 .nav-footer {
@@ -572,7 +576,7 @@ html.nav-animating body { transition: padding-left var(--w-base) var(--w-swift);
   font-size: 12px;
   font-weight: 600;
   color: #fff;
-  background: linear-gradient(135deg, #5b8cff, #8b5cf6) !important;
+  background: linear-gradient(135deg, #fb923c, #cc4e0b) !important;
 }
 .user-menu-pop {
   position: absolute;
@@ -728,7 +732,7 @@ button {
 }
 button:hover {
   background: var(--w-accent-hover) !important;
-  box-shadow: 0 4px 14px rgba(91, 91, 214, 0.24) !important;
+  box-shadow: 0 4px 14px rgba(234, 88, 12, 0.26) !important;
   transform: none !important;
 }
 button:active {
@@ -993,7 +997,7 @@ thead tr:hover th { background: transparent !important; box-shadow: none !import
 .timeline-content { border-left-color: var(--w-hairline-strong); }
 .sse-inline-notice {
   background: var(--w-accent-soft) !important;
-  border: 1px solid rgba(109, 108, 245, 0.3) !important;
+  border: 1px solid rgba(234, 88, 12, 0.3) !important;
   color: var(--w-accent) !important;
   border-radius: 10px !important;
 }
@@ -1638,7 +1642,7 @@ body:has(div[style*="position:fixed"][style*="inset:0"]:not(.hidden):not([style*
 }
 .ftree-entry-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(109, 108, 245, 0.22) !important;
+  box-shadow: 0 6px 18px rgba(234, 88, 12, 0.22) !important;
 }
 .ftree-entry-btn--test {
   position: relative;
@@ -2392,4 +2396,267 @@ details:not([open]) > .lift-ring { display: none !important; }
 }
 @media (prefers-reduced-motion: reduce) {
   .lift-ring > i { animation: none !important; }
+}
+
+/* ============================================================
+   R6 需求卡 v2（2026-11-24，对应 demo 的需求卡排版）
+   模板见 js/tabs/mine.js renderMineCards：内联样式已改为 mrc-* 语义类。
+   悬停上浮 / 流光环 / 左沿竖线仍由 R2.2、14d、R5.4 提供，这里只管排版与配色。
+   ============================================================ */
+#tab-mine details.mine-req-card {
+  padding: 0 !important;
+  margin-bottom: 10px !important;
+  border-radius: 14px !important;
+}
+/* 静止态底色：展开/折叠统一暖白；已完成略沉；复测出问题红描边（悬停时让位给流光） */
+#tab-mine details.mine-req-card:not(:hover),
+#tab-mine details.mine-req-card[open]:not(:hover) { background: var(--w-raised) !important; }
+#tab-mine details.mine-req-card.is-done:not(:hover) { background: var(--w-surface) !important; }
+#tab-mine details.mine-req-card.is-retest-failed:not(:hover) {
+  border-color: rgba(220, 38, 38, 0.55) !important;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.10) !important;
+}
+
+/* 标题行 */
+#tab-mine details.mine-req-card > summary.mrc-head {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  padding: 12px 16px !important;
+  border: none !important;
+  list-style: none;
+  cursor: pointer;
+  outline: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--w-ink);
+}
+#tab-mine details.mine-req-card > summary.mrc-head::-webkit-details-marker { display: none; }
+#tab-mine .mrc-chev {
+  width: 15px; height: 15px; flex: 0 0 auto;
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  color: var(--w-ink-faint);
+  transition: transform var(--w-base) var(--w-spring);
+}
+#tab-mine details.mine-req-card[open] > summary .mrc-chev { transform: rotate(90deg); }
+#tab-mine .mrc-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  line-height: 1.5;
+}
+#tab-mine .mrc-name { font-size: 14px; font-weight: 600; color: var(--w-ink); }
+#tab-mine .mrc-id {
+  margin-right: 2px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--w-accent-ink);
+}
+#tab-mine .mrc-id .qa-story-id-nohref { color: inherit !important; }
+#tab-mine details.mine-req-card.is-done .mrc-name,
+#tab-mine details.mine-req-card.is-done .mrc-id { color: var(--w-ink-faint); }
+#tab-mine .mrc-status { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+#tab-mine .mrc-steps { display: inline-flex; gap: 4px; }
+#tab-mine .mrc-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(28, 25, 23, 0.06);
+  color: var(--w-ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+}
+#tab-mine .mrc-step::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+}
+#tab-mine .mrc-step.is-done { background: rgba(22, 163, 74, 0.10); color: #15803d; }
+#tab-mine .mrc-step.is-done::before { background: currentColor; }
+
+/* 展开内容 */
+#tab-mine .mrc-body {
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--w-hairline);
+  border-radius: 0 0 14px 14px;
+  background: rgba(28, 25, 23, 0.018);
+}
+#tab-mine .mrc-controls {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 8px 10px !important;
+  margin: 0 !important;
+}
+#tab-mine .mrc-spacer { flex: 1 1 auto; }
+#tab-mine .mrc-check {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  margin: 0 !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--w-ink-soft) !important;
+  white-space: nowrap;
+  cursor: pointer;
+}
+#tab-mine .mrc-check input { width: 15px; height: 15px; margin: 0; accent-color: var(--w-accent); }
+#tab-mine .mrc-note-state { font-size: 12px; color: var(--w-ink-faint); }
+#tab-mine .mrc-note-state.is-filled { color: #15803d; }
+#tab-mine button.mrc-btn {
+  height: 28px !important;
+  min-height: 0 !important;
+  padding: 0 10px !important;
+  font-size: 12.5px !important;
+}
+#tab-mine button.mrc-btn--start { background: #15803d !important; color: #fff !important; }
+#tab-mine button.mrc-btn--start:hover { background: #166534 !important; box-shadow: 0 4px 12px rgba(22, 163, 74, 0.25) !important; }
+#tab-mine button.mrc-btn--warn { background: #b45309 !important; color: #fff !important; }
+#tab-mine button.mrc-btn--warn:hover { background: #92400e !important; box-shadow: 0 4px 12px rgba(180, 83, 9, 0.25) !important; }
+#tab-mine .mrc-hours {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  height: 26px;
+  margin: 0 !important;
+  padding: 0 8px 0 10px;
+  border-radius: 999px;
+  background: rgba(28, 25, 23, 0.06);
+  color: var(--w-ink-soft) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+#tab-mine .mrc-hours input {
+  width: 46px !important;
+  height: 20px !important;
+  min-height: 0 !important;   /* main.css 给所有 input 的 36px 最小高度 */
+  padding: 0 6px !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+}
+
+/* 通用小标签 */
+#tab-mine .mrc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(28, 25, 23, 0.06);
+  color: var(--w-ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+#tab-mine .mrc-chip--ok { background: rgba(22, 163, 74, 0.10); color: #15803d; }
+#tab-mine .mrc-chip--info { background: rgba(8, 145, 178, 0.10); color: #0e7490; }
+#tab-mine .mrc-chip--warn { background: rgba(245, 158, 11, 0.14); color: #b45309; }
+#tab-mine .mrc-chip--bad { background: rgba(220, 38, 38, 0.09); color: #b91c1c; }
+#tab-mine .mrc-chip--purple { background: rgba(124, 58, 237, 0.09); color: #6d28d9; }
+#tab-mine .mrc-chip--muted { color: var(--w-ink-faint); }
+#tab-mine .mrc-chip--outline { background: transparent; box-shadow: inset 0 0 0 1px var(--w-hairline-strong); }
+#tab-mine .mrc-chip--strong { font-weight: 600; }
+
+/* 用例 / 自由 Bug 分区：带标题的列表框，条目为分隔行 */
+#tab-mine .mrc-section,
+#tab-mine .mrc-section.free-bug-box {
+  margin-top: 12px !important;
+  padding: 0 !important;
+  border: 1px solid var(--w-hairline) !important;
+  border-style: solid !important;
+  border-radius: 10px !important;
+  background: var(--w-raised) !important;
+  overflow: hidden;
+}
+#tab-mine .mrc-section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--w-hairline);
+  background: rgba(28, 25, 23, 0.025);
+  color: var(--w-ink-soft);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+#tab-mine .mrc-section-head .n { color: var(--w-ink-faint); font-weight: 500; }
+#tab-mine .mrc-section-list > .case-item {
+  margin: 0 !important;
+  padding: 10px 12px !important;
+  border: none !important;
+  border-top: 1px solid var(--w-hairline) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+#tab-mine .mrc-section-list > .case-item:first-child { border-top: none !important; }
+#tab-mine .case-item-head { gap: 6px !important; align-items: center !important; }
+#tab-mine .mrc-section .case-bugs {
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--w-hairline);
+}
+
+/* Bug 条目（保留 .badge 以兼容按 .badge 定位的逻辑/用例） */
+#tab-mine .badge.mrc-bug {
+  position: relative;
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 !important;
+  padding: 8px 12px !important;
+  border: none !important;
+  border-top: 1px solid var(--w-hairline) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--w-ink) !important;
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  line-height: 1.5 !important;
+  transition: background var(--w-fast) ease-out;
+}
+#tab-mine .mrc-section-list > .badge.mrc-bug:first-child { border-top: none !important; }
+#tab-mine .case-bugs > .badge.mrc-bug { padding: 6px 8px !important; border-top: none !important; border-radius: 6px !important; }
+#tab-mine .badge.mrc-bug:hover { background: rgba(var(--w-accent-rgb), 0.05) !important; }
+#tab-mine .badge.mrc-bug:hover::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 6px; bottom: 6px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(#fbbf24, #ea580c, #e11d48);
+}
+#tab-mine .badge.mrc-bug.is-retest-problem { background: rgba(220, 38, 38, 0.05) !important; box-shadow: inset 3px 0 0 #dc2626; }
+#tab-mine .mrc-bug-main { flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+#tab-mine .mrc-bug-tags { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+#tab-mine .mrc-bug-result {
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: var(--w-accent-ink) !important;
+  font-size: 12px;
+  text-decoration: none !important;
+}
+#tab-mine .mrc-bug-result:hover { background: var(--w-accent-soft); }
+#tab-mine .mrc-empty { display: block; padding: 10px 12px; font-size: 12.5px; color: var(--w-ink-faint); }
+#tab-mine .case-bugs .mrc-empty { padding: 2px 0; }
+
+@media (max-width: 560px) {
+  #tab-mine details.mine-req-card > summary.mrc-head { padding: 10px 12px !important; gap: 8px !important; }
+  #tab-mine .mrc-body { padding: 10px 12px 12px; }
+  #tab-mine .mrc-steps { display: none; }
 }

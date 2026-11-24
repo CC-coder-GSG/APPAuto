@@ -301,12 +301,12 @@ function renderCachedBugSlot(bug) {
 
 function renderBugChip(req, bug) {
   const dBadge = bug.dispatched_to_name
-    ? `<span style="color:#ea580c; background:#ffedd5; padding:1px 4px; border-radius:4px; font-size:11px; margin-left:6px;">🪂已特派给:${bug.dispatched_to_name}</span>`
+    ? `<span class="mrc-chip mrc-chip--warn">已特派给 ${bug.dispatched_to_name}</span>`
     : '';
   // 跨大版本归集：Bug 挂在其他大版本下时标注来源（同一需求跨版本时后端不再过滤）
   const crossMajorBadge = (bug.major_version_id && req.major_version_id
     && Number(bug.major_version_id) !== Number(req.major_version_id) && bug.major_version_no)
-    ? `<span title="该Bug记录在其他大版本下" style="background:#ede9fe; color:#6d28d9; padding:1px 5px; border-radius:4px; font-size:10px; font-weight:600; margin-left:4px;">🔀来自 ${escapeHtml(bug.major_version_no)}</span>`
+    ? `<span title="该Bug记录在其他大版本下" class="mrc-chip mrc-chip--purple">来自 ${escapeHtml(bug.major_version_no)}</span>`
     : '';
   const verText = renderBugVersion(bug);
   const ztBugId = (bug.bug_id || '').replace(/\D/g, '');
@@ -319,21 +319,18 @@ function renderBugChip(req, bug) {
   const previewBugBtn = renderPreviewBtn('bug', ztBugId);
   // 修复结果/闭环确认入口：点击弹窗完成「修复通过 + 确认闭环 + 保存记录」，不占用标签空间
   const closedHint = bug.closed
-    ? '<span title="已闭环" style="color:#16a34a; margin-left:4px;">✅</span>'
+    ? '<span title="已闭环" class="mrc-chip mrc-chip--ok">已闭环</span>'
     : '';
-  const resultBtn = `<a href="javascript:void(0)" title="修复结果 / 闭环确认" onclick="openBugResultModal(${bug.id}, '${bug.bug_id}', ${bug.closed ? 'true' : 'false'}, '${bug.zentao_bug_id || ''}')" style="color:#16a34a; margin-left:6px; text-decoration:none;">🛠️</a>`;
+  const resultBtn = `<a href="javascript:void(0)" class="mrc-bug-result" title="修复结果 / 闭环确认" onclick="openBugResultModal(${bug.id}, '${bug.bug_id}', ${bug.closed ? 'true' : 'false'}, '${bug.zentao_bug_id || ''}')">修复结果</a>`;
   // 复测问题标记（原测试人视角）：激活 → 复测发现未修好；测后归集 → 复测新发现的问题
   const retestProblemBadge = bug.retest_problem
-    ? `<span style="background:#dc2626; color:#fff; padding:1px 6px; border-radius:4px; font-size:11px; font-weight:700; margin-left:4px;">${bug.retest_problem_kind === 'activated' ? '🔄复测发现未修好' : '🆕复测新发现的问题'}${bug.retest_activated_by_name ? '·' + escapeHtml(bug.retest_activated_by_name) : ''}</span>`
+    ? `<span class="mrc-chip mrc-chip--bad">${bug.retest_problem_kind === 'activated' ? '复测发现未修好' : '复测新发现的问题'}${bug.retest_activated_by_name ? ' · ' + escapeHtml(bug.retest_activated_by_name) : ''}</span>`
     : '';
-  const chipTone = bug.retest_problem
-    ? 'background:#fef2f2; border:1.5px solid #ef4444;'
-    : 'background:#f1f5f9; border:1px solid #cbd5e1;';
-
-  return `<span class="badge" style="${chipTone} padding:2px 6px; margin-right:6px; border-radius:4px; display:inline-block; margin-bottom:4px;">
-      ${renderBugLink(bug)} ${ztSlot} ${previewBugBtn} ${verText} ${crossMajorBadge} ${dBadge} ${autoBadge}${renderZentaoCheckBadge(bug)}${retestProblemBadge}${closedHint}
-      ${resultBtn}
-  </span>`;
+  // 行式条目（壳层 v2）：保留 .badge 类——workbench_bug_version 等用例按 .badge 定位 Bug 条目
+  return `<div class="badge mrc-bug${bug.retest_problem ? ' is-retest-problem' : ''}">
+      <span class="mrc-bug-main">${renderBugLink(bug)} ${ztSlot} ${previewBugBtn} ${verText}</span>
+      <span class="mrc-bug-tags">${crossMajorBadge}${dBadge}${autoBadge}${renderZentaoCheckBadge(bug)}${retestProblemBadge}${closedHint}${resultBtn}</span>
+  </div>`;
 }
 
 function initTestExecutionModal() {
@@ -1527,48 +1524,48 @@ const TASK_STATUS_ZH = { wait: '未开始', doing: '进行中', changed: '进行
 //   done（测试完成）→「任务已完成」禁用
 function renderTaskStartControl(req) {
   if (!req.zentao_task_id) return '';
-  if (req.task_story_change_pending) return '<span class="muted" style="color:#9a3412; font-size:12px;">请先查看并确认需求变更</span>';
+  if (req.task_story_change_pending) return '<span class="mrc-chip mrc-chip--warn">请先查看并确认需求变更</span>';
   const status = String(req.zentao_task_status || '').toLowerCase();
   // 需求工作台的完成态优先于禅道完成后的指派流转。
   if (status === 'done' || status === 'closed' || req.test_completed) {
-    return `<button class="secondary" disabled style="padding:2px 10px; font-size:12px; opacity:.7;">✅ 任务已完成</button>`;
+    return `<button class="secondary mrc-btn" disabled>任务已完成</button>`;
   }
   // 任务未指派给当前账号：不显示操作按钮（仅指派人本人可操作）。
   if (!req.task_assigned_to_me) return '';
   if (status === 'doing' || status === 'changed') {
     // 进行中：可暂停（禅道同步暂停）。
-    return `<button style="padding:2px 10px; font-size:12px; background:#d97706;" onclick="pauseReqTask(${req.id})" title="暂停任务，禅道子任务同步暂停">⏸ 暂停</button>`;
+    return `<button class="mrc-btn mrc-btn--warn" onclick="pauseReqTask(${req.id})" title="暂停任务，禅道子任务同步暂停">⏸ 暂停</button>`;
   }
   if (status === 'pause') {
     // 已暂停：用「开始」继续（后端识别暂停态走 restart 继续）。
-    return `<button style="padding:2px 10px; font-size:12px; background:#16a34a;" onclick="startReqTask(${req.id})" title="继续任务，禅道子任务同步继续">▶ 继续</button>`;
+    return `<button class="mrc-btn mrc-btn--start" onclick="startReqTask(${req.id})" title="继续任务，禅道子任务同步继续">▶ 继续</button>`;
   }
-  return `<button style="padding:2px 10px; font-size:12px; background:#16a34a;" onclick="startReqTask(${req.id})" title="开始测试，禅道子任务同步开始">▶ 开始</button>`;
+  return `<button class="mrc-btn mrc-btn--start" onclick="startReqTask(${req.id})" title="开始测试，禅道子任务同步开始">▶ 开始</button>`;
 }
 
 // 子任务标签 + 预览 + 预计用时输入。预计用时仅在「任务指派给本人」时可编辑；
 // 非指派人只读展示子任务状态与指派人，避免误操作他人任务。
 function renderTaskMeta(req) {
   if (req.zentao_task_id) {
-    if (req.task_story_change_pending) return renderRequirementTaskSelector(req, `<span style="font-size:12px; color:var(--w-ink-soft, #64748b);">禅道子任务 #${Number(req.zentao_task_id)}</span>`);
+    if (req.task_story_change_pending) return renderRequirementTaskSelector(req, `<span class="mrc-chip">禅道子任务 #${Number(req.zentao_task_id)}</span>`);
     const rawStatus = String(req.zentao_task_status || '').toLowerCase();
     const effectiveStatus = req.test_completed ? 'done' : rawStatus;
     const zh = TASK_STATUS_ZH[effectiveStatus] || effectiveStatus || '';
     const done = effectiveStatus === 'done' || effectiveStatus === 'closed';
-    const taskTag = renderRequirementTaskSelector(req, `<span class="badge" style="background:${done ? '#dcfce7' : '#eff6ff'}; color:${done ? '#166534' : '#1d4ed8'}; border:1px solid ${done ? '#bbf7d0' : '#bfdbfe'};">禅道子任务 #${req.zentao_task_id}${zh ? '·' + zh : ''}</span>`, renderPreviewBtn('task', req.zentao_task_id));
+    const taskTag = renderRequirementTaskSelector(req, `<span class="mrc-chip ${done ? 'mrc-chip--ok' : 'mrc-chip--info'}">禅道子任务 #${req.zentao_task_id}${zh ? ' · ' + zh : ''}</span>`, renderPreviewBtn('task', req.zentao_task_id));
     if (!req.task_assigned_to_me) {
       // 非指派人：隐藏预计用时输入，改为只读的指派人标签。
       const assignee = req.zentao_task_assigned_to
-        ? `<span class="badge" style="background:#faf5ff; color:#7c3aed; border:1px solid #e9d5ff;">指派给 ${escapeHtml(req.zentao_task_assigned_to)}</span>`
+        ? `<span class="mrc-chip mrc-chip--outline">指派给 ${escapeHtml(req.zentao_task_assigned_to)}</span>`
         : '';
       return `${taskTag}${assignee}`;
     }
     const est = (req.estimated_test_hours != null ? req.estimated_test_hours : 4);
-    const estInput = `<label class="badge" style="background:#f8fafc; color:#475569; border:1px solid #e2e8f0; display:inline-flex; align-items:center; gap:4px;">预计用时
-      <input type="number" min="0.5" step="0.5" value="${est}" style="width:54px; padding:1px 4px; border:1px solid #cbd5e1; border-radius:4px;" onchange="setReqEstimatedHours(${req.id}, this.value)" onclick="event.stopPropagation()">h</label>`;
+    const estInput = `<label class="mrc-hours">预计用时
+      <input type="number" min="0.5" step="0.5" value="${est}" onchange="setReqEstimatedHours(${req.id}, this.value)" onclick="event.stopPropagation()">h</label>`;
     return `${estInput}${taskTag}`;
   }
-  return `<span class="badge" style="background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;">未关联禅道任务</span>`;
+  return `<span class="mrc-chip mrc-chip--muted">未关联禅道任务</span>`;
 }
 
 // 收集一个需求卡片下的全部 bug（用例关联 bug + 自由 bug）。
@@ -1617,7 +1614,7 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
     const isOpen = Object.prototype.hasOwnProperty.call(foldStateMap, String(req.id)) ? !!foldStateMap[String(req.id)] : (!isFullyCompleted || req.task_story_change_pending);
     const taskChangeDisabled = req.selected_task_mode && !req.selected_test_task.can_operate ? 'disabled title="当前任务已流转给其他人员，仅可查看"' : req.task_story_change_pending && (!req.final_test || req.task_assigned_to_me) ? 'disabled title="请先查看并确认研发需求变更"' : '';
     const vTag = mode === 'all_pending' && req.major_version_name
-      ? `<span class="badge" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; margin-right:8px; padding:2px 6px;">🏷️${req.major_version_name}</span>`
+      ? `<span class="mrc-chip mrc-chip--info">${req.major_version_name}</span>`
       : '';
     const syncSummary = [
       req.auto_linked_case_count > 0 ? renderAutoLinkedBadge(`自动归集用例 ${req.auto_linked_case_count}`) : '',
@@ -1628,15 +1625,15 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
       const caseZtId = String(c.zentao_case_id || '').replace(/\D/g, '');
       return `
       <div class="case-item">
-        <div class="row">
+        <div class="row case-item-head">
           ${renderCaseLink(c)}${renderPreviewBtn('testcase', caseZtId)}${c.auto_linked ? renderAutoLinkedBadge() : ''}${renderZentaoCheckBadge(c)}
         </div>
         ${(() => { const rv = renderCaseReviewControls(c, req.id, { actions: false }); return rv ? `<div style="margin-top:6px;">${rv}</div>` : ''; })()}
-        <div class="case-bugs" style="margin-top:6px;">${(c.bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无关联Bug</span>'}</div>
+        <div class="case-bugs">${(c.bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="mrc-empty">暂无关联 Bug</span>'}</div>
       </div>`;
     }).join('');
 
-    const freeBugHtml = (req.free_bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="muted">暂无自由Bug</span>';
+    const freeBugHtml = (req.free_bugs || []).map((b) => renderBugChip(req, b)).join('') || '<span class="mrc-empty">暂无自由 Bug</span>';
 
     const ztStoryId = String(req.zentao_story_id || req.zentao_req_id || '').replace(/\D/g, '');
     const ztStorySlot = ztStoryId ? `<span class="zt-story-slot" data-zt-story-id="${ztStoryId}" style="margin-left:6px; vertical-align:middle;"></span>` : '';
@@ -1655,35 +1652,38 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
     // 复测出现问题：标题旁醒目文本 + 整卡红框（对所有能看到该需求卡片的人展示）
     const retestFailed = req.retest_conclusion === 'failed';
     const retestFailTag = retestFailed
-      ? '<span style="background:#dc2626; color:#fff; padding:2px 8px; border-radius:6px; font-size:12px; font-weight:700; margin-left:8px; white-space:nowrap; vertical-align:middle;">🚨此需求复测出现未发现的问题</span>'
+      ? '<span class="mrc-chip mrc-chip--bad mrc-chip--strong">此需求复测出现未发现的问题</span>'
       : '';
-    const retestFailBorder = retestFailed ? 'border:2px solid #ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.12);' : '';
+    // 右侧进度：完成后显示完成标签，否则用「用例 / 测试」两步标记代替原「点击标题可收起」提示
+    const stepHtml = isFullyCompleted
+      ? '<span class="mrc-chip mrc-chip--ok">✓ 测试已完成</span>'
+      : `<span class="mrc-steps"><span class="mrc-step${req.case_completed ? ' is-done' : ''}">用例</span><span class="mrc-step${req.test_completed ? ' is-done' : ''}">测试</span></span>`;
 
     return `
-      <details class="mine-req-card${emphasizeChange ? ' mine-change-retest-pending' : ''}" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)" style="background: ${isFullyCompleted ? '#f8fafc' : '#ffffff'}; ${retestFailBorder} transition: all 0.3s;">
-        <summary style="outline:none; cursor:pointer; font-size:16px; font-weight:bold; color:#0f172a; border-bottom: ${isFullyCompleted ? 'none' : '1px solid #e2e8f0'}; padding-bottom: ${isFullyCompleted ? '0' : '12px'}; display: flex; justify-content: space-between; align-items: center; list-style: none;">
-          <div style="flex:1; min-width:0;">${vTag}<span style="${isFullyCompleted ? 'text-decoration:line-through; color:#94a3b8;' : ''}">${reqIdHtml} ${req.title}</span>${renderTaskStoryChangeBadge(req)}${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${generateCaseChip}${storyTaskHtml}${renderFinalTestPeople(baseReq)}${renderRequirementChange(baseReq)}</div>
-          ${isFullyCompleted ? '<span style="color:#16a34a; font-size:14px; background:#f0fdf4; padding:4px 8px; border-radius:4px; border:1px solid #bbf7d0;">✅ 测试已完成</span>' : '<span style="font-size:12px; color:#94a3b8; font-weight:normal;">(点击标题可收起/展开卡片)</span>'}
+      <details class="mine-req-card${emphasizeChange ? ' mine-change-retest-pending' : ''}${isFullyCompleted ? ' is-done' : ''}${retestFailed ? ' is-retest-failed' : ''}" data-req-id="${req.id}" ${isOpen ? 'open' : ''} ontoggle="rememberMineReqFold(${req.id}, this.open)">
+        <summary class="mrc-head">
+          <svg class="mrc-chev" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+          <div class="mrc-title">${vTag}<span class="mrc-name"${isFullyCompleted ? ' style="text-decoration:line-through;"' : ''}><span class="mrc-id">${reqIdHtml}</span> ${req.title}</span>${renderTaskStoryChangeBadge(req)}${retestFailTag}${ztStorySlot}${previewBtn}${aiResultSlot}${generateCaseChip}${storyTaskHtml}${renderFinalTestPeople(baseReq)}${renderRequirementChange(baseReq)}</div>
+          <div class="mrc-status">${stepHtml}</div>
         </summary>
-        <div style="margin-top: 12px;">
-          <div class="row" style="margin-bottom:8px">
+        <div class="mrc-body">
+          <div class="row mrc-controls">
             ${renderTaskStartControl(req)}
             ${req.final_test
-              ? `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'case_completed', this.checked, this)">✅用例完成</label>
+              ? `<label class="mrc-check"><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'case_completed', this.checked, this)">用例完成</label>
             ${!baseReq.test_completed ? `<label class="final-test-start"><input type="checkbox" ${baseReq.testing ? 'checked' : ''} onchange="setFinalTestStatus(${req.id}, 'testing', this.checked, this)"><span class="final-test-toggle" aria-hidden="true"></span><span>正在测试</span></label>` : ''}
-            <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="setFinalTestStatus(${req.id}, 'test_completed', this.checked, this)">✅测试完成</label>`
-              : `<label><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked, this)">✅用例完成</label>
-            <label><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">✅测试完成</label>`}
+            <label class="mrc-check"><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="setFinalTestStatus(${req.id}, 'test_completed', this.checked, this)">测试完成</label>`
+              : `<label class="mrc-check"><input type="checkbox" ${req.case_completed ? 'checked' : ''} onchange="setReqStatus(${req.id}, 'case_completed', this.checked, this)">用例完成</label>
+            <label class="mrc-check"><input type="checkbox" ${req.test_completed ? 'checked' : ''} ${taskChangeDisabled} onchange="handleTestCompletedToggle(${req.id}, this.checked, this)">测试完成</label>`}
             ${renderTaskMeta(req)}
             ${baseReq.has_multiple_test_tasks ? `<span class="muted qa-task-progress">关联测试任务完成 ${baseReq.linked_test_task_done ?? (baseReq.test_tasks || []).filter(t => ['done', 'closed'].includes(t.status)).length} / ${baseReq.linked_test_task_total ?? (baseReq.test_tasks || []).length}</span>` : ''}
-            <span class="badge" style="background:${req.test_notes ? '#dcfce7' : '#f1f5f9'}; color:${req.test_notes ? '#166534' : '#64748b'}; border:1px solid ${req.test_notes ? '#bbf7d0' : '#e2e8f0'};">
-              测试要点：${req.test_notes ? '已填写' : '未填写'}
-            </span>
-            <button class="secondary" style="padding:2px 8px; font-size:12px;" onclick="openReqTestNotesModal(${req.id})">${req.test_notes ? '查看/编辑测试要点' : '填写测试要点'}</button>
             ${syncSummary}
+            <span class="mrc-spacer"></span>
+            <span class="mrc-note-state${req.test_notes ? ' is-filled' : ''}">测试要点：${req.test_notes ? '已填写' : '未填写'}</span>
+            <button class="secondary mrc-btn" onclick="openReqTestNotesModal(${req.id})">${req.test_notes ? '查看 / 编辑测试要点' : '填写测试要点'}</button>
           </div>
-          <div>${caseHtml}</div>
-          <div class="free-bug-box"><div><b>自由Bug</b></div><div style="margin-top:6px;">${freeBugHtml}</div></div>
+          ${caseHtml ? `<div class="mrc-section"><div class="mrc-section-head">用例 <span class="n">${(req.test_cases || []).length}</span></div><div class="mrc-section-list">${caseHtml}</div></div>` : ''}
+          <div class="mrc-section free-bug-box"><div class="mrc-section-head">自由 Bug <span class="n">${(req.free_bugs || []).length}</span></div><div class="mrc-section-list">${freeBugHtml}</div></div>
         </div>
       </details>`;
   }).join('');
