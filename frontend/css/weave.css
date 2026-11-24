@@ -2902,3 +2902,227 @@ details:not([open]) > .lift-ring { display: none !important; }
   .theme-panel { animation: none; }
   .theme-panel .tp-swatch, .tp-pv-btn { transition: none !important; }
 }
+
+/* ============================================================
+   R8 任务工作台排版 v2（2026-11-24）
+   模板见 js/tabs/task-workbench.js：卡片与需求卡共用 mrc-* 结构（R6），
+   这里补工具栏 / 状态统计 / 信息行 / 按钮分组。按钮内联颜色已移除，统一走 tw-btn--*。
+   ============================================================ */
+#tab-mine .tw-desc { margin: -6px 0 16px; font-size: 13px; color: var(--w-ink-soft); }
+
+/* 工具栏：左侧状态统计（兼筛选），右侧开关与操作 */
+#tab-mine .tw-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  margin-bottom: 16px;
+}
+#tab-mine .tw-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-width: 0; }
+#tab-mine .tw-stat-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(28, 25, 23, 0.05);
+}
+#tab-mine button.tw-stat {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  height: 30px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 11px !important;
+  border: none !important;
+  border-radius: 7px !important;
+  background: transparent !important;
+  color: var(--w-ink-soft) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+#tab-mine button.tw-stat b {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(28, 25, 23, 0.07);
+  color: var(--w-ink-soft);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+#tab-mine button.tw-stat:hover { background: rgba(255, 255, 255, 0.7) !important; color: var(--w-ink) !important; }
+#tab-mine button.tw-stat.is-on {
+  background: var(--w-raised) !important;
+  color: var(--w-ink) !important;
+  box-shadow: 0 1px 3px rgba(28, 25, 23, 0.10), 0 0 0 1px rgba(28, 25, 23, 0.04) !important;
+}
+#tab-mine button.tw-stat.is-on b { background: var(--w-accent); color: #fff; }
+#tab-mine .tw-stats-note { font-size: 12.5px; color: var(--w-ink-faint); white-space: nowrap; }
+
+#tab-mine .tw-toolbar-side { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-left: auto; }
+#tab-mine .tw-toggle {
+  gap: 6px !important;
+  margin: 0 !important;
+  font-size: 13px !important;
+  color: var(--w-ink-soft) !important;
+  white-space: nowrap;
+  cursor: pointer;
+}
+#tab-mine .tw-toggle input { width: 15px; height: 15px; min-height: 0 !important; margin: 0; accent-color: var(--w-accent); cursor: pointer; }
+#tab-mine button.tw-batch-close,
+#tab-mine button.tw-refresh {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  height: 32px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 12px !important;
+  font-size: 13px !important;
+}
+#tab-mine button.tw-refresh .ui-ic { width: 15px; height: 15px; }
+#tab-mine button.tw-batch-close:not(:disabled) { color: #b91c1c !important; border-color: rgba(220, 38, 38, 0.35) !important; }
+#tab-mine button.tw-batch-close:not(:disabled):hover { background: rgba(220, 38, 38, 0.06) !important; }
+#tab-mine button.tw-batch-close:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 卡片：标题行补勾选框与截止提示 */
+#tab-mine details.task-card > summary .tw-select {
+  width: 15px; height: 15px; min-height: 0 !important; margin: 0; flex: 0 0 auto;
+  accent-color: #dc2626; cursor: pointer;
+}
+#tab-mine details.task-card.is-closed .mrc-name { color: var(--w-ink-faint); }
+#tab-mine .tw-due { font-size: 12px; font-weight: 500; color: var(--w-ink-faint); white-space: nowrap; }
+#tab-mine .tw-due.is-overdue { color: #b91c1c; }
+
+/* 信息行：标签淡、值深，不再每项一个描边框 */
+#tab-mine .tw-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 22px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--w-ink);
+}
+#tab-mine .tw-fact { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+#tab-mine .tw-fact > em { font-style: normal; font-size: 12px; color: var(--w-ink-faint); }
+#tab-mine .tw-fact.is-overdue { color: #b91c1c; }
+#tab-mine .tw-overdue {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(220, 38, 38, 0.09);
+  font-style: normal;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+#tab-mine .tw-pri {
+  display: inline-grid;
+  place-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: rgba(28, 25, 23, 0.06);
+  color: var(--w-ink-soft);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+#tab-mine .tw-pri--1 { background: rgba(220, 38, 38, 0.09); color: #b91c1c; }
+#tab-mine .tw-pri--2 { background: rgba(245, 158, 11, 0.14); color: #b45309; }
+#tab-mine .tw-effort > span:last-child { color: var(--w-ink-soft); }
+#tab-mine .tw-effort b { color: var(--w-ink); font-weight: 600; }
+#tab-mine .tw-dot { margin: 0 6px; color: var(--w-ink-faint); }
+#tab-mine .tw-bar {
+  position: relative;
+  width: 72px;
+  height: 6px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(28, 25, 23, 0.08);
+}
+#tab-mine .tw-bar > i {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--w-accent-2), var(--w-accent));
+}
+#tab-mine .tw-bar.is-over > i { background: #dc2626; }
+
+/* 子任务列表 */
+#tab-mine .tw-children { margin: 0 0 14px !important; }
+#tab-mine .tw-child {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--w-hairline);
+  font-size: 13px;
+}
+#tab-mine .tw-child:first-child { border-top: none; }
+#tab-mine .tw-child-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--w-ink); }
+#tab-mine .tw-child-who { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; font-size: 12px; color: var(--w-ink-soft); }
+#tab-mine .tw-child-who .tw-ic { width: 13px; height: 13px; }
+
+/* 操作区：主操作 | 辅助 ……… 危险操作靠右 */
+#tab-mine .tw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--w-hairline-strong);
+}
+#tab-mine .tw-sep { width: 1px; height: 18px; margin: 0 4px; background: var(--w-hairline-strong); }
+#tab-mine .tw-hint { font-size: 12px; color: var(--w-ink-faint); }
+#tab-mine button.tw-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  height: 30px !important;
+  margin: 0 !important;
+  padding: 0 12px !important;
+  font-size: 12.5px !important;
+}
+#tab-mine button.tw-btn .tw-ic { width: 14px; height: 14px; }
+#tab-mine button.tw-btn--start { background: #15803d !important; color: #fff !important; }
+#tab-mine button.tw-btn--start:hover { background: #166534 !important; box-shadow: 0 4px 12px rgba(22, 163, 74, 0.25) !important; }
+#tab-mine button.tw-btn--warn { background: rgba(245, 158, 11, 0.16) !important; color: #92400e !important; box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.28) !important; }
+#tab-mine button.tw-btn--warn:hover { background: rgba(245, 158, 11, 0.26) !important; color: #78350f !important; box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.4) !important; }
+#tab-mine button.tw-btn--info { background: #0369a1 !important; color: #fff !important; }
+#tab-mine button.tw-btn--info:hover { background: #075985 !important; box-shadow: 0 4px 12px rgba(3, 105, 161, 0.25) !important; }
+#tab-mine button.tw-btn--ghost .tw-ic { color: var(--w-icon); }
+#tab-mine button.tw-btn--danger {
+  color: #b91c1c !important;
+  border-color: rgba(220, 38, 38, 0.28) !important;
+}
+#tab-mine button.tw-btn--danger:hover {
+  background: rgba(220, 38, 38, 0.06) !important;
+  color: #991b1b !important;
+  border-color: rgba(220, 38, 38, 0.45) !important;
+}
+#tab-mine .tw-empty {
+  padding: 40px 16px;
+  border: 1px dashed var(--w-hairline-strong);
+  border-radius: 14px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--w-ink-faint);
+}
+
+@media (max-width: 760px) {
+  #tab-mine .tw-toolbar-side { margin-left: 0; }
+  #tab-mine .tw-stats-note { white-space: normal; }
+  #tab-mine .tw-facts { gap: 8px 16px; }
+  #tab-mine .tw-sep { display: none; }
+  #tab-mine .tw-actions .mrc-spacer { display: none; }
+}
+@media (max-width: 560px) {
+  #tab-mine details.task-card .mrc-status .tw-due { display: none; }
+}

@@ -4,13 +4,13 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css?v=20261103-final-presence-ui-2">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261124-theme-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261124-taskwb-1">
   <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261124-card-v2-1"></script>
+  <script type="module" src="/static/js/app.js?v=20261124-taskwb-1"></script>
   <script src="/static/js/weave-motion.js?v=20261124-shell-v2-2" defer></script>
   <script src="/static/js/shell.js?v=20261124-theme-1" defer></script>
   <script>
@@ -64,6 +64,14 @@
       <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
       <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 1 10-10c0 2.8-2.2 4-4.5 4H16a2 2 0 0 0-1.6 3.2c.4.6.6 1 .6 1.5 0 .8-.7 1.3-3 1.3Z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10.5" cy="6.8" r="1.2"/><circle cx="15.5" cy="7.2" r="1.2"/></symbol>
       <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.8v14.4a.8.8 0 0 0 1.2.7l11.3-7.2a.8.8 0 0 0 0-1.4L8.2 4.1A.8.8 0 0 0 7 4.8Z"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4.5" width="4" height="15" rx="1"/><rect x="14" y="4.5" width="4" height="15" rx="1"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+      <symbol id="i-timer" viewBox="0 0 24 24"><path d="M10 2h4"/><path d="m12 14 3-3"/><circle cx="12" cy="14" r="8"/></symbol>
+      <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+      <symbol id="i-x-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></symbol>
+      <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/></symbol>
+      <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></symbol>
       <symbol id="i-pipette" viewBox="0 0 24 24"><path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z"/></symbol>
     </defs>
   </svg>
@@ -696,28 +704,20 @@
           <div class="workbench-panel" data-workbench-panel="task">
             <div class="workbench-panel-inner">
               <h2>任务工作台</h2>
-              <div class="row" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px; align-items: center; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                <span class="muted" style="font-size:13px;">显示当前账号名下的禅道任务：关联需求的任务可跳转到需求工作台；独立任务可直接开始/完成/关闭。</span>
-                <label style="display:flex; align-items:center; gap:6px; font-size:13px;">状态筛选
-                  <select id="taskWorkbenchStatusFilter" onchange="taskWorkbenchFilterChanged(this.value)" style="padding:4px 8px;">
-                    <option value="all">全部状态</option>
-                    <option value="wait">未开始</option>
-                    <option value="doing">进行中</option>
-                    <option value="pause">已暂停</option>
-                    <option value="done">已完成</option>
-                    <option value="closed">已关闭</option>
-                  </select>
-                </label>
-                <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;" title="勾选后隐藏已关闭/已取消的任务（筛选「已关闭」时不生效）">
-                  <input type="checkbox" id="taskWorkbenchHideClosed" onchange="taskWorkbenchHideClosedChanged(this.checked)" style="width:15px; height:15px; cursor:pointer;">隐藏已关闭
-                </label>
-                <label id="taskWorkbenchSelectAllWrap" style="display:none !important; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
-                  <input type="checkbox" id="taskWorkbenchSelectAll" onchange="taskWorkbenchToggleSelectAll(this.checked)" style="width:15px; height:15px; cursor:pointer; accent-color:#dc2626;">全选可关闭任务
-                </label>
-                <button id="taskWorkbenchBatchCloseBtn" disabled style="color:#b91c1c; border:1px solid #fca5a5; background:#fff; opacity:.55;" onclick="taskWorkbenchBatchClose()">⛔ 批量关闭选中 (0)</button>
-                <button onclick="refreshTaskWorkbench()">刷新（从禅道拉取）</button>
+              <p class="tw-desc">显示当前账号名下的禅道任务：关联需求的任务可跳转到需求工作台；独立任务可直接开始 / 完成 / 关闭。</p>
+              <div class="tw-toolbar">
+                <div id="taskWorkbenchSummary" class="tw-stats"></div>
+                <div class="tw-toolbar-side">
+                  <label class="tw-toggle" title="勾选后隐藏已关闭/已取消的任务（筛选「已关闭」时不生效）">
+                    <input type="checkbox" id="taskWorkbenchHideClosed" onchange="taskWorkbenchHideClosedChanged(this.checked)">隐藏已关闭
+                  </label>
+                  <label id="taskWorkbenchSelectAllWrap" class="tw-toggle" style="display:none !important;">
+                    <input type="checkbox" id="taskWorkbenchSelectAll" onchange="taskWorkbenchToggleSelectAll(this.checked)">全选可关闭任务
+                  </label>
+                  <button id="taskWorkbenchBatchCloseBtn" type="button" class="secondary tw-batch-close" disabled onclick="taskWorkbenchBatchClose()">批量关闭选中 (0)</button>
+                  <button type="button" class="tw-refresh" onclick="refreshTaskWorkbench()" title="从禅道拉取最新任务"><svg class="ui-ic"><use href="#i-refresh"/></svg>从禅道刷新</button>
+                </div>
               </div>
-              <div id="taskWorkbenchSummary" style="margin-bottom: 16px; font-weight: bold; color: #1d4ed8; background: #eff6ff; padding: 10px 16px; border-radius: 6px; display: none; border-left: 4px solid #3b82f6;"></div>
               <div id="taskWorkbenchCards"></div>
             </div>
           </div>
