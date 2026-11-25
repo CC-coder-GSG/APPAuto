@@ -252,36 +252,8 @@
 
   /* ── 4. 页面说明 ─────────────────────────────────────── */
 
-  const PAGE_DESC = {
-    assign: "为大版本需求批量创建、发布与调整禅道测试任务",
-    "task-board": "按状态追踪禅道任务进度",
-    feedback: "汇总内外部反馈，跟踪处理进度",
-    "field-test": "外业采集测试的计划、设备与结果记录",
-    "build-records": "各版本构建包与发布记录",
-    "testcase-center": "按功能树组织禅道用例，支持审查与关联",
-    report: "版本质量、缺陷趋势与团队效率",
-    activity: "团队动态与关键事件",
-    data: "管理软件、版本、需求与用户，从禅道同步版本，并按大版本追溯需求、用例与 Bug",
-    dispatch: "跨团队特派 Bug 的跟踪与处理",
-    "zentao-ai": "基于需求描述，用 AI 生成禅道测试用例",
-    jenkins: "自动化任务的执行状态与历史",
-    "cad-test": "CAD 模块测试数据统计与异常追踪",
-    tools: "数据库对比、文件处理等实用工具",
-    terminal: "测试设备的远程终端与状态",
-    learning: "培训资料、考核与成绩榜",
-  };
-  function injectPageDescriptions() {
-    Object.entries(PAGE_DESC).forEach(([name, text]) => {
-      const h2 = $(`#tab-${name} > h2`);
-      if (!h2) return;
-      const next = h2.nextElementSibling;
-      if (next && (next.classList.contains("page-desc") || next.classList.contains("muted"))) return;
-      const p = doc.createElement("p");
-      p.className = "page-desc";
-      p.textContent = text;
-      h2.insertAdjacentElement("afterend", p);
-    });
-  }
+  /* 2026-11-25 起每个页面的标题区直接写在 index.html 的 .ph 头部里（图标 + 标题 + 说明 + 操作），
+     不再由脚本注入说明文字。 */
 
   /* ── 5. 自绘下拉面板 ─────────────────────────────────
      不替换、不包裹原生 <select>：仅在 mousedown / 展开快捷键时阻止系统弹层，
@@ -958,7 +930,7 @@
   /* ── 启动 ────────────────────────────────────────────── */
 
   function init() {
-    const steps = [initNav, initCrumb, initUserMenu, initCommandPalette, injectPageDescriptions,
+    const steps = [initNav, initCrumb, initUserMenu, initCommandPalette,
       initSelectMenus, initCalendars, initPopupDismiss, initOpenCardRing, initThemePicker];
     steps.forEach((fn) => {
       try { fn(); } catch (err) { console.error("[OmniQA shell] init failed:", fn.name, err); }

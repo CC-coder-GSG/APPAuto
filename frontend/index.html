@@ -4,15 +4,15 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css?v=20261103-final-presence-ui-2">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261124-assign-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261125-pagehead-4">
   <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261124-assign-1"></script>
+  <script type="module" src="/static/js/app.js?v=20261125-pagehead-2"></script>
   <script src="/static/js/weave-motion.js?v=20261124-shell-v2-2" defer></script>
-  <script src="/static/js/shell.js?v=20261124-datamgr-1" defer></script>
+  <script src="/static/js/shell.js?v=20261125-pagehead-1" defer></script>
   <script>
     /* 壳层布局标记 + 侧栏收起态需在首帧前生效，避免加载时宽度跳变（shell.js 负责后续切换） */
     document.documentElement.classList.add('omniqa-shell');
@@ -270,7 +270,10 @@
   </section>
 
   <section id="tab-assign" class="hidden card">
-    <h2>任务分配台</h2>
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-assign"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-assign"/></svg>
+      <div class="ph-text"><h2>任务分配台</h2><p class="page-desc">为大版本需求批量创建、发布与调整禅道测试任务</p></div>
+    </div>
     <!-- 任务创建台（2026-11-24 排版 v2）：选择版本 → 选需求、设负责人 → 设起止并对所选需求执行批量操作。元素 id 与按钮名称保持不变 -->
     <details id="assignCreateBlock" class="as-block" open>
       <summary class="as-summary">
@@ -351,9 +354,10 @@
   </section>
 
   <section id="tab-learning" class="hidden card learning-center">
-    <div class="learning-head">
-      <div><h2>学习中心</h2><p class="muted">学习资料、课程与团队答题活动</p></div>
-      <div class="row"><button class="secondary" onclick="showLearningContentForm()">新增资料/课程</button><button onclick="openQuizEditor()">创建答题活动</button><button class="secondary" onclick="loadLearningCenter()">刷新</button></div>
+    <div class="learning-head ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-book"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-book"/></svg>
+      <div class="ph-text"><h2>学习中心</h2><p class="muted page-desc">学习资料、课程与团队答题活动</p></div>
+      <div class="row ph-actions"><button class="secondary" onclick="showLearningContentForm()">新增资料/课程</button><button onclick="openQuizEditor()">创建答题活动</button><button class="secondary" onclick="loadLearningCenter()">刷新</button></div>
     </div>
 
     <div id="learningHome">
@@ -434,47 +438,42 @@
   </section>
 
   <section id="tab-task-board" class="hidden card">
-    <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-      <div>
-        <h2 style="margin-bottom:4px;">任务看板</h2>
-        <div class="muted">面向团队的每日任务派发与执行透明视图。所有登录用户可见。</div>
-      </div>
-      <div class="row" style="gap:8px;">
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-board"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-board"/></svg>
+      <div class="ph-text"><h2>任务看板</h2><p class="page-desc">面向团队的每日任务派发与执行透明视图，所有登录用户可见</p></div>
+      <div class="ph-actions">
         <button id="taskBoardCreateBtn" class="hidden" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.openCreate()">新建任务</button>
       </div>
     </div>
 
-    <div class="row" style="margin-top:12px; flex-wrap:wrap; gap:10px; align-items:center; background:#f8fafc; padding:12px; border-radius:8px; border:1px solid #e2e8f0;">
-      <label>视图</label>
-      <select id="taskBoardViewMode" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.toggleViewMode(this.value)" style="padding:4px 8px;">
+    <div class="fb">
+      <label class="fb-field"><span class="fb-k">视图</span><select id="taskBoardViewMode" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.toggleViewMode(this.value)">
         <option value="day">日视图</option>
         <option value="month">月视图</option>
-      </select>
-      <label>日期</label>
-      <button class="secondary" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.shiftDate(-1)">◀</button>
-      <input type="date" id="taskBoardDate" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()">
-      <button class="secondary" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.shiftDate(1)">▶</button>
-      <button class="secondary" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.gotoToday()">今天</button>
-      <label style="margin-left:8px;">成员</label>
-      <select id="taskBoardAssigneeFilter" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()">
+      </select></label>
+      <div class="fb-stepper" role="group" aria-label="日期">
+        <button type="button" class="secondary fb-icon-btn" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.shiftDate(-1)" title="上一天" aria-label="上一天"><svg class="ui-ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button>
+        <input type="date" id="taskBoardDate" aria-label="日期" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()">
+        <button type="button" class="secondary fb-icon-btn" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.shiftDate(1)" title="下一天" aria-label="下一天"><svg class="ui-ic" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+        <button type="button" class="secondary" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.gotoToday()">今天</button>
+      </div>
+      <span class="fb-sep" aria-hidden="true"></span>
+      <label class="fb-field"><span class="fb-k">成员</span><select id="taskBoardAssigneeFilter" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()">
         <option value="">全部</option>
-      </select>
-      <label style="cursor:pointer;">
-        <input type="checkbox" id="taskBoardMineOnly" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()"> 只看我的
-      </label>
-      <label>状态</label>
-      <select id="taskBoardStatusFilter" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()">
+      </select></label>
+      <label class="fb-field"><span class="fb-k">状态</span><select id="taskBoardStatusFilter" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()">
         <option value="">全部</option>
         <option value="todo">待处理</option>
         <option value="in_progress">进行中</option>
         <option value="done">已完成</option>
         <option value="done_unclosed">已完成但未关闭</option>
         <option value="deferred">延期</option>
-      </select>
-      <label style="cursor:pointer;">
-        <input type="checkbox" id="taskBoardShowArchived" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()"> 包含已归档
-      </label>
-      <button onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()">刷新</button>
+      </select></label>
+      <label class="fb-check"><input type="checkbox" id="taskBoardMineOnly" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()">只看我的</label>
+      <label class="fb-check"><input type="checkbox" id="taskBoardShowArchived" onchange="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()">包含已归档</label>
+      <div class="fb-actions">
+        <button type="button" onclick="window.OmniQATaskBoardTab && window.OmniQATaskBoardTab.load()"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>刷新</button>
+      </div>
     </div>
 
     <div id="taskBoardSummary" class="row" style="margin-top:12px; gap:10px; flex-wrap:wrap;"></div>
@@ -678,12 +677,13 @@
 
   <section id="tab-mine" class="hidden card">
     <div class="workbench-shell">
-      <div class="workbench-shell-header">
-        <div>
-          <h2 style="margin:0;">我的工作台</h2>
-          <div class="muted" style="margin-top:6px;">统一查看需求测试、复测和测试工作台</div>
+      <div class="workbench-shell-header ph">
+        <span class="ph-icon" aria-hidden="true"><svg><use href="#i-mine"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-mine"/></svg>
+        <div class="ph-text">
+          <h2>我的工作台</h2>
+          <div class="muted page-desc">统一查看需求测试、复测、测试、任务与审查工作台</div>
         </div>
-        <div id="workbenchSubnav" class="workbench-subnav" role="tablist" aria-label="工作台子页面">
+        <div id="workbenchSubnav" class="workbench-subnav ph-actions" role="tablist" aria-label="工作台子页面">
           <button id="workbenchDemandBtn" type="button" onclick="switchWorkbenchSubtab('demand')">需求工作台<span id="workbenchDemandBadge" class="nav-badge hidden"></span></button>
           <button id="workbenchRetestBtn" type="button" onclick="switchWorkbenchSubtab('retest')">复测工作台<span id="workbenchRetestBadge" class="nav-badge hidden"></span></button>
           <button id="workbenchOverallTestBtn" type="button" onclick="switchWorkbenchSubtab('overall-test')">测试工作台<span id="workbenchOverallTestBadge" class="nav-badge hidden"></span></button>
@@ -697,36 +697,21 @@
           <div class="workbench-panel" data-workbench-panel="demand">
             <div class="workbench-panel-inner">
               <h2>需求工作台</h2>
-              <div class="row" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px; align-items: center; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
-      <select id="mineDisplayMode" onchange="toggleMineMode()" style="padding: 6px; border-radius: 4px; border: 1px solid #cbd5e1; outline: none; font-weight: bold; color: #334155;">
+              <div class="fb">
+      <label class="fb-field"><span class="fb-k">查看</span><select id="mineDisplayMode" onchange="toggleMineMode()">
         <option value="version">📌 按大版本查看</option>
         <option value="all_pending">🔥 查看所有待测试需求</option>
-      </select>
-
-      <div id="mineVersionWrap" style="display:flex; align-items:center;">
-        <label style="margin-right:8px; font-weight:bold; color:#475569;">大版本</label>
-        <select id="mineMajorSelect" onchange="loadMyWorkbench()" style="padding: 6px; border-radius: 4px; border: 1px solid #cbd5e1;"></select>
-      </div>
-
-      <div style="display:flex; align-items:center;">
-        <label style="margin-right:8px; font-weight:bold; color:#475569;">当前复测发包(小版本)</label>
-        <select id="mineMinorSelect" style="padding: 6px; border-radius: 4px; border: 1px solid #cbd5e1;"></select>
-      </div>
-
-      <div style="display:flex; align-items:center; gap:8px; border-left:1px solid #cbd5e1; padding-left:12px;">
+      </select></label>
+      <label id="mineVersionWrap" class="fb-field"><span class="fb-k">大版本</span><select id="mineMajorSelect" onchange="loadMyWorkbench()"></select></label>
+      <label class="fb-field" title="当前复测发包（小版本）"><span class="fb-k">复测发包</span><select id="mineMinorSelect"></select></label>
+      <label class="fb-search"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg><input id="mineSearchInput" oninput="renderMineCards()" placeholder="搜索需求编号/名称或 Bug 标题..."></label>
+      <label class="fb-check" title="只显示含有指派给我的 Bug 的需求卡片"><input id="mineAssignedToMe" type="checkbox" onchange="renderMineCards()">指派给我的</label>
+      <div class="fb-actions">
         <button class="secondary" onclick="pushCase()">推送用例进度</button>
         <button class="secondary" onclick="pushTest()">推送测试进度</button>
+        <button onclick="loadMyWorkbench()">刷新工作台</button>
+        <button id="featureTreeTestBtn" class="ftree-entry-btn ftree-entry-btn--test hidden" onclick="window.OmniQAFeatureTreeTab?.openFromWorkbench()" title="进入全量测试功能树状图">🌳 全量测试树状图</button>
       </div>
-
-      <div class="prefix-input" style="flex:1; min-width: 200px; background: #fff;">
-        <span>🔍</span>
-        <input id="mineSearchInput" oninput="renderMineCards()" placeholder="搜索需求编号/名称或 Bug 标题..." style="width:100%; border:none; outline:none; background:transparent;">
-      </div>
-      <label style="display:inline-flex; align-items:center; gap:4px; white-space:nowrap; color:#334155; font-size:13px; cursor:pointer;" title="只显示含有指派给我的 Bug 的需求卡片">
-        <input id="mineAssignedToMe" type="checkbox" onchange="renderMineCards()"> 指派给我的
-      </label>
-      <button onclick="loadMyWorkbench()">刷新工作台</button>
-      <button id="featureTreeTestBtn" class="ftree-entry-btn ftree-entry-btn--test hidden" onclick="window.OmniQAFeatureTreeTab?.openFromWorkbench()" title="进入全量测试功能树状图">🌳 全量测试树状图</button>
       </div>
 
               <div id="mineSummaryText" style="margin-bottom: 16px; font-weight: bold; color: #ea580c; background: #ffedd5; padding: 10px 16px; border-radius: 6px; display: none; border-left: 4px solid #f97316;"></div>
@@ -928,59 +913,38 @@
   </div>
 
   <section id="tab-feedback" class="hidden card">
-    <h2>反馈记录与处理</h2>
-    <div class="qa-filter-grid qa-filter-grid-feedback" style="margin-bottom: 14px;">
-      <div class="qa-filter-item">
-        <label>大版本</label>
-        <select id="feedbackMajorSelect" onchange="loadFeedbackMinorOptions(); loadFeedbackBoard();"></select>
-      </div>
-      <div class="qa-filter-item">
-        <label>小版本</label>
-        <select id="feedbackMinorSelect" onchange="loadFeedbackBoard()"></select>
-      </div>
-      <div class="qa-filter-item">
-        <label>状态</label>
-        <select id="feedbackStatusSelect" onchange="loadFeedbackBoard()">
-          <option value="">全部</option>
-          <option value="pending">待处理</option>
-          <option value="processing">处理中</option>
-          <option value="resolved">已处理</option>
-          <option value="closed">已关闭</option>
-        </select>
-      </div>
-      <div class="qa-filter-item">
-        <label>指派人</label>
-        <select id="feedbackAssigneeSelect" onchange="loadFeedbackBoard()"><option value="">全部</option></select>
-      </div>
-      <div class="qa-filter-item">
-        <label>排序</label>
-        <select id="feedbackSortBy" onchange="loadFeedbackBoard(1)">
-          <option value="created_at">创建时间</option>
-          <option value="updated_at">更新时间</option>
-          <option value="status">状态</option>
-        </select>
-      </div>
-      <div class="qa-filter-item">
-        <label>顺序</label>
-        <select id="feedbackSortOrder" onchange="loadFeedbackBoard(1)">
-          <option value="desc">倒序</option>
-          <option value="asc">正序</option>
-        </select>
-      </div>
-      <div class="qa-filter-item">
-        <label>每页</label>
-        <select id="feedbackPageSize" onchange="loadFeedbackBoard(1)">
-          <option value="10">10</option>
-          <option value="20">20</option>
-          <option value="50">50</option>
-        </select>
-      </div>
-      <div class="qa-filter-item qa-filter-item-search">
-        <label>关键字</label>
-        <div class="prefix-input"><span>🔍</span><input id="feedbackKeyword" placeholder="按反馈编号/概览搜索"></div>
-      </div>
-      <div class="qa-filter-actions">
-        <button onclick="loadFeedbackBoard(1)">刷新列表</button>
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-feedback"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-feedback"/></svg>
+      <div class="ph-text"><h2>反馈记录与处理</h2><p class="page-desc">汇总内外部反馈，跟踪处理进度</p></div>
+    </div>
+    <div class="fb">
+      <label class="fb-field"><span class="fb-k">大版本</span><select id="feedbackMajorSelect" onchange="loadFeedbackMinorOptions(); loadFeedbackBoard();"></select></label>
+      <label class="fb-field"><span class="fb-k">小版本</span><select id="feedbackMinorSelect" onchange="loadFeedbackBoard()"></select></label>
+      <label class="fb-field"><span class="fb-k">状态</span><select id="feedbackStatusSelect" onchange="loadFeedbackBoard()">
+        <option value="">全部</option>
+        <option value="pending">待处理</option>
+        <option value="processing">处理中</option>
+        <option value="resolved">已处理</option>
+        <option value="closed">已关闭</option>
+      </select></label>
+      <label class="fb-field"><span class="fb-k">指派人</span><select id="feedbackAssigneeSelect" onchange="loadFeedbackBoard()"><option value="">全部</option></select></label>
+      <label class="fb-search"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg><input id="feedbackKeyword" placeholder="按反馈编号/概览搜索"></label>
+      <span class="fb-break" aria-hidden="true"></span>
+      <label class="fb-field"><span class="fb-k">排序</span><select id="feedbackSortBy" onchange="loadFeedbackBoard(1)">
+        <option value="created_at">创建时间</option>
+        <option value="updated_at">更新时间</option>
+        <option value="status">状态</option>
+      </select><select id="feedbackSortOrder" aria-label="顺序" onchange="loadFeedbackBoard(1)">
+        <option value="desc">倒序</option>
+        <option value="asc">正序</option>
+      </select></label>
+      <label class="fb-field"><span class="fb-k">每页</span><select id="feedbackPageSize" onchange="loadFeedbackBoard(1)">
+        <option value="10">10</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+      </select></label>
+      <div class="fb-actions">
+        <button onclick="loadFeedbackBoard(1)"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>刷新列表</button>
       </div>
     </div>
 
@@ -1014,7 +978,10 @@
   </section>
 
   <section id="tab-testcase-center" class="hidden card">
-    <h2>用例中心</h2>
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-cases"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-cases"/></svg>
+      <div class="ph-text"><h2>用例中心</h2><p class="page-desc">按功能树组织禅道用例，支持审查与关联</p></div>
+    </div>
     <div id="testcaseCenterTabs" class="workbench-subnav" role="tablist" aria-label="用例中心分页" style="margin-bottom:16px;">
       <button id="testcaseCenterQueryTab" type="button" class="active" role="tab" aria-selected="true" aria-controls="testcaseCenterQueryPanel" data-testcase-view="query">用例查询</button>
       <button id="testcaseCenterAutomationTab" type="button" role="tab" aria-selected="false" aria-controls="testcaseCenterAutomationPanel" tabindex="-1" data-testcase-view="automation">自动化测试</button>
@@ -1023,27 +990,24 @@
       <div id="automationPanel"></div>
     </div>
     <div id="testcaseCenterQueryPanel" role="tabpanel" aria-labelledby="testcaseCenterQueryTab">
-    <div class="row" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px; align-items: center; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
-      <span class="badge" style="background:#eff6ff; color:#1d4ed8;">当前软件范围</span>
-      <label>状态</label>
-      <select id="testcaseCenterStatus" onchange="loadTestcaseCenter()">
+    <div class="fb">
+      <span class="fb-scope"><svg class="ui-ic" aria-hidden="true"><use href="#i-data"/></svg>当前软件范围</span>
+      <label class="fb-field"><span class="fb-k">状态</span><select id="testcaseCenterStatus" onchange="loadTestcaseCenter()">
         <option value="">全部</option>
         <option value="normal">正常</option>
         <option value="wait">待评审</option>
         <option value="blocked">已阻塞</option>
         <option value="done">已完成</option>
-      </select>
-      <label>模块</label>
-      <select id="testcaseCenterModule" onchange="loadTestcaseCenter()">
+      </select></label>
+      <label class="fb-field"><span class="fb-k">模块</span><select id="testcaseCenterModule" onchange="loadTestcaseCenter()">
         <option value="">全部模块</option>
-      </select>
-      <div class="prefix-input" style="flex:1; min-width:220px; background:#fff;">
-        <span>🔍</span>
-        <input id="testcaseCenterKeyword" onkeydown="if(event.key==='Enter') loadTestcaseCenter()" placeholder="搜索用例编号或标题..." style="width:100%; border:none; outline:none; background:transparent;">
+      </select></label>
+      <label class="fb-search"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg><input id="testcaseCenterKeyword" onkeydown="if(event.key==='Enter') loadTestcaseCenter()" placeholder="搜索用例编号或标题..."></label>
+      <div class="fb-actions">
+        <button onclick="loadTestcaseCenter()">查询</button>
+        <button class="secondary" onclick="syncTestcaseCenterRecent()">增量同步</button>
+        <button class="secondary" onclick="syncTestcaseCenter()">同步禅道用例</button>
       </div>
-      <button onclick="loadTestcaseCenter()">查询</button>
-      <button class="secondary" onclick="syncTestcaseCenterRecent()" style="color:#0d9488; border-color:#5eead4;">增量同步</button>
-      <button class="secondary" onclick="syncTestcaseCenter()">同步禅道用例</button>
     </div>
     <div id="testcaseCenterMeta" class="muted" style="margin-bottom: 12px;"></div>
     <table>
@@ -1125,18 +1089,20 @@
   <section id="tab-overall-test" class="hidden card">
     <h2>测试工作台</h2>
 
-    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; margin-bottom: 16px;">
-      <div class="row" style="margin-bottom: 12px;">
-        <span style="font-weight: bold; color: #334155; margin-right: 8px;">🎯 提取Bug池:</span>
-        <label>大版本</label><select id="s5MajorSelect" onchange="window.OmniQAOverallTestTab?.refreshS5EntryMode?.()"></select>
+    <div class="fb fb--rows">
+      <div class="fb-row">
+        <span class="fb-row-title"><svg class="ui-ic" aria-hidden="true"><use href="#i-bug"/></svg>提取 Bug 池</span>
+        <label class="fb-field"><span class="fb-k">大版本</span><select id="s5MajorSelect" onchange="window.OmniQAOverallTestTab?.refreshS5EntryMode?.()"></select></label>
         <button onclick="loadOverallTest()">加载全景大盘</button>
-        <button class="secondary" onclick="syncOverallTestRecentFromZentao()" style="color:#0d9488; border-color:#5eead4;">增量同步</button>
-        <button class="secondary" onclick="syncOverallTestFromZentao({ force: true })">强制同步禅道并刷新</button>
-        <button class="secondary" onclick="openS5CreateZentaoBugModal()" style="color:#7c3aed; border-color:#c4b5fd;">➕ 新建禅道Bug</button>
+        <div class="fb-actions">
+          <button class="secondary" onclick="syncOverallTestRecentFromZentao()">增量同步</button>
+          <button class="secondary" onclick="syncOverallTestFromZentao({ force: true })">强制同步禅道并刷新</button>
+          <button class="secondary" onclick="openS5CreateZentaoBugModal()">➕ 新建禅道Bug</button>
+        </div>
       </div>
-      <div class="row" style="border-top: 1px dashed #cbd5e1; padding-top: 12px;">
-        <span style="font-weight: bold; color: #334155; margin-right: 8px;">🚀 回归发包环境:</span>
-        <label>当前验证子版本</label><select id="s5MinorSelect"></select>
+      <div class="fb-row">
+        <span class="fb-row-title"><svg class="ui-ic" aria-hidden="true"><use href="#i-build"/></svg>回归发包环境</span>
+        <label class="fb-field"><span class="fb-k">当前验证子版本</span><select id="s5MinorSelect"></select></label>
         <button class="secondary" onclick="pushOverallTest()">📢 推送整体进度到企微</button>
       </div>
     </div>
@@ -1150,26 +1116,15 @@
       </div>
     </div>
 
-    <div id="s5FilterBar" class="hidden" style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin: 0 0 12px; padding: 12px 16px; background:#ffffff; border:1px solid #e2e8f0; border-radius:10px;">
-      <span style="font-weight:600; color:#334155;">🔍 筛选</span>
-      <div class="row" style="margin:0; gap:10px; align-items:center;">
-        <label style="margin:0; color:#475569;">状态</label>
-        <label style="margin:0; font-size:13px; color:#334155; display:flex; align-items:center; gap:4px;">
-          <input type="checkbox" id="s5FilterStatusActive" onchange="applyS5Filters()"> 激活
-        </label>
-        <label style="margin:0; font-size:13px; color:#334155; display:flex; align-items:center; gap:4px;">
-          <input type="checkbox" id="s5FilterStatusResolved" onchange="applyS5Filters()"> 已解决
-        </label>
-        <label style="margin:0; font-size:13px; color:#334155; display:flex; align-items:center; gap:4px;">
-          <input type="checkbox" id="s5FilterStatusClosed" onchange="applyS5Filters()"> 已关闭
-        </label>
-        <label style="margin:0; font-size:13px; color:#334155; display:flex; align-items:center; gap:4px;">
-          <input type="checkbox" id="s5FilterStatusLocal" onchange="applyS5Filters()"> 本地Bug
-        </label>
-      </div>
-      <div class="row" style="margin:0; gap:8px; align-items:center; flex:1; min-width:240px;">
-        <label style="margin:0; color:#475569;">搜索</label>
-        <input id="s5FilterKeyword" type="text" placeholder="编号或 Bug 标题/指派人，如 b#290 或 黑屏，回车搜索" style="flex:1; min-width:200px; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;" onkeydown="if(event.key==='Enter'){applyS5Filters();}">
+    <div id="s5FilterBar" class="fb hidden">
+      <span class="fb-k fb-k--lead">状态</span>
+      <label class="fb-check"><input type="checkbox" id="s5FilterStatusActive" onchange="applyS5Filters()">激活</label>
+      <label class="fb-check"><input type="checkbox" id="s5FilterStatusResolved" onchange="applyS5Filters()">已解决</label>
+      <label class="fb-check"><input type="checkbox" id="s5FilterStatusClosed" onchange="applyS5Filters()">已关闭</label>
+      <label class="fb-check"><input type="checkbox" id="s5FilterStatusLocal" onchange="applyS5Filters()">本地Bug</label>
+      <span class="fb-sep" aria-hidden="true"></span>
+      <label class="fb-search"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg><input id="s5FilterKeyword" type="text" placeholder="编号或 Bug 标题/指派人，如 b#290 或 黑屏，回车搜索" onkeydown="if(event.key==='Enter'){applyS5Filters();}"></label>
+      <div class="fb-actions">
         <button class="secondary" onclick="applyS5Filters()">搜索</button>
         <button class="secondary" onclick="resetS5Filters()">重置</button>
       </div>
@@ -1194,38 +1149,22 @@
   </section>
 
   <section id="tab-field-test" class="hidden card">
-    <h2>外业测试</h2>
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-field"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-field"/></svg>
+      <div class="ph-text"><h2>外业测试</h2><p class="page-desc">外业采集测试的计划、设备与结果记录</p></div>
+    </div>
     <div class="card qa-panel qa-panel-soft">
-      <div class="qa-filter-grid qa-filter-grid-field-test">
-        <div class="qa-filter-item ft-filter-major">
-          <label>大版本</label>
-          <select id="fieldTestFilterMajor" onchange="onFieldTestFilterMajorChange()"></select>
-        </div>
-        <div class="qa-filter-item ft-filter-minor">
-          <label>小版本</label>
-          <select id="fieldTestFilterMinor"></select>
-        </div>
-        <div class="qa-filter-item ft-filter-purpose">
-          <label>测试目的</label>
-          <select id="fieldTestFilterPurpose"><option value="">全部</option><option value="requirement">需求测试</option><option value="feature">功能测试</option></select>
-        </div>
-        <div id="fieldTestFilterTesterWrap" class="qa-filter-item ft-filter-tester hidden">
-          <label>测试人</label>
-          <select id="fieldTestFilterTester"><option value="">全部</option></select>
-        </div>
-        <div class="qa-filter-item qa-filter-item-search ft-filter-keyword">
-          <label>关键字</label>
-          <div class="prefix-input"><span>🔍</span><input id="fieldTestFilterKeyword" placeholder="模糊搜索：需求/内容/备注/Bug/测试人"></div>
-        </div>
-        <div class="qa-filter-item ft-filter-page-size">
-          <label>每页</label>
-          <select id="fieldTestPageSize"><option value="10">10</option><option value="20" selected>20</option><option value="50">50</option></select>
-        </div>
-        <div class="qa-filter-actions ft-filter-actions">
-          <div class="qa-filter-actions-row">
-            <button class="ft-primary-btn" onclick="openFieldTestCreate()">➕ 新增测试记录</button>
-            <button onclick="loadFieldTestBoard()">刷新列表</button>
-          </div>
+      <div class="fb">
+        <label class="fb-field"><span class="fb-k">大版本</span><select id="fieldTestFilterMajor" onchange="onFieldTestFilterMajorChange()"></select></label>
+        <label class="fb-field"><span class="fb-k">小版本</span><select id="fieldTestFilterMinor"></select></label>
+        <label class="fb-field"><span class="fb-k">测试目的</span><select id="fieldTestFilterPurpose"><option value="">全部</option><option value="requirement">需求测试</option><option value="feature">功能测试</option></select></label>
+        <label id="fieldTestFilterTesterWrap" class="fb-field hidden"><span class="fb-k">测试人</span><select id="fieldTestFilterTester"><option value="">全部</option></select></label>
+        <label class="fb-search"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg><input id="fieldTestFilterKeyword" placeholder="模糊搜索：需求/内容/备注/Bug/测试人"></label>
+        <span class="fb-break" aria-hidden="true"></span>
+        <label class="fb-field"><span class="fb-k">每页</span><select id="fieldTestPageSize"><option value="10">10</option><option value="20" selected>20</option><option value="50">50</option></select></label>
+        <div class="fb-actions">
+          <button class="secondary" onclick="loadFieldTestBoard()"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>刷新列表</button>
+          <button class="ft-primary-btn" onclick="openFieldTestCreate()">➕ 新增测试记录</button>
         </div>
       </div>
       <div id="fieldTestTopNotice" class="hidden muted sse-inline-notice" role="button" tabindex="0" onclick="revealFieldTestRealtimeNew()" onkeydown="onNoticeKeydown(event, revealFieldTestRealtimeNew)">有 0 条新增外业测试记录</div>
@@ -1320,40 +1259,27 @@
   </section>
 
   <section id="tab-build-records" class="hidden card">
-    <div class="row" style="justify-content:space-between; align-items:flex-start;">
-      <div>
-        <h2 style="margin-bottom:6px;">构建记录</h2>
-        <div class="muted">展示 Jenkins 上报到系统的构建记录，支持按大版本筛选，并查看小版本/大版本日志。</div>
-      </div>
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-build"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-build"/></svg>
+      <div class="ph-text"><h2>构建记录</h2><p class="page-desc">展示 Jenkins 上报到系统的构建记录，支持按大版本筛选，并查看小版本/大版本日志</p></div>
     </div>
 
-    <div class="row" style="margin-top:14px; align-items:flex-end; flex-wrap:wrap;">
-      <div>
-        <label>大版本</label>
-        <select id="buildRecordsMajorFilter" onchange="onBuildRecordsMajorFilterChange()">
-          <option value="">全部大版本</option>
-        </select>
+    <div class="fb">
+      <label class="fb-field"><span class="fb-k">大版本</span><select id="buildRecordsMajorFilter" onchange="onBuildRecordsMajorFilterChange()">
+        <option value="">全部大版本</option>
+      </select></label>
+      <label class="fb-field"><span class="fb-k">构建状态</span><select id="buildRecordsStatusFilter" onchange="onBuildRecordsFilterChange()">
+        <option value="">全部状态</option>
+        <option value="SUCCESS">成功</option>
+        <option value="FAILURE">失败</option>
+        <option value="ABORTED">中止</option>
+        <option value="UNSTABLE">不稳定</option>
+      </select></label>
+      <div class="fb-field fb-range"><span class="fb-k">日期</span><input type="date" id="buildRecordsDateFrom" aria-label="开始日期" data-range-role="start" data-range-pair="buildRecordsDateTo" onchange="onBuildRecordsFilterChange()"><span class="fb-range-sep">至</span><input type="date" id="buildRecordsDateTo" aria-label="结束日期" data-range-role="end" data-range-pair="buildRecordsDateFrom" onchange="onBuildRecordsFilterChange()"></div>
+      <div class="fb-actions">
+        <button class="secondary" onclick="loadBuildRecordsBoard()"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>刷新</button>
+        <button id="buildRecordsMajorLogBtn" onclick="openMajorBuildLogModal()" disabled>查看大版本修改日志</button>
       </div>
-      <div>
-        <label>构建状态</label>
-        <select id="buildRecordsStatusFilter" onchange="onBuildRecordsFilterChange()">
-          <option value="">全部状态</option>
-          <option value="SUCCESS">成功</option>
-          <option value="FAILURE">失败</option>
-          <option value="ABORTED">中止</option>
-          <option value="UNSTABLE">不稳定</option>
-        </select>
-      </div>
-      <div>
-        <label>开始日期</label>
-        <input type="date" id="buildRecordsDateFrom" data-range-role="start" data-range-pair="buildRecordsDateTo" onchange="onBuildRecordsFilterChange()">
-      </div>
-      <div>
-        <label>结束日期</label>
-        <input type="date" id="buildRecordsDateTo" data-range-role="end" data-range-pair="buildRecordsDateFrom" onchange="onBuildRecordsFilterChange()">
-      </div>
-      <button id="buildRecordsMajorLogBtn" onclick="openMajorBuildLogModal()" disabled>查看大版本修改日志</button>
-      <button class="secondary" onclick="loadBuildRecordsBoard()">刷新</button>
     </div>
 
     <div class="card" style="margin-top:16px; box-shadow:none; border:1px solid #e2e8f0;">
@@ -1370,15 +1296,19 @@
   </section>
 
   <section id="tab-report" class="hidden card">
-    <h2>报表中心</h2>
-    <div class="row">
-      <label>大版本</label><select id="reportMajorSelect"></select>
-      <label>开始日期</label><input type="date" id="reportStartDate" data-range-role="start" data-range-pair="reportEndDate">
-      <label>结束日期</label><input type="date" id="reportEndDate" data-range-role="end" data-range-pair="reportStartDate">
-      <span id="reportUserWrap" class="row hidden"><label>人员</label><select id="reportUserSelect"></select></span>
-      <button onclick="queryReport()">查询报表</button>
-      <button class="secondary" onclick="exportReportPdf()">导出 PDF</button>
-      <button class="secondary" onclick="exportWeeklyTasks()" title="导出本周（周一~周日）每人的禅道任务工作内容，txt 文本">📄 导出本周工作</button>
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-report"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-report"/></svg>
+      <div class="ph-text"><h2>报表中心</h2><p class="page-desc">版本质量、缺陷趋势与团队效率</p></div>
+    </div>
+    <div class="fb">
+      <label class="fb-field"><span class="fb-k">大版本</span><select id="reportMajorSelect"></select></label>
+      <div class="fb-field fb-range"><span class="fb-k">日期</span><input type="date" id="reportStartDate" aria-label="开始日期" data-range-role="start" data-range-pair="reportEndDate"><span class="fb-range-sep">至</span><input type="date" id="reportEndDate" aria-label="结束日期" data-range-role="end" data-range-pair="reportStartDate"></div>
+      <label id="reportUserWrap" class="fb-field hidden"><span class="fb-k">人员</span><select id="reportUserSelect"></select></label>
+      <div class="fb-actions">
+        <button onclick="queryReport()">查询报表</button>
+        <button class="secondary" onclick="exportReportPdf()">导出 PDF</button>
+        <button class="secondary" onclick="exportWeeklyTasks()" title="导出本周（周一~周日）每人的禅道任务工作内容，txt 文本">📄 导出本周工作</button>
+      </div>
     </div>
 
     <div id="reportContent" class="card">
@@ -1534,10 +1464,13 @@
   </section>
 
   <section id="tab-dispatch" class="hidden card">
-    <h2>BUG特派中心 (专项验证分发)</h2>
-    <div class="row">
-      <div class="prefix-input"><span>b#</span><input id="dispatchBugNo" inputmode="numeric" oninput="digitsOnly(this)" placeholder="输入 Bug 数字编号"></div>
-      <button onclick="searchDispatchBug()">检索缺陷</button>
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-bug"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-bug"/></svg>
+      <div class="ph-text"><h2>BUG特派中心</h2><p class="page-desc">按编号检索缺陷，特派给指定成员做专项验证并跟踪处理</p></div>
+    </div>
+    <div class="fb">
+      <label class="fb-search fb-search--prefix"><span class="fb-prefix">b#</span><input id="dispatchBugNo" inputmode="numeric" oninput="digitsOnly(this)" onkeydown="if(event.key==='Enter') searchDispatchBug()" placeholder="输入 Bug 数字编号"></label>
+      <button onclick="searchDispatchBug()"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg>检索缺陷</button>
     </div>
 
     <div id="dispatchBugInfo" class="hidden card" style="margin-top: 16px; background: #f8fafc; border: 1px solid #cbd5e1;">
@@ -1567,24 +1500,17 @@
   </section>
 
   <section id="tab-zentao-ai" class="hidden card">
-    <div class="row" style="justify-content:space-between; align-items:center;">
-      <div>
-        <h2 style="margin-bottom:6px;">禅道AI用例生成</h2>
-        <div class="muted">从禅道读取执行中的需求并转发到 n8n，由 AI 协助生成测试用例或设计评审材料。</div>
-      </div>
-      <div class="row">
-        <button class="secondary" onclick="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.reload()">刷新执行列表</button>
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-sparkles"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-sparkles"/></svg>
+      <div class="ph-text"><h2>禅道AI用例生成</h2><p class="page-desc">从禅道读取执行中的需求并转发到 n8n，由 AI 协助生成测试用例或设计评审材料</p></div>
+      <div class="ph-actions">
+        <button class="secondary" onclick="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.reload()"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>刷新执行列表</button>
       </div>
     </div>
-    <div class="row" style="margin-top:12px; gap:12px; flex-wrap:wrap; align-items:flex-end;">
-      <div>
-        <label style="display:block; font-weight:600; color:#0f172a;">执行</label>
-        <select id="zentaoAiExecutionSelect" style="min-width:360px;" onchange="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.onExecutionChange()"></select>
-      </div>
-      <div>
-        <button onclick="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.loadStories()">加载需求</button>
-      </div>
-      <div id="zentaoAiExecMeta" class="muted" style="flex:1; min-width:240px;"></div>
+    <div class="fb">
+      <label class="fb-field fb-field--grow"><span class="fb-k">执行</span><select id="zentaoAiExecutionSelect" onchange="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.onExecutionChange()"></select></label>
+      <button onclick="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.loadStories()">加载需求</button>
+      <div id="zentaoAiExecMeta" class="muted fb-meta"></div>
     </div>
     <div class="row" style="margin-top:12px; gap:12px; align-items:center;">
       <label style="cursor:pointer;">
@@ -1609,50 +1535,34 @@
   </section>
 
   <section id="tab-activity" class="hidden card">
-    <div class="row" style="justify-content:space-between; align-items:center;">
-      <div>
-        <h2 style="margin-bottom:6px;">活动中心</h2>
-        <div class="muted">管理员可查看团队最近动态、对象时间线，并手动推送摘要通知。</div>
-      </div>
-      <div class="row" style="gap:8px;">
-        <button class="secondary" onclick="loadActivityBoard()">刷新动态</button>
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-activity"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-activity"/></svg>
+      <div class="ph-text"><h2>活动中心</h2><p class="page-desc">管理员可查看团队最近动态、对象时间线，并手动推送摘要通知</p></div>
+      <div class="ph-actions">
+        <button class="secondary" onclick="loadActivityBoard()"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>刷新动态</button>
         <button onclick="pushActivitySummary()">推送最近动态</button>
       </div>
     </div>
 
-    <div class="row activity-toolbar" style="margin-top:14px; align-items:flex-end; flex-wrap:wrap;">
-      <div>
-        <label>时间范围</label>
-        <select id="activityRangeDays" onchange="loadActivityBoard()">
-          <option value="1">最近1天</option>
-          <option value="3">最近3天</option>
-          <option value="7">最近7天</option>
-        </select>
-      </div>
-      <div>
-        <label>模块</label>
-        <select id="activityTargetType" onchange="loadActivityBoard()">
-          <option value="">全部模块</option>
-          <option value="bug">Bug</option>
-          <option value="requirement">需求</option>
-          <option value="feedback">反馈</option>
-          <option value="field_test">外业测试</option>
-          <option value="retest">复测</option>
-        </select>
-      </div>
-      <div>
-        <label>操作人</label>
-        <select id="activityActorSelect" onchange="loadActivityBoard()">
-          <option value="0">全部人员</option>
-        </select>
-      </div>
-      <div style="flex:1; min-width:220px;">
-        <label>关键词</label>
-        <div class="prefix-input"><span>🔍</span><input id="activityKeyword" placeholder="搜索编号、标题、人员、摘要" onkeydown="if(event.key==='Enter'){loadActivityBoard()}"></div>
-      </div>
-      <label style="cursor:pointer; margin-bottom:8px;">
-        <input type="checkbox" id="activityOnlyImportant" onchange="loadActivityBoard()"> 仅看关键动态
-      </label>
+    <div class="fb">
+      <label class="fb-field"><span class="fb-k">时间范围</span><select id="activityRangeDays" onchange="loadActivityBoard()">
+        <option value="1">最近1天</option>
+        <option value="3">最近3天</option>
+        <option value="7">最近7天</option>
+      </select></label>
+      <label class="fb-field"><span class="fb-k">模块</span><select id="activityTargetType" onchange="loadActivityBoard()">
+        <option value="">全部模块</option>
+        <option value="bug">Bug</option>
+        <option value="requirement">需求</option>
+        <option value="feedback">反馈</option>
+        <option value="field_test">外业测试</option>
+        <option value="retest">复测</option>
+      </select></label>
+      <label class="fb-field"><span class="fb-k">操作人</span><select id="activityActorSelect" onchange="loadActivityBoard()">
+        <option value="0">全部人员</option>
+      </select></label>
+      <label class="fb-search"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg><input id="activityKeyword" placeholder="搜索编号、标题、人员、摘要" onkeydown="if(event.key==='Enter'){loadActivityBoard()}"></label>
+      <label class="fb-check"><input type="checkbox" id="activityOnlyImportant" onchange="loadActivityBoard()">仅看关键动态</label>
     </div>
 
     <div id="activitySummaryCards" class="metrics-grid" style="margin-top:14px; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));"></div>
@@ -1683,12 +1593,13 @@
 
   <section id="tab-tools" class="hidden card">
     <div class="workbench-shell">
-      <div class="workbench-shell-header" style="position:static;">
-        <div>
-          <h2 style="margin:0;">实用工具</h2>
-          <div class="muted" style="margin-top:6px;">集中使用测试辅助工具</div>
+      <div class="workbench-shell-header ph" style="position:static;">
+        <span class="ph-icon" aria-hidden="true"><svg><use href="#i-wrench"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-wrench"/></svg>
+        <div class="ph-text">
+          <h2>实用工具</h2>
+          <div class="muted page-desc">数据库对比、文件处理等测试辅助工具</div>
         </div>
-        <div class="workbench-subnav" role="tablist" aria-label="实用工具模块">
+        <div class="workbench-subnav ph-actions" role="tablist" aria-label="实用工具模块">
           <button id="toolsDatabaseCompareBtn" class="active" type="button" role="tab" aria-selected="true" aria-controls="toolsDatabaseComparePanel" onclick="window.OmniQAToolsTab?.activate()">数据库对比</button>
         </div>
       </div>
@@ -1699,14 +1610,14 @@
   </section>
 
   <section id="tab-terminal" class="hidden card">
-    <div class="row" style="justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
-      <h2 style="margin:0;">终端控制台</h2>
-      <div class="row" style="gap:8px;">
-        <button id="terminalDiscoverBtn" class="secondary" onclick="window.OmniQATerminalTab.discoverTerminals()">🔄 扫描设备</button>
-        <button onclick="window.OmniQATerminalTab.loadTerminalTab()">刷新</button>
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-terminal"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-terminal"/></svg>
+      <div class="ph-text"><h2>终端控制台</h2><p class="page-desc">远程查看/操作连接在服务器上的安卓终端。自动化测试运行中仅可观看；空闲时可获取操作权，抢占会中断自动化（管理员）</p></div>
+      <div class="ph-actions">
+        <button id="terminalDiscoverBtn" class="secondary" onclick="window.OmniQATerminalTab.discoverTerminals()"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg>扫描设备</button>
+        <button onclick="window.OmniQATerminalTab.loadTerminalTab()"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>刷新</button>
       </div>
     </div>
-    <div class="muted" style="margin:6px 0 14px; font-size:13px;">远程查看/操作连接在服务器上的安卓终端。自动化测试运行中仅可观看；空闲时可获取操作权。抢占会中断自动化（管理员）。</div>
     <div id="terminalGrid" class="row" style="gap:12px; flex-wrap:wrap; align-items:stretch;"></div>
 
     <div id="terminalViewer" class="hidden" style="margin-top:18px;">
@@ -1719,19 +1630,18 @@
   </section>
 
   <section id="tab-jenkins" class="hidden card">
-    <!-- 顶部工具条：标题 + 视图选择 + 搜索 + 设置入口 -->
-    <div class="row" style="justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
-      <div class="row" style="gap:10px; align-items:center;">
-        <h2 style="margin:0;">Jenkins</h2>
-        <span id="jenkinsBindingStatus" style="font-size:12px;"></span>
-      </div>
-      <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
-        <label style="font-size:13px; color:#475569;">视图</label>
-        <select id="jenkinsViewSelect" onchange="onJenkinsViewChange()" style="min-width:160px;"></select>
-        <input id="jenkinsJobFilter" oninput="onJenkinsJobFilter()" placeholder="🔍 过滤 Job" style="min-width:160px;">
-        <button class="secondary" onclick="loadJenkinsJobs()">刷新</button>
+    <!-- 页面头部：标题 + 绑定状态 + 设置入口；下方筛选栏：视图 + Job 过滤 -->
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-jenkins"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-jenkins"/></svg>
+      <div class="ph-text"><h2>Jenkins</h2><span id="jenkinsBindingStatus" class="ph-status"></span><p class="page-desc">自动化任务的执行状态、构建历史与产物</p></div>
+      <div class="ph-actions">
+        <button class="secondary" onclick="loadJenkinsJobs()"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>刷新</button>
         <button class="secondary" onclick="toggleJenkinsSettings()">⚙ 账号设置</button>
       </div>
+    </div>
+    <div class="fb">
+      <label class="fb-field"><span class="fb-k">视图</span><select id="jenkinsViewSelect" onchange="onJenkinsViewChange()"></select></label>
+      <label class="fb-search"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg><input id="jenkinsJobFilter" oninput="onJenkinsJobFilter()" placeholder="过滤 Job"></label>
     </div>
 
     <!-- 账号绑定：默认收起，点击「⚙ 账号设置」展开 -->
@@ -1788,7 +1698,10 @@
   </div>
 
   <section id="tab-data" class="hidden card">
-    <h2>数据管理台</h2>
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-data"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-data"/></svg>
+      <div class="ph-text"><h2>数据管理台</h2><p class="page-desc">管理软件、版本、需求与用户，从禅道同步版本，并按大版本追溯需求、用例与 Bug</p></div>
+    </div>
     <div id="dataReadonlyHint" class="hidden dm-hint">
       当前账号为只读访问，可查看数据与日志，但不能执行创建、编辑、删除等管理操作。
     </div>

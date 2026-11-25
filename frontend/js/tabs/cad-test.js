@@ -69,16 +69,21 @@ function render() {
   const root = document.getElementById('cadTestRoot');
   if (!root) return;
   root.innerHTML = `
-    <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-      <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap;">
-        <h2 style="margin:0;">CAD测试统计</h2>
-        <select id="cadBoardSelect" style="min-width:200px;">
-          ${state.boards.map((b) => `<option value="${b.id}" ${b.id === state.boardId ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}
-        </select>
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-cad"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-cad"/></svg>
+      <div class="ph-text"><h2>CAD测试统计</h2><p class="page-desc">CAD 模块测试数据统计与异常追踪</p></div>
+      <div class="ph-actions">
         <button class="secondary" onclick="window.OmniQACadTab._newBoard()">+ 新建统计表</button>
-        ${state.board ? `<button class="secondary" onclick="window.OmniQACadTab._renameBoard()">重命名</button>
-        <button class="secondary" onclick="window.OmniQACadTab._delBoard()" style="color:#dc2626;">删除表</button>` : ''}
       </div>
+    </div>
+    <div class="fb">
+      <label class="fb-field fb-field--grow"><span class="fb-k">统计表</span><select id="cadBoardSelect">
+          ${state.boards.map((b) => `<option value="${b.id}" ${b.id === state.boardId ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}
+        </select></label>
+      ${state.board ? `<div class="fb-actions">
+        <button class="secondary" onclick="window.OmniQACadTab._renameBoard()">重命名</button>
+        <button class="secondary fb-danger" onclick="window.OmniQACadTab._delBoard()">删除表</button>
+      </div>` : ''}
     </div>
     ${state.board ? renderBoardBody() : `<div class="muted" style="padding:30px; text-align:center;">还没有统计表，点击「+ 新建统计表」开始。</div>`}
   `;
