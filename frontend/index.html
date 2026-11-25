@@ -4,13 +4,13 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css?v=20261103-final-presence-ui-2">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261125-fbft-5">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261125-build-1">
   <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261125-fbft-4"></script>
+  <script type="module" src="/static/js/app.js?v=20261125-build-1"></script>
   <script src="/static/js/weave-motion.js?v=20261124-shell-v2-2" defer></script>
   <script src="/static/js/shell.js?v=20261125-pagehead-1" defer></script>
   <script>
@@ -1248,14 +1248,16 @@
       </div>
     </div>
 
-    <div class="card" style="margin-top:16px; box-shadow:none; border:1px solid #e2e8f0;">
+    <!-- 构建列表（2026-11-25 排版 v2）：状态统计条 + 按日期分组的构建行，点行在右侧抽屉看详情 -->
+    <div class="fbk-panel brc-panel">
+      <div id="buildRecordsStats" class="brc-stats"></div>
       <div id="buildRecordsTopNotice" class="hidden muted sse-inline-notice" role="button" tabindex="0" onclick="revealBuildRealtimeNew()" onkeydown="onNoticeKeydown(event, revealBuildRealtimeNew)">有 0 条新构建记录</div>
-      <div id="buildRecordsCardList" style="display:flex; flex-direction:column; gap:12px;">
-        <div style="text-align:center; padding:24px; color:#64748b;">正在加载构建记录...</div>
+      <div id="buildRecordsCardList" class="brc-list" role="list">
+        <div class="brc-loading">正在加载构建记录...</div>
       </div>
-      <div id="buildRecordsEmpty" class="hidden muted" style="padding:24px; text-align:center;">暂无构建记录</div>
-      <div id="buildRecordsMoreWrap" class="hidden" style="margin-top:14px; text-align:center;">
-        <div id="buildRecordsLoadMoreMeta" class="muted" style="margin-bottom:8px;"></div>
+      <div id="buildRecordsEmpty" class="hidden fbk-empty">暂无构建记录</div>
+      <div id="buildRecordsMoreWrap" class="hidden brc-more">
+        <span id="buildRecordsLoadMoreMeta" class="muted"></span>
         <button id="buildRecordsLoadMoreBtn" class="secondary" onclick="loadMoreBuildRecords()">加载更多</button>
       </div>
     </div>
@@ -1866,13 +1868,18 @@
     </div>
   </div>
 
-  <div id="buildRecordLogModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
-    <div style="width:min(760px, 94vw); max-height:88vh; overflow:auto; background:#fff; border-radius:12px; box-shadow:0 12px 28px rgba(0,0,0,.18); padding:18px;">
-      <div class="row" style="justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin-bottom:12px;">
-        <h3 id="buildRecordLogTitle" style="margin:0; color:#0f172a;">构建日志</h3>
-        <button class="secondary" onclick="closeBuildRecordLogModal()">关闭</button>
-      </div>
-      <pre id="buildRecordLogBody" style="white-space:pre-wrap; word-break:break-word; margin:0; color:#334155; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;">暂无日志内容</pre>
+  <!-- 构建日志弹窗（2026-11-25 v2）：样式复用 .atl-*（weave.css R16/R17） -->
+  <div id="buildRecordLogModal" class="hidden atl-root" data-modal-display="flex" role="dialog" aria-modal="true" aria-labelledby="buildRecordLogTitle" style="display:none;" onclick="if(event.target===this) closeBuildRecordLogModal()">
+    <div class="atl-card">
+      <header class="atl-head">
+        <span class="atl-icon" aria-hidden="true"><svg><use href="#i-build"/></svg></span>
+        <div class="atl-head-text">
+          <h3 id="buildRecordLogTitle">构建日志</h3>
+          <div id="buildRecordLogSub" class="atl-sub"></div>
+        </div>
+        <button type="button" class="atl-close" onclick="closeBuildRecordLogModal()" aria-label="关闭" title="关闭（Esc）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+      </header>
+      <div class="atl-body atl-body--log"><pre id="buildRecordLogBody" class="brc-log-full">暂无日志内容</pre></div>
     </div>
   </div>
 
