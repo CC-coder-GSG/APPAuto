@@ -245,15 +245,15 @@ function buildCardHtml(row) {
       <button type="button" class="fbk-row-hit" onclick="openBuildRecordLogModal(${Number(row.id)})" aria-label="查看构建 ${escapeHtml(row.version_name || row.build_number)} 详情"></button>
       <span class="brc-ic" title="构建${escapeHtml(meta.text)}">${svg(meta.icon)}</span>
       <div class="brc-main">
-        <div class="brc-title">
+        <div class="brc-title" title="${escapeHtml(jobNameToMajorLabel(row.job_name))} · ${escapeHtml(row.version_name || '-')}">
           <b>${escapeHtml(jobNameToMajorLabel(row.job_name))}</b>
-          <span class="brc-ver" title="${escapeHtml(row.version_name || '')}">${escapeHtml(row.version_name || '-')}</span>
+          <span class="brc-ver">${escapeHtml(row.version_name || '-')}</span>
         </div>
         <div class="brc-log${preview ? '' : ' is-empty'}" title="${escapeHtml(row.change_log || '')}">${preview ? escapeHtml(preview) : '暂无变更日志'}${lines > 2 ? `<span class="brc-more-lines">+${lines - 2} 条</span>` : ''}</div>
       </div>
       <div class="brc-build">
         <span class="brc-no">#${escapeHtml(row.build_number)}</span>
-        ${row.branch ? `<span class="brc-branch" title="分支 ${escapeHtml(row.branch)}">${svg('branch')}${escapeHtml(row.branch)}</span>` : ''}
+        ${row.branch ? `<span class="brc-branch" title="分支 ${escapeHtml(row.branch)}">${svg('branch')}<span>${escapeHtml(row.branch)}</span></span>` : ''}
       </div>
       <div class="brc-flags">${flagChip('archive', row.auto_archive_status, row.auto_archive_message)}${flagChip('zentao', row.zentao_push_status, row.zentao_push_message)}</div>
       <div class="brc-time" title="${escapeHtml(formatDateTime(row.created_at))}"><b>${escapeHtml(timeHM(row.created_at))}</b><span>${escapeHtml(relTime(row.created_at))}</span></div>
