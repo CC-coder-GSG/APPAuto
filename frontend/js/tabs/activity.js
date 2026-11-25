@@ -26,13 +26,13 @@ const timelineState = {
 function moduleZh(value) {
   const map = {
     bug: 'Bug',
-    requirement: 'Requirement',
-    feedback: 'Feedback',
-    field_test: 'Field Test',
-    retest: 'Retest',
-    admin: 'Admin',
+    requirement: '需求',
+    feedback: '反馈',
+    field_test: '外业测试',
+    retest: '复测',
+    admin: '管理',
   };
-  return map[value] || value || 'Activity';
+  return map[value] || value || '动态';
 }
 
 function moduleBadgeStyle(module) {
@@ -59,7 +59,8 @@ function levelStyle(level) {
 function formatShanghaiTime(value) {
   if (!value) return '-';
   const text = String(value).trim();
-  const normalized = /Z$|[+-]\d{2}:\d{2}$/.test(text) ? text : `${text}Z`;
+  // 后端用 local_now()（服务器上海本地时间）存无时区时间戳，按 +08:00 解析；旧代码补 Z 当 UTC 会晚 8 小时
+  const normalized = /Z$|[+-]\d{2}:\d{2}$/.test(text) ? text : `${text.replace(' ', 'T')}+08:00`;
   const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return text;
   return date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
@@ -121,7 +122,7 @@ function fillActorOptions(savedActorId = '0') {
   const select = document.getElementById('activityActorSelect');
   if (!select || !window.currentUser || window.currentUser.role !== 'admin') return;
   const users = window.users || [];
-  select.innerHTML = '<option value="0">All Users</option>' + users.map((user) => `<option value="${user.id}">${user.display_name || user.username}</option>`).join('');
+  select.innerHTML = '<option value="0">全部人员</option>' + users.map((user) => `<option value="${user.id}">${user.display_name || user.username}</option>`).join('');
   select.value = Array.from(select.options).some((opt) => opt.value === String(savedActorId)) ? String(savedActorId) : '0';
 }
 
@@ -140,7 +141,7 @@ function renderSummary(summary) {
 
   const highlights = summary?.highlights || [];
   if (!highlights.length) {
-    highlightWrap.innerHTML = '<div class="muted" style="padding:10px 0;">No key activity in current range.</div>';
+    highlightWrap.innerHTML = '<div class="muted" style="padding:10px 0;">当前时间范围内暂无关键动态。</div>';
     return;
   }
   highlightWrap.innerHTML = highlights.map((item) => `<div class="activity-highlight-item">• ${item.summary}</div>`).join('');
@@ -152,7 +153,7 @@ function renderPagination() {
   const next = document.getElementById('activityNextBtn');
   if (!text || !prev || !next) return;
   const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
-  text.innerText = `Page ${state.page}/${pages}, Total ${state.total}`;
+  text.innerText = `第 ${state.page} / ${pages} 页，共 ${state.total} 条`;
   prev.disabled = state.page <= 1;
   next.disabled = state.page >= pages;
 }
@@ -164,10 +165,10 @@ function renderFeed(feed) {
 
   const items = feed?.items || [];
   state.total = Number(feed?.total || 0);
-  totalEl.innerText = `Total ${state.total}`;
+  totalEl.innerText = `共 ${state.total} 条`;
 
   if (!items.length) {
-    wrap.innerHTML = '<div class="muted" style="padding:18px 0; text-align:center;">No activity under current filter.</div>';
+    wrap.innerHTML = '<div class="muted" style="padding:18px 0; text-align:center;">当前筛选条件下暂无动态。</div>';
     renderPagination();
     return;
   }
@@ -184,13 +185,13 @@ function renderFeed(feed) {
               <span class="badge" style="border-radius:999px; background:${module.bg}; color:${module.color}; border:1px solid ${module.border};">${moduleZh(item.module)}</span>
               <span class="badge" style="border-radius:999px; background:${level.bg}; color:${level.color}; border:none;">${item.action_text || item.action || '-'}</span>
               <span class="muted" style="font-size:12px;">${formatShanghaiTime(item.created_at)}</span>
-              <span class="muted" style="font-size:12px;">${item.actor_name || 'System'}</span>
+              <span class="muted" style="font-size:12px;">${item.actor_name || '系统'}</span>
             </div>
             <div style="font-weight:700; color:#0f172a; line-height:1.55;">${item.summary || '-'}</div>
             ${targetLine ? `<div class="muted" style="margin-top:4px; line-height:1.55;">${targetLine}</div>` : ''}
             ${item.detail ? `<div class="muted" style="margin-top:4px; line-height:1.55;">${item.detail}</div>` : ''}
           </div>
-          <button class="secondary" onclick="event.stopPropagation(); openActivityItem(${item.id}, '${item.module}', ${item.target_id || 0})">View</button>
+          <button class="secondary" onclick="event.stopPropagation(); openActivityItem(${item.id}, '${item.module}', ${item.target_id || 0})">查看</button>
         </div>
       </div>
     `;
@@ -330,26 +331,67 @@ export async function pushActivitySummary() {
       only_important: onlyImportant,
     },
   });
-  window.showMessage && window.showMessage('Summary pushed.', 'success');
+  window.showMessage && window.showMessage('动态摘要已推送', 'success');
+}
+
+const DETAIL_DRAWER = { feedback: 'feedback-detail', field_test: 'field-test-detail' };
+const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const WEEK_ZH = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+function isImportantItem(item) {
+  return !!(item.important || item.level === 'important' || item.level === 'critical');
+}
+
+// 上海时区下的 { day: 'YYYY-MM-DD', time: 'HH:mm' }
+function shanghaiParts(value) {
+  if (!value) return { day: '', time: '-' };
+  const text = String(value).trim();
+  // 后端用 local_now()（服务器上海本地时间）存无时区时间戳，按 +08:00 解析；旧代码补 Z 当 UTC 会晚 8 小时
+  const normalized = /Z$|[+-]\d{2}:\d{2}$/.test(text) ? text : `${text.replace(' ', 'T')}+08:00`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return { day: '', time: text };
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(date).map((p) => [p.type, p.value]));
+  return { day: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
+}
+
+function dayLabel(day) {
+  if (!day) return '时间未知';
+  const today = shanghaiParts(new Date().toISOString()).day;
+  const yesterday = shanghaiParts(new Date(Date.now() - 86400000).toISOString()).day;
+  const [y, m, d] = day.split('-').map(Number);
+  const week = WEEK_ZH[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  if (day === today) return `今天 · ${m}月${d}日`;
+  if (day === yesterday) return `昨天 · ${m}月${d}日`;
+  return `${day} · ${week}`;
+}
+
+function detailAlreadyOpen() {
+  const key = DETAIL_DRAWER[timelineState.targetType];
+  if (!key) return false;
+  const root = document.querySelector(`.sd-root[data-sd-key="${key}"]`);
+  return !!root && !root.hidden && Number(root.dataset.recordId) === Number(timelineState.targetId);
 }
 
 function buildTimelineActionBar() {
-  const detailButton = (() => {
-    if (!timelineState.targetId) return '';
+  const all = timelineState.items || [];
+  const importantCount = all.filter(isImportantItem).length;
+  const seg = (on, label, count, value) => `<button type="button" class="atl-seg${on ? ' is-on' : ''}" aria-pressed="${on}"
+      onclick="window.OmniQAActivityTab.toggleAuditTimelineImportantOnly(${value})">${label}<span class="atl-seg-n">${count}</span></button>`;
+  let detailButton = '';
+  if (timelineState.targetId && !detailAlreadyOpen()) {
     if (timelineState.targetType === 'feedback') {
-      return `<button class="secondary" onclick="showTab('feedback'); openFeedbackDetail(${timelineState.targetId}); closeAuditTimelineModal();">Open Detail</button>`;
+      detailButton = `<button type="button" class="secondary atl-detail" onclick="closeAuditTimelineModal(); showTab('feedback'); openFeedbackDetail(${timelineState.targetId});">打开详情</button>`;
+    } else if (timelineState.targetType === 'field_test') {
+      detailButton = `<button type="button" class="secondary atl-detail" onclick="closeAuditTimelineModal(); showTab('field-test'); openFieldTestDetail(${timelineState.targetId});">打开详情</button>`;
     }
-    if (timelineState.targetType === 'field_test') {
-      return `<button class="secondary" onclick="showTab('field-test'); openFieldTestDetail(${timelineState.targetId}); closeAuditTimelineModal();">Open Detail</button>`;
-    }
-    return '';
-  })();
-
+  }
   return `
-    <label style="display:flex; align-items:center; gap:6px; color:#475569; font-size:13px; cursor:pointer; margin-right:8px;">
-      <input type="checkbox" ${timelineState.importantOnly ? 'checked' : ''} onchange="window.OmniQAActivityTab.toggleAuditTimelineImportantOnly(this.checked)">
-      Important only
-    </label>
+    <div class="atl-segs" role="group" aria-label="筛选记录">
+      ${seg(!timelineState.importantOnly, '全部', all.length, false)}
+      ${seg(timelineState.importantOnly, '仅看重要', importantCount, true)}
+    </div>
     ${detailButton}
   `;
 }
@@ -358,31 +400,48 @@ function renderTimelineItems() {
   const body = document.getElementById('auditTimelineBody');
   if (!body) return;
   const items = timelineState.importantOnly
-    ? (timelineState.items || []).filter((item) => item.important || item.level === 'important' || item.level === 'critical')
+    ? (timelineState.items || []).filter(isImportantItem)
     : (timelineState.items || []);
 
   if (!items.length) {
-    body.innerHTML = '<div class="muted" style="padding:12px 0;">No timeline records.</div>';
+    body.innerHTML = `<div class="atl-empty"><svg class="atl-empty-ic" aria-hidden="true"><use href="#i-clock"/></svg>
+      <strong>${timelineState.importantOnly ? '没有重要记录' : '暂无操作记录'}</strong>
+      <span>${timelineState.importantOnly ? '切换到「全部」可查看所有操作。' : '该对象还没有被记录的操作。'}</span></div>`;
     return;
   }
 
-  body.innerHTML = items.map((item) => {
-    const level = levelStyle(item.level);
-    return `
-      <div class="timeline-item">
-        <div class="timeline-dot" style="background:${level.color};"></div>
-        <div class="timeline-content">
-          <div class="row" style="gap:8px; align-items:center; margin:0; flex-wrap:wrap;">
-            <div style="font-weight:700; color:#0f172a;">${item.action_text || item.action || '-'}</div>
-            <span class="badge" style="border-radius:999px; background:${level.bg}; color:${level.color}; border:none;">${item.level === 'critical' ? 'Critical' : item.level === 'important' ? 'Important' : 'Normal'}</span>
-          </div>
-          <div class="muted" style="font-size:12px; margin-top:4px;">${item.actor_name || 'System'} / ${formatShanghaiTime(item.created_at)}</div>
-          <div style="margin-top:6px; line-height:1.6; color:#334155;">${item.summary || ''}</div>
-          ${item.detail ? `<div class="muted" style="margin-top:4px; line-height:1.6;">${item.detail}</div>` : ''}
-        </div>
-      </div>
-    `;
-  }).join('');
+  const groups = [];
+  items.forEach((item) => {
+    const p = shanghaiParts(item.created_at);
+    let g = groups[groups.length - 1];
+    if (!g || g.day !== p.day) { g = { day: p.day, rows: [] }; groups.push(g); }
+    g.rows.push({ item, time: p.time });
+  });
+
+  body.innerHTML = groups.map((g) => `
+    <section class="atl-day">
+      <h4 class="atl-day-label">${esc(dayLabel(g.day))}</h4>
+      <ol class="atl-list">
+        ${g.rows.map(({ item, time }) => {
+          const lv = item.level === 'critical' ? 'critical' : (isImportantItem(item) ? 'important' : 'info');
+          const pill = lv === 'critical' ? '<span class="st-pill st-pill--red">关键</span>' : lv === 'important' ? '<span class="st-pill st-pill--soft st-pill--amber">重要</span>' : '';
+          const actor = item.actor_name || '系统';
+          return `
+          <li class="atl-item atl-item--${lv}">
+            <time class="atl-time">${esc(time)}</time>
+            <span class="atl-dot" aria-hidden="true"></span>
+            <div class="atl-content">
+              <div class="atl-row1">
+                <b class="atl-action">${esc(item.action_text || item.action || '-')}</b>${pill}
+                <span class="atl-actor"><span class="fbk-avatar" aria-hidden="true">${esc(actor.slice(0, 1).toUpperCase())}</span>${esc(actor)}</span>
+              </div>
+              ${item.summary ? `<div class="atl-summary">${esc(item.summary)}</div>` : ''}
+              ${item.detail ? `<div class="atl-detail-text">${esc(item.detail)}</div>` : ''}
+            </div>
+          </li>`;
+        }).join('')}
+      </ol>
+    </section>`).join('');
 }
 
 function renderTimelineModal(title, items, targetType = '', targetId = 0) {
@@ -396,9 +455,36 @@ function renderTimelineModal(title, items, targetType = '', targetId = 0) {
   timelineState.items = items || [];
   timelineState.importantOnly = false;
   titleEl.innerText = title;
+  const sub = document.getElementById('auditTimelineSub');
+  if (sub) {
+    const first = timelineState.items[0] || {};
+    const target = [first.target_no, first.target_title].filter(Boolean).join(' · ');
+    sub.innerHTML = `${target ? `<span class="atl-target" title="${esc(target)}">${esc(target)}</span>` : ''}<span class="atl-total">共 ${timelineState.items.length} 条记录</span>`;
+  }
   actionBar.innerHTML = buildTimelineActionBar();
   renderTimelineItems();
   openModal(modal);
+  const body = document.getElementById('auditTimelineBody');
+  if (body) body.scrollTop = 0;
+  modal.querySelector('.atl-close')?.focus({ preventScroll: true });
+  bindTimelineKeys();
+}
+
+let timelineKeysBound = false;
+function bindTimelineKeys() {
+  if (timelineKeysBound) return;
+  timelineKeysBound = true;
+  // 捕获阶段处理 Esc：只关时间线，不连带关闭下层的详情抽屉
+  window.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    const modal = document.getElementById('auditTimelineModal');
+    if (!modal || modal.dataset.open !== '1' || modal.classList.contains('hidden')) return;
+    const viewer = document.getElementById('entityImageViewer');
+    if (viewer && !viewer.hidden) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeAuditTimelineModal();
+  }, true);
 }
 
 export function toggleAuditTimelineImportantOnly(checked) {
@@ -412,47 +498,48 @@ export function closeAuditTimelineModal() {
   closeModal('auditTimelineModal');
 }
 
+const TIMELINE_TITLE = {
+  bug: 'Bug 时间线',
+  requirement: '需求时间线',
+  feedback: '反馈时间线',
+  field_test: '外业测试时间线',
+};
+
 export async function openAuditTimelineModal(targetType, targetId, customTitle = '') {
   if (!targetId) {
-    window.showMessage && window.showMessage('Missing target id.', 'error');
+    window.showMessage && window.showMessage('缺少要查看的对象编号', 'error');
     return;
   }
-  let url = '';
-  let title = customTitle;
-  if (targetType === 'bug') {
-    url = `/bugs/${targetId}/timeline`;
-    title = title || 'Bug Timeline';
-  } else if (targetType === 'requirement') {
-    url = `/requirements/${targetId}/timeline`;
-    title = title || 'Requirement Timeline';
-  } else if (targetType === 'feedback') {
-    url = `/feedbacks/${targetId}/timeline`;
-    title = title || 'Feedback Timeline';
-  } else if (targetType === 'field_test') {
-    url = `/field-tests/${targetId}/timeline`;
-    title = title || 'Field Test Timeline';
-  } else {
-    window.showMessage && window.showMessage('Timeline not supported for this type.', 'error');
+  const urls = {
+    bug: `/bugs/${targetId}/timeline`,
+    requirement: `/requirements/${targetId}/timeline`,
+    feedback: `/feedbacks/${targetId}/timeline`,
+    field_test: `/field-tests/${targetId}/timeline`,
+  };
+  const url = urls[targetType];
+  if (!url) {
+    window.showMessage && window.showMessage('该类型暂不支持查看时间线', 'error');
     return;
   }
+  const title = customTitle || TIMELINE_TITLE[targetType];
   try {
     const items = await (await api(url)).json();
     renderTimelineModal(title, items || [], targetType, targetId);
   } catch (err) {
-    window.showMessage && window.showMessage(err.message || 'Load timeline failed.', 'error');
+    window.showMessage && window.showMessage(err.message || '时间线加载失败', 'error');
   }
 }
 
 export async function openActivityItem(_id, module, targetId) {
   if (!targetId) {
-    window.showMessage && window.showMessage('No timeline target for this item.', 'error');
+    window.showMessage && window.showMessage('这条动态没有可查看的对象', 'error');
     return;
   }
-  if (module === 'bug') return openAuditTimelineModal('bug', targetId, 'Bug Timeline');
-  if (module === 'requirement' || module === 'retest') return openAuditTimelineModal('requirement', targetId, 'Requirement Timeline');
-  if (module === 'feedback') return openAuditTimelineModal('feedback', targetId, 'Feedback Timeline');
-  if (module === 'field_test') return openAuditTimelineModal('field_test', targetId, 'Field Test Timeline');
-  window.showMessage && window.showMessage('Open timeline not supported.', 'error');
+  if (module === 'bug') return openAuditTimelineModal('bug', targetId);
+  if (module === 'requirement' || module === 'retest') return openAuditTimelineModal('requirement', targetId);
+  if (module === 'feedback') return openAuditTimelineModal('feedback', targetId);
+  if (module === 'field_test') return openAuditTimelineModal('field_test', targetId);
+  window.showMessage && window.showMessage('该模块暂不支持查看时间线', 'error');
 }
 
 window.OmniQAActivityTab = {

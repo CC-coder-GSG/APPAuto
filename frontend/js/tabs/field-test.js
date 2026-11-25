@@ -1,5 +1,6 @@
 ﻿import { api } from '../api.js';
-import { withPrefix, renderBugLink } from '../utils.js';
+import { withPrefix, renderBugLink, escapeHtml } from '../utils.js';
+import { openDrawer, getDrawer, closeDrawer } from '../components/side-drawer.js';
 
 const PURPOSE_ZH = { requirement: '需求测试', feature: '功能测试' };
 const RESULT_ZH = { passed: '测试通过', failed: '测试未通过' };
@@ -138,12 +139,12 @@ function collectPayload() {
 
 function resultBadge(status) {
   const passed = status === 'passed';
-  return `<span class="badge badge--status" style="background:${passed ? '#dcfce7' : '#fee2e2'}; color:${passed ? '#166534' : '#991b1b'};">${RESULT_ZH[status] || status}</span>`;
+  return `<span class="st-pill st-pill--${passed ? 'green' : 'red'}">${RESULT_ZH[status] || status}</span>`;
 }
 
 function purposeBadge(status) {
   const isReq = status === 'requirement';
-  return `<span class="badge badge--status" style="background:${isReq ? '#dbeafe' : '#fef3c7'}; color:${isReq ? '#1d4ed8' : '#92400e'};">${PURPOSE_ZH[status] || status}</span>`;
+  return `<span class="st-pill st-pill--soft st-pill--${isReq ? 'blue' : 'amber'}">${PURPOSE_ZH[status] || status}</span>`;
 }
 
 function openFormModal() {
@@ -290,62 +291,105 @@ export async function submitFieldTestRecord() {
   }
 }
 
-function openDetailPanel() { document.getElementById('fieldTestDetailPanel')?.classList.remove('hidden'); }
-export function closeFieldTestDetail() { document.getElementById('fieldTestDetailPanel')?.classList.add('hidden'); }
+function openDetailPanel() { /* 详情改为右侧抽屉（side-drawer），保留函数名兼容旧调用 */ }
+export function closeFieldTestDetail() { closeDrawer('field-test-detail'); }
+
+const esc = (v) => escapeHtml(v == null ? '' : String(v));
+const ic = (name, cls = 'ui-ic') => `<svg class="${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+function durationText(min) {
+  const m = Number(min || 0);
+  if (m < 60) return `${m} 分钟`;
+  return `${Math.floor(m / 60)} 小时${m % 60 ? ` ${m % 60} 分` : ''}`;
+}
+
+function personChip(name) {
+  const n = String(name || '').trim();
+  return `<span class="fbk-avatar${n ? '' : ' fbk-avatar--empty'}" aria-hidden="true">${esc(n ? n.slice(0, 1).toUpperCase() : '?')}</span><span>${esc(n || '-')}</span>`;
+}
+
+function markFieldTestActive(id) {
+  document.querySelectorAll('#fieldTestTable .field-test-row-card').forEach((el) => {
+    el.classList.toggle('is-active', Number(el.dataset.fieldTestId) === Number(id));
+  });
+}
 
 export async function openFieldTestDetail(recordId) {
   try {
     const row = await (await api(`/field-tests/${recordId}`)).json();
     const canEdit = canEditRow(row);
-    const bugHtml = (row.bugs || []).map((b) => {
+    const bugs = row.bugs || [];
+    const bugHtml = bugs.map((b) => {
       const ztBugId = (b.bug_id || '').replace(/\D/g, '');
-      const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" style="margin-left:4px;"></span>` : '';
-      return `
-      <span class="badge" style="margin-right:6px; margin-bottom:6px; display:inline-flex; align-items:center;">
-        ${renderBugLink(b)}${ztSlot}
-        ${canEdit ? `<a href="javascript:void(0)" onclick="unlinkFieldTestBug(${row.id}, ${b.id})" style="margin-left:6px; color:#dc2626; text-decoration:none;">×</a>` : ''}
-      </span>
-    `}).join('') || '<span class="muted">暂无关联 Bug</span>';
-
-    const body = document.getElementById('fieldTestDetailBody');
-    const title = document.getElementById('fieldTestDetailTitle');
-    if (title) title.innerText = `外业测试详情 #${row.id}`;
-    if (body) {
-      body.innerHTML = `
-        <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;">
-          <div><b>大版本：</b>${row.major_version_no || '-'}</div>
-          <div><b>小版本：</b>${row.minor_version_no || '-'}</div>
-          <div><b>测试目的：</b>${PURPOSE_ZH[row.purpose_type] || row.purpose_type}</div>
-          <div><b>关联内容：</b>${purposeText(row)}</div>
-          <div><b>开始时间：</b>${row.start_time ? new Date(row.start_time).toLocaleString() : '-'}</div>
-          <div><b>结束时间：</b>${row.end_time ? new Date(row.end_time).toLocaleString() : '-'}</div>
-          <div><b>本次时长：</b>${row.duration_minutes || 0} 分钟</div>
-          <div><b>测试结果：</b>${RESULT_ZH[row.result_status] || row.result_status}</div>
-          <div><b>测试人：</b>${row.tester_name || '-'}</div>
-          <div><b>备注：</b>${row.notes || '-'}</div>
-          <div style="margin-top:8px;"><b>关联 Bug：</b><div style="margin-top:6px;">${bugHtml}</div></div>
-          ${canEdit ? `
-          <div class="row" style="margin-top:10px;">
-            <div class="prefix-input" style="min-width:220px;">
-              <span>🔎</span>
-              <input id="fieldTestSearchBugInput" placeholder="搜索已有 Bug（支持模糊）" oninput="searchFieldTestBugOptions(${row.id}, this.value)">
-            </div>
-            <select id="fieldTestLinkBugSelect" style="min-width:200px;"><option value="">选择已有 Bug</option></select>
-            <button class="secondary" onclick="linkFieldTestDetailBug(${row.id})">关联已有 Bug</button>
+      const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}"></span>` : '';
+      return `<span class="fbk-bug">${renderBugLink(b)}${ztSlot}
+        ${canEdit ? `<button type="button" class="fbk-x" onclick="unlinkFieldTestBug(${row.id}, ${b.id})" aria-label="解除关联 ${esc(b.bug_id)}" title="解除关联">×</button>` : ''}</span>`;
+    }).join('');
+    const sameDay = formatDateOnly(row.start_time) === formatDateOnly(row.end_time);
+    const prev = getDrawer('field-test-detail');
+    const d = openDrawer({
+      key: 'field-test-detail',
+      size: 'lg',
+      keepScroll: !!prev && Number(prev.root.dataset.recordId) === Number(row.id),
+      head: `
+        <div class="sd-eyebrow"><span class="fbk-no">#${row.id}</span>${purposeBadge(row.purpose_type)}${resultBadge(row.result_status)}</div>
+        <h3 class="sd-title sd-title--clamp" title="${esc(purposeText(row))}">${esc(purposeText(row))}</h3>
+        <div class="sd-sub">${esc(row.tester_name || '-')} 记录于 ${esc(formatDateTime(row.created_at))}</div>`,
+      tools: `<button type="button" class="secondary sd-tool" onclick="openAuditTimelineModal('field_test', ${row.id}, '外业测试时间线')">${ic('clock')}时间线</button>
+        ${canEdit ? `<button type="button" class="sd-tool" onclick="closeFieldTestDetail(); editFieldTestRecord(${row.id});">编辑记录</button>` : ''}`,
+      body: `
+        <div class="ftd-time">
+          <div class="ftd-time-main">
+            <span class="ftd-time-label">测试时段</span>
+            <strong>${esc(formatDateOnly(row.start_time))} ${esc(formatTimeHM(row.start_time))}<span class="ftd-arrow">→</span>${sameDay ? '' : esc(formatDateOnly(row.end_time)) + ' '}${esc(formatTimeHM(row.end_time))}</strong>
           </div>
-          <div class="row" style="margin-top:10px;">
-            <div class="prefix-input"><span>b#</span><input id="fieldTestDetailBugInput" inputmode="numeric" oninput="digitsOnly(this)" placeholder="输入 Bug 数字部分"></div>
-            <button class="secondary" onclick="addFieldTestDetailBug(${row.id})">新增并关联 Bug</button>
-          </div>` : ''}
-          <div class="row" style="margin-top:12px;">
-            <button class="secondary" onclick="openAuditTimelineModal('field_test', ${row.id}, '外业测试时间线')">时间线</button>
-            ${canEdit ? `<button class="secondary" onclick="editFieldTestRecord(${row.id}); closeFieldTestDetail();">编辑记录</button>` : ''}
-          </div>
+          <span class="ftd-dur">${ic('timer')}${esc(durationText(row.duration_minutes))}</span>
         </div>
-      `;
-    }
-    openDetailPanel();
-    if (body) window.OmniQAZentao?.hydrateContainer(body);
+
+        <dl class="sd-facts">
+          <div><dt>大版本</dt><dd>${esc(row.major_version_no || '-')}</dd></div>
+          <div><dt>小版本</dt><dd>${esc(row.minor_version_no || '-')}</dd></div>
+          <div><dt>测试目的</dt><dd>${esc(PURPOSE_ZH[row.purpose_type] || row.purpose_type)}</dd></div>
+          <div><dt>测试人</dt><dd>${personChip(row.tester_name)}</dd></div>
+          <div><dt>记录时间</dt><dd>${esc(formatDateTime(row.created_at))}</dd></div>
+          <div><dt>最近更新</dt><dd>${esc(formatDateTime(row.updated_at))}</dd></div>
+        </dl>
+
+        <section class="sd-sec">
+          <h4 class="sd-sec-title">${ic('field')}${row.purpose_type === 'requirement' ? '关联需求' : '测试内容'}</h4>
+          <div class="fbk-content">${esc(purposeText(row))}</div>
+        </section>
+
+        <section class="sd-sec">
+          <h4 class="sd-sec-title">${ic('feedback')}备注</h4>
+          ${row.notes ? `<div class="fbk-content">${esc(row.notes)}</div>` : '<span class="sd-empty">未填写备注</span>'}
+        </section>
+
+        <section class="sd-sec">
+          <h4 class="sd-sec-title">${ic('bug')}关联 Bug <span class="sd-count">${bugs.length}</span></h4>
+          <div class="fbk-bugs">${bugHtml || '<span class="sd-empty">暂无关联 Bug</span>'}</div>
+          ${canEdit ? `<div class="sd-subgrid">
+            <div class="sd-field"><span class="sd-label">关联已有 Bug</span>
+              <div class="sd-inline sd-inline--tight">
+                <span class="sd-search">${ic('search')}<input id="fieldTestSearchBugInput" placeholder="搜索已有 Bug（支持模糊）" oninput="searchFieldTestBugOptions(${row.id}, this.value)"></span>
+                <select id="fieldTestLinkBugSelect"><option value="">选择已有 Bug</option></select>
+                <button type="button" class="secondary" onclick="linkFieldTestDetailBug(${row.id})">关联</button>
+              </div>
+            </div>
+            <div class="sd-field"><span class="sd-label">新增并关联 Bug</span>
+              <div class="sd-inline sd-inline--tight">
+                <span class="sd-prefix"><span>b#</span><input id="fieldTestDetailBugInput" inputmode="numeric" oninput="digitsOnly(this)" placeholder="Bug 数字编号"></span>
+                <button type="button" class="secondary" onclick="addFieldTestDetailBug(${row.id})">新增并关联</button>
+              </div>
+            </div>
+          </div>` : ''}
+        </section>`,
+      onClose: () => { markFieldTestActive(0); },
+    });
+    d.root.dataset.recordId = String(row.id);
+    markFieldTestActive(row.id);
+    window.OmniQAZentao?.hydrateContainer?.(d.body);
     if (canEdit) {
       await searchFieldTestBugOptions(row.id, '');
     }
@@ -423,39 +467,35 @@ function updatePagination(total, page, pageSize) {
 }
 
 function renderList(rows) {
-  const tbody = document.getElementById('fieldTestTable');
-  if (!tbody) return;
+  const list = document.getElementById('fieldTestTable');
+  if (!list) return;
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="field-test-empty">暂无外业测试记录</td></tr>';
+    list.innerHTML = `<div class="fbk-empty field-test-empty">${ic('field', 'fbk-empty-ic')}<strong>暂无外业测试记录</strong><span>调整上方筛选条件，或点击「新增测试记录」。</span></div>`;
     return;
   }
-  tbody.innerHTML = rows.map((r) => `
-    <tr class="field-test-row-card" data-field-test-id="${r.id}">
-      <td class="field-test-col-date">${formatDateOnly(r.start_time)}</td>
-      <td class="field-test-col-version">
-        <div class="field-test-cell-main">${r.major_version_no || '-'}</div>
-        <div class="field-test-cell-sub" title="${(r.minor_version_no || '-').replace(/"/g, '&quot;')}">${r.minor_version_no || '-'}</div>
-      </td>
-      <td class="col-status">${purposeBadge(r.purpose_type)}</td>
-      <td class="field-test-col-content" title="${purposeText(r).replace(/"/g, '&quot;')}">
-        <div class="field-test-cell-main field-test-text-clamp-2">${purposeText(r)}</div>
-      </td>
-      <td class="field-test-col-time">
-        <div class="field-test-cell-main field-test-time-range">${formatTimeRange(r.start_time, r.end_time)}</div>
-        <div class="field-test-cell-sub">${r.duration_minutes || 0} 分钟</div>
-      </td>
-      <td class="col-status">${resultBadge(r.result_status)}</td>
-      <td class="field-test-col-bug">${r.bug_count || 0}</td>
-      <td class="field-test-col-tester">${r.tester_name || '-'}</td>
-      <td class="field-test-col-notes" title="${(r.notes || '').replace(/"/g, '&quot;')}">
-        <div class="field-test-text-clamp-2">${r.notes || '-'}</div>
-      </td>
-      <td class="col-actions">
-        <button class="secondary" onclick="openFieldTestDetail(${r.id})">详情</button>
-        ${canEditRow(r) ? `<button class="secondary" onclick="editFieldTestRecord(${r.id})" style="margin-left:6px;">编辑</button>` : ''}
-      </td>
-    </tr>
-  `).join('');
+  const activeId = Number(getDrawer('field-test-detail')?.root.dataset.recordId || 0);
+  list.innerHTML = rows.map((r) => {
+    const d = new Date(r.start_time);
+    const valid = !Number.isNaN(d.getTime());
+    const bugs = Number(r.bug_count || 0);
+    return `
+    <div class="ftl-row field-test-row-card${activeId === Number(r.id) ? ' is-active' : ''}" role="listitem" data-field-test-id="${r.id}">
+      <button type="button" class="fbk-row-hit" onclick="openFieldTestDetail(${r.id})" aria-label="查看外业测试记录 #${r.id} 详情"></button>
+      <div class="ftl-date">${valid ? `<b>${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}</b><span>${d.getFullYear()} · ${WEEK[d.getDay()]}</span>` : '<b>-</b>'}</div>
+      <div class="ftl-main">
+        <div class="ftl-title">${purposeBadge(r.purpose_type)}<span title="${esc(purposeText(r))}">${esc(purposeText(r))}</span></div>
+        <div class="fbk-meta">
+          <span class="fbk-ver">${esc(r.major_version_no || '-')} / ${esc(r.minor_version_no || '-')}</span>
+          ${r.notes ? `<span class="ftl-note" title="${esc(r.notes)}">${esc(r.notes)}</span>` : ''}
+        </div>
+      </div>
+      <div class="ftl-time"><b>${esc(formatTimeHM(r.start_time))} – ${esc(formatTimeHM(r.end_time))}</b><span>${esc(durationText(r.duration_minutes))}</span></div>
+      <div class="ftl-result">${resultBadge(r.result_status)}<span class="ftl-bugs${bugs ? ' has-bugs' : ''}" title="关联 Bug 数">${ic('bug')}${bugs}</span></div>
+      <div class="fbk-assignee">${personChip(r.tester_name)}</div>
+      <div class="ftl-actions">${canEditRow(r) ? `<button type="button" class="secondary ftl-edit" onclick="editFieldTestRecord(${r.id})" title="编辑记录">编辑</button>` : ''}</div>
+      <svg class="fbk-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+    </div>`;
+  }).join('');
 }
 
 function isFieldTestNearTop() {

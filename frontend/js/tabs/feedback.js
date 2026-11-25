@@ -1,26 +1,41 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { renderBugLink } from '../utils.js';
+import { renderBugLink, escapeHtml } from '../utils.js';
+import { openDrawer, getDrawer, closeDrawer } from '../components/side-drawer.js';
+import { wireImageViewer } from '../components/image-viewer.js';
 
+// 2026-11-25 排版 v2：列表改为可点击的行卡片；新建反馈 / 反馈详情都在右侧抽屉里完成，
+// 不再把详情渲染到页面底部。附件经 api() 取 blob（下载接口需要 Authorization 头，
+// 直接 <img src> / <a href> 会 401）。
 let currentPage = 1;
 let currentPageSize = 10;
 let feedbackSseBound = false;
+let activeFeedbackId = 0;
+let attachmentUrls = [];
+let createFiles = [];
 const _feedbackTopBannerCount = { value: 0 };
 
+const esc = (v) => escapeHtml(v == null ? '' : String(v));
+const STATUS = {
+  pending: { zh: '待处理', tone: 'amber' },
+  processing: { zh: '处理中', tone: 'blue' },
+  resolved: { zh: '已处理', tone: 'green' },
+  closed: { zh: '已关闭', tone: 'gray' },
+};
+const STATUS_ORDER = ['pending', 'processing', 'resolved', 'closed'];
+const ic = (name, cls = 'ui-ic') => `<svg class="${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+
 function feedbackStatusZh(v) {
-  const m = { pending: '待处理', processing: '处理中', resolved: '已处理', closed: '已关闭' };
-  return m[v] || v;
+  return STATUS[v]?.zh || v;
 }
 
 function buildStatusBadge(status) {
-  const conf = {
-    pending: { bg: '#fef9c3', color: '#854d0e' },
-    processing: { bg: '#dbeafe', color: '#1d4ed8' },
-    resolved: { bg: '#dcfce7', color: '#166534' },
-    closed: { bg: '#e2e8f0', color: '#334155' },
-  };
-  const c = conf[status] || conf.pending;
-  return `<span class="badge badge--status" style="background:${c.bg}; color:${c.color};">${feedbackStatusZh(status)}</span>`;
+  const s = STATUS[status] || STATUS.pending;
+  return `<span class="st-pill st-pill--${s.tone}">${s.zh}</span>`;
+}
+
+function isAdmin() {
+  return !!(window.currentUser && window.currentUser.role === 'admin');
 }
 
 function selectedMajorId() {
@@ -39,14 +54,44 @@ function formatBytes(bytes) {
   return `${val.toFixed(val >= 10 ? 0 : 1)} ${units[idx]}`;
 }
 
-function fileIconByExt(ext = '') {
-  const e = ext.toLowerCase();
-  if (['.doc', '.docx'].includes(e)) return '📄';
-  if (['.xls', '.xlsx', '.csv'].includes(e)) return '📊';
-  if (['.pdf'].includes(e)) return '📕';
-  if (['.zip', '.rar', '.7z'].includes(e)) return '🗜️';
-  if (['.txt', '.md', '.log'].includes(e)) return '📝';
-  return '📎';
+function fmtTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '-';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function relTime(iso) {
+  if (!iso) return '';
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (Number.isNaN(diff)) return '';
+  if (diff < 60) return '刚刚';
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} 天前`;
+  return fmtTime(iso).slice(0, 10);
+}
+
+function avatar(name) {
+  const n = String(name || '').trim();
+  if (!n) return '<span class="fbk-avatar fbk-avatar--empty" aria-hidden="true">?</span>';
+  return `<span class="fbk-avatar" aria-hidden="true">${esc(n.slice(0, 1).toUpperCase())}</span>`;
+}
+
+function fileKind(ext = '') {
+  const e = String(ext).toLowerCase();
+  if (['.doc', '.docx'].includes(e)) return 'DOC';
+  if (['.xls', '.xlsx', '.csv'].includes(e)) return 'XLS';
+  if (e === '.pdf') return 'PDF';
+  if (['.zip', '.rar', '.7z'].includes(e)) return 'ZIP';
+  if (['.txt', '.md', '.log'].includes(e)) return 'TXT';
+  return (e.replace('.', '').slice(0, 4) || 'FILE').toUpperCase();
+}
+
+function versionOptions(type, parentId, selected) {
+  const rows = (window.versions || []).filter((v) => v.version_type === type && (type !== 'minor' || Number(v.parent_id) === Number(parentId)));
+  return rows.map((v) => `<option value="${v.id}" ${Number(selected) === Number(v.id) ? 'selected' : ''}>${esc(v.version_no)}</option>`).join('');
 }
 
 export async function loadFeedbackMinorOptions() {
@@ -112,25 +157,37 @@ function renderPagination(total, page, pageSize) {
   if (next) next.disabled = page >= pages;
 }
 
+function markActiveRow() {
+  document.querySelectorAll('#feedbackTable .feedback-row-card').forEach((el) => {
+    el.classList.toggle('is-active', Number(el.dataset.feedbackId) === activeFeedbackId && !!getDrawer('feedback-detail'));
+  });
+}
+
 function renderFeedbackList(rows) {
-  const tbody = document.getElementById('feedbackTable');
-  if (!tbody) return;
+  const list = document.getElementById('feedbackTable');
+  if (!list) return;
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#94a3b8; padding:20px;">暂无反馈数据</td></tr>';
+    list.innerHTML = `<div class="fbk-empty">${ic('feedback', 'fbk-empty-ic')}<strong>暂无反馈数据</strong><span>调整上方筛选条件，或点击右上角「新建反馈」。</span></div>`;
     return;
   }
-  tbody.innerHTML = rows.map((r) => `
-    <tr class="feedback-row-card" data-feedback-id="${r.id}">
-      <td>${r.feedback_no || '-'}</td>
-      <td class="col-text col-summary" title="${(r.summary || '').replace(/"/g, '&quot;')}"><span class="cell-ellipsis">${(r.summary || '').slice(0, 50)}${(r.summary || '').length > 50 ? '...' : ''}</span></td>
-      <td>${r.major_version_no || '-'} / ${r.minor_version_no || '-'}</td>
-      <td class="col-status">${buildStatusBadge(r.status)}</td>
-      <td>${r.assignee_name || '<span class="muted">未指派</span>'}</td>
-      <td>${r.creator_name || '-'}</td>
-      <td>${r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td>
-      <td class="col-actions"><button class="secondary" onclick="openFeedbackDetail(${r.id})">查看详情</button></td>
-    </tr>
+  list.innerHTML = rows.map((r) => `
+    <div class="fbk-row feedback-row-card" role="listitem" data-feedback-id="${r.id}">
+      <button type="button" class="fbk-row-hit" onclick="openFeedbackDetail(${r.id})" aria-label="查看反馈 ${esc(r.feedback_no || '#' + r.id)} 详情"></button>
+      <span class="fbk-no${r.feedback_no ? '' : ' is-empty'}">${esc(r.feedback_no || '未编号')}</span>
+      <div class="fbk-main">
+        <div class="fbk-summary" title="${esc(r.summary)}">${esc(r.summary)}</div>
+        <div class="fbk-meta">
+          <span class="fbk-ver">${esc(r.major_version_no || '-')} / ${esc(r.minor_version_no || '-')}</span>
+          <span>${esc(r.creator_name || '-')} 创建</span>
+          <span title="${esc(fmtTime(r.created_at))}">${esc(relTime(r.created_at))}</span>
+        </div>
+      </div>
+      <div class="fbk-assignee">${avatar(r.assignee_name)}<span class="${r.assignee_name ? '' : 'is-empty'}">${esc(r.assignee_name || '未指派')}</span></div>
+      <div class="fbk-status">${buildStatusBadge(r.status)}</div>
+      <svg class="fbk-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+    </div>
   `).join('');
+  markActiveRow();
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
     window.OmniQASSE.releaseAttention?.();
     document.querySelectorAll('.feedback-row-card[data-feedback-id]').forEach((el) => {
@@ -156,10 +213,84 @@ export async function prevFeedbackPage() {
   await loadFeedbackBoard(currentPage - 1);
 }
 
+/* ── 新建反馈（右侧抽屉） ─────────────────────────────── */
+
+function renderCreateFiles() {
+  const box = document.getElementById('newFeedbackFileList');
+  if (!box) return;
+  box.innerHTML = createFiles.map((f, i) => `
+    <span class="fbk-file-chip"><span class="fbk-kind">${esc(fileKind((f.name.match(/\.[^.]+$/) || [''])[0]))}</span>
+      <span class="fbk-file-name" title="${esc(f.name)}">${esc(f.name)}</span><span class="fbk-file-size">${formatBytes(f.size)}</span>
+      <button type="button" class="fbk-x" onclick="window.OmniQAFeedbackTab._removeCreateFile(${i})" aria-label="移除 ${esc(f.name)}">×</button>
+    </span>`).join('');
+}
+
+function addCreateFiles(list) {
+  Array.from(list || []).forEach((f) => {
+    if (!createFiles.some((x) => x.name === f.name && x.size === f.size)) createFiles.push(f);
+  });
+  renderCreateFiles();
+}
+
+function bindDropzone(zone, input, onFiles) {
+  if (!zone || !input) return;
+  input.addEventListener('change', () => { onFiles(input.files); input.value = ''; });
+  ['dragenter', 'dragover'].forEach((t) => zone.addEventListener(t, (e) => { e.preventDefault(); zone.classList.add('is-over'); }));
+  ['dragleave', 'drop'].forEach((t) => zone.addEventListener(t, (e) => { e.preventDefault(); zone.classList.remove('is-over'); }));
+  zone.addEventListener('drop', (e) => onFiles(e.dataTransfer?.files));
+}
+
+export function openFeedbackCreate() {
+  createFiles = [];
+  const filterMajor = selectedMajorId();
+  const majors = (window.versions || []).filter((v) => v.version_type === 'major');
+  const hasMinor = (id) => (window.versions || []).some((v) => v.version_type === 'minor' && Number(v.parent_id) === Number(id));
+  const majorId = filterMajor || Number((majors.find((m) => hasMinor(m.id)) || majors[0])?.id || 0);
+  const filterMinor = Number(document.getElementById('feedbackMinorSelect')?.value || 0);
+  const d = openDrawer({
+    key: 'feedback-create',
+    size: 'md',
+    head: `<div class="sd-eyebrow">反馈记录</div><h3 class="sd-title">新建反馈</h3>`,
+    body: `
+      <div class="sd-form">
+        <div class="sd-grid2">
+          <label class="sd-field"><span class="sd-label">大版本<em>*</em></span><select id="newFeedbackMajor">${versionOptions('major', 0, majorId)}</select></label>
+          <label class="sd-field"><span class="sd-label">小版本<em>*</em></span><select id="newFeedbackMinor"></select></label>
+        </div>
+        <label class="sd-field"><span class="sd-label">反馈编号<small>选填，只填数字</small></span>
+          <span class="sd-prefix"><span>f#</span><input id="newFeedbackNoNum" inputmode="numeric" oninput="digitsOnly(this)" placeholder="例如 12"></span></label>
+        <label class="sd-field"><span class="sd-label">反馈概览<em>*</em><small id="newFeedbackCount">0 / 500</small></span>
+          <textarea id="newFeedbackSummary" rows="6" maxlength="500" placeholder="描述用户遇到的问题：现象、操作步骤、设备与环境……"></textarea></label>
+        <div class="sd-field"><span class="sd-label">附件<small>截图、日志等，可多选或拖入</small></span>
+          <label class="sd-drop" id="newFeedbackDrop">
+            <input id="newFeedbackFiles" type="file" multiple hidden>
+            ${ic('upload', 'sd-drop-ic')}<span><b>点击选择文件</b>，或拖到这里</span>
+          </label>
+          <div id="newFeedbackFileList" class="fbk-file-chips"></div>
+        </div>
+      </div>`,
+    foot: `<button type="button" class="secondary" data-sd-close>取消</button>
+      <button type="button" id="newFeedbackSubmit" onclick="createFeedback()">${ic('check')}提交反馈</button>`,
+  });
+  const mSel = d.body.querySelector('#newFeedbackMajor');
+  const nSel = d.body.querySelector('#newFeedbackMinor');
+  const fillMinor = () => {
+    const opts = versionOptions('minor', mSel.value, Number(mSel.value) === filterMajor ? filterMinor : 0);
+    nSel.innerHTML = opts || '<option value="">暂无小版本</option>';
+  };
+  mSel.addEventListener('change', fillMinor);
+  fillMinor();
+  const summary = d.body.querySelector('#newFeedbackSummary');
+  const count = d.body.querySelector('#newFeedbackCount');
+  summary.addEventListener('input', () => { count.textContent = `${summary.value.length} / 500`; });
+  bindDropzone(d.body.querySelector('#newFeedbackDrop'), d.body.querySelector('#newFeedbackFiles'), addCreateFiles);
+  setTimeout(() => summary.focus({ preventScroll: true }), 60);
+}
+
 export async function createFeedback() {
   const noNum = (document.getElementById('newFeedbackNoNum')?.value || '').trim();
-  const majorId = selectedMajorId();
-  const minorId = Number(document.getElementById('feedbackMinorSelect')?.value || 0);
+  const majorId = Number(document.getElementById('newFeedbackMajor')?.value || selectedMajorId() || 0);
+  const minorId = Number(document.getElementById('newFeedbackMinor')?.value || document.getElementById('feedbackMinorSelect')?.value || 0);
   const summary = (document.getElementById('newFeedbackSummary')?.value || '').trim();
   if (!majorId || !minorId) {
     window.showMessage && window.showMessage('请选择反馈版本（大版本/小版本）', 'error');
@@ -167,29 +298,83 @@ export async function createFeedback() {
   }
   if (!summary) {
     window.showMessage && window.showMessage('反馈概览不能为空', 'error');
+    document.getElementById('newFeedbackSummary')?.focus();
     return;
   }
-
-  const created = await (await api('/feedbacks', {
-    method: 'POST',
-    headers: window.H,
-    body: { feedback_no_num: noNum || null, major_version_id: majorId, minor_version_id: minorId, summary },
-  })).json();
-
-  const createFilesInput = document.getElementById('newFeedbackFiles');
-  const createFiles = createFilesInput?.files ? Array.from(createFilesInput.files) : [];
-  if (createFiles.length > 0) {
+  const btn = document.getElementById('newFeedbackSubmit');
+  if (btn) btn.disabled = true;
+  try {
+    const created = await (await api('/feedbacks', {
+      method: 'POST',
+      headers: window.H,
+      body: { feedback_no_num: noNum || null, major_version_id: majorId, minor_version_id: minorId, summary },
+    })).json();
     for (const file of createFiles) {
       const form = new FormData();
       form.append('file', file);
       await api(`/feedbacks/${created.id}/attachments`, { method: 'POST', body: form });
     }
+    createFiles = [];
+    window.showMessage && window.showMessage('反馈已创建', 'success');
+    closeDrawer('feedback-create');
+    await loadFeedbackBoard(1);
+    const row = document.querySelector(`.feedback-row-card[data-feedback-id='${created.id}']`);
+    if (row && window.OmniQASSE?.pulseBoundaryGlow) window.OmniQASSE.pulseBoundaryGlow(row, 'blue');
+  } finally {
+    if (btn) btn.disabled = false;
   }
-  window.showMessage && window.showMessage('反馈已创建', 'success');
-  document.getElementById('newFeedbackNoNum').value = '';
-  document.getElementById('newFeedbackSummary').value = '';
-  if (createFilesInput) createFilesInput.value = '';
-  await loadFeedbackBoard(1);
+}
+
+/* ── 附件 ─────────────────────────────────────────────── */
+
+function revokeAttachmentUrls() {
+  attachmentUrls.forEach((u) => URL.revokeObjectURL(u));
+  attachmentUrls = [];
+}
+
+async function attachmentBlobUrl(id) {
+  const res = await api(`/feedbacks/attachments/${id}/download`);
+  const url = URL.createObjectURL(await res.blob());
+  attachmentUrls.push(url);
+  return url;
+}
+
+async function hydrateAttachmentImages(root) {
+  const imgs = [...root.querySelectorAll('img[data-att-id]')];
+  await Promise.all(imgs.map(async (img) => {
+    try {
+      img.src = await attachmentBlobUrl(img.dataset.attId);
+    } catch (_) {
+      img.dataset.previewImageError = '1';
+      img.closest('.fbk-thumb')?.classList.add('is-broken');
+    }
+  }));
+}
+
+export async function downloadFeedbackAttachment(attachmentId, name) {
+  try {
+    const url = await attachmentBlobUrl(attachmentId);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name || 'attachment';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch (err) {
+    window.showMessage && window.showMessage(err.message || '下载失败', 'error');
+  }
+}
+
+async function uploadFiles(feedbackId, files) {
+  const list = Array.from(files || []);
+  if (!list.length) return;
+  for (const file of list) {
+    const form = new FormData();
+    form.append('file', file);
+    await api(`/feedbacks/${feedbackId}/attachments`, { method: 'POST', body: form });
+  }
+  window.showMessage && window.showMessage(`已上传 ${list.length} 个附件`, 'success');
+  await openFeedbackDetail(feedbackId);
 }
 
 export async function uploadFeedbackFiles(feedbackId) {
@@ -199,13 +384,7 @@ export async function uploadFeedbackFiles(feedbackId) {
     window.showMessage && window.showMessage('请先选择附件', 'error');
     return;
   }
-  for (const file of files) {
-    const form = new FormData();
-    form.append('file', file);
-    await api(`/feedbacks/${feedbackId}/attachments`, { method: 'POST', body: form });
-  }
-  window.showMessage && window.showMessage('附件上传完成', 'success');
-  await openFeedbackDetail(feedbackId);
+  await uploadFiles(feedbackId, files);
 }
 
 export async function deleteFeedbackAttachment(attachmentId, feedbackId) {
@@ -223,178 +402,202 @@ async function loadBugOptions(keyword = '') {
   const rows = await (await api(`/feedbacks/bug-options?${params.toString()}`)).json();
   const sel = document.getElementById('feedbackLinkBugId');
   if (!sel) return;
-  sel.innerHTML = '<option value="">选择已有 Bug</option>' + rows.map((b) => `<option value="${b.id}">${b.bug_id} (ID:${b.id})</option>`).join('');
+  sel.innerHTML = '<option value="">选择已有 Bug</option>' + rows.map((b) => `<option value="${b.id}">${esc(b.bug_id)}${b.zentao_bug_title ? ' · ' + esc(String(b.zentao_bug_title).slice(0, 24)) : ''}</option>`).join('');
 }
 
-function renderStatusOps(feedbackId, currentStatus) {
-  const isAdmin = window.currentUser && window.currentUser.role === 'admin';
-  const statuses = isAdmin ? ['pending', 'processing', 'resolved', 'closed'] : ['pending', 'processing', 'resolved'];
-  return statuses.map((s) => {
-    const active = s === currentStatus;
-    return `<button class="${active ? 'secondary' : ''}" style="padding:6px 12px; font-size:12px; border-radius:10px; transition:all .2s ease;" onclick="setFeedbackStatus(${feedbackId}, '${s}')">${feedbackStatusZh(s)}</button>`;
-  }).join('');
+/* ── 反馈详情（右侧抽屉） ─────────────────────────────── */
+
+// 与后端 FeedbackService._assert_status_transition 保持一致：不允许的流转直接置灰，避免点了才报错
+const STATUS_FLOW = {
+  admin: {
+    pending: ['processing', 'resolved', 'closed'],
+    processing: ['pending', 'resolved', 'closed'],
+    resolved: ['processing', 'closed'],
+    closed: ['processing'],
+  },
+  member: {
+    pending: ['processing'],
+    processing: ['resolved'],
+    resolved: ['processing'],
+    closed: [],
+  },
+};
+
+function renderStatusStepper(detail) {
+  const admin = isAdmin();
+  const statuses = admin ? STATUS_ORDER : STATUS_ORDER.filter((s) => s !== 'closed');
+  const allowed = (STATUS_FLOW[admin ? 'admin' : 'member'][detail.status]) || [];
+  const cur = STATUS_ORDER.indexOf(detail.status);
+  return `<div class="fbk-stepper" role="group" aria-label="反馈状态">${statuses.map((s) => {
+    const i = STATUS_ORDER.indexOf(s);
+    const current = s === detail.status;
+    const blocked = !current && !allowed.includes(s);
+    const cls = current ? 'is-current' : `${i < cur ? 'is-done' : ''}${blocked ? ' is-blocked' : ''}`;
+    const title = current ? '当前状态' : blocked ? `当前状态不能直接切换为「${STATUS[s].zh}」` : `切换为「${STATUS[s].zh}」`;
+    return `<button type="button" class="fbk-step fbk-step--${STATUS[s].tone} ${cls}" ${current ? 'aria-current="step" disabled' : ''}${blocked ? ' disabled' : ''}
+      onclick="setFeedbackStatus(${detail.id}, '${s}')" title="${title}">
+      <span class="fbk-step-dot"></span>${STATUS[s].zh}</button>`;
+  }).join('')}</div>`;
 }
+
+const ACTION_ZH = {
+  'feedback.create': '创建反馈',
+  'feedback.assign': '指派处理人',
+  'feedback.handle': '提交处理结果',
+  'feedback.status': '更新反馈状态',
+  'feedback.upload_attachment': '上传附件',
+  'feedback.delete_attachment': '删除附件',
+  'feedback.link_bug': '关联已有 Bug',
+  'feedback.create_bug_link': '新建并关联 Bug',
+  'feedback.unlink_bug': '解除 Bug 关联',
+};
 
 export async function openFeedbackDetail(feedbackId) {
-  const detail = await (await api(`/feedbacks/${feedbackId}`)).json();
-  const timeline = await (await api(`/feedbacks/${feedbackId}/timeline`)).json();
-  const panel = document.getElementById('feedbackDetailPanel');
-  const body = document.getElementById('feedbackDetailBody');
-  if (!panel || !body) return;
-  const sectionCardStyle = 'flex:1; min-width:320px; min-height:320px; border-radius:12px; background:#ffffff; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); padding:22px; display:flex; flex-direction:column;';
+  const [detail, timeline] = await Promise.all([
+    (await api(`/feedbacks/${feedbackId}`)).json(),
+    (await api(`/feedbacks/${feedbackId}/timeline`)).json(),
+  ]);
+  const keepScroll = activeFeedbackId === Number(feedbackId) && !!getDrawer('feedback-detail');
+  activeFeedbackId = Number(feedbackId);
+  revokeAttachmentUrls();
+  const admin = isAdmin();
+  const attachments = detail.attachments || [];
+  const images = attachments.filter((a) => a.is_image);
+  const files = attachments.filter((a) => !a.is_image);
 
-  const attachmentsHtml = (detail.attachments || []).map((a) => {
-    const dl = `/feedbacks/attachments/${a.id}/download`;
-    if (a.is_image) {
-      return `<div style="display:inline-block; margin-right:10px; margin-bottom:10px;">
-        <a href="${dl}" target="_blank">
-          <img src="${dl}" alt="${a.original_name}" style="width:136px; height:102px; object-fit:cover; border-radius:10px; box-shadow:0 2px 8px rgba(15,23,42,0.08);">
-        </a>
-        <div style="font-size:12px; margin-top:6px; color:#64748b;">
-          <a href="javascript:void(0)" style="color:#ef4444; text-decoration:none;" onclick="deleteFeedbackAttachment(${a.id}, ${detail.id})">删除</a>
-        </div>
-      </div>`;
-    }
-    return `<div class="row" style="margin-bottom:8px; justify-content:space-between; background:#f8fafc; border-radius:10px; padding:10px 12px;">
-      <span style="color:#0f172a;">${fileIconByExt(a.file_ext)} ${a.original_name} <span class="muted">(${formatBytes(a.file_size)})</span></span>
-      <span>
-        <a href="${dl}" target="_blank" style="text-decoration:none;">下载</a>
-        <a href="javascript:void(0)" style="color:#ef4444; margin-left:8px; text-decoration:none;" onclick="deleteFeedbackAttachment(${a.id}, ${detail.id})">删除</a>
-      </span>
-    </div>`;
-  }).join('') || '<span class="muted">暂无附件</span>';
+  const imagesHtml = images.length ? `<div class="fbk-thumbs" id="feedbackDetailImages">${images.map((a) => `
+      <figure class="fbk-thumb">
+        <img data-att-id="${a.id}" alt="${esc(a.original_name)}" title="点击放大查看">
+        <figcaption><span title="${esc(a.original_name)}">${esc(a.original_name)}</span>
+          <button type="button" class="fbk-x" onclick="deleteFeedbackAttachment(${a.id}, ${detail.id})" aria-label="删除 ${esc(a.original_name)}" title="删除">×</button></figcaption>
+      </figure>`).join('')}</div>` : '';
+  const filesHtml = files.length ? `<div class="fbk-files">${files.map((a) => `
+      <div class="fbk-file">
+        <span class="fbk-kind">${esc(fileKind(a.file_ext))}</span>
+        <span class="fbk-file-name" title="${esc(a.original_name)}">${esc(a.original_name)}</span>
+        <span class="fbk-file-size">${formatBytes(a.file_size)}</span>
+        <button type="button" class="fbk-link" onclick="window.OmniQAFeedbackTab.downloadFeedbackAttachment(${a.id}, '${esc(a.original_name).replace(/'/g, '&#39;')}')">下载</button>
+        <button type="button" class="fbk-link fbk-link--danger" onclick="deleteFeedbackAttachment(${a.id}, ${detail.id})">删除</button>
+      </div>`).join('')}</div>` : '';
 
-  const bugsHtml = (detail.bugs || []).map((b) => `<span class="badge" style="display:inline-flex; align-items:center; margin-right:8px; margin-bottom:8px; border-radius:99px; padding:6px 10px; background:#f8fafc; color:#334155;">${renderBugLink(b)} <a href="javascript:void(0)" style="color:#ef4444; margin-left:6px; text-decoration:none;" onclick="unlinkFeedbackBug(${detail.id}, ${b.id})">×</a></span>`).join('') || '<span class="muted">暂无关联 Bug</span>';
+  const bugsHtml = (detail.bugs || []).map((b) => `<span class="fbk-bug">${renderBugLink(b)}
+      <button type="button" class="fbk-x" onclick="unlinkFeedbackBug(${detail.id}, ${b.id})" aria-label="解除关联 ${esc(b.bug_id)}" title="解除关联">×</button></span>`).join('');
   const users = window.users || [];
-  const isAdmin = window.currentUser && window.currentUser.role === 'admin';
-  const assigneeOpts = users.map((u) => `<option value="${u.id}" ${Number(detail.assignee_id) === Number(u.id) ? 'selected' : ''}>${u.display_name || u.username}</option>`).join('');
-  const actionZhMap = {
-    'feedback.create': '创建反馈',
-    'feedback.assign': '指派处理人',
-    'feedback.handle': '提交处理结果',
-    'feedback.status': '更新反馈状态',
-    'feedback.upload_attachment': '上传附件',
-    'feedback.delete_attachment': '删除附件',
-    'feedback.link_bug': '关联已有Bug',
-    'feedback.create_bug_link': '新建并关联Bug',
-    'feedback.unlink_bug': '解除Bug关联',
-  };
-  const timelineHtml = (timeline || []).map((t) => {
-    const actionZh = actionZhMap[t.action] || t.action || '未知操作';
-    const actorName = t.actor_name || '系统';
-    const timeText = t.created_at ? new Date(t.created_at).toLocaleString() : '-';
-    return `<div style="padding:10px 0; border-bottom:1px dashed #e2e8f0; line-height:1.65;">
-      <b>${actionZh}</b> · ${actorName} · ${timeText}
-      <div class="muted">${t.detail || ''}</div>
-    </div>`;
-  }).join('') || '<span class="muted">暂无操作记录</span>';
+  const assigneeOpts = users.map((u) => `<option value="${u.id}" ${Number(detail.assignee_id) === Number(u.id) ? 'selected' : ''}>${esc(u.display_name || u.username)}</option>`).join('');
 
-  body.innerHTML = `
-    <div class="card" style="border-radius:12px; background:#f8fafc; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); padding:24px;">
-      <div class="row" style="justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
-        <div>
-          <h3 style="margin:0; color:#0f172a; font-size:22px; line-height:1.35;">反馈详情 ${detail.feedback_no || '未编号'}</h3>
-          <div style="margin-top:6px; color:#64748b; font-size:13px;">创建于 ${detail.created_at ? new Date(detail.created_at).toLocaleString() : '-'}</div>
-        </div>
-        <div class="row" style="gap:8px; margin:0;">
-          <button class="secondary" onclick="openAuditTimelineModal('feedback', ${detail.id}, '反馈时间线')">时间线</button>
-          ${buildStatusBadge(detail.status)}
-        </div>
-      </div>
-      <div class="row" style="margin-top:12px; margin-bottom:4px; gap:8px;">${renderStatusOps(detail.id, detail.status)}</div>
+  const timelineHtml = (timeline || []).map((t) => `
+      <li class="fbk-tl-item">
+        <div class="fbk-tl-head"><b>${esc(ACTION_ZH[t.action] || t.action || '未知操作')}</b><span>${esc(t.actor_name || '系统')} · ${esc(fmtTime(t.created_at))}</span></div>
+        ${t.detail ? `<div class="fbk-tl-detail">${esc(t.detail)}</div>` : ''}
+      </li>`).join('');
 
-      <div class="row" style="align-items:stretch; gap:20px; margin-top:16px; flex-wrap:wrap;">
-        <div class="card" style="${sectionCardStyle}">
-          <div style="font-weight:700; margin-bottom:12px; color:#0f172a;">概览信息</div>
-          <div style="display:grid; row-gap:8px; color:#334155; line-height:1.7;">
-            <div><span style="color:#64748b;">反馈版本：</span>${detail.major_version_no || '-'} / ${detail.minor_version_no || '-'}</div>
-            <div><span style="color:#64748b;">创建人：</span>${detail.creator_name || '-'}</div>
-            <div><span style="color:#64748b;">指派处理人：</span>${detail.assignee_name || '未指派'}</div>
-          </div>
-        </div>
+  const handledInfo = detail.handled_by_name
+    ? `<div class="fbk-handled">${ic('check')}<span>${esc(detail.handled_by_name)} 于 ${esc(fmtTime(detail.handled_at))} 处理，修复版本 ${esc(detail.handled_major_version_no || '-')} / ${esc(detail.handled_minor_version_no || '-')}</span></div>`
+    : '';
 
-        <div class="card" style="${sectionCardStyle}">
-          <div style="font-weight:700; margin-bottom:12px; color:#0f172a;">反馈内容</div>
-          <div style="white-space:pre-wrap; margin-bottom:12px; color:#334155; line-height:1.75;">${detail.summary || ''}</div>
-          <div>${attachmentsHtml}</div>
-          <div class="row" style="margin-top:auto; padding-top:10px;">
-            <input type="file" id="feedbackUploadInput" multiple>
-            <button onclick="uploadFeedbackFiles(${detail.id})" style="border-radius:10px;">上传附件</button>
-          </div>
-        </div>
-      </div>
+  const d = openDrawer({
+    key: 'feedback-detail',
+    size: 'lg',
+    keepScroll,
+    onClose: () => { revokeAttachmentUrls(); activeFeedbackId = 0; markActiveRow(); },
+    head: `
+      <div class="sd-eyebrow"><span class="fbk-no">${esc(detail.feedback_no || '未编号')}</span>${buildStatusBadge(detail.status)}</div>
+      <h3 class="sd-title sd-title--clamp" title="${esc(detail.summary)}">${esc(detail.summary || '（无概览）')}</h3>
+      <div class="sd-sub">${esc(detail.creator_name || '-')} 创建于 ${esc(fmtTime(detail.created_at))}</div>`,
+    tools: `<button type="button" class="secondary sd-tool" onclick="openAuditTimelineModal('feedback', ${detail.id}, '反馈时间线')">${ic('clock')}审计时间线</button>`,
+    body: `
+      ${renderStatusStepper(detail)}
 
-      <div class="row" style="align-items:stretch; gap:20px; margin-top:16px; flex-wrap:wrap;">
-        <div class="card" style="${sectionCardStyle}">
-          <div style="font-weight:700; margin-bottom:12px; color:#0f172a;">处理信息</div>
-          <div class="row" style="${isAdmin ? '' : 'display:none;'}">
-            <select id="feedbackAssigneeSelectInDetail">${assigneeOpts}</select>
-            <button class="secondary" onclick="assignFeedback(${detail.id})" style="border-radius:10px; background:#eef2ff; color:#4338ca; border:none;">管理员指派</button>
-          </div>
-          <textarea id="feedbackHandleResult" rows="4" placeholder="处理结果" style="width:100%; margin-top:10px; border-radius:10px; border:none; box-shadow:inset 0 0 0 1px #e2e8f0;">${detail.handling_result || ''}</textarea>
-          <div class="row" style="margin-top:10px;">
-            <label>处理大版本</label><select id="feedbackHandleMajor"></select>
-            <label>处理小版本</label><select id="feedbackHandleMinor"></select>
-          </div>
-          <div class="row" style="margin-top:12px;">
-            <select id="feedbackHandleStatus">
-              <option value="processing">处理中</option>
-              <option value="resolved">已处理</option>
-              <option value="closed">已关闭</option>
-            </select>
-            <button onclick="saveFeedbackHandle(${detail.id})" style="border-radius:10px;">保存处理结果</button>
-          </div>
-        </div>
+      <dl class="sd-facts">
+        <div><dt>反馈版本</dt><dd>${esc(detail.major_version_no || '-')} / ${esc(detail.minor_version_no || '-')}</dd></div>
+        <div><dt>创建人</dt><dd>${esc(detail.creator_name || '-')}</dd></div>
+        <div><dt>指派处理人</dt><dd>${detail.assignee_name ? `${avatar(detail.assignee_name)}${esc(detail.assignee_name)}` : '<span class="is-empty">未指派</span>'}</dd></div>
+        <div><dt>创建时间</dt><dd>${esc(fmtTime(detail.created_at))}</dd></div>
+      </dl>
 
-        <div class="card" style="${sectionCardStyle}">
-          <div style="font-weight:700; margin-bottom:12px; color:#0f172a;">关联 Bug</div>
-          <div style="margin-bottom:10px; min-height:38px;">${bugsHtml}</div>
-          <div class="row">
-            <div class="prefix-input" style="min-width:220px; border-radius:10px;">
-              <span>🔎</span>
-              <input id="feedbackBugKeyword" placeholder="按 b# 搜索已有 Bug" oninput="searchFeedbackBugOptions(this.value)">
+      <section class="sd-sec">
+        <h4 class="sd-sec-title">${ic('feedback')}反馈内容</h4>
+        <div class="fbk-content">${esc(detail.summary || '')}</div>
+        ${imagesHtml}${filesHtml}
+        <label class="sd-drop sd-drop--sm" id="feedbackUploadDrop">
+          <input type="file" id="feedbackUploadInput" multiple hidden>
+          ${ic('upload', 'sd-drop-ic')}<span><b>添加附件</b>，或把文件拖到这里（选中后自动上传）</span>
+        </label>
+      </section>
+
+      <section class="sd-sec">
+        <h4 class="sd-sec-title">${ic('check')}处理</h4>
+        ${handledInfo}
+        ${admin ? `<div class="sd-inline">
+          <label class="sd-field sd-field--grow"><span class="sd-label">指派处理人</span><select id="feedbackAssigneeSelectInDetail">${assigneeOpts}</select></label>
+          <button type="button" class="secondary" onclick="assignFeedback(${detail.id})">${ic('user')}指派并通知</button>
+        </div>` : ''}
+        <label class="sd-field"><span class="sd-label">处理结果<em>*</em></span>
+          <textarea id="feedbackHandleResult" rows="4" placeholder="说明处理方式、原因或修复情况">${esc(detail.handling_result || '')}</textarea></label>
+        <div class="sd-grid3">
+          <label class="sd-field"><span class="sd-label">处理大版本</span><select id="feedbackHandleMajor"></select></label>
+          <label class="sd-field"><span class="sd-label">处理小版本</span><select id="feedbackHandleMinor"></select></label>
+          <label class="sd-field"><span class="sd-label">处理后状态</span><select id="feedbackHandleStatus">
+            <option value="processing">处理中</option>
+            <option value="resolved">已处理</option>
+            <option value="closed">已关闭</option>
+          </select></label>
+        </div>
+        <div class="sd-actions"><button type="button" onclick="saveFeedbackHandle(${detail.id})">${ic('check')}保存处理结果</button></div>
+      </section>
+
+      <section class="sd-sec">
+        <h4 class="sd-sec-title">${ic('bug')}关联 Bug <span class="sd-count">${(detail.bugs || []).length}</span></h4>
+        <div class="fbk-bugs">${bugsHtml || '<span class="sd-empty">暂无关联 Bug</span>'}</div>
+        <div class="sd-subgrid">
+          <div class="sd-field"><span class="sd-label">关联已有 Bug</span>
+            <div class="sd-inline sd-inline--tight">
+              <span class="sd-search">${ic('search')}<input id="feedbackBugKeyword" placeholder="按 b# 编号或标题搜索" oninput="searchFeedbackBugOptions(this.value)"></span>
+              <select id="feedbackLinkBugId"><option value="">选择已有 Bug</option></select>
+              <button type="button" class="secondary" onclick="linkFeedbackBug(${detail.id})">关联</button>
             </div>
           </div>
-          <div class="row" style="margin-top:10px;">
-            <select id="feedbackLinkBugId" style="min-width:220px;"><option value="">选择已有 Bug</option></select>
-            <button class="secondary" onclick="linkFeedbackBug(${detail.id})" style="border-radius:10px; background:#eef2ff; color:#4338ca; border:none;">关联已有 Bug</button>
-          </div>
-          <div class="row" style="margin-top:10px;">
-            <div class="prefix-input" style="border-radius:10px;"><span>b#</span><input id="feedbackNewBugNo" inputmode="numeric" oninput="digitsOnly(this)" placeholder="新增 Bug 数字"></div>
-            <button onclick="createFeedbackBug(${detail.id})" style="border-radius:10px;">新增 Bug 并关联</button>
+          <div class="sd-field"><span class="sd-label">新建 Bug 并关联</span>
+            <div class="sd-inline sd-inline--tight">
+              <span class="sd-prefix"><span>b#</span><input id="feedbackNewBugNo" inputmode="numeric" oninput="digitsOnly(this)" placeholder="Bug 数字编号"></span>
+              <button type="button" class="secondary" onclick="createFeedbackBug(${detail.id})">新建并关联</button>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div class="card" style="margin-top:16px; border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); padding:22px;">
-        <div style="font-weight:700; margin-bottom:10px; color:#0f172a;">操作时间线</div>
-        <div>${timelineHtml}</div>
-      </div>
-    </div>
-  `;
+      <section class="sd-sec">
+        <h4 class="sd-sec-title">${ic('clock')}操作记录</h4>
+        ${timelineHtml ? `<ol class="fbk-tl">${timelineHtml}</ol>` : '<span class="sd-empty">暂无操作记录</span>'}
+      </section>`,
+  });
 
-  const majors = (window.versions || []).filter((v) => v.version_type === 'major');
-  const mSel = document.getElementById('feedbackHandleMajor');
-  const mmSel = document.getElementById('feedbackHandleMinor');
-  mSel.innerHTML = majors.map((v) => `<option value="${v.id}" ${Number(detail.handled_major_version_id || detail.major_version_id) === Number(v.id) ? 'selected' : ''}>${v.version_no}</option>`).join('');
+  d.root.dataset.recordId = String(detail.id);
+  const mSel = d.body.querySelector('#feedbackHandleMajor');
+  const mmSel = d.body.querySelector('#feedbackHandleMinor');
+  mSel.innerHTML = versionOptions('major', 0, detail.handled_major_version_id || detail.major_version_id);
   const bindMinor = () => {
-    const majorId = Number(mSel.value || 0);
-    const minors = (window.versions || []).filter((v) => v.version_type === 'minor' && Number(v.parent_id) === majorId);
-    mmSel.innerHTML = minors.map((v) => `<option value="${v.id}" ${Number(detail.handled_minor_version_id || detail.minor_version_id) === Number(v.id) ? 'selected' : ''}>${v.version_no}</option>`).join('');
+    mmSel.innerHTML = versionOptions('minor', mSel.value, detail.handled_minor_version_id || detail.minor_version_id) || '<option value="">暂无小版本</option>';
   };
   mSel.onchange = bindMinor;
   bindMinor();
-  document.getElementById('feedbackHandleStatus').value = detail.status === 'pending' ? 'processing' : detail.status;
-  if (!isAdmin) {
-    const statusSel = document.getElementById('feedbackHandleStatus');
-    if (statusSel) {
-      Array.from(statusSel.options).forEach((opt) => {
-        if (opt.value === 'closed') opt.disabled = true;
-      });
-    }
+  const statusSel = d.body.querySelector('#feedbackHandleStatus');
+  statusSel.value = detail.status === 'pending' ? 'processing' : detail.status;
+  if (!admin) Array.from(statusSel.options).forEach((opt) => { if (opt.value === 'closed') opt.disabled = true; });
+
+  bindDropzone(d.body.querySelector('#feedbackUploadDrop'), d.body.querySelector('#feedbackUploadInput'), (fl) => uploadFiles(detail.id, fl));
+  const thumbs = d.body.querySelector('#feedbackDetailImages');
+  if (thumbs) {
+    wireImageViewer(thumbs);
+    hydrateAttachmentImages(thumbs);
   }
+  window.OmniQAZentao?.hydrateContainer?.(d.body);
+  markActiveRow();
   await loadBugOptions();
-  panel.classList.remove('hidden');
+}
+
+export function closeFeedbackDetail() {
+  closeDrawer('feedback-detail');
 }
 
 export async function searchFeedbackBugOptions(keyword) {
@@ -427,6 +630,7 @@ export async function saveFeedbackHandle(feedbackId) {
   const status = document.getElementById('feedbackHandleStatus')?.value || 'resolved';
   if (!handlingResult) {
     window.showMessage && window.showMessage('请填写处理结果', 'error');
+    document.getElementById('feedbackHandleResult')?.focus();
     return;
   }
   await api(`/feedbacks/${feedbackId}/handle`, {
@@ -505,9 +709,12 @@ window.OmniQAFeedbackTab = {
   nextFeedbackPage,
   prevFeedbackPage,
   createFeedback,
+  openFeedbackCreate,
   openFeedbackDetail,
+  closeFeedbackDetail,
   uploadFeedbackFiles,
   deleteFeedbackAttachment,
+  downloadFeedbackAttachment,
   assignFeedback,
   saveFeedbackHandle,
   linkFeedbackBug,
@@ -516,6 +723,7 @@ window.OmniQAFeedbackTab = {
   loadFeedbackTodoOnMine,
   searchFeedbackBugOptions,
   setFeedbackStatus,
+  _removeCreateFile(i) { createFiles.splice(Number(i), 1); renderCreateFiles(); },
 };
 
 function bindFeedbackSSE() {
@@ -527,18 +735,18 @@ function bindFeedbackSSE() {
     const tab = document.getElementById('tab-feedback');
     if (!tab || tab.classList.contains('hidden')) return;
     const feedbackId = Number(payload?.id || 0);
-    const tableEl = document.getElementById('feedbackTable')?.closest('table');
-    const rect = tableEl?.getBoundingClientRect();
+    const listEl = document.getElementById('feedbackTable');
+    const rect = listEl?.getBoundingClientRect();
     const atTop = !rect || rect.top >= 0;
     if (!atTop && window.OmniQASSE.showPositionBanner) {
       _feedbackTopBannerCount.value += 1;
       window.OmniQASSE.showPositionBanner({
         scrollContainer: document.scrollingElement || document.documentElement,
-        anchorEl: tableEl,
+        anchorEl: listEl,
         position: 'top',
         countRef: _feedbackTopBannerCount,
         labelFn: (n) => `↑ ${n} 条新反馈任务`,
-        onClickScroll: () => tableEl?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+        onClickScroll: () => listEl?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
         bannerId: 'feedback-top-banner',
       });
       return;

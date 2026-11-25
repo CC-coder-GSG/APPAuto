@@ -4,13 +4,13 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css?v=20261103-final-presence-ui-2">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261125-pagehead-4">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261125-fbft-5">
   <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261125-pagehead-2"></script>
+  <script type="module" src="/static/js/app.js?v=20261125-fbft-4"></script>
   <script src="/static/js/weave-motion.js?v=20261124-shell-v2-2" defer></script>
   <script src="/static/js/shell.js?v=20261125-pagehead-1" defer></script>
   <script>
@@ -72,6 +72,7 @@
       <symbol id="i-x-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></symbol>
       <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/></symbol>
       <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></symbol>
+      <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></symbol>
       <symbol id="i-pipette" viewBox="0 0 24 24"><path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z"/></symbol>
     </defs>
   </svg>
@@ -916,6 +917,9 @@
     <div class="ph">
       <span class="ph-icon" aria-hidden="true"><svg><use href="#i-feedback"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-feedback"/></svg>
       <div class="ph-text"><h2>反馈记录与处理</h2><p class="page-desc">汇总内外部反馈，跟踪处理进度</p></div>
+      <div class="ph-actions">
+        <button type="button" id="feedbackCreateBtn" onclick="window.OmniQAFeedbackTab ? window.OmniQAFeedbackTab.openFeedbackCreate() : showTab('feedback')"><svg class="ui-ic" aria-hidden="true"><use href="#i-sparkles"/></svg>新建反馈</button>
+      </div>
     </div>
     <div class="fb">
       <label class="fb-field"><span class="fb-k">大版本</span><select id="feedbackMajorSelect" onchange="loadFeedbackMinorOptions(); loadFeedbackBoard();"></select></label>
@@ -948,32 +952,15 @@
       </div>
     </div>
 
-    <div class="card" style="box-shadow:none; border:1px solid #e2e8f0;">
-      <h3>新建反馈</h3>
-      <div style="display:flex; flex-direction:column; gap:10px;">
-        <div class="row" style="align-items:center; flex-wrap:wrap;">
-          <div class="prefix-input"><span>f#</span><input id="newFeedbackNoNum" inputmode="numeric" oninput="digitsOnly(this)" placeholder="仅填写数字，例如 12"></div>
-          <input id="newFeedbackSummary" placeholder="反馈概览（必填）" style="min-width:360px; flex:1; padding:10px 12px; border:1px solid #cbd5e1; border-radius:10px;">
-        </div>
-        <div class="row" style="align-items:center; flex-wrap:wrap;">
-          <input id="newFeedbackFiles" type="file" multiple>
-          <button onclick="createFeedback()">提交反馈</button>
-        </div>
+    <!-- 反馈列表（2026-11-25 排版 v2）：行卡片，点击整行在右侧抽屉打开详情；新建反馈也在抽屉里 -->
+    <div class="fbk-panel">
+      <div class="fbk-list-head" aria-hidden="true"><span>编号</span><span>反馈概览</span><span>指派给</span><span>状态</span><span></span></div>
+      <div id="feedbackTable" class="fbk-list" role="list"></div>
+      <div class="fbk-pager">
+        <span id="feedbackPaginationText" class="muted">第 1 / 1 页，共 0 条</span>
+        <button id="feedbackPrevBtn" class="secondary" onclick="prevFeedbackPage()">上一页</button>
+        <button id="feedbackNextBtn" class="secondary" onclick="nextFeedbackPage()">下一页</button>
       </div>
-    </div>
-
-    <table class="qa-table qa-table-feedback" style="margin-top:12px;">
-      <thead><tr><th>反馈编号</th><th class="col-text">反馈概览</th><th>反馈版本</th><th class="col-status">状态</th><th>指派给</th><th>创建人</th><th>创建时间</th><th class="col-actions">操作</th></tr></thead>
-      <tbody id="feedbackTable"></tbody>
-    </table>
-    <div class="row" style="justify-content:flex-end; align-items:center; gap:8px; margin-top:8px;">
-      <span id="feedbackPaginationText" class="muted">第 1 / 1 页，共 0 条</span>
-      <button id="feedbackPrevBtn" class="secondary" onclick="prevFeedbackPage()">上一页</button>
-      <button id="feedbackNextBtn" class="secondary" onclick="nextFeedbackPage()">下一页</button>
-    </div>
-
-    <div id="feedbackDetailPanel" class="hidden" style="margin-top: 16px;">
-      <div id="feedbackDetailBody"></div>
     </div>
   </section>
 
@@ -1168,37 +1155,16 @@
         </div>
       </div>
       <div id="fieldTestTopNotice" class="hidden muted sse-inline-notice" role="button" tabindex="0" onclick="revealFieldTestRealtimeNew()" onkeydown="onNoticeKeydown(event, revealFieldTestRealtimeNew)">有 0 条新增外业测试记录</div>
-      <div class="qa-table-scroll field-test-table-wrap">
-        <table class="qa-table qa-table-field-test field-test-table" style="margin-top:10px;">
-          <colgroup class="field-test-table-cols">
-            <col class="ft-col-date">
-            <col class="ft-col-version">
-            <col class="ft-col-purpose">
-            <col class="ft-col-content">
-            <col class="ft-col-time">
-            <col class="ft-col-result">
-            <col class="ft-col-bug">
-            <col class="ft-col-tester">
-            <col class="ft-col-notes">
-            <col class="ft-col-actions">
-          </colgroup>
-          <thead><tr><th>日期</th><th>版本(大/小)</th><th class="col-status">测试目的</th><th class="col-text ft-th-content">关联需求/测试内容</th><th class="ft-th-time">测试时段与时长</th><th class="col-status">测试结果</th><th>Bug数</th><th>测试人</th><th class="col-text">备注</th><th class="col-actions">操作</th></tr></thead>
-          <tbody id="fieldTestTable"></tbody>
-        </table>
+      <!-- 外业测试列表（2026-11-25 排版 v2）：行卡片，点击整行在右侧抽屉打开详情 -->
+      <div class="fbk-panel">
+        <div class="ftl-list-head" aria-hidden="true"><span>日期</span><span>测试内容</span><span>时段</span><span>结果 / Bug</span><span>测试人</span><span></span><span></span></div>
+        <div id="fieldTestTable" class="fbk-list ftl-list" role="list"></div>
+        <div class="fbk-pager">
+          <span id="fieldTestPaginationText" class="muted">第 1 / 1 页，共 0 条</span>
+          <button id="fieldTestPrevBtn" class="secondary" onclick="prevFieldTestPage()">上一页</button>
+          <button id="fieldTestNextBtn" class="secondary" onclick="nextFieldTestPage()">下一页</button>
+        </div>
       </div>
-      <div class="row" style="justify-content:flex-end; align-items:center; gap:8px; margin-top:8px;">
-        <span id="fieldTestPaginationText" class="muted">第 1 / 1 页，共 0 条</span>
-        <button id="fieldTestPrevBtn" class="secondary" onclick="prevFieldTestPage()">上一页</button>
-        <button id="fieldTestNextBtn" class="secondary" onclick="nextFieldTestPage()">下一页</button>
-      </div>
-    </div>
-
-    <div id="fieldTestDetailPanel" class="hidden" style="position:fixed; top:0; right:0; width:min(560px, 92vw); height:100vh; background:#fff; box-shadow:-6px 0 18px rgba(15,23,42,.15); z-index:9999; overflow:auto; padding:16px;">
-      <div class="row" style="justify-content:space-between; align-items:center;">
-        <h3 id="fieldTestDetailTitle" style="margin:0;">外业测试详情</h3>
-        <button class="secondary" onclick="closeFieldTestDetail()">关闭</button>
-      </div>
-      <div id="fieldTestDetailBody" style="margin-top:12px;"></div>
     </div>
 
     <div id="fieldTestFormModal" class="hidden ft-modal-mask" onclick="if(event.target===this) cancelFieldTestEdit();">
@@ -1884,16 +1850,19 @@
     </div>
   </section>
 
-  <div id="auditTimelineModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
-    <div style="width:min(760px, 94vw); max-height:88vh; overflow:auto; background:#fff; border-radius:12px; box-shadow:0 12px 28px rgba(0,0,0,.18); padding:18px;">
-      <div class="row" style="justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin-bottom:12px;">
-        <h3 id="auditTimelineTitle" style="margin:0; color:#0f172a;">时间线</h3>
-        <div class="row" style="gap:8px; margin:0;">
-          <div id="auditTimelineActionBar"></div>
-          <button class="secondary" onclick="closeAuditTimelineModal()">关闭</button>
+  <!-- 操作时间线弹窗（2026-11-25 v2）：结构由 activity.js 填充，样式见 weave.css R16（.atl-*） -->
+  <div id="auditTimelineModal" class="hidden atl-root" data-modal-display="flex" role="dialog" aria-modal="true" aria-labelledby="auditTimelineTitle" style="display:none;" onclick="if(event.target===this) closeAuditTimelineModal()">
+    <div class="atl-card">
+      <header class="atl-head">
+        <span class="atl-icon" aria-hidden="true"><svg><use href="#i-clock"/></svg></span>
+        <div class="atl-head-text">
+          <h3 id="auditTimelineTitle">时间线</h3>
+          <div id="auditTimelineSub" class="atl-sub"></div>
         </div>
-      </div>
-      <div id="auditTimelineBody"></div>
+        <button type="button" class="atl-close" onclick="closeAuditTimelineModal()" aria-label="关闭" title="关闭（Esc）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+      </header>
+      <div id="auditTimelineActionBar" class="atl-bar"></div>
+      <div id="auditTimelineBody" class="atl-body"></div>
     </div>
   </div>
 
@@ -2441,27 +2410,33 @@ window.switchWorkbenchSubtab = switchWorkbenchSubtab;
     header.classList.remove('is-stuck');
     header.style.removeProperty('margin-bottom');
   }
-  function normalFlowTop(element){
-    let top=0;
-    for(let node=element; node; node=node.offsetParent) top+=node.offsetTop;
-    return top;
+  // 阈值用头部前的 0 高度哨兵测量：sticky 元素自身的 offsetTop 在吸住后会带上偏移，
+  // 拿它当「自然位置」会让阈值随状态漂移，压缩/展开来回触发 → 闪烁（2026-11-25 修复）。
+  let sentinel=header.previousElementSibling;
+  if(!sentinel || !sentinel.classList.contains('wb-sticky-sentinel')){
+    sentinel=document.createElement('div');
+    sentinel.className='wb-sticky-sentinel';
+    sentinel.setAttribute('aria-hidden','true');
+    // 绝对定位：不参与 .workbench-shell 的 flex gap；静态位置即容器顶部＝头部的自然位置
+    sentinel.style.cssText='position:absolute;width:0;height:0;margin:0;padding:0;overflow:hidden;pointer-events:none;';
+    header.parentNode.insertBefore(sentinel, header);
   }
+  // 吸住 / 松开之间留 8px 回差：临界点附近的细微滚动（触控板惯性、滚动锚定）不会来回翻转
+  const HYSTERESIS=8;
   let pending=false;
   let geometryDirty=true;
-  let normalTop=0;
   let expandedHeight=0;
   function measureNormalGeometry(){
-    clearStuckState();
-    const rect=header.getBoundingClientRect();
-    normalTop=normalFlowTop(header);
-    expandedHeight=rect.height;
+    if(header.classList.contains('is-stuck')){ geometryDirty=true; return; }
+    expandedHeight=header.getBoundingClientRect().height;
     geometryDirty=false;
   }
   function applyStuckState(){
     if(header.classList.contains('is-stuck')) return;
+    if(geometryDirty || !expandedHeight) measureNormalGeometry();
     header.classList.add('is-stuck');
     const compactHeight=header.getBoundingClientRect().height;
-    // 保持后续内容的文档流位置不变，防止浏览器滚动锚定把临界点来回推过阈值。
+    // 保持后续内容的文档流位置不变（对应 CSS 里 margin-bottom 不能带 !important）
     header.style.marginBottom=`${Math.max(0, expandedHeight-compactHeight)}px`;
   }
   function apply(){
@@ -2474,13 +2449,11 @@ window.switchWorkbenchSubtab = switchWorkbenchSubtab;
     const top=stickyTopPx();
     header.style.setProperty('--workbench-header-top', `${top}px`);
     if(geometryDirty) measureNormalGeometry();
-    if(!header.classList.contains('is-stuck')){
-      const rect=header.getBoundingClientRect();
-      normalTop=normalFlowTop(header);
-      expandedHeight=rect.height;
-    }
-    if(window.scrollY>=Math.max(0, normalTop-top)) applyStuckState();
-    else clearStuckState();
+    // 哨兵到视口顶的距离 ≤ 吸顶位置时，头部开始吸住
+    const gap=sentinel.getBoundingClientRect().top-top;
+    const stuck=header.classList.contains('is-stuck');
+    if(!stuck && gap<=0) applyStuckState();
+    else if(stuck && gap>HYSTERESIS) clearStuckState();
   }
   function schedule(){ if(!pending){ pending=true; requestAnimationFrame(apply); } }
   window.addEventListener('scroll', schedule, {passive:true});
@@ -3134,7 +3107,7 @@ async function pushTest(){return window.OmniQAMineTab.pushTest()}
 async function ensureFeedbackTab(){
   if(window.OmniQAFeedbackTab) return window.OmniQAFeedbackTab;
   try{
-    await import('/static/js/tabs/feedback.js');
+    await import('/static/js/tabs/feedback.js?v=20261125-fbft-3');
   }catch(_e){}
   if(!window.OmniQAFeedbackTab){
     showMessage('反馈模块未加载，请按 Ctrl+F5 强制刷新页面后重试', 'error');
