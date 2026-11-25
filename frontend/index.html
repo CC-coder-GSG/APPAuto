@@ -4,13 +4,13 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css?v=20261103-final-presence-ui-2">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261125-build-3">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261125-s5list-1">
   <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261125-build-2"></script>
+  <script type="module" src="/static/js/app.js?v=20261125-s5list-1"></script>
   <script src="/static/js/weave-motion.js?v=20261124-shell-v2-2" defer></script>
   <script src="/static/js/shell.js?v=20261125-pagehead-1" defer></script>
   <script>
@@ -769,25 +769,29 @@
       </div>
     </div>
 
-    <div id="mineTestExecModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
-      <div style="width: min(560px, 92vw); background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px 18px 14px 18px;">
-        <h3 style="margin: 0 0 12px 0; color:#0f172a;">提交测试结果</h3>
-        <div class="row" style="margin-bottom: 10px;">
-          <label style="min-width: 90px;">当前小版本</label>
-          <select id="mineTestExecMinorSelect" style="flex:1;"></select>
+    <div id="mineTestExecModal" class="hidden atl-root mte-root" data-modal-display="flex" role="dialog" aria-modal="true" aria-labelledby="mineTestExecTitle" style="display:none;">
+      <div class="atl-card atl-card--sm mte-card">
+        <header class="atl-head">
+          <span class="atl-icon" aria-hidden="true"><svg><use href="#i-check"/></svg></span>
+          <div class="atl-head-text">
+            <h3 id="mineTestExecTitle">提交测试结果</h3>
+            <div class="atl-sub"><span class="atl-target" id="mineTestExecSub"></span></div>
+          </div>
+          <button type="button" class="atl-close" onclick="closeMineTestExecutionModal()" aria-label="关闭" title="关闭（Esc）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+        </header>
+        <div class="atl-op-slot"></div>
+        <div class="atl-body atl-body--form mte-body">
+          <div class="mte-grid">
+            <label class="brc-field"><span>当前小版本</span><select id="mineTestExecMinorSelect"></select></label>
+            <label class="brc-field"><span>测试结果</span><select id="mineTestExecResult"></select></label>
+          </div>
+          <div id="mineTestExecHoursWrap" class="mte-hours" hidden></div>
+          <label class="brc-field"><span>备注<small>选填</small></span><textarea id="mineTestExecNotes" rows="4" placeholder="可填写本轮验证说明、问题现象或补充信息"></textarea></label>
         </div>
-        <div class="row" style="margin-bottom: 10px;">
-          <label style="min-width: 90px;">测试结果</label>
-          <select id="mineTestExecResult" style="flex:1;"></select>
-        </div>
-        <div style="margin-bottom: 14px;">
-          <label style="display:block; margin-bottom:6px;">备注</label>
-          <textarea id="mineTestExecNotes" rows="4" placeholder="可填写本轮验证说明、问题现象或补充信息" style="width:100%;"></textarea>
-        </div>
-        <div class="row" style="justify-content: flex-end; gap: 8px;">
-          <button class="secondary" onclick="closeMineTestExecutionModal()">取消</button>
-          <button onclick="confirmMineTestExecutionModal()">确认提交</button>
-        </div>
+        <footer class="atl-foot">
+          <button type="button" class="secondary" onclick="closeMineTestExecutionModal()">取消</button>
+          <button type="button" onclick="confirmMineTestExecutionModal()">确认提交</button>
+        </footer>
       </div>
     </div>
 
@@ -900,16 +904,27 @@
     </div>
   </div>
 
-  <div id="taskAssignModal" class="hidden" data-modal-display="flex" style="position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 9999; display: none; align-items: center; justify-content: center;">
-    <div style="width: min(440px, 92vw); background: #fff; border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.18); padding: 18px;">
-      <h3 style="margin:0 0 4px 0;">👤 指派任务 <span id="taskAssignTaskLabel" style="color:#1d4ed8;"></span></h3>
-      <div id="taskAssignHint" class="muted" style="font-size:12px; margin-bottom:10px;"></div>
-      <input id="taskAssignInput" placeholder="输入姓名或账号模糊搜索，点击选择…" autocomplete="off" style="width:100%; box-sizing:border-box;">
-      <div id="taskAssignList" style="max-height:250px; overflow:auto; border:1px solid #e2e8f0; border-radius:8px; margin-top:8px;"></div>
-      <div class="row" style="justify-content:flex-end; gap:8px; margin-top:14px;">
-        <button class="secondary" onclick="closeTaskAssignModal()">取消</button>
-        <button onclick="confirmTaskAssign()">确认指派</button>
+  <div id="taskAssignModal" class="hidden atl-root" data-modal-display="flex" role="dialog" aria-modal="true" aria-labelledby="taskAssignTitle" style="display:none; z-index:10010;" onclick="if(event.target===this) closeTaskAssignModal()">
+    <div class="atl-card atl-card--sm tas-card">
+      <header class="atl-head">
+        <span class="atl-icon" aria-hidden="true"><svg><use href="#i-user"/></svg></span>
+        <div class="atl-head-text">
+          <h3 id="taskAssignTitle">指派任务</h3>
+          <div class="atl-sub"><span class="atl-target" id="taskAssignTaskLabel"></span></div>
+        </div>
+        <button type="button" class="atl-close" onclick="closeTaskAssignModal()" aria-label="关闭" title="关闭（Esc）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+      </header>
+      <div class="atl-op-slot"></div>
+      <div class="tas-body">
+        <div id="taskAssignHint" class="tas-current"></div>
+        <label class="tas-search"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg><input id="taskAssignInput" placeholder="输入姓名或账号搜索，↑↓ 选择，回车确认" autocomplete="off" aria-controls="taskAssignList"></label>
+        <div id="taskAssignList" class="tas-list" role="listbox" aria-label="可指派人员"></div>
       </div>
+      <footer class="atl-foot tas-foot">
+        <span id="taskAssignPicked" class="tas-picked">从列表中选择要指派的人</span>
+        <button type="button" class="secondary" onclick="closeTaskAssignModal()">取消</button>
+        <button type="button" id="taskAssignConfirmBtn" onclick="confirmTaskAssign()" disabled>确认指派</button>
+      </footer>
     </div>
   </div>
 
@@ -1117,22 +1132,17 @@
       </div>
     </div>
 
-    <div id="s5PagerBar" class="hidden" style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin: 0 0 12px; padding: 12px 16px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px;">
-      <div id="s5PagerSummary" style="font-size:13px; color:#475569;">共 0 条</div>
-      <div class="row" style="margin:0; gap:10px; align-items:center;">
-        <label style="margin:0; color:#334155;">每页显示</label>
-        <input id="s5PageSizeInput" type="number" min="1" max="500" value="20" style="width:88px; padding:6px 8px;">
-        <button class="secondary" onclick="applyS5PageSize()">应用</button>
+    <div id="s5TableContainer" class="fbk-panel s5-panel hidden">
+      <div id="s5TableHead" class="s5-head" aria-hidden="true"><span>Bug</span><span>我的验证</span><span>操作</span></div>
+      <div id="s5Table" class="s5-list" role="list"></div>
+      <div id="s5PagerBar" class="fbk-pager s5-pager hidden">
+        <span id="s5PagerSummary" class="s5-pager-sum">共 0 条</span>
+        <label class="s5-pager-size">每页<input id="s5PageSizeInput" type="number" min="1" max="500" value="20" onkeydown="if(event.key==='Enter'){applyS5PageSize();}" onchange="applyS5PageSize()">条</label>
         <button id="s5PrevPageBtn" class="secondary" onclick="prevS5Page()">上一页</button>
-        <span id="s5PageText" style="min-width:92px; text-align:center; color:#334155;">第 1 / 1 页</span>
+        <span id="s5PageText" class="s5-page-text">第 1 / 1 页</span>
         <button id="s5NextPageBtn" class="secondary" onclick="nextS5Page()">下一页</button>
       </div>
     </div>
-
-    <table id="s5TableContainer" class="hidden">
-      <thead id="s5TableHead"><tr><th style="width:260px">Bug 编号 (来源)</th><th>Bug 标题</th><th style="width:420px">验证操作</th></tr></thead>
-      <tbody id="s5Table"></tbody>
-    </table>
   </section>
 
   <section id="tab-field-test" class="hidden card">

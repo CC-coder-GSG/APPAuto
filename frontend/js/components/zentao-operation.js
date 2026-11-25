@@ -229,7 +229,7 @@ function notice(op) {
   let node = op.modal.querySelector('.wb-operation-status');
   if (!node) {
     node = document.createElement('div'); node.className = 'wb-operation-status';
-    (op.modal.querySelector('.effort-dialog') || op.modal.firstElementChild || op.modal).prepend(node);
+    (op.modal.querySelector('.atl-op-slot, .effort-dialog') || op.modal.firstElementChild || op.modal).prepend(node);
   }
   const busy = BUSY.includes(op.state);
   node.setAttribute('role', busy ? 'status' : 'alert');

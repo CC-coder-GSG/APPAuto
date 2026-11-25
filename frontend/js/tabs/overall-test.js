@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { state } from '../state.js';
 import { withPrefix, sourceTypeZh, escapeHtml } from '../utils.js';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
+import { confirmTaskDialog } from '../components/task-dialog.js';
 
 let overallTestSseBound = false;
 let overallTestUnreadClearTimer = null;
@@ -226,7 +227,25 @@ function deferClearOverallUnread(ms = 1200) {
   }, ms);
 }
 
-// Row builder
+// ── Bug 列表（2026-11-25 v2：卡片行 + 卡内展开详情，weave.css R19 .s5-*）──────────
+// 每行：左侧 编号/状态/来源/标题/关键信息；中间 我的验证（结论、闭环确认、保存）；右侧 预览/指派/重新激活/展开。
+// 编辑入口已移除（禅道标题以禅道为准）；删除挪进展开详情。勾选闭环确认时闭环说明默认填「当前小版本 已确认修复」。
+
+const s5Expanded = new Set();
+const S5_STATUS = {
+  active: ['激活', 'red'],
+  resolved: ['已解决', 'amber'],
+  closed: ['已关闭', 'green'],
+  delay: ['延期', 'gray'],
+};
+const S5_ICON = {
+  eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>',
+  user: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
+  rotate: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>',
+  chevron: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>',
+  external: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>',
+};
 
 function isS5BugEffectivelyClosed(bug) {
   if (!bug?.zentao_bug_id) return false;
@@ -243,118 +262,6 @@ function isS5BugReactivatable(bug) {
   if (!bug?.zentao_bug_id) return false;
   const zentaoStatus = String(bug.zentao_live_status || '').toLowerCase();
   return isS5BugEffectivelyClosed(bug) || zentaoStatus === 'resolved';
-}
-
-function buildS5RowHtml(b, allVersionsMode) {
-  const isMyClosed = b.my_test_done;
-  const isZentaoDeleted = !!b.zentao_deleted;
-  const rowStyle = isZentaoDeleted
-    ? 'background:#fef2f2; box-shadow: inset 4px 0 0 #dc2626;'
-    : (isMyClosed ? 'background: #f8fafc; color: #94a3b8;' : '');
-  const isZentaoBug = !!b.zentao_bug_id;
-  const isEffectivelyClosed = isS5BugEffectivelyClosed(b);
-  const canReactivate = isS5BugReactivatable(b);
-  const shouldStrikeClosed = !!(isMyClosed || isEffectivelyClosed);
-  const strikeDecoration = shouldStrikeClosed
-    ? 'text-decoration:line-through; text-decoration-thickness:1px; text-decoration-color:#94a3b8;'
-    : '';
-
-  const failBadge = b.is_retest_failed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; margin-left:4px;">🚨复测打回</span>' : '';
-  const dispatchBadge = b.dispatched_to_name ? `<span class="badge" style="background:#ffedd5; color:#ea580c; border:1px solid #fdba74; margin-left:4px;">🪂特派:${b.dispatched_to_name}</span>` : '';
-
-  const bugIdText = escapeHtml(b.bug_id || '-');
-  const ztBugId = (b.zentao_bug_id) ? String(b.zentao_bug_id) : (b.bug_id || '').replace(/\D/g, '');
-  const bugHref = b.zentao_bug_url
-    ? `<a class="qa-ext-link" href="${b.zentao_bug_url}" target="_blank" rel="noopener noreferrer">${bugIdText}</a>`
-    : ztBugId
-      ? `<span class="qa-bug-id-nohref" data-zt-bug-id="${ztBugId}">${bugIdText}</span>`
-      : `<span>${bugIdText}</span>`;
-  const bugTitle = escapeHtml(b.zentao_bug_title || b.bug_title || '');
-  const ztSlot = ztBugId ? `<span class="zt-bug-slot" data-zt-bug-id="${ztBugId}" data-zt-no-title="1" style="margin-left:4px;"></span>` : '';
-  // 禅道已删除的 Bug：用红色醒目标记，且不展示状态 / 指派等会误导的信息。
-  const deletedBadge = isZentaoDeleted
-    ? `<span class="badge" style="background:#dc2626; color:#fff; font-weight:bold;">🗑️ 禅道已删除</span>`
-    : '';
-  const syncMeta = b.last_zentao_synced_at ? `<span class="badge" style="background:#f8fafc; color:#64748b;">同步 ${escapeHtml(b.last_zentao_synced_at)}</span>` : '';
-  const assignedMeta = (!isZentaoDeleted && b.zentao_assigned_to_name) ? `<span class="badge" style="background:#faf5ff; color:#7c3aed;">当前指派 ${escapeHtml(getS5AssignedDisplayName(b.zentao_assigned_to_name))}</span>` : '';
-  const closedByMeta = (!isZentaoDeleted && b.zentao_closed_by_name) ? `<span class="badge" style="background:#ecfdf5; color:#047857;">禅道关闭 ${escapeHtml(b.zentao_closed_by_name)}</span>` : '';
-  const closeDateMeta = (!isZentaoDeleted && b.zentao_close_date) ? `<span class="badge" style="background:#f1f5f9; color:#475569;">${escapeHtml(b.zentao_close_date)}</span>` : '';
-  const closeCommentPreview = (b.zentao_close_comment || '').trim();
-  const detailMeta = [
-    (b.other_records && b.other_records.length > 0)
-      ? `<span class="badge" style="background:#eff6ff; color:#1d4ed8;">他人闭环 ${b.other_records.length}</span>`
-      : '',
-    closeCommentPreview
-      ? `<span class="badge" style="background:#f8fafc; color:#475569;">有关闭环备注</span>`
-      : '',
-  ].filter(Boolean).join('');
-
-  const versionCell = allVersionsMode
-    ? `<td style="vertical-align:middle; padding: 6px 10px; white-space:nowrap; font-size:12px; color:#475569;"><span class="badge" style="background:#eff6ff; color:#2563eb;">${escapeHtml(b.major_version_no || '')}</span></td>`
-    : '';
-
-  // 操作列：固定两行布局，位置始终稳定
-  // 使用 visibility:hidden 代替 display:none，确保按钮槽位不因状态变化而位移
-  const linkStyle = 'font-size:12px; text-decoration:none; white-space:nowrap;';
-  const editLink = `<a href="javascript:void(0)" onclick="editS5BugById(${b.id})" style="${linkStyle} color:#3b82f6;">编辑</a>`;
-  const deleteLink = `<a href="javascript:void(0)" onclick="removeS5BugById(${b.id})" style="${linkStyle} color:#ef4444;">删除</a>`;
-  const sep = `<span style="color:#e2e8f0; margin:0 2px;">|</span>`;
-
-  let actionsHtml;
-  if (isZentaoBug) {
-    const assignLink = `<a href="javascript:void(0)" onclick="openS5AssignById(${b.id})" style="${linkStyle} color:#8b5cf6;">指派</a>`;
-    // 重新激活占位始终存在，visibility 控制可见性，保持布局稳定
-    const reactivateVis = canReactivate ? 'visible' : 'hidden';
-    const reactivateLink = `<a href="javascript:void(0)" onclick="openS5ReactivateById(${b.id})" style="${linkStyle} color:#059669; font-weight:bold; visibility:${reactivateVis};">重新激活</a>`;
-    actionsHtml = `
-      <div style="display:flex; flex-direction:column; gap:3px;">
-        <div style="display:flex; align-items:center; gap:2px;">${editLink}${sep}${deleteLink}</div>
-        <div style="display:flex; align-items:center; gap:2px;">${assignLink}${sep}${reactivateLink}</div>
-      </div>`;
-  } else {
-    // 本地 Bug：两行固定，第二行留空，使高度与禅道行一致
-    actionsHtml = `
-      <div style="display:flex; flex-direction:column; gap:3px;">
-        <div style="display:flex; align-items:center; gap:2px;">${editLink}${sep}${deleteLink}</div>
-        <div style="height:18px;"></div>
-      </div>`;
-  }
-
-  // 验证列
-  const closeOnChange = isZentaoBug ? `onchange="toggleS5CloseComment(${b.id}, this.checked)"` : '';
-  const closeLabel = `<label style="color:#0f172a; font-weight:bold; display:flex; align-items:center; gap:4px; margin:0; ${strikeDecoration}"><input id='done_${b.id}' type='checkbox' ${isMyClosed ? 'checked' : ''} ${closeOnChange}> 我的闭环确认</label>`;
-
-  // 关闭备注默认收起，用户勾选后展开
-  const closeCommentRow = isZentaoBug
-    ? `<div id='closeComment_${b.id}' style="display:none; margin-top:4px; width:100%;">
-        <textarea id='closeCommentText_${b.id}' placeholder='闭环说明（将同步写入禅道备注）' style='width:100%; font-size:12px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; resize:vertical; min-height:40px;'>${escapeHtml(b.my_comment || '')}</textarea>
-       </div>`
-    : '';
-
-  return `<tr class="overall-test-row-card" data-bug-id="${b.id}" style="${rowStyle}">
-    ${versionCell}
-    <td style="vertical-align:middle; padding:6px 10px;">
-      <div${isZentaoDeleted ? ' style="color:#dc2626; font-weight:bold;"' : ''}>${bugHref}${ztSlot} <span style="font-size:12px;color:#64748b">(${sourceTypeZh(b.source_type)})</span>${failBadge}${dispatchBadge}</div>
-      ${(deletedBadge || detailMeta) ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">${deletedBadge}${detailMeta}</div>` : ''}
-    </td>
-    <td style="vertical-align:middle; padding:6px 10px;">
-      ${bugTitle ? `<div style="max-height:60px; overflow-y:auto; font-size:13px; color:#475569; line-height:1.65; word-break:break-word; ${strikeDecoration}">${bugTitle}</div>` : '<span style="color:#94a3b8;">-</span>'}
-      ${(syncMeta || assignedMeta || closedByMeta || closeDateMeta) ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">${syncMeta}${assignedMeta}${closedByMeta}${closeDateMeta}</div>` : ''}
-    </td>
-    <td style="vertical-align:middle; padding:6px 8px; width:120px;">${actionsHtml}</td>
-    <td style="text-decoration:none; vertical-align:middle; padding:6px 10px;">
-      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        <select id='res_${b.id}' style="padding:2px; font-size:13px; border:1px solid #cbd5e1; border-radius:4px; color:#475569; ${strikeDecoration}" ${isMyClosed ? 'disabled' : ''}>
-          <option value="fixed" ${b.my_resolution === 'fixed' ? 'selected' : ''}>✅修复通过</option>
-          <option value="false_alarm" ${b.my_resolution === 'false_alarm' ? 'selected' : ''}>⚠️误报</option>
-          <option value="rejected" ${b.my_resolution === 'rejected' ? 'selected' : ''}>拒绝修复</option>
-        </select>
-        ${closeLabel}
-        ${closeCommentRow}
-        <button class="${isMyClosed ? 'secondary' : ''}" style="${strikeDecoration}" onclick='saveS5(${b.id})'>保存记录</button>
-      </div>
-    </td>
-  </tr>`;
 }
 
 function getS5ResolutionLabel(value) {
@@ -385,81 +292,166 @@ function getS5AssignedDisplayName(value) {
   return text.toLowerCase() === 'closed' ? '已关闭' : text;
 }
 
-function buildS5OtherRecordsHtml(records) {
-  if (!(records && records.length > 0)) {
-    return '<div style="font-size:12px; color:#94a3b8;">暂无其他测试人员闭环记录</div>';
-  }
-  return `<div style="display:flex; flex-direction:column; gap:8px;">${records.map((record) => {
-    const status = record.test_done
-      ? `<span style="color:#16a34a; font-weight:600;">已闭环</span>`
-      : `<span style="color:#dc2626; font-weight:600;">未闭环</span>`;
-    const resolution = record.test_done
-      ? `<span class="badge" style="background:#ecfdf5; color:#166534;">${getS5ResolutionLabel(record.resolution)}</span>`
-      : '';
-    return `<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:8px 10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;">
-      <span class="badge" style="background:#e2e8f0; color:#334155;">${escapeHtml(record.username || '-')}</span>
-      ${status}
-      ${resolution}
-      <span style="font-size:12px; color:#64748b;">发包：${escapeHtml(record.minor_version_no || '-')}</span>
-    </div>`;
-  }).join('')}</div>`;
+function s5StatusPill(b) {
+  if (b.zentao_deleted) return '<span class="st-pill st-pill--red s5-deleted-pill">禅道已删除</span>';
+  if (!b.zentao_bug_id) return '<span class="st-pill st-pill--gray st-pill--soft">本地 Bug</span>';
+  const key = isS5BugEffectivelyClosed(b) ? 'closed' : String(b.zentao_live_status || '').toLowerCase();
+  const [label, tone] = S5_STATUS[key] || [key || '未同步', 'gray'];
+  return `<span class="st-pill st-pill--${tone}">${escapeHtml(label)}</span>`;
 }
 
-function buildS5DetailRowHtml(b, colSpan) {
+function s5MinorName(minorId) {
+  const v = (state.versions || window.versions || []).find((item) => Number(item.id) === Number(minorId));
+  return v ? v.version_no : '';
+}
+
+// 闭环说明默认文案：「当前验证子版本 已确认修复」（未选具体小版本时只写「已确认修复」）
+function s5DefaultCloseComment() {
+  const sel = document.getElementById('s5MinorSelect');
+  const id = Number(sel?.value || 0);
+  const name = id ? (sel.selectedOptions?.[0]?.textContent || s5MinorName(id) || '').trim() : '';
+  return name ? `${name} 已确认修复` : '已确认修复';
+}
+
+function s5Btn(cls, icon, label, onclick, { title = '', disabled = false, extra = '' } = {}) {
+  return `<button type="button" class="s5-act ${cls}" ${disabled ? 'aria-disabled="true"' : ''} title="${escapeHtml(title || label)}" onclick="event.stopPropagation(); ${onclick}" ${extra}>${S5_ICON[icon]}<span>${label}</span></button>`;
+}
+
+function buildS5RowHtml(b, allVersionsMode) {
+  const isMyClosed = !!b.my_test_done;
   const isZentaoDeleted = !!b.zentao_deleted;
-  // 禅道已删除：只展示红色「已删除」标记，隐藏状态/指派/关闭人等会误导的信息。
-  const statusBadges = isZentaoDeleted
-    ? `<span class="badge" style="background:#dc2626; color:#fff; font-weight:bold;">🗑️ 禅道已删除</span>`
-    : [
-      b.zentao_live_status
-        ? `<span class="badge" style="background:#f8fafc; color:#475569;">禅道状态 ${escapeHtml(getS5ZentaoStatusLabel(b))}</span>`
-        : '',
-      b.zentao_assigned_to_name
-        ? `<span class="badge" style="background:#faf5ff; color:#7c3aed;">当前指派 ${escapeHtml(getS5AssignedDisplayName(b.zentao_assigned_to_name))}</span>`
-        : '',
-      b.zentao_closed_by_name
-        ? `<span class="badge" style="background:#ecfdf5; color:#047857;">关闭人 ${escapeHtml(b.zentao_closed_by_name)}</span>`
-        : '',
-      b.zentao_close_date
-        ? `<span class="badge" style="background:#f1f5f9; color:#475569;">关闭时间 ${escapeHtml(b.zentao_close_date)}</span>`
-        : '',
-      b.last_zentao_synced_at
-        ? `<span class="badge" style="background:#eff6ff; color:#2563eb;">同步 ${escapeHtml(b.last_zentao_synced_at)}</span>`
-        : '',
-    ].filter(Boolean).join('');
-  const previewAction = b.zentao_bug_id
-    ? `<a href="javascript:void(0)" data-preview-kind="bug" data-preview-id="${Number(b.zentao_bug_id)}" onclick="openS5PreviewById(${b.id})" style="font-size:12px; text-decoration:none; color:#0f766e;">打开禅道预览</a>`
-    : '<span style="font-size:12px; color:#94a3b8;">本地 Bug 无禅道预览</span>';
-  const closeCommentBlock = (b.zentao_close_comment || '').trim()
-    ? `<div style="margin-top:12px;">
-        <div style="font-size:12px; font-weight:600; color:#334155; margin-bottom:6px;">禅道关闭备注</div>
-        <div style="font-size:12px; color:#475569; line-height:1.7; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:8px; padding:10px 12px; white-space:pre-wrap; word-break:break-word;">${escapeHtml(b.zentao_close_comment)}</div>
+  const isZentaoBug = !!b.zentao_bug_id;
+  const isEffectivelyClosed = isS5BugEffectivelyClosed(b);
+  const canReactivate = isS5BugReactivatable(b);
+  const expanded = s5Expanded.has(b.id);
+  const cls = ['s5-row', 'overall-test-row-card'];
+  if (isMyClosed) cls.push('is-done');
+  if (isEffectivelyClosed) cls.push('is-closed');
+  if (isZentaoDeleted) cls.push('is-deleted');
+  if (expanded) cls.push('is-open');
+
+  const bugIdText = escapeHtml(b.bug_id || '-');
+  const bugHref = b.zentao_bug_url
+    ? `<a class="qa-ext-link" href="${escapeHtml(b.zentao_bug_url)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${bugIdText}</a>`
+    : `<span>${bugIdText}</span>`;
+  const bugTitle = escapeHtml(b.zentao_bug_title || b.bug_title || '');
+
+  const chips = [
+    allVersionsMode && b.major_version_no ? `<span class="s5-chip s5-chip--version">${escapeHtml(b.major_version_no)}</span>` : '',
+    `<span class="s5-src">${escapeHtml(sourceTypeZh(b.source_type))}</span>`,
+    b.is_retest_failed ? '<span class="s5-chip s5-chip--red">复测打回</span>' : '',
+    b.dispatched_to_name ? `<span class="s5-chip s5-chip--amber">特派 · ${escapeHtml(b.dispatched_to_name)}</span>` : '',
+  ].filter(Boolean).join('');
+
+  const others = b.other_records || [];
+  const othersDone = others.filter((r) => r.test_done).length;
+  const meta = [
+    (!isZentaoDeleted && b.zentao_assigned_to_name && !isEffectivelyClosed)
+      ? `<span>指派 <b>${escapeHtml(getS5AssignedDisplayName(b.zentao_assigned_to_name))}</b></span>` : '',
+    (!isZentaoDeleted && b.zentao_closed_by_name)
+      ? `<span>${escapeHtml(b.zentao_closed_by_name)} 关闭${b.zentao_close_date ? ` · ${escapeHtml(String(b.zentao_close_date).slice(0, 10))}` : ''}</span>` : '',
+    others.length ? `<span>他人闭环 <b>${othersDone}/${others.length}</b></span>` : '',
+    (b.zentao_close_comment || '').trim() ? '<span>有关闭备注</span>' : '',
+    isMyClosed ? `<span class="s5-meta-done">我已闭环${b.my_minor_version_id && s5MinorName(b.my_minor_version_id) ? ` · ${escapeHtml(s5MinorName(b.my_minor_version_id))}` : ''}</span>` : '',
+  ].filter(Boolean).join('<i aria-hidden="true">·</i>');
+
+  // 我的验证：结论 + 闭环确认 + 保存
+  const closeOnChange = isZentaoBug ? `onchange="toggleS5CloseComment(${b.id}, this.checked)"` : '';
+  const verify = `
+    <div class="s5-verify" onclick="event.stopPropagation()">
+      <select id="res_${b.id}" class="s5-res" ${isMyClosed ? 'disabled' : ''} aria-label="验证结论">
+        <option value="fixed" ${b.my_resolution === 'fixed' || !b.my_resolution ? 'selected' : ''}>修复通过</option>
+        <option value="false_alarm" ${b.my_resolution === 'false_alarm' ? 'selected' : ''}>误报</option>
+        <option value="rejected" ${b.my_resolution === 'rejected' ? 'selected' : ''}>拒绝修复</option>
+      </select>
+      <label class="s5-done"><input id="done_${b.id}" type="checkbox" ${isMyClosed ? 'checked' : ''} ${closeOnChange}><span>我的闭环确认</span></label>
+      <button type="button" class="s5-save${isMyClosed ? ' secondary' : ''}" onclick="saveS5(${b.id})">保存</button>
+    </div>`;
+
+  const actions = isZentaoBug
+    ? [
+      s5Btn('', 'eye', '预览', `openS5PreviewById(${b.id})`, { title: '预览禅道 Bug', extra: `data-preview-kind="bug" data-preview-id="${Number(b.zentao_bug_id)}"` }),
+      isEffectivelyClosed || isZentaoDeleted
+        ? s5Btn('is-off', 'user', '指派', `openS5AssignById(${b.id})`, { title: '已关闭的禅道 Bug 不能再指派，请先重新激活', disabled: true })
+        : s5Btn('', 'user', '指派', `openS5AssignById(${b.id})`),
+      canReactivate && !isZentaoDeleted
+        ? s5Btn('s5-act--green', 'rotate', '激活', `openS5ReactivateById(${b.id})`, { title: '重新激活该 Bug' })
+        : '<span class="s5-act-gap" aria-hidden="true"></span>',
+    ].join('')
+    : '<span class="s5-local-hint">本地记录</span>';
+
+  // 闭环说明：仅禅道 Bug（关闭时同步写入禅道备注）；勾选闭环确认后展开
+  const comment = isZentaoBug
+    ? `<div id="closeComment_${b.id}" class="s5-comment" style="display:none;" onclick="event.stopPropagation()">
+        <label for="closeCommentText_${b.id}">闭环说明<small>将同步写入禅道关闭备注</small></label>
+        <textarea id="closeCommentText_${b.id}" rows="2" placeholder="闭环说明（将同步写入禅道备注）" oninput="this.dataset.auto=''">${escapeHtml(b.my_comment || '')}</textarea>
       </div>`
     : '';
-  return `<tr class="overall-test-detail-row hidden" data-bug-id="${b.id}">
-    <td colspan="${colSpan}" style="padding:0 10px 10px 10px; background:#fcfcfd;">
-      <div style="border:1px solid #e2e8f0; border-top:none; border-radius:0 0 10px 10px; background:#ffffff; padding:12px 14px;">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-          <div style="font-size:13px; font-weight:700; color:#0f172a;">Bug 详情</div>
-          <div>${previewAction}</div>
-        </div>
-        ${statusBadges ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;">${statusBadges}</div>` : ''}
-        ${closeCommentBlock}
-        <div style="margin-top:12px;">
-          <div style="font-size:12px; font-weight:600; color:#334155; margin-bottom:8px;">其他人闭环记录</div>
-          ${buildS5OtherRecordsHtml(b.other_records)}
-        </div>
-      </div>
-    </td>
-  </tr>`;
+
+  return `<div class="${cls.join(' ')}" data-bug-id="${b.id}" role="listitem" onclick="s5RowClick(event, ${b.id})">
+    <div class="s5-main">
+      <div class="s5-line1"><span class="s5-id">${bugHref}</span>${s5StatusPill(b)}${chips}</div>
+      <div class="s5-title">${bugTitle || '<span class="s5-untitled">暂无标题</span>'}</div>
+      ${meta ? `<div class="s5-meta">${meta}</div>` : ''}
+    </div>
+    ${verify}
+    <div class="s5-actions">
+      ${actions}
+      <button type="button" class="s5-toggle" data-s5-toggle-link="1" data-bug-id="${b.id}" aria-expanded="${expanded}" title="${expanded ? '收起详情' : '展开详情'}" onclick="event.stopPropagation(); toggleS5DetailRow(${b.id})">${S5_ICON.chevron}</button>
+    </div>
+    ${comment}
+    ${buildS5DetailHtml(b, expanded)}
+  </div>`;
 }
 
-function mountS5DetailRows(table, pageRows, colSpan) {
-  pageRows.forEach((bug) => {
-    const rowEl = table.querySelector(`.overall-test-row-card[data-bug-id="${bug.id}"]`);
-    if (!rowEl || rowEl.nextElementSibling?.matches(`.overall-test-detail-row[data-bug-id="${bug.id}"]`)) return;
-    rowEl.insertAdjacentHTML('afterend', buildS5DetailRowHtml(bug, colSpan));
-  });
+function buildS5OtherRecordsHtml(records) {
+  if (!(records && records.length > 0)) {
+    return '<div class="s5-empty-line">暂无其他测试人员的闭环记录</div>';
+  }
+  return `<ul class="s5-others">${records.map((record) => {
+    const name = String(record.username || '-');
+    return `<li>
+      <span class="fbk-avatar" aria-hidden="true">${escapeHtml(name.slice(0, 1).toUpperCase())}</span>
+      <span class="s5-other-name">${escapeHtml(name)}</span>
+      ${record.test_done
+        ? `<span class="st-pill st-pill--green">已闭环</span><span class="s5-other-res">${escapeHtml(getS5ResolutionLabel(record.resolution))}</span>`
+        : '<span class="st-pill st-pill--red">未闭环</span>'}
+      <span class="s5-other-minor">发包 ${escapeHtml(record.minor_version_no || '-')}</span>
+    </li>`;
+  }).join('')}</ul>`;
+}
+
+function buildS5DetailHtml(b, expanded) {
+  const isZentaoDeleted = !!b.zentao_deleted;
+  const fact = (k, v) => `<div><dt>${k}</dt><dd>${v || '<span class="s5-na">—</span>'}</dd></div>`;
+  const facts = b.zentao_bug_id && !isZentaoDeleted
+    ? [
+      fact('禅道状态', escapeHtml(getS5ZentaoStatusLabel(b))),
+      fact('当前指派', b.zentao_assigned_to_name ? escapeHtml(getS5AssignedDisplayName(b.zentao_assigned_to_name)) : ''),
+      fact('关闭人', b.zentao_closed_by_name ? escapeHtml(b.zentao_closed_by_name) : ''),
+      fact('关闭时间', b.zentao_close_date ? escapeHtml(b.zentao_close_date) : ''),
+      fact('我的结论', b.my_test_done ? escapeHtml(getS5ResolutionLabel(b.my_resolution)) : '未闭环'),
+      fact('最后同步', b.last_zentao_synced_at ? escapeHtml(b.last_zentao_synced_at) : ''),
+    ].join('')
+    : [
+      fact('类型', isZentaoDeleted ? '<span class="s5-danger-text">禅道中已删除</span>' : '本地 Bug（未关联禅道）'),
+      fact('来源', escapeHtml(sourceTypeZh(b.source_type))),
+      fact('我的结论', b.my_test_done ? escapeHtml(getS5ResolutionLabel(b.my_resolution)) : '未闭环'),
+    ].join('');
+  const closeComment = (b.zentao_close_comment || '').trim()
+    ? `<section class="s5-sec"><h5>禅道关闭备注</h5><div class="s5-note">${escapeHtml(b.zentao_close_comment)}</div></section>`
+    : '';
+  const tools = [
+    b.zentao_bug_id ? `<button type="button" class="s5-tool" data-preview-kind="bug" data-preview-id="${Number(b.zentao_bug_id)}" onclick="openS5PreviewById(${b.id})">${S5_ICON.eye}预览详情</button>` : '',
+    b.zentao_bug_url ? `<a class="s5-tool" href="${escapeHtml(b.zentao_bug_url)}" target="_blank" rel="noopener noreferrer">${S5_ICON.external}在禅道中打开</a>` : '',
+    `<button type="button" class="s5-tool s5-tool--danger" onclick="removeS5BugById(${b.id})">${S5_ICON.trash}${b.zentao_bug_id ? '删除禅道 Bug' : '移除本地 Bug'}</button>`,
+  ].join('');
+  return `<div class="s5-detail overall-test-detail-row" data-bug-id="${b.id}" ${expanded ? '' : 'hidden'} onclick="event.stopPropagation()">
+    <dl class="s5-facts">${facts}</dl>
+    ${closeComment}
+    <section class="s5-sec"><h5>其他人闭环记录<em>${(b.other_records || []).length}</em></h5>${buildS5OtherRecordsHtml(b.other_records)}</section>
+    <div class="s5-tools">${tools}</div>
+  </div>`;
 }
 
 // 等两帧让浏览器先完成展开后的 reflow，再判断是否需要滚动
@@ -477,66 +469,51 @@ function ensureS5ElementVisible(el) {
 }
 
 export function toggleS5DetailRow(id, forceExpand = null) {
-  const detailRow = document.querySelector(`.overall-test-detail-row[data-bug-id="${id}"]`);
-  if (!detailRow) return;
-  const shouldExpand = typeof forceExpand === 'boolean'
-    ? forceExpand
-    : detailRow.classList.contains('hidden');
-  detailRow.classList.toggle('hidden', !shouldExpand);
-  const toggleLink = document.querySelector(`[data-s5-toggle-link][data-bug-id="${id}"]`);
-  if (toggleLink) toggleLink.textContent = shouldExpand ? '收起' : '展开';
-  if (shouldExpand) ensureS5ElementVisible(detailRow);
+  const row = document.querySelector(`.s5-row[data-bug-id="${id}"]`);
+  const detail = row?.querySelector('.s5-detail');
+  if (!row || !detail) return;
+  const shouldExpand = typeof forceExpand === 'boolean' ? forceExpand : detail.hidden;
+  detail.hidden = !shouldExpand;
+  row.classList.toggle('is-open', shouldExpand);
+  if (shouldExpand) s5Expanded.add(Number(id)); else s5Expanded.delete(Number(id));
+  const toggle = row.querySelector('[data-s5-toggle-link]');
+  if (toggle) {
+    toggle.setAttribute('aria-expanded', String(shouldExpand));
+    toggle.title = shouldExpand ? '收起详情' : '展开详情';
+  }
+  if (shouldExpand) ensureS5ElementVisible(row);
+}
+
+// 点行的空白处 / 标题区展开详情；交互控件与链接自己处理，不触发
+export function s5RowClick(event, id) {
+  if (event.target.closest('a, button, input, select, textarea, label')) return;
+  if (window.getSelection && String(window.getSelection()).trim()) return; // 选中文字时不切换
+  toggleS5DetailRow(id);
+}
+
+let s5MinorBound = false;
+// 切换验证子版本时，同步更新尚未手动改过的默认闭环说明
+function bindS5MinorAutofill() {
+  if (s5MinorBound) return;
+  const sel = document.getElementById('s5MinorSelect');
+  if (!sel) return;
+  s5MinorBound = true;
+  sel.addEventListener('change', () => {
+    const text = s5DefaultCloseComment();
+    document.querySelectorAll('#s5Table textarea[data-auto="1"]').forEach((ta) => { ta.value = text; });
+  });
 }
 
 export function renderS5() {
   const table = document.getElementById('s5Table');
   if (!table) return;
   clampS5CurrentPage();
+  bindS5MinorAutofill();
   const pageRows = getCurrentS5PageRows();
   const allVersionsMode = !!state.overallTestAllVersionsMode;
-  const thead = document.getElementById('s5TableHead');
-  if (thead) {
-    thead.innerHTML = allVersionsMode
-      ? '<tr><th style="width:90px">所属版本</th><th style="width:240px">Bug 编号 (来源)</th><th>Bug 标题</th><th style="width:120px">操作</th><th style="width:380px">验证操作</th></tr>'
-      : '<tr><th style="width:240px">Bug 编号 (来源)</th><th>Bug 标题</th><th style="width:120px">操作</th><th style="width:380px">验证操作</th></tr>';
-  }
-  const colSpan = allVersionsMode ? 5 : 4;
   table.innerHTML = pageRows.length
     ? pageRows.map((b) => buildS5RowHtml(b, allVersionsMode)).join('')
-    : `<tr><td colspan="${colSpan}" style="text-align:center; color:#94a3b8; padding:24px 12px;">暂无 Bug 数据</td></tr>`;
-
-  mountS5DetailRows(table, pageRows, colSpan);
-
-  pageRows.forEach((bug) => {
-    const rowEl = table.querySelector(`.overall-test-row-card[data-bug-id="${bug.id}"]`);
-    const actionCell = rowEl?.children?.[allVersionsMode ? 3 : 2];
-    const firstActionRow = actionCell?.querySelector('div > div');
-    const actionRows = actionCell?.querySelectorAll(':scope > div > div');
-    const secondActionRow = actionRows?.[1] || null;
-    if (secondActionRow && isS5BugEffectivelyClosed(bug)) {
-      const assignAnchor = secondActionRow.querySelector(`a[onclick="openS5AssignById(${bug.id})"]`);
-      if (assignAnchor) {
-        assignAnchor.removeAttribute('onclick');
-        assignAnchor.removeAttribute('href');
-        assignAnchor.style.color = '#94a3b8';
-        assignAnchor.style.cursor = 'not-allowed';
-        assignAnchor.title = '已关闭的禅道 Bug 不能再指派';
-      }
-    }
-    if (!firstActionRow) return;
-    const inserted = [];
-    if (bug?.zentao_bug_id && !firstActionRow.querySelector('[data-s5-preview-link]')) {
-      inserted.push(`<a data-s5-preview-link="1" data-preview-kind="bug" data-preview-id="${Number(bug.zentao_bug_id)}" href="javascript:void(0)" onclick="openS5PreviewById(${bug.id})" style="font-size:12px; text-decoration:none; white-space:nowrap; color:#0f766e;">预览</a>`);
-    }
-    if (!firstActionRow.querySelector('[data-s5-toggle-link]')) {
-      inserted.push(`<a data-s5-toggle-link="1" data-bug-id="${bug.id}" href="javascript:void(0)" onclick="toggleS5DetailRow(${bug.id})" style="font-size:12px; text-decoration:none; white-space:nowrap; color:#2563eb;">展开</a>`);
-    }
-    if (!inserted.length) return;
-    firstActionRow.insertAdjacentHTML(
-      'afterbegin',
-      `${inserted.join('<span style="color:#e2e8f0; margin:0 2px;">|</span>')}<span style="color:#e2e8f0; margin:0 2px;">|</span>`,
-    );
-  });
+    : `<div class="fbk-empty"><svg class="fbk-empty-ic" aria-hidden="true"><use href="#i-bug"/></svg><strong>暂无 Bug 数据</strong>换个大版本或调整筛选条件试试</div>`;
 
   updateS5PagerBar();
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
@@ -693,6 +670,12 @@ async function _syncOverallTestRecentFromZentaoImpl(options = {}) {
 export function toggleS5CloseComment(bugId, checked) {
   const wrap = document.getElementById('closeComment_' + bugId);
   if (wrap) wrap.style.display = checked ? '' : 'none';
+  const ta = document.getElementById('closeCommentText_' + bugId);
+  // 空白或仍是自动填入的说明 → 填入「当前验证子版本 已确认修复」；用户手改过的保留
+  if (checked && ta && (!ta.value.trim() || ta.dataset.auto === '1')) {
+    ta.value = s5DefaultCloseComment();
+    ta.dataset.auto = '1';
+  }
   if (checked) {
     // 展开后若行底跑到视口外，自动把整行滚回可见区域
     const rowEl = document.querySelector(`.overall-test-row-card[data-bug-id="${bugId}"]`);
@@ -731,50 +714,14 @@ export async function saveS5(id) {
   });
 }
 
-export async function editS5Bug(id, oldBugId, zentaoBugId, currentTitle) {
-  if (zentaoBugId) {
-    // Zentao bug: edit title via Zentao API
-    const title = prompt('请输入 Bug 标题：', currentTitle ? String(currentTitle).replace(/&amp;/g, '&') : '');
-    if (title === null) return;
-    if (!title.trim()) {
-      window.showMessage && window.showMessage('标题不能为空', 'error');
-      return;
-    }
-    try {
-      await api(`/zentao/bugs/${Number(zentaoBugId)}`, {
-        method: 'PUT',
-        headers: window.H,
-        body: { title: title.trim() },
-      });
-      window.showMessage && window.showMessage('禅道 Bug 标题已更新', 'success');
-      await loadOverallTest({ syncBeforeLoad: false, showSuccess: false });
-    } catch (err) {
-      window.showMessage && window.showMessage(err.message || '标题更新失败', 'error');
-    }
-  } else {
-    // Local bug: change bug_id (original behaviour)
-    const num = prompt('请输入正确的 Bug 数字部分：', String(oldBugId || '').replace('b#', ''));
-    if (!num) return;
-    try {
-      await api('/bugs/' + id + '?new_bug_id=' + encodeURIComponent(withPrefix('b#', num)), { method: 'PUT' });
-      window.showMessage && window.showMessage('Bug 编号已纠正', 'success');
-      await loadOverallTest({ syncBeforeLoad: false, showSuccess: false });
-    } catch (err) {
-      window.showMessage && window.showMessage(err.message || '更新失败', 'error');
-    }
-  }
-}
-
 export async function removeS5Bug(id, zentaoBugId = '') {
   if (zentaoBugId) {
     // Zentao bug: soft-delete via Zentao API with strong warning
-    const confirmed = window.confirm(
-      `⚠️ 删除禅道 Bug\n\n` +
-      `将对禅道执行删除操作（软删除，deleted=true）。\n` +
-      `当前实例删除后暂无稳定可用的 REST 恢复接口，请谨慎操作！\n\n` +
-      `本地记录将标记为“已删除”并从大盘隐藏，不会彻底清除（保留审计记录）。\n\n` +
-      `确认删除禅道 Bug #${zentaoBugId} 吗？`
-    );
+    const confirmed = await confirmTaskDialog({
+      icon: 'i-alert', tone: 'red', danger: true, title: '删除禅道 Bug', sub: `禅道 Bug #${zentaoBugId}`,
+      message: '将对禅道执行删除（软删除），当前实例删除后暂无稳定可用的恢复接口，请谨慎操作。本地记录会标记为「已删除」并从大盘隐藏，保留审计记录。',
+      okText: '删除禅道 Bug',
+    });
     if (!confirmed) return;
     try {
       await api(`/zentao/bugs/${Number(zentaoBugId)}`, { method: 'DELETE' });
@@ -785,7 +732,11 @@ export async function removeS5Bug(id, zentaoBugId = '') {
     }
   } else {
     // Local bug
-    if (!confirm('确定要在该大版本下移除这个 Bug 吗？')) return;
+    const ok = await confirmTaskDialog({
+      icon: 'i-alert', tone: 'red', danger: true, title: '移除本地 Bug', okText: '移除',
+      message: '将在该大版本下移除这条本地 Bug 记录，移除后无法恢复。',
+    });
+    if (!ok) return;
     try {
       await api('/bugs/' + id, { method: 'DELETE' });
       window.showMessage && window.showMessage('Bug 已彻底移除', 'success');
@@ -797,12 +748,6 @@ export async function removeS5Bug(id, zentaoBugId = '') {
 }
 
 // State-driven action wrappers (no inline HTML attribute injection)
-
-function editS5BugById(id) {
-  const bug = state.overallTestRows.find((b) => b.id === id);
-  if (!bug) return;
-  editS5Bug(id, bug.bug_id, bug.zentao_bug_id || '', bug.zentao_bug_title || '');
-}
 
 function removeS5BugById(id) {
   const bug = state.overallTestRows.find((b) => b.id === id);
@@ -1767,7 +1712,6 @@ const OmniQAOverallTestTab = {
   loadOverallTest,
   renderS5,
   saveS5,
-  editS5Bug,
   removeS5Bug,
   pushOverallTest,
   refreshS5EntryMode,
@@ -1805,8 +1749,6 @@ window.loadOverallTest = loadOverallTest;
 window.pushOverallTest = pushOverallTest;
 window.syncOverallTestFromZentao = syncOverallTestFromZentao;
 window.syncOverallTestRecentFromZentao = syncOverallTestRecentFromZentao;
-window.editS5Bug = editS5Bug;
-window.editS5BugById = editS5BugById;
 window.removeS5Bug = removeS5Bug;
 window.removeS5BugById = removeS5BugById;
 window.openS5AssignById = openS5AssignById;
@@ -1819,6 +1761,7 @@ window.resetS5Filters = resetS5Filters;
 window.saveS5 = saveS5;
 window.openS5PreviewById = openS5PreviewById;
 window.toggleS5DetailRow = toggleS5DetailRow;
+window.s5RowClick = s5RowClick;
 window.toggleS5CloseComment = toggleS5CloseComment;
 window.openZentaoBugPreview = openZentaoBugPreview;
 window.closeZentaoBugPreview = closeZentaoBugPreview;

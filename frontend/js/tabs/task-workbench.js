@@ -1,4 +1,5 @@
 import { prepareOperationModal } from '../components/zentao-operation.js';
+import { askTaskHours, confirmTaskAction, confirmTaskDialog } from '../components/task-dialog.js';
 import { operateTask } from '../components/task-operation.js';
 import { api } from '../api.js';
 import { escapeHtml, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
@@ -392,7 +393,12 @@ export async function taskWorkbenchBatchClose() {
     window.showMessage && window.showMessage('请先勾选要关闭的任务', 'info');
     return;
   }
-  if (!window.confirm(`确认关闭选中的 ${ids.length} 个任务？关闭后如需继续可「重新激活」。`)) return;
+  const ok = await confirmTaskDialog({
+    icon: 'i-ban', tone: 'red', title: '批量关闭任务', danger: true, okText: `关闭 ${ids.length} 个任务`,
+    sub: `已勾选 ${ids.length} 个任务`,
+    message: '将逐个同步到禅道关闭，失败的任务会单独提示，不影响其余任务。关闭后如需继续可「重新激活」。',
+  });
+  if (!ok) return;
   showLoading(`正在关闭任务（0/${ids.length}）…`);
   let okCount = 0;
   const failed = [];
@@ -457,43 +463,33 @@ export async function jumpToLinkedRequirement(reqId, majorVersionId) {
 }
 
 export async function taskWorkbenchOperate(taskId, action) {
-  const confirmText = {
-    finish: '确认将该任务标记为完成？',
-    close: '确认关闭该任务？',
-    cancel: '确认取消该任务？（与禅道联动，取消后可重新激活）',
-    reactivate: '确认重新激活该任务？',
-  }[action];
-  if (confirmText && !window.confirm(confirmText)) return;
+  const task = findWorkbenchTask(taskId);
   let consumed;
-  if (action === 'finish') {
-    const task = taskWorkbenchData.find((item) => Number(item.task_id) === Number(taskId));
-    if (task && !task.has_time_tracking) {
-      const suggested = Number(task.suggested_consumed_hours || task.left || task.estimate || 1);
-      const input = window.prompt(
-        '未检测到该任务的计时记录，请输入本次实际工时（小时）：',
-        String(suggested),
-      );
-      if (input === null) return;
-      consumed = Number(input);
-      if (!Number.isFinite(consumed) || consumed <= 0 || consumed > 999) {
-        window.showMessage && window.showMessage('实际工时需在 0~999 小时之间', 'error');
-        return;
-      }
-    }
+  if (['finish', 'close', 'cancel', 'reactivate'].includes(action)) {
+    // 确认与「补填实际工时」合并在同一个对话框里（完成且无计时记录时才要求填工时）
+    const res = await confirmTaskAction(action, task, { taskId });
+    if (!res) return;
+    consumed = res.consumed;
   }
   // 加载条挂到任务列表重载完成、提示放在重载之后：条消失时界面已与禅道一致。
   await operateTask(taskId, { action, ...(consumed !== undefined ? { consumed } : {}) }, { onSuccess: () => loadTaskWorkbench() });
 }
 
 export async function taskWorkbenchSetTime(taskId) {
-  const input = window.prompt('设置该任务的预计工时（小时，0~999）：', '4');
-  if (input === null) return;
-  const hours = Number(input);
-  if (!Number.isFinite(hours) || hours <= 0 || hours > 999) {
-    window.showMessage && window.showMessage('工时需在 0~999 小时之间', 'error');
-    return;
-  }
+  const hours = await askTaskHours(findWorkbenchTask(taskId), { mode: 'estimate', taskId });
+  if (hours === null) return;
   await operateTask(taskId, { action:'set_time', hours }, { onSuccess: () => loadTaskWorkbench() });
+}
+
+// 父任务的子任务也可能被操作，一并查找
+function findWorkbenchTask(taskId) {
+  const id = Number(taskId);
+  for (const t of taskWorkbenchData) {
+    if (Number(t.task_id) === id) return t;
+    const kid = (t.children || []).find((k) => Number(k.task_id) === id);
+    if (kid) return kid;
+  }
+  return null;
 }
 
 export function taskWorkbenchRememberFold(taskId, open) {
@@ -504,7 +500,7 @@ export function taskWorkbenchRememberFold(taskId, open) {
 
 // ── 任务指派（面向所有用户开放，支持姓名/账号模糊搜索）──────────────────────
 
-let assignCtx = { taskId: null, items: [], picked: '', source: 'workbench' };
+let assignCtx = { taskId: null, items: [], picked: '', current: '', source: 'workbench' };
 
 function assignEls() {
   return {
@@ -513,62 +509,141 @@ function assignEls() {
     list: document.getElementById('taskAssignList'),
     hint: document.getElementById('taskAssignHint'),
     label: document.getElementById('taskAssignTaskLabel'),
+    picked: document.getElementById('taskAssignPicked'),
+    ok: document.getElementById('taskAssignConfirmBtn'),
   };
+}
+
+const assignAvatar = (name) => `<span class="fbk-avatar" aria-hidden="true">${escapeHtml(String(name || '?').trim().slice(0, 1).toUpperCase() || '?')}</span>`;
+const assignName = (account) => {
+  const u = assignCtx.items.find((x) => x.account === account);
+  return u ? (u.realname || u.account) : account;
+};
+
+function renderAssignLabel() {
+  const { label } = assignEls();
+  if (!label) return;
+  const t = findWorkbenchTask(assignCtx.taskId);
+  label.textContent = `#${assignCtx.taskId}${t?.name ? ` · ${t.name}` : ''}`;
+  label.title = label.textContent;
+}
+
+// 底部「将指派给 X」+ 确认按钮可用性（操作进行中由禅道操作组件统一禁用，不在这里改）
+function renderAssignPicked() {
+  const { picked, ok } = assignEls();
+  if (picked) {
+    picked.innerHTML = assignCtx.picked
+      ? `将指派给 <b>${escapeHtml(assignName(assignCtx.picked))}</b>`
+      : '从列表中选择要指派的人';
+  }
+  if (ok && !ok.dataset.operationDisabled) ok.disabled = !assignCtx.picked || assignCtx.picked === assignCtx.current;
+}
+
+function assignMatches() {
+  const { input } = assignEls();
+  const q = (input?.value || '').trim().toLowerCase();
+  return q
+    ? assignCtx.items.filter((u) => (`${u.realname || ''} ${u.account || ''}`).toLowerCase().includes(q))
+    : assignCtx.items;
 }
 
 // 模糊过滤：输入的单词（拼音/账号字母）或汉字都能命中（大小写不敏感的子串匹配）
 function renderAssignList() {
-  const { input, list } = assignEls();
-  if (!input || !list) return;
-  const q = input.value.trim().toLowerCase();
-  const matched = q
-    ? assignCtx.items.filter((u) => (`${u.realname || ''} ${u.account || ''}`).toLowerCase().includes(q))
-    : assignCtx.items;
+  const { list } = assignEls();
+  if (!list) return;
+  const matched = assignMatches();
   list.innerHTML = matched.length
-    ? matched.slice(0, 100).map((u) => `
-        <div class="zt-combo-item ${assignCtx.picked === u.account ? 'active' : ''}" data-account="${escapeHtml(u.account)}"
-          style="display:flex; justify-content:space-between; gap:8px; cursor:pointer;">
-          <span>${escapeHtml(u.realname || u.account)}</span>
-          <span class="muted" style="font-size:12px;">${escapeHtml(u.account)}</span>
-        </div>`).join('')
-    : '<div class="muted" style="padding:8px 10px; font-size:12px;">无匹配人员，试试换个关键字</div>';
+    ? matched.slice(0, 100).map((u) => {
+      const on = assignCtx.picked === u.account;
+      const cur = assignCtx.current === u.account;
+      return `
+        <div class="tas-item${on ? ' is-on' : ''}${cur ? ' is-current' : ''}" role="option" aria-selected="${on}" data-account="${escapeHtml(u.account)}">
+          ${assignAvatar(u.realname || u.account)}
+          <span class="tas-name">${escapeHtml(u.realname || u.account)}</span>
+          <span class="tas-account">${escapeHtml(u.account)}</span>
+          ${cur ? '<span class="tas-tag">当前</span>' : ''}
+          <svg class="tas-check" aria-hidden="true"><use href="#i-check"/></svg>
+        </div>`;
+    }).join('')
+    : `<div class="tas-empty">${assignCtx.items.length ? '无匹配人员，试试换个关键字' : '暂无可指派人员'}</div>`;
+  renderAssignPicked();
+}
+
+function moveAssignPick(delta) {
+  const matched = assignMatches().slice(0, 100);
+  if (!matched.length) return;
+  const idx = matched.findIndex((u) => u.account === assignCtx.picked);
+  const next = matched[Math.max(0, Math.min(matched.length - 1, idx < 0 ? 0 : idx + delta))];
+  assignCtx.picked = next.account;
+  renderAssignList();
+  assignEls().list?.querySelector('.tas-item.is-on')?.scrollIntoView({ block: 'nearest' });
+}
+
+function bindAssignModal() {
+  const { modal, input, list } = assignEls();
+  if (!modal || modal.dataset.bound) return;
+  modal.dataset.bound = '1';
+  input.addEventListener('input', () => {
+    // 输入后若只剩一个匹配项则自动选中，回车即可确认
+    const matched = assignMatches();
+    assignCtx.picked = matched.length === 1 ? matched[0].account : '';
+    renderAssignList();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); moveAssignPick(e.key === 'ArrowDown' ? 1 : -1); }
+    else if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); if (assignCtx.picked) confirmTaskAssign(); }
+  });
+  list.addEventListener('click', (e) => {
+    const item = e.target.closest('[data-account]');
+    if (!item) return;
+    assignCtx.picked = item.getAttribute('data-account');
+    renderAssignList();
+  });
+  list.addEventListener('dblclick', (e) => {
+    const item = e.target.closest('[data-account]');
+    if (!item) return;
+    assignCtx.picked = item.getAttribute('data-account');
+    confirmTaskAssign();
+  });
+  // Esc 只关指派弹窗（捕获阶段，避免连带关闭下层弹窗 / 抽屉）
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || modal.classList.contains('hidden') || modal.style.display === 'none') return;
+    if (document.getElementById('taskOpDialog')?.style.display === 'flex') return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    closeTaskAssignModal();
+  }, true);
 }
 
 export async function openTaskAssign(taskId, source = 'workbench') {
-  const snapshot = assignCtx = { taskId, items: [], picked: '', source };
-  const { modal, input, list, hint, label } = assignEls();
+  const snapshot = assignCtx = { taskId, items: [], picked: '', current: '', source };
+  const { modal, input, list, hint } = assignEls();
   if (!modal || !input || !list) return;
-  if (label) label.textContent = `#${taskId}`;
-  if (hint) hint.textContent = '';
+  bindAssignModal();
+  renderAssignLabel();
+  if (hint) hint.innerHTML = '';
   input.value = '';
-  list.innerHTML = '<div class="muted" style="padding:8px 10px; font-size:12px;">正在加载可指派人…</div>';
+  list.innerHTML = '<div class="tas-empty"><span class="wb-spin" aria-hidden="true"></span>正在加载可指派人…</div>';
+  renderAssignPicked();
   prepareOperationModal(modal);
   modal.classList.remove('hidden');
   modal.style.display = 'flex';
-  if (!input.dataset.bound) {
-    input.dataset.bound = '1';
-    input.addEventListener('input', () => { assignCtx.picked = ''; renderAssignList(); });
-    list.addEventListener('click', (e) => {
-      const item = e.target.closest('[data-account]');
-      if (!item) return;
-      assignCtx.picked = item.getAttribute('data-account');
-      renderAssignList();
-    });
-  }
+  input.focus();
   try {
     const data = await (await api(`/workbench/tasks/${taskId}/assignable`)).json();
     if (assignCtx !== snapshot) return;
     assignCtx.items = data.users || [];
+    assignCtx.current = data.current || '';
     if (hint) {
-      const cur = assignCtx.items.find((u) => u.account === data.current);
-      hint.textContent = data.current ? `当前指派：${cur ? `${cur.realname}（${data.current}）` : data.current}` : '当前未指派';
+      hint.innerHTML = data.current
+        ? `<span class="tas-current-k">当前指派</span>${assignAvatar(assignName(data.current))}<b>${escapeHtml(assignName(data.current))}</b><span class="tas-account">${escapeHtml(data.current)}</span>`
+        : '<span class="tas-current-k">当前指派</span><span class="tas-none">未指派</span>';
     }
     renderAssignList();
   } catch (err) {
     if (assignCtx !== snapshot) return;
-    list.innerHTML = `<div class="muted" style="padding:8px 10px; font-size:12px;">加载可指派人失败：${escapeHtml(err.message || '未知错误')}</div>`;
+    list.innerHTML = `<div class="tas-empty is-error">加载可指派人失败：${escapeHtml(err.message || '未知错误')}</div>`;
   }
-  input.focus();
 }
 
 export function closeTaskAssignModal() {
@@ -584,14 +659,17 @@ export async function confirmTaskAssign() {
     window.showMessage && window.showMessage('请先从列表中选择要指派的人员', 'info');
     return;
   }
+  if (assignCtx.picked === assignCtx.current) {
+    window.showMessage && window.showMessage('该任务已指派给此人', 'info');
+    return;
+  }
   const snapshot = assignCtx;
   await operateTask(snapshot.taskId, { action:'assign', assigned_to:snapshot.picked }, {
     modal: 'taskAssignModal',
     isCurrent: () => assignCtx === snapshot,
     restore: () => {
       assignCtx = snapshot;
-      const { label } = assignEls();
-      if (label) label.textContent = `#${snapshot.taskId}`;
+      renderAssignLabel();
       renderAssignList();
     },
     onSuccess: async () => {
@@ -600,6 +678,7 @@ export async function confirmTaskAssign() {
       if (snapshot.source === 'board') await window.OmniQATaskBoardTab?.reloadZentaoFromMirror?.();
     },
   });
+  if (assignCtx === snapshot) renderAssignPicked();
 }
 
 window.OmniQATaskWorkbenchTab = {

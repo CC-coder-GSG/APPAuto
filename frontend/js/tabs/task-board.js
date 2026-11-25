@@ -1,4 +1,5 @@
 import { operateTask } from '../components/task-operation.js';
+import { confirmTaskAction } from '../components/task-dialog.js';
 import { api } from '../api.js';
 import { renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
 import { showLoading, hideLoading } from '../components/common.js';
@@ -1062,28 +1063,13 @@ export async function reloadZentaoFromMirror() {
 }
 
 export async function ztOperate(taskId, action) {
-  const confirmText = {
-    finish: '确认将该任务标记为完成？',
-    close: '确认关闭该任务？',
-    reactivate: '确认重新激活该任务？已登记工时会保留，并从当前时刻开始新的计时段。',
-  }[action];
-  if (confirmText && !window.confirm(confirmText)) return;
   let consumed;
-  if (action === 'finish') {
+  if (['finish', 'close', 'reactivate', 'cancel'].includes(action)) {
     const task = state.zentao.find((item) => Number(item.task_id) === Number(taskId));
-    if (task && !task.has_time_tracking) {
-      const suggested = Number(task.suggested_consumed_hours || task.left || task.estimate || 1);
-      const input = window.prompt(
-        '未检测到该任务的计时记录，请输入本次实际工时（小时）：',
-        String(suggested),
-      );
-      if (input === null) return;
-      consumed = Number(input);
-      if (!Number.isFinite(consumed) || consumed <= 0 || consumed > 999) {
-        window.showMessage && window.showMessage('实际工时需在 0~999 小时之间', 'error');
-        return;
-      }
-    }
+    // 确认与「补填实际工时」合并在同一个对话框里（完成且无计时记录时才要求填工时）
+    const res = await confirmTaskAction(action, task, { taskId });
+    if (!res) return;
+    consumed = res.consumed;
   }
   await operateTask(taskId, { action, ...(consumed !== undefined ? { consumed } : {}) }, {
     onSuccess: async () => {

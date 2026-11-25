@@ -6,6 +6,7 @@ import { runZentaoOperation, operationPending, prepareOperationModal } from '../
 import { verifyBugResult } from '../components/bug-result-operation.js';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 import { closeModal, openModal } from '../components/modal.js';
+import { askTaskHours, mountHoursField, confirmTaskDialog, promptTaskDialog } from '../components/task-dialog.js';
 import { renderCaseReviewControls } from '../components/case-review.js?v=20260714-1';
 import { renderBugVersion } from '../components/bug-version.js?v=20261022-found-version-1';
 import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge, sourceTypeZh } from '../utils.js?v=20261014-2';
@@ -555,8 +556,51 @@ function openTestExecutionModal(reqId, checkboxEl) {
 
   noteInput.value = '';
   resultSel.value = 'passed';
+  const sub = document.getElementById('mineTestExecSub');
+  if (sub) {
+    const text = [selected?.zentao_req_id || `需求 #${reqId}`, selected?.title, selected?.selected_task_mode ? `任务 #${selected.zentao_task_id}` : '']
+      .filter(Boolean).join(' · ');
+    sub.textContent = text;
+    sub.title = text;
+  }
+  // 未检测到计时记录的本人禅道任务：实际工时直接在本弹窗里填，不再另弹输入框
+  const hoursWrap = document.getElementById('mineTestExecHoursWrap');
+  testExecHoursField = null;
+  if (hoursWrap) {
+    hoursWrap.hidden = !needsTaskConsumed(selected);
+    hoursWrap.innerHTML = '';
+    if (!hoursWrap.hidden) {
+      testExecHoursField = mountHoursField(hoursWrap, {
+        id: 'mineTestExecHours',
+        label: '本次实际测试工时',
+        value: consumedDefault(selected),
+        presets: [1, 2, 4, 8],
+        hint: '未检测到该禅道任务的计时记录，提交时会把这次实际测试工时一并写入禅道。',
+      });
+    }
+  }
   prepareOperationModal(modal);
   openModal(modal);
+  bindTestExecKeys();
+}
+
+let testExecHoursField = null;
+let testExecKeysBound = false;
+// Esc 关闭「提交测试结果」弹窗（捕获阶段，只作用于本弹窗；禅道操作进行中由操作组件自己处理）
+function bindTestExecKeys() {
+  if (testExecKeysBound) return;
+  testExecKeysBound = true;
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const modal = document.getElementById('mineTestExecModal');
+    if (!modal || modal.dataset.open !== '1' || modal.style.display === 'none') return;
+    if (document.getElementById('taskOpDialog')?.style.display === 'flex') return;
+    if (document.querySelector('#omniqaSelectMenu:not([hidden]), #omniqaCalendar:not([hidden])')) return;
+    if (operationPending(modalState.taskId ? `task:${modalState.taskId}` : `requirement:${modalState.reqId}`)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    closeMineTestExecutionModal();
+  }, true);
 }
 
 export function closeMineTestExecutionModal() {
@@ -1084,20 +1128,55 @@ export async function submitTestExecution(reqId, payload) {
   });
 }
 
-function promptRequirementTaskConsumed(req) {
-  if (!req?.zentao_task_id || !req.task_assigned_to_me || req.task_has_time_tracking) return undefined;
-  const suggested = Number(req.estimated_test_hours || 1);
-  const input = window.prompt(
-    '未检测到该禅道任务的计时记录，请输入本次实际测试工时（小时）：',
-    String(suggested),
-  );
-  if (input === null) return null;
-  const consumed = Number(input);
-  if (!Number.isFinite(consumed) || consumed <= 0 || consumed > 999) {
-    window.showMessage && window.showMessage('实际工时需在 0~999 小时之间', 'error');
-    return null;
-  }
-  return consumed;
+function reqLabel(req, reqId) {
+  return [req?.zentao_req_id || `需求 #${reqId ?? req?.id ?? ''}`, req?.title].filter(Boolean).join(' · ');
+}
+
+// 取消「用例完成 / 测试完成」的二次确认（替代原生 confirm）
+function confirmUndoCompletion(reqId, key, { finalTest = false } = {}) {
+  const req = getRequirementById(reqId);
+  const isTest = key !== 'case_completed';
+  const linked = isTest && req?.zentao_task_id;
+  return confirmTaskDialog({
+    icon: 'i-rotate',
+    tone: 'blue',
+    title: isTest ? (finalTest ? '取消最终测试完成' : '取消测试完成') : '取消用例完成',
+    sub: reqLabel(req, reqId),
+    message: isTest
+      ? (linked ? '需求将回到「未完成」，并同步禅道把关联任务重新激活；已登记的工时会保留。' : '需求将回到「测试未完成」状态。')
+      : '需求将回到「用例未完成」状态。',
+    okText: isTest ? '取消测试完成' : '取消用例完成',
+    cancelText: '保持完成',
+  });
+}
+
+// 本人负责、且未检测到计时记录的禅道任务，完成时需要补填实际工时
+function needsTaskConsumed(req) {
+  return !!(req?.zentao_task_id && req.task_assigned_to_me && !req.task_has_time_tracking);
+}
+function consumedDefault(req) {
+  const v = Number(req?.estimated_test_hours || 1);
+  return Number.isFinite(v) && v > 0 ? v : 1;
+}
+
+// 勾选「测试完成」等不经过提交弹窗的路径：用任务对话框补填实际工时。
+// 返回 undefined = 无需填写；null = 用户取消；数字 = 实际工时
+async function askRequirementTaskConsumed(req) {
+  if (!needsTaskConsumed(req)) return undefined;
+  const hours = await askTaskHours({
+    task_id: req.zentao_task_id,
+    name: req.title,
+    status: req.zentao_task_status,
+    estimate: req.estimated_test_hours,
+    suggested_consumed_hours: consumedDefault(req),
+  }, {
+    mode: 'consumed',
+    title: '填写实际测试工时',
+    sub: [req.zentao_req_id || `需求 #${req.id}`, req.title, `任务 #${req.zentao_task_id}`].filter(Boolean).join(' · '),
+    hint: '未检测到该禅道任务的计时记录，标记测试完成时会把这次实际测试工时一并写入禅道。',
+    okText: '确认完成',
+  });
+  return hours === null ? null : hours;
 }
 
 export async function confirmMineTestExecutionModal() {
@@ -1118,8 +1197,12 @@ export async function confirmMineTestExecutionModal() {
     window.showMessage?.('所选任务已变化，请关闭弹窗并重新选择任务', 'error');
     return;
   }
-  const taskConsumedHours = promptRequirementTaskConsumed(req);
-  if (taskConsumedHours === null) return;
+  let taskConsumedHours;
+  if (needsTaskConsumed(req)) {
+    // 打开弹窗后所选任务可能变化：没有内嵌输入时退回对话框
+    taskConsumedHours = testExecHoursField ? testExecHoursField.read() : await askRequirementTaskConsumed(req);
+    if (taskConsumedHours === null) return;
+  }
 
   const pageMinorSel = document.getElementById('mineMinorSelect');
   if (pageMinorSel) pageMinorSel.value = String(minorId);
@@ -1180,7 +1263,7 @@ export async function handleTestCompletedToggle(reqId, checked, checkboxEl) {
     return;
   }
 
-  const ok = confirm('确认取消该需求的测试完成状态吗？');
+  const ok = await confirmUndoCompletion(reqId, 'test_completed');
   if (!ok) {
     if (checkboxEl) checkboxEl.checked = true;
     return;
@@ -1896,7 +1979,11 @@ export function rememberMineReqFold(reqId, isOpen) {
 }
 
 export async function editWorkbenchCase(id, oldCaseId) {
-  const num = prompt('请输入正确的用例数字部分：', oldCaseId.replace('u#', ''));
+  const num = await promptTaskDialog({
+    icon: 'i-cases', title: '修改用例编号', sub: `当前 ${oldCaseId}`,
+    label: '正确的用例编号', prefix: 'u#', value: String(oldCaseId || '').replace('u#', ''),
+    placeholder: '只填数字部分', validate: (v) => (/^\d+$/.test(v) ? '' : '编号只能是数字'), okText: '保存',
+  });
   if (!num) return;
   try {
     await api('/test-cases/' + id, { method: 'PUT', headers: window.H, body: { zentao_case_id: window.withPrefix('u#', num) } });
@@ -1908,7 +1995,11 @@ export async function editWorkbenchCase(id, oldCaseId) {
 }
 
 export async function editWorkbenchBug(id, oldBugId) {
-  const num = prompt('请输入正确的 Bug 数字部分：', oldBugId.replace('b#', ''));
+  const num = await promptTaskDialog({
+    icon: 'i-bug', title: '修改 Bug 编号', sub: `当前 ${oldBugId}`,
+    label: '正确的 Bug 编号', prefix: 'b#', value: String(oldBugId || '').replace('b#', ''),
+    placeholder: '只填数字部分', validate: (v) => (/^\d+$/.test(v) ? '' : '编号只能是数字'), okText: '保存',
+  });
   if (!num) return;
   try {
     await api('/bugs/' + id + '?new_bug_id=' + encodeURIComponent(window.withPrefix('b#', num)), { method: 'PUT' });
@@ -1920,7 +2011,11 @@ export async function editWorkbenchBug(id, oldBugId) {
 }
 
 export async function removeWorkbenchBug(id) {
-  if (!confirm('确定要在工作台中彻底删除这个 Bug 吗？')) return;
+  const ok = await confirmTaskDialog({
+    icon: 'i-alert', tone: 'red', danger: true, title: '删除 Bug 记录', okText: '彻底删除',
+    message: '将从工作台中彻底删除这条 Bug 记录，删除后无法恢复。',
+  });
+  if (!ok) return;
   try {
     await api('/bugs/' + id, { method: 'DELETE' });
     window.showMessage && window.showMessage('Bug 已彻底删除', 'success');
@@ -1942,7 +2037,7 @@ export async function setReqStatus(reqId, key, checked, checkboxEl) {
   let msgType = 'success';
   try {
     if (!checked) {
-      const ok = confirm(key === 'case_completed' ? '确认取消【用例完成】状态吗？' : '确认取消【测试完成】状态吗？');
+      const ok = await confirmUndoCompletion(reqId, key);
       if (!ok) {
         if (checkboxEl) checkboxEl.checked = true;
         return;
@@ -1950,7 +2045,7 @@ export async function setReqStatus(reqId, key, checked, checkboxEl) {
     }
     let taskConsumedHours;
     if (key === 'test_completed' && checked) {
-      taskConsumedHours = promptRequirementTaskConsumed(getRequirementById(reqId));
+      taskConsumedHours = await askRequirementTaskConsumed(getRequirementById(reqId));
       if (taskConsumedHours === null) {
         if (checkboxEl) checkboxEl.checked = false;
         return;
@@ -2040,7 +2135,7 @@ export async function setFinalTestStatus(reqId, key, checked, checkboxEl) {
     return;
   }
   if (key === 'test_completed' && !checked) {
-    const ok = confirm('确认取消该需求的【测试完成】状态吗？');
+    const ok = await confirmUndoCompletion(reqId, key, { finalTest: true });
     if (!ok) {
       if (checkboxEl) checkboxEl.checked = true;
       return;
@@ -2055,7 +2150,7 @@ export async function setFinalTestStatus(reqId, key, checked, checkboxEl) {
     payload[key] = checked;
     const req = getRequirementById(reqId);
     if (key === 'test_completed' && req?.selected_task_mode) {
-      const consumed = checked ? promptRequirementTaskConsumed(req) : undefined;
+      const consumed = checked ? await askRequirementTaskConsumed(req) : undefined;
       if (consumed === null) { if (checkboxEl) checkboxEl.checked = !checked; return; }
       await requestSelectedRequirementTask(req, checked ? 'finish' : 'reactivate', consumed !== undefined ? { consumed } : {});
     } else await api(`/final-test/requirements/${reqId}/status`, { method: 'PATCH', headers: window.H, body: payload });
@@ -2092,7 +2187,11 @@ export async function addCase(reqId) {
 }
 
 export async function deleteCase(caseId) {
-  if (!confirm('确定删除该用例吗？')) return;
+  const ok = await confirmTaskDialog({
+    icon: 'i-alert', tone: 'red', danger: true, title: '删除用例', okText: '删除',
+    message: '将删除这条用例记录，删除后无法恢复。',
+  });
+  if (!ok) return;
   try {
     await api(`/test-cases/${caseId}`, { method: 'DELETE' });
     window.showMessage && window.showMessage('用例已删除', 'success');
@@ -2108,7 +2207,11 @@ export async function promptCaseBug(reqId, caseId) {
     window.showMessage && window.showMessage('拦截：请先在页面顶部选择【当前复测发包(小版本)】环境！', 'error');
     return;
   }
-  const n = prompt('请输入关联 Bug 的数字部分：');
+  const n = await promptTaskDialog({
+    icon: 'i-bug', title: '关联 Bug', sub: reqLabel(getRequirementById(reqId), reqId),
+    label: 'Bug 编号', prefix: 'b#', placeholder: '只填数字部分，如 12345',
+    hint: '关联到这条用例，并记入当前复测发包（小版本）。', validate: (v) => (/^\d+$/.test(v) ? '' : '编号只能是数字'), okText: '关联',
+  });
   if (!n) return;
   const bug = window.withPrefix('b#', n);
   try {

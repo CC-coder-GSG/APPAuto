@@ -11,7 +11,7 @@ const root = path.resolve(__dirname, '..');
     const page = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
     const errors = [], operations = [], edits = [];
     page.on('pageerror', err => errors.push(err.stack));
-    page.on('dialog', dialog => dialog.type() === 'prompt' ? dialog.accept('1') : dialog.accept());
+    page.on('dialog', dialog => dialog.accept());
     let finalTest = false, failOperation = false;
     const tasks = [
       { task_id: 101, name: '任务一', status: 'wait', estimate: 4, assigned_to: 'alice', assigned_to_me: true, can_operate: true },
@@ -119,6 +119,7 @@ const root = path.resolve(__dirname, '..');
     assert.equal(operations.at(-1).taskId, 102);
     assert.equal(operations.at(-1).notes, '任务二完成');
     assert.equal(operations.at(-1).minor_version_id, 2);
+    assert.equal(operations.at(-1).consumed, 9, 'inline actual-hours field defaults to the task estimate');
     assert.equal(await strike(), 0, 'finishing one task must not strike the requirement');
     assert.equal(await checkbox().isChecked(), true, 'checkbox reflects the selected completed task');
     await choose(101);
@@ -129,6 +130,8 @@ const root = path.resolve(__dirname, '..');
     assert.equal(operations.at(-1).taskId, 101);
     await choose(102);
     await checkbox().uncheck();
+    // 取消测试完成的二次确认走自绘对话框（不再是原生 confirm）
+    await page.locator('#taskOpDialog').getByRole('button', { name: '取消测试完成', exact: true }).click();
     await page.waitForFunction(() => !document.querySelector('.mine-req-card > summary [style*="line-through"]'));
     assert.deepEqual(operations.at(-1), { taskId: 102, action: 'reactivate' });
     failOperation = true;
@@ -139,8 +142,14 @@ const root = path.resolve(__dirname, '..');
     finalTest = true;
     await page.evaluate(() => window.mine.loadMyWorkbench());
     await checkbox().check();
+    // 未检测到计时记录：补填实际工时走任务对话框（不再是原生 prompt）
+    const hoursDialog = page.locator('#taskOpDialog');
+    await hoursDialog.waitFor({ state: 'visible' });
+    await page.locator('#taskOpHours').fill('1.5');
+    await hoursDialog.getByRole('button', { name: '确认完成' }).click();
     await page.waitForFunction(() => document.querySelector('.mine-req-card > summary [style*="line-through"]'));
     assert.equal(operations.at(-1).taskId, 102, 'final test also targets the selected task');
+    assert.equal(operations.at(-1).consumed, 1.5, 'consumed hours from the dialog are submitted');
     await page.setViewportSize({ width: 390, height: 844 });
     await choose(101);
     await card.getByLabel('切换需求 1 的当前任务', { exact: true }).click();

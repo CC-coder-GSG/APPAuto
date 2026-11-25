@@ -100,6 +100,7 @@ const root = path.resolve(__dirname, '..');
     console.log('PASS test completion preserves other cards and target expansion');
 
     await caseBox().uncheck();
+    await page.locator('#taskOpDialog').getByRole('button',{name:'取消用例完成',exact:true}).click();
     await page.waitForFunction(()=>!document.querySelector('.mine-req-card[data-req-id="11"] input').checked);
     assert.equal(await other.getAttribute('data-preserved'),'yes');
     console.log('PASS unchecking completion keeps view state');

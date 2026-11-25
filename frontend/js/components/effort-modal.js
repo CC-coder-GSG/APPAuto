@@ -1,6 +1,7 @@
 import { runZentaoOperation, operationPending, prepareOperationModal } from './zentao-operation.js';
 import { api } from '../api.js';
 import { escapeHtml } from '../utils.js';
+import { confirmTaskDialog } from './task-dialog.js';
 
 // 工时记录弹窗（任务看板 / 任务工作台共用，2026-07-17 工时口径升级配套）。
 // 展示某禅道任务已提交的工时记录（暂停/完成时平台按天自动结算 + 手工记录），
@@ -9,130 +10,171 @@ import { escapeHtml } from '../utils.js';
 
 let ctx = { taskId: null, efforts: [], canEditAny: false, editingId: null, deletingId: null };
 
+const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+const avatar = (name) => `<span class="fbk-avatar" aria-hidden="true">${escapeHtml(String(name || '?').trim().slice(0, 1).toUpperCase() || '?')}</span>`;
+const ICON_EDIT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+const ICON_DEL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>';
+
+function dayLabel(date) {
+  const d = new Date(`${date}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? escapeHtml(date || '未知日期') : `${escapeHtml(date)} <span>${WEEK[d.getDay()]}</span>`;
+}
+
 function ensureModal() {
   if (document.getElementById('taskEffortModal')) return;
   const wrap = document.createElement('div');
   wrap.id = 'taskEffortModal';
-  wrap.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,.46); backdrop-filter:blur(2px); z-index:9999; display:none; align-items:center; justify-content:center; padding:18px; box-sizing:border-box;';
+  wrap.className = 'atl-root efm-root';
+  wrap.setAttribute('role', 'dialog');
+  wrap.setAttribute('aria-modal', 'true');
+  wrap.setAttribute('aria-labelledby', 'taskEffortTitle');
+  wrap.style.display = 'none';
   wrap.innerHTML = `
-    <style>
-      #taskEffortModal .effort-dialog { width:min(820px, 96vw); max-height:86vh; display:flex; flex-direction:column; background:#fff; border:1px solid #dbeafe; border-radius:14px; box-shadow:0 24px 64px rgba(15,23,42,.24); padding:20px; }
-      #taskEffortModal .effort-table { width:100%; min-width:720px; border-collapse:separate; border-spacing:0; font-size:13px; }
-      #taskEffortModal .effort-table thead th { position:sticky; top:0; z-index:1; background:#f8fafc; color:#475569; font-size:12px; text-align:left; padding:10px 12px; border-bottom:1px solid #e2e8f0; }
-      #taskEffortModal .effort-row td { padding:10px 12px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
-      #taskEffortModal .effort-row:last-child td { border-bottom:0; }
-      #taskEffortModal .effort-row:hover td { background:#f8fbff; }
-      #taskEffortModal .effort-actions { display:flex; align-items:center; justify-content:flex-end; gap:7px; }
-      #taskEffortModal .effort-action-btn { padding:4px 10px; min-height:28px; border-radius:6px; font-size:12px; font-weight:600; white-space:nowrap; box-shadow:none; }
-      #taskEffortModal .effort-delete-btn { color:#b91c1c; background:#fff7f7; border:1px solid #fecaca; }
-      #taskEffortModal .effort-delete-btn:hover:not(:disabled) { color:#991b1b; background:#fee2e2; border-color:#fca5a5; transform:none; box-shadow:none; }
-      #taskEffortModal .effort-delete-btn:disabled { color:#94a3b8; background:#f8fafc; border-color:#e2e8f0; cursor:wait; opacity:1; }
-    </style>
-    <div class="effort-dialog">
-      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:4px;">
-        <div>
-          <h3 style="margin:0; color:#0f172a;">🕒 工时记录 <span id="taskEffortTaskLabel" style="color:#1d4ed8;"></span></h3>
-          <div id="taskEffortHint" class="muted" style="font-size:12px; margin-top:5px;"></div>
+    <div class="atl-card efm-card">
+      <header class="atl-head">
+        <span class="atl-icon" aria-hidden="true"><svg><use href="#i-clock"/></svg></span>
+        <div class="atl-head-text">
+          <h3 id="taskEffortTitle">工时记录</h3>
+          <div class="atl-sub"><span class="atl-target" id="taskEffortTaskLabel"></span><span class="atl-total">数据来自禅道</span></div>
         </div>
-        <span style="font-size:11px; color:#64748b; background:#f1f5f9; border:1px solid #e2e8f0; border-radius:999px; padding:4px 9px; white-space:nowrap;">数据来自禅道</span>
-      </div>
-      <div id="taskEffortBody" style="flex:1; min-height:150px; overflow:auto; border:1px solid #e2e8f0; border-radius:10px; margin-top:12px; background:#fff;"></div>
-      <div class="row" style="justify-content:space-between; gap:8px; margin-top:14px;">
-        <span id="taskEffortTotal" class="muted" style="font-size:12px; align-self:center;"></span>
-        <span class="row" style="gap:8px;">
-          <button class="secondary" onclick="window.reloadTaskEffortModal()">🔄 刷新</button>
-          <button class="secondary" onclick="window.closeTaskEffortModal()">关闭</button>
-        </span>
-      </div>
+        <button type="button" class="atl-close" onclick="window.closeTaskEffortModal()" aria-label="关闭" title="关闭（Esc）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+      </header>
+      <div class="atl-op-slot"></div>
+      <div class="efm-summary" id="taskEffortTotal"></div>
+      <div class="efm-hint" id="taskEffortHint"></div>
+      <div class="atl-body efm-body" id="taskEffortBody"></div>
+      <footer class="atl-foot">
+        <button type="button" class="secondary" onclick="window.reloadTaskEffortModal()"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>刷新</button>
+        <button type="button" class="secondary" onclick="window.closeTaskEffortModal()">关闭</button>
+      </footer>
     </div>`;
   wrap.addEventListener('click', (e) => { if (e.target === wrap) window.closeTaskEffortModal(); });
+  wrap.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing && e.target.closest?.('.efm-edit') && e.target.tagName === 'INPUT') {
+      e.preventDefault();
+      window.saveTaskEffortEdit(ctx.editingId);
+    }
+  });
+  // Esc：正在编辑时先退出编辑，否则关闭弹窗（捕获阶段，只作用于本弹窗）
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || wrap.style.display === 'none') return;
+    if (document.getElementById('taskOpDialog')?.style.display === 'flex') return;
+    if (document.querySelector('#omniqaCalendar:not([hidden]), #omniqaSelectMenu:not([hidden])')) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (ctx.editingId) window.cancelTaskEffortEdit();
+    else window.closeTaskEffortModal();
+  }, true);
   document.body.appendChild(wrap);
+}
+
+function renderSummary() {
+  const totalEl = document.getElementById('taskEffortTotal');
+  if (!totalEl) return;
+  if (!ctx.efforts.length) { totalEl.innerHTML = ''; return; }
+  const total = ctx.efforts.reduce((s, e) => s + (Number(e.consumed) || 0), 0);
+  const mine = ctx.efforts.filter((e) => e.can_edit);
+  const mineTotal = mine.reduce((s, e) => s + (Number(e.consumed) || 0), 0);
+  const people = new Set(ctx.efforts.map((e) => e.account || '')).size;
+  const days = new Set(ctx.efforts.map((e) => e.date || '')).size;
+  const stat = (k, v, cls = '') => `<div class="efm-stat${cls}"><b>${v}</b><span>${k}</span></div>`;
+  totalEl.innerHTML = [
+    stat('合计工时', `${round2(total)}<small>h</small>`, ' efm-stat--main'),
+    stat('记录', `${ctx.efforts.length}<small>条</small>`),
+    stat('涉及天数', `${days}<small>天</small>`),
+    stat('参与人', `${people}<small>人</small>`),
+    mine.length ? stat('我的工时', `${round2(mineTotal)}<small>h</small>`) : '',
+  ].join('');
+}
+
+function renderRow(e) {
+  if (ctx.editingId === e.id) {
+    return `
+      <div class="efm-row efm-edit">
+        <label class="efm-f"><span>日期</span><input id="effortEditDate" type="date" value="${escapeHtml(e.date)}"></label>
+        <label class="efm-f efm-f--h"><span>工时（h）</span><input id="effortEditConsumed" type="number" min="0.1" max="999" step="0.1" value="${e.consumed}"></label>
+        <label class="efm-f efm-f--work"><span>工作内容</span><input id="effortEditWork" value="${escapeHtml(e.work || '')}" placeholder="工作内容"></label>
+        <div class="efm-edit-actions">
+          <button type="button" class="secondary" onclick="window.cancelTaskEffortEdit()">取消</button>
+          <button type="button" onclick="window.saveTaskEffortEdit(${e.id})">保存</button>
+        </div>
+      </div>`;
+  }
+  const canMaintain = !!e.can_edit && ctx.canEditAny;
+  const isDeleting = ctx.deletingId === e.id;
+  const actions = canMaintain
+    ? `<div class="efm-actions">
+        <button type="button" class="efm-act" ${isDeleting ? 'disabled' : ''} onclick="window.startTaskEffortEdit(${e.id})" title="修改这条工时记录" aria-label="修改">${ICON_EDIT}<span>修改</span></button>
+        <button type="button" class="efm-act efm-act--del" ${isDeleting ? 'disabled' : ''} onclick="window.deleteTaskEffort(${e.id})" title="从禅道删除这条工时记录" aria-label="删除">${ICON_DEL}<span>${isDeleting ? '正在同步…' : '删除'}</span></button>
+      </div>`
+    : `<span class="efm-ro" title="${e.can_edit ? '未绑定禅道网页登录凭据，暂不可修改' : '仅记录人本人可修改或删除'}"><svg class="ui-ic" aria-hidden="true"><use href="#i-lock"/></svg>${e.can_edit ? '只读' : '仅本人可改'}</span>`;
+  return `
+    <div class="efm-row${e.can_edit ? ' is-mine' : ''}${isDeleting ? ' is-busy' : ''}">
+      <span class="efm-h">${round2(e.consumed)}<small>h</small></span>
+      <span class="efm-who">${avatar(e.realname || e.account)}<span>${escapeHtml(e.realname || e.account || '未知')}</span></span>
+      <span class="efm-work${e.work ? '' : ' is-empty'}">${escapeHtml(e.work || '未填写工作内容')}</span>
+      ${actions}
+    </div>`;
 }
 
 function renderRows() {
   const body = document.getElementById('taskEffortBody');
-  const totalEl = document.getElementById('taskEffortTotal');
   if (!body) return;
+  renderSummary();
   if (!ctx.efforts.length) {
-    body.innerHTML = '<div class="muted" style="padding:18px; text-align:center; font-size:13px;">该任务暂无工时记录</div>';
-    if (totalEl) totalEl.textContent = '';
+    body.innerHTML = '<div class="atl-empty"><svg class="atl-empty-ic" aria-hidden="true"><use href="#i-clock"/></svg><strong>暂无工时记录</strong>暂停或完成任务时，平台会按天自动结算并提交到禅道</div>';
     return;
   }
-  const rows = ctx.efforts.map((e) => {
-    if (ctx.editingId === e.id) {
-      return `
-        <tr style="background:#f0f9ff;">
-          <td style="padding:6px 10px;"><input id="effortEditDate" type="date" value="${escapeHtml(e.date)}" style="width:130px;"></td>
-          <td style="padding:6px 10px;"><input id="effortEditConsumed" type="number" min="0.1" max="999" step="0.1" value="${e.consumed}" style="width:70px;"></td>
-          <td style="padding:6px 10px;" class="muted">${escapeHtml(e.account || '')}</td>
-          <td style="padding:6px 10px;"><input id="effortEditWork" value="${escapeHtml(e.work || '')}" placeholder="工作内容" style="width:100%; box-sizing:border-box;"></td>
-          <td style="padding:6px 10px; white-space:nowrap;">
-            <div class="effort-actions">
-              <button class="effort-action-btn" style="background:#0d9488;" onclick="window.saveTaskEffortEdit(${e.id})">保存</button>
-              <button class="secondary effort-action-btn" onclick="window.cancelTaskEffortEdit()">取消</button>
-            </div>
-          </td>
-        </tr>`;
-    }
-    const canMaintain = !!e.can_edit && ctx.canEditAny;
-    const isDeleting = ctx.deletingId === e.id;
-    const actionButtons = canMaintain
-      ? `<div class="effort-actions">
-          <button class="secondary effort-action-btn" ${isDeleting ? 'disabled' : ''} onclick="window.startTaskEffortEdit(${e.id})" title="修改这条工时记录">✏️ 修改</button>
-          <button class="effort-action-btn effort-delete-btn" ${isDeleting ? 'disabled' : ''} onclick="window.deleteTaskEffort(${e.id})" title="从禅道删除这条工时记录">${isDeleting ? '正在同步…' : '🗑️ 删除'}</button>
-        </div>`
-      : '<span class="muted" style="font-size:12px; display:block; text-align:center;">仅本人可操作</span>';
-    return `
-      <tr class="effort-row" style="${isDeleting ? 'opacity:.7;' : ''}">
-        <td style="padding:6px 10px; white-space:nowrap;">${escapeHtml(e.date)}</td>
-        <td style="padding:6px 10px; font-weight:600; color:#0f172a;">${e.consumed}h</td>
-        <td style="padding:6px 10px;" class="muted">${escapeHtml(e.account || '')}</td>
-        <td style="padding:6px 10px; color:#475569; word-break:break-all;">${escapeHtml(e.work || '')}</td>
-        <td style="padding:6px 10px; min-width:156px; white-space:nowrap;">${actionButtons}</td>
-      </tr>`;
-  }).join('');
-  body.innerHTML = `
-    <table class="effort-table">
-      <thead>
-        <tr style="background:#f8fafc; color:#475569; font-size:12px; text-align:left;">
-          <th style="padding:6px 10px;">日期</th>
-          <th style="padding:6px 10px;">消耗</th>
-          <th style="padding:6px 10px;">记录人</th>
-          <th style="padding:6px 10px;">工作内容</th>
-          <th style="padding:6px 10px; text-align:center;">操作</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-  if (totalEl) {
-    const total = ctx.efforts.reduce((s, e) => s + (Number(e.consumed) || 0), 0);
-    totalEl.textContent = `共 ${ctx.efforts.length} 条，合计 ${Math.round(total * 100) / 100}h`;
+  // 按日期分组（新 → 旧），组头带当日小计
+  const groups = new Map();
+  [...ctx.efforts]
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || Number(b.id) - Number(a.id))
+    .forEach((e) => {
+      const key = e.date || '';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(e);
+    });
+  body.innerHTML = [...groups.entries()].map(([date, rows]) => `
+    <section class="efm-day">
+      <h4 class="efm-day-label">${dayLabel(date)}<em>${round2(rows.reduce((s, e) => s + (Number(e.consumed) || 0), 0))}h</em></h4>
+      ${rows.map(renderRow).join('')}
+    </section>`).join('');
+  if (ctx.editingId) {
+    const input = document.getElementById('effortEditConsumed');
+    input?.focus();
+    input?.select?.();
   }
+}
+
+function renderState(text, isError = false) {
+  const body = document.getElementById('taskEffortBody');
+  if (body) body.innerHTML = `<div class="atl-empty${isError ? ' efm-error' : ''}">${isError ? '<svg class="atl-empty-ic" aria-hidden="true"><use href="#i-alert"/></svg>' : '<span class="wb-spin" aria-hidden="true"></span>'}<span>${escapeHtml(text)}</span></div>`;
 }
 
 async function loadEfforts() {
   const snapshot = ctx;
   const hint = document.getElementById('taskEffortHint');
-  const body = document.getElementById('taskEffortBody');
-  if (body) body.innerHTML = '<div class="muted" style="padding:18px; text-align:center; font-size:13px;">正在从禅道拉取工时记录…</div>';
+  renderState('正在从禅道拉取工时记录…');
   try {
     const res = await (await api(`/workbench/tasks/${ctx.taskId}/efforts`)).json();
     if (ctx !== snapshot) return;
     if (!res.ok) {
-      if (body) body.innerHTML = `<div style="padding:18px; text-align:center; font-size:13px; color:#b91c1c;">${escapeHtml(res.error || '拉取工时记录失败')}</div>`;
+      renderState(res.error || '拉取工时记录失败', true);
       return;
     }
     ctx.efforts = res.efforts || [];
     ctx.canEditAny = !!res.can_edit_any;
     if (hint) {
+      hint.classList.toggle('is-readonly', !ctx.canEditAny);
       hint.textContent = ctx.canEditAny
-        ? '暂停/完成任务时平台按天自动结算并提交禅道；本人的记录可修改或删除。删除以禅道回读结果为准。'
+        ? '暂停 / 完成任务时平台按天自动结算并提交禅道；本人的记录可修改或删除，结果以禅道回读为准。'
         : '未绑定禅道网页登录凭据，仅可查看（修改或删除工时必须以本人身份同步禅道）。';
     }
     renderRows();
   } catch (err) {
     if (ctx !== snapshot) return;
-    if (body) body.innerHTML = `<div style="padding:18px; text-align:center; font-size:13px; color:#b91c1c;">${escapeHtml(err.message || '拉取工时记录失败')}</div>`;
+    renderState(err.message || '拉取工时记录失败', true);
   }
 }
 
@@ -141,7 +183,11 @@ window.openTaskEffortModal = async function openTaskEffortModal(taskId) {
   ctx = { taskId, editingId:null, deletingId:null, efforts:[], canEditAny:false };
   document.querySelector("#taskEffortModal .wb-operation-status")?.remove();
   const label = document.getElementById('taskEffortTaskLabel');
-  if (label) label.textContent = `#${taskId}`;
+  if (label) label.textContent = `任务 #${taskId}`;
+  const totalEl = document.getElementById('taskEffortTotal');
+  if (totalEl) totalEl.innerHTML = '';
+  const hint = document.getElementById('taskEffortHint');
+  if (hint) hint.textContent = '';
   const modal = document.getElementById('taskEffortModal');
   prepareOperationModal(modal);
   modal.style.display = 'flex';
@@ -178,7 +224,7 @@ async function maintainEffort(effortId, method, payload) {
     modal: 'taskEffortModal', isCurrent: () => ctx === snapshot,
     restore: () => {
       ctx = snapshot;
-      document.getElementById('taskEffortTaskLabel').textContent = `#${taskId}`;
+      document.getElementById('taskEffortTaskLabel').textContent = `任务 #${taskId}`;
       renderRows();
     },
     run: async () => {
@@ -217,6 +263,11 @@ window.saveTaskEffortEdit = async function saveTaskEffortEdit(effortId) {
 window.deleteTaskEffort = async function deleteTaskEffort(effortId) {
   const effort = ctx.efforts.find(e => Number(e.id) === Number(effortId));
   if (!effort?.can_edit || !ctx.canEditAny || operationPending(`task:${ctx.taskId}`)) return;
-  if (!window.confirm(`确认删除工时记录？\n${effort.date} · ${effort.consumed}h\n删除会同步到禅道，成功后不可撤销。`)) return;
+  const ok = await confirmTaskDialog({
+    icon: 'i-alert', tone: 'red', title: '删除工时记录', danger: true, okText: '确认删除',
+    sub: `${effort.date} · ${effort.consumed}h${effort.work ? ` · ${effort.work}` : ''}`,
+    message: '删除会同步到禅道，成功后不可撤销。',
+  });
+  if (!ok) return;
   return maintainEffort(effortId, 'DELETE');
 };
