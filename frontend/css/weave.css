@@ -5954,15 +5954,28 @@ section.card button.brc-stat--all.is-on { --st: var(--w-accent-ink); }
 
 /* 日期分组 + 构建行 */
 .brc-list { display: flex; flex-direction: column; }
+/* 日期分隔带：有底色 + 上下细线，和构建行明确区分（之前只是一行文字，会被看成上一条构建的延伸） */
 .brc-day {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
-  padding: 14px 20px 6px;
+  min-height: 34px;
+  padding: 0 20px;
+  border-top: 1px solid var(--w-hairline);
+  background: var(--w-surface);
   font-size: 12.5px;
   font-weight: 650;
   color: var(--w-ink-soft);
 }
+.brc-day::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--w-accent);
+  box-shadow: 0 0 0 3px rgba(var(--w-accent-rgb), 0.14);
+}
+.brc-list > .brc-day:first-child { border-top: none; }
 .brc-day em { font-style: normal; font-weight: 400; color: var(--w-ink-faint); }
 .brc-loading { padding: 36px 16px; text-align: center; font-size: 13px; color: var(--w-ink-faint); }
 .brc-row {
