@@ -9,6 +9,7 @@
  */
 
 import { api } from './api.js';
+import { confirmDialog, promptDialog } from './components/dialog.js?v=20261126-zai-1';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let _binding = null;   // current binding from server, or null
@@ -164,10 +165,16 @@ async function handleSave() {
   // If password is empty but binding already exists, user skipped re-entering — keep old password
   // We must send a password always; prompt user to confirm
   if (!password && _binding?.has_password) {
-    const confirm = window.confirm('密码留空时将保持原有密码不变，确认保存其他修改吗？');
-    if (!confirm) return;
-    // Re-fetch and re-save only account/url fields by re-entering password via prompt
-    const reenter = window.prompt('请重新输入禅道密码以确认修改（安全要求）：');
+    // 修改地址 / 账号时出于安全要求需要重新输入一次禅道密码
+    const reenter = await promptDialog({
+      icon: 'i-lock',
+      title: '确认禅道密码',
+      sub: account,
+      message: '保存禅道地址或账号的修改前，需要重新输入一次禅道密码（安全要求）。',
+      label: '禅道密码',
+      type: 'password',
+      okText: '保存修改',
+    });
     if (!reenter) return;
     _saving = true;
     setSavingState(true);
@@ -265,7 +272,11 @@ async function handleRefresh() {
 
 async function handleDelete() {
   if (!_binding) return;
-  if (!window.confirm('确认删除禅道账号绑定？删除后系统将无法代您读取禅道数据。')) return;
+  if (!(await confirmDialog({
+    danger: true,
+    title: '删除禅道账号绑定',
+    message: '删除后系统将无法代您读取禅道数据，需要时可以重新绑定。',
+  }))) return;
   try {
     await deleteBinding();
     render();

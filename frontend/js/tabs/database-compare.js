@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { confirmDialog } from '../components/dialog.js?v=20261126-zai-1';
 
 const BASE = '/api/database-compare';
 const $ = (id) => document.getElementById(id);
@@ -305,7 +306,10 @@ function updateHistoryActions() {
 async function deleteHistory(ids) {
   if (ids && !ids.length) return;
   const scope = ids ? `所选 ${ids.length} 条` : '当前可见范围内全部已结束的';
-  if (!window.confirm(`确定删除${scope}对比历史吗？\n结果、导出报告和不再被其他任务使用的上传快照将被永久清理，删除后无法恢复。`)) return;
+  if (!(await confirmDialog({
+    danger: true, title: `删除${scope}对比历史`,
+    message: '结果、导出报告，以及不再被其他任务使用的上传快照会被永久清理，删除后无法恢复。',
+  }))) return;
   message('正在清理对比历史和文件…');
   const data = ids?.length === 1
     ? await json(`/tasks/${ids[0]}`, {method:'DELETE'})

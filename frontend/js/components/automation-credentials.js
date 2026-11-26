@@ -1,3 +1,5 @@
+import { confirmDialog } from './dialog.js?v=20261126-zai-1';
+
 export function mountAutomationCredentials(host, { request, selectedRepository, notify }) {
   host.innerHTML = `<div style="padding:12px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:12px">
     <h3 style="margin:0 0 8px">Jenkins 接入凭据</h3>
@@ -47,8 +49,13 @@ export function mountAutomationCredentials(host, { request, selectedRepository, 
   el('automationCredentialRefresh').onclick = refresh;
   el('automationCredentialCreate').onclick = () => save({});
   el('automationCredentialAdopt').onclick = () => save({ reuse_repository_id: selectedRepository() });
-  el('automationCredentialRotate').onclick = () => {
-    if (window.confirm('更换后旧共享密钥会失效，需要在 Jenkins 更新一次凭据。确定更换？')) return save({ rotate: true });
+  el('automationCredentialRotate').onclick = async () => {
+    const ok = await confirmDialog({
+      icon: 'i-key', tone: 'red', title: '更换共享密钥',
+      message: '更换后旧共享密钥立即失效，需要在 Jenkins 里更新一次凭据。',
+      okText: '确认更换', danger: true,
+    });
+    if (ok) return save({ rotate: true });
   };
   return { refresh };
 }

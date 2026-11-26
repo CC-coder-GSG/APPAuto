@@ -232,7 +232,7 @@ function _wireProxyDownloads(containerEl) {
         setTimeout(() => URL.revokeObjectURL(objUrl), 10000);
       } catch (err) {
         const msg = '文件下载失败：' + (err?.message || '未知错误');
-        if (window.showMessage) window.showMessage(msg, 'error'); else alert(msg);
+        if (window.showMessage) window.showMessage(msg, 'error'); else console.error(msg);
       } finally {
         a.classList.remove('is-busy');
       }

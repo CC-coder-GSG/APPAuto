@@ -2,7 +2,7 @@ import { api } from '../api.js';
 import { escapeHtml as esc } from '../utils.js';
 import { createRequestId } from '../request-id.js?v=20261020-http-uuid-1';
 import { mountAutomationConfiguration } from './automation-config.js?v=20261020-shared-key-1';
-import { mountAutomationCredentials } from './automation-credentials.js?v=20261020-1';
+import { mountAutomationCredentials } from './automation-credentials.js?v=20261126-zai-1';
 
 const state = { repositories: [], selected: null, run: null };
 let pendingRequest = null;

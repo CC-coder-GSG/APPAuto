@@ -2,6 +2,8 @@
 // 数据：统计表(board) → 版本(version) + 自定义列(column) + 条目(item) → 记录(item×version) → 附件(CAD/截图)。
 // 依赖全局：api()、token、window.OmniQAUtils、window.OmniQAPreview、window.showMessage。
 
+import { confirmDialog, promptDialog } from '../components/dialog.js?v=20261126-zai-1';
+
 const U = () => window.OmniQAUtils || {};
 const esc = (s) => (U().escapeHtml ? U().escapeHtml(String(s ?? '')) : String(s ?? ''));
 const toast = (m, t = 'success') => window.showMessage && window.showMessage(m, t);
@@ -200,8 +202,8 @@ function hydrateScreenshots(container) {
 
 // ---------------------------------------------------------------- board ops
 async function _newBoard() {
-  const name = prompt('统计表名称（如：40311版本测试统计表）');
-  if (!name || !name.trim()) return;
+  const name = await promptDialog({ icon: 'i-cad', title: '新建统计表', label: '统计表名称', placeholder: '如：40311版本测试统计表', okText: '创建' });
+  if (!name) return;
   try {
     const res = await japi('/api/cad/boards', { method: 'POST', body: { name: name.trim() } });
     state.boardId = res.id; state.versionId = null;
@@ -211,13 +213,13 @@ async function _newBoard() {
   } catch (e) { toast(e.message, 'error'); }
 }
 async function _renameBoard() {
-  const name = prompt('重命名统计表', state.board?.name || '');
-  if (!name || !name.trim()) return;
+  const name = await promptDialog({ icon: 'i-cad', title: '重命名统计表', label: '统计表名称', value: state.board?.name || '', okText: '保存' });
+  if (!name) return;
   try { await japi(`/api/cad/boards/${state.boardId}`, { method: 'PUT', body: { name: name.trim() } });
     state.boards = await japi('/api/cad/boards'); await loadBoard(); toast('已重命名'); } catch (e) { toast(e.message, 'error'); }
 }
 async function _delBoard() {
-  if (!confirm(`确定删除统计表「${state.board?.name}」？该表下所有版本/条目/记录/附件将一并删除。`)) return;
+  if (!(await confirmDialog({ danger: true, title: '删除统计表', sub: state.board?.name || '', message: '该表下所有版本、条目、记录和附件会一并删除。', okText: '删除统计表' }))) return;
   try { await japi(`/api/cad/boards/${state.boardId}`, { method: 'DELETE' });
     state.boardId = null; state.board = null; state.versionId = null;
     state.boards = await japi('/api/cad/boards');
@@ -227,19 +229,19 @@ async function _delBoard() {
 
 // -------------------------------------------------------------- version ops
 async function _newVersion() {
-  const name = prompt('版本名称（如：4.0.3.11.260603(40311022)版本测试）');
-  if (!name || !name.trim()) return;
+  const name = await promptDialog({ icon: 'i-build', title: '新增版本', label: '版本名称', placeholder: '如：4.0.3.11.260603(40311022)版本测试', okText: '新增' });
+  if (!name) return;
   try { const res = await japi(`/api/cad/boards/${state.boardId}/versions`, { method: 'POST', body: { name: name.trim() } });
     state.versionId = res.id; await loadBoard(); toast('已新增版本'); } catch (e) { toast(e.message, 'error'); }
 }
 async function _renameVersion(id) {
   const cur = state.board.versions.find((v) => v.id === id);
-  const name = prompt('重命名版本', cur?.name || '');
-  if (!name || !name.trim()) return;
+  const name = await promptDialog({ icon: 'i-build', title: '重命名版本', label: '版本名称', value: cur?.name || '', okText: '保存' });
+  if (!name) return;
   try { await japi(`/api/cad/versions/${id}`, { method: 'PUT', body: { name: name.trim() } }); await loadBoard(); toast('已重命名'); } catch (e) { toast(e.message, 'error'); }
 }
 async function _delVersion(id) {
-  if (!confirm('删除该版本？该版本下的记录与附件将一并删除。')) return;
+  if (!(await confirmDialog({ danger: true, title: '删除版本', message: '该版本下的记录与附件会一并删除。', okText: '删除版本' }))) return;
   try { await japi(`/api/cad/versions/${id}`, { method: 'DELETE' }); state.versionId = null; await loadBoard(); toast('已删除'); } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -274,7 +276,7 @@ async function _renameColumn(id) {
   try { await japi(`/api/cad/columns/${id}`, { method: 'PUT', body: { name } }); await loadBoard(); toast('已改名'); } catch (e) { toast(e.message, 'error'); }
 }
 async function _delColumn(id) {
-  if (!confirm('删除该自定义列？已填写的对应值将不再显示。')) return;
+  if (!(await confirmDialog({ danger: true, title: '删除自定义列', message: '已填写的对应值将不再显示。', okText: '删除列' }))) return;
   try { await japi(`/api/cad/columns/${id}`, { method: 'DELETE' }); await loadBoard(); _manageColumns(); toast('已删除'); } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -306,7 +308,7 @@ async function _saveItem(id) {
   } catch (e) { toast(e.message, 'error'); }
 }
 async function _delItem(id) {
-  if (!confirm('删除该条目？其所有版本下的记录与附件将一并删除。')) return;
+  if (!(await confirmDialog({ danger: true, title: '删除条目', message: '该条目在所有版本下的记录与附件会一并删除。', okText: '删除条目' }))) return;
   try { await japi(`/api/cad/items/${id}`, { method: 'DELETE' }); closeModal(); await loadBoard(); toast('已删除'); } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -438,7 +440,7 @@ async function _uploadFolder(itemId, versionId, inputEl) {
   // 文件夹名取自首个文件相对路径的顶层目录名。
   const firstRel = files[0].webkitRelativePath || files[0].name;
   const folderName = (firstRel.split('/')[0] || '上传文件夹').trim();
-  if (!confirm(`将把文件夹「${folderName}」中的 ${files.length} 个文件作为整组归档上传，确定继续？`)) return;
+  if (!(await confirmDialog({ icon: 'i-upload', title: '上传文件夹', sub: folderName, message: `将把文件夹中的 ${files.length} 个文件作为一组归档上传。`, okText: '开始上传' }))) return;
 
   const prog = createProgressBar(`📁 ${folderName} 0/${files.length}`);
   try {
@@ -594,7 +596,7 @@ async function _dlcad(fileId) {
   } catch (e) { toast(e.message, 'error'); }
 }
 async function _delCad(fileId, itemId, versionId) {
-  if (!confirm('删除该共享 CAD 文件？该条目所有版本都将不再显示它。')) return;
+  if (!(await confirmDialog({ danger: true, title: '删除共享 CAD 文件', message: '删除后该条目的所有版本都不再显示它。', okText: '删除' }))) return;
   try {
     await japi(`/api/cad/cad-files/${fileId}`, { method: 'DELETE' });
     await loadBoard();
@@ -658,7 +660,7 @@ async function _dlFolder(folderId) {
 }
 async function _delFolder(folderId, itemId, versionId) {
   const found = findFolder(folderId);
-  if (!confirm(`删除整个文件夹「${found?.folder?.name || ''}」？其中所有文件将一并删除，该条目各版本都将不再显示。`)) return;
+  if (!(await confirmDialog({ danger: true, title: '删除文件夹', sub: found?.folder?.name || '', message: '文件夹内所有文件会一并删除，该条目各版本都不再显示。', okText: '删除文件夹' }))) return;
   try {
     await japi(`/api/cad/cad-folders/${folderId}`, { method: 'DELETE' });
     await loadBoard();
@@ -668,7 +670,7 @@ async function _delFolder(folderId, itemId, versionId) {
   } catch (e) { toast(e.message, 'error'); }
 }
 async function _delFolderFile(fileId, folderId, itemId, versionId) {
-  if (!confirm('从该文件夹中删除这个文件？')) return;
+  if (!(await confirmDialog({ danger: true, title: '删除文件', message: '从该文件夹中删除这个文件。', okText: '删除' }))) return;
   try {
     await japi(`/api/cad/cad-files/${fileId}`, { method: 'DELETE' });
     await loadBoard();
@@ -681,7 +683,7 @@ async function _delFolderFile(fileId, folderId, itemId, versionId) {
   } catch (e) { toast(e.message, 'error'); }
 }
 async function _delAtt(attId, itemId, versionId) {
-  if (!confirm('删除该附件？')) return;
+  if (!(await confirmDialog({ danger: true, title: '删除附件', message: '附件删除后无法恢复。', okText: '删除' }))) return;
   try {
     await japi(`/api/cad/attachments/${attId}`, { method: 'DELETE' });
     await loadBoard();

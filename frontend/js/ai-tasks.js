@@ -6,10 +6,12 @@
 // - Exposes window.OmniQAStoryAI.startBatchWatch(batchInfo) for the zentao-ai tab to register a new pending batch.
 
 import { api } from './api.js';
+import { formDialog } from './components/dialog.js?v=20261126-zai-1';
 
 const STORAGE_KEY = 'omniqa_pending_ai_batches_v1';
 const CACHE_LATEST_KEY = 'omniqa_ai_latest_cache_v1';
 const CHIP_CLASS = 'ai-result-chip';
+const DOCK_COLLAPSED_KEY = 'omniqa_ai_dock_collapsed_v1';
 
 function injectChipStyles() {
   if (document.getElementById('aiResultChipStyles')) return;
@@ -107,7 +109,7 @@ function injectChipStyles() {
       top: 28px;
       left: 50%;
       transform: translateX(-50%);
-      z-index: 2000;
+      z-index: 13500; /* 高于 AI 结果 / 整理弹窗与通用对话框 */
       display: flex;
       flex-direction: column;
       gap: 10px;
@@ -219,9 +221,11 @@ function ensureHost() {
   if (state.hostEl && document.body.contains(state.hostEl)) return state.hostEl;
   const el = document.createElement('div');
   el.id = 'aiTaskBanner';
-  el.style.cssText = 'position:fixed; right:20px; bottom:20px; z-index:1800; display:flex; flex-direction:column; gap:8px; max-width:360px;';
+  el.className = 'aig-dock';
+  el.addEventListener('click', onDockClick);
   document.body.appendChild(el);
   state.hostEl = el;
+  state.dockSignature = '';
   return el;
 }
 
@@ -276,27 +280,75 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+// 一个批次里的需求：单条显示「需求 #id · 标题」，多条显示条数
+function batchLabel(info) {
+  const ids = (info?.story_ids || []).map(Number).filter(Boolean);
+  const titles = info?.story_titles || {};
+  if (ids.length === 1) {
+    const title = titles[ids[0]] || titles[String(ids[0])] || '';
+    return `需求 #${ids[0]}${title ? ` · ${title}` : ''}`;
+  }
+  return ids.length ? `共 ${ids.length} 条需求` : 'AI 用例生成';
+}
+
+const ORB = '<span class="aig-orb" aria-hidden="true"><svg><use href="#i-sparkles"/></svg></span>';
+
+function dockCollapsed() {
+  try { return localStorage.getItem(DOCK_COLLAPSED_KEY) === '1'; } catch { return false; }
+}
+
+function setDockCollapsed(value) {
+  try { localStorage.setItem(DOCK_COLLAPSED_KEY, value ? '1' : '0'); } catch { /* 隐私模式 */ }
+  render();
+}
+
+// 只在批次集合 / 收起状态变化时重建 DOM（每 2 秒的 tick 不再整块重绘，动画和悬停不会被打断）
 function render() {
   const host = ensureHost();
-  host.innerHTML = '';
-  for (const batch_id of state.batches.keys()) {
-    const card = document.createElement('div');
-    card.style.cssText = 'padding:12px 14px; border-radius:10px; box-shadow:0 6px 18px rgba(15,23,42,0.18); background:#ffffff; border:1px solid #e2e8f0;';
-    card.innerHTML = `
-      <div role="status" style="font-weight:600; color:#0f172a;">用例正在生成，请稍后</div>
-      <div style="margin-top:8px; display:flex; gap:8px; justify-content:flex-end;">
-        <button type="button" class="aiqa-btn aiqa-btn--secondary" data-ai-batch-dismiss="${escapeHtml(batch_id)}">稍后再说</button>
-        <button type="button" class="aiqa-btn aiqa-btn--primary" data-ai-batch-poll="${escapeHtml(batch_id)}">立即查询</button>
-      </div>
-    `;
-    host.appendChild(card);
+  const entries = Array.from(state.batches.entries());
+  const collapsed = dockCollapsed();
+  const signature = `${collapsed}|${entries.map(([id, info]) => `${id}:${batchLabel(info)}`).join(',')}`;
+  if (signature === state.dockSignature) return;
+  state.dockSignature = signature;
+  host.hidden = !entries.length;
+  host.classList.toggle('is-collapsed', collapsed);
+  if (!entries.length) { host.innerHTML = ''; return; }
+  if (collapsed) {
+    host.innerHTML = `<button type="button" class="aig-pill" data-ai-dock-expand title="展开生成进度">
+      ${ORB}<span role="status">AI 正在生成用例${entries.length > 1 ? ` · ${entries.length} 个任务` : ''}</span></button>`;
+    return;
   }
-  host.querySelectorAll('[data-ai-batch-poll]').forEach((btn) => {
-    btn.addEventListener('click', () => pollBatch(btn.getAttribute('data-ai-batch-poll')));
-  });
-  host.querySelectorAll('[data-ai-batch-dismiss]').forEach((btn) => {
-    btn.addEventListener('click', () => { state.batches.delete(btn.getAttribute('data-ai-batch-dismiss')); persist(); render(); });
-  });
+  host.innerHTML = entries.map(([batchId, info]) => `
+    <section class="aig-card" aria-label="AI 用例生成进度">
+      <div class="aig-head">
+        ${ORB}
+        <div class="aig-text">
+          <div class="aig-title" role="status">用例正在生成，请稍后</div>
+          <div class="aig-sub" title="${escapeHtml(batchLabel(info))}">${escapeHtml(batchLabel(info))}</div>
+        </div>
+        <button type="button" class="aig-icon" data-ai-dock-collapse title="收起" aria-label="收起生成进度"><svg><use href="#i-minimize"/></svg></button>
+      </div>
+      <div class="aig-track" aria-hidden="true"><i></i></div>
+      <p class="aig-tip">生成在后台进行，可以继续其他操作，完成后会通知你。</p>
+      <div class="aig-actions">
+        <button type="button" class="aig-link" data-ai-batch-dismiss="${escapeHtml(batchId)}" title="隐藏这条提示；生成仍在后台继续，完成后需求卡上会出现 AI 标记">不再提醒</button>
+        <button type="button" class="secondary aig-poll" data-ai-batch-poll="${escapeHtml(batchId)}"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>立即查询</button>
+      </div>
+    </section>`).join('');
+}
+
+function onDockClick(e) {
+  const poll = e.target.closest('[data-ai-batch-poll]');
+  if (poll) { pollBatch(poll.getAttribute('data-ai-batch-poll'), poll); return; }
+  const dismiss = e.target.closest('[data-ai-batch-dismiss]');
+  if (dismiss) {
+    state.batches.delete(dismiss.getAttribute('data-ai-batch-dismiss'));
+    persist();
+    render();
+    return;
+  }
+  if (e.target.closest('[data-ai-dock-collapse]')) setDockCollapsed(true);
+  else if (e.target.closest('[data-ai-dock-expand]')) setDockCollapsed(false);
 }
 
 function startTicking() {
@@ -384,7 +436,8 @@ async function viewBatchResults(batchId) {
   }
 }
 
-async function pollBatch(batchId) {
+async function pollBatch(batchId, button) {
+  if (button) { button.disabled = true; button.classList.add('is-busy'); }
   try {
     const res = await api(`/zentao/ai/batch/${batchId}`);
     const data = await res.json();
@@ -392,10 +445,12 @@ async function pollBatch(batchId) {
     if (data.pending === 0) {
       finishBatch(batchId, { success: data.success, failed: data.failed });
     } else {
-      window.showMessage && window.showMessage(`批次仍在处理：pending ${data.pending}`, 'info');
+      window.showMessage && window.showMessage(`仍在生成中，还有 ${data.pending} 条需求未完成`, 'info');
     }
   } catch (err) {
     window.showMessage && window.showMessage(err.message || '查询失败', 'error');
+  } finally {
+    if (button?.isConnected) { button.disabled = false; button.classList.remove('is-busy'); }
   }
 }
 
@@ -423,6 +478,7 @@ function startBatchWatch(info) {
   const startedAt = info.started_at || now();
   state.batches.set(info.batch_id, {
     story_ids: Array.isArray(info.story_ids) ? info.story_ids : [],
+    story_titles: info.story_titles && typeof info.story_titles === 'object' ? info.story_titles : {},
     started_at: startedAt,
     expected_seconds: Number(info.expected_duration_seconds) || 300,
     // 把 last_poll_ts 设到启动时间，避免刚提交就立即去 poll；
@@ -451,10 +507,11 @@ function refreshGenerationButtons(root = document) {
     button.hidden = generated;
     button.disabled = generated || pending || !Number(button.dataset.aiExecutionId);
     button.textContent = pending ? '正在生成…' : button.hasAttribute('data-ai-regenerate') ? '重新生成' : '生成用例';
+    button.classList.toggle('is-generating', pending);
   });
 }
 
-async function generateForStory(storyId, executionId, { regenerate = false } = {}) {
+async function generateForStory(storyId, executionId, { regenerate = false, title = '' } = {}) {
   const id = Number(storyId);
   const execution = Number(executionId);
   if (!id || !execution) {
@@ -462,15 +519,29 @@ async function generateForStory(storyId, executionId, { regenerate = false } = {
     return false;
   }
   if (isStoryGenerating(id)) return false;
-  if (!window.confirm(regenerate ? '是否重新生成该需求的用例？' : '是否为该需求生成用例？')) return false;
+  const values = await formDialog({
+    icon: regenerate ? 'i-rotate' : 'i-sparkles',
+    title: regenerate ? '重新生成用例' : '生成 AI 测试用例',
+    sub: `需求 #${id}${title ? ` · ${title}` : ''}`,
+    message: regenerate
+      ? '将按禅道里最新的需求内容重新生成一份用例。生成完成后，「查看结果」显示最新一次的内容。'
+      : 'AI 会读取该需求在禅道中的详情并生成测试用例。生成在后台进行，期间可以继续其他操作，完成后会通知你。',
+    okText: regenerate ? '重新生成' : '开始生成',
+    fields: [{
+      name: 'note', label: '补充说明', type: 'textarea', rows: 3, required: false, maxlength: 2000,
+      placeholder: '可选：希望 AI 关注的点，例如「只生成回归用例，忽略性能」',
+    }],
+  });
+  if (!values) return false;
+  if (isStoryGenerating(id)) return false;
   state.submittingStories.add(id);
   refreshGenerationButtons();
   try {
     const data = await (await api('/zentao/ai/generate-and-save', {
       method: 'POST',
-      body: { execution_id: execution, story_ids: [id], select_all: false, user_note: '' },
+      body: { execution_id: execution, story_ids: [id], select_all: false, user_note: values.note || '' },
     })).json();
-    startBatchWatch({ ...data, started_at: now() });
+    startBatchWatch({ ...data, story_titles: title ? { [id]: title } : {}, started_at: now() });
     return true;
   } catch (error) {
     window.showMessage?.(error.message || '提交失败', 'error');
@@ -592,6 +663,7 @@ function bindDelegatedClicks() {
       if (!generateButton.disabled) {
         generateForStory(generateButton.dataset.aiGenerateStoryId, generateButton.dataset.aiExecutionId, {
           regenerate: generateButton.hasAttribute('data-ai-regenerate'),
+          title: generateButton.dataset.aiStoryTitle || '',
         }).then((submitted) => {
           const modal = document.getElementById('aiResultModal');
           if (submitted && modal?.dataset.storyId === generateButton.dataset.aiGenerateStoryId) {

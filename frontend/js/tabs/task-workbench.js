@@ -1,5 +1,5 @@
 import { prepareOperationModal } from '../components/zentao-operation.js';
-import { askTaskHours, confirmTaskAction, confirmTaskDialog } from '../components/task-dialog.js';
+import { askTaskHours, confirmTaskAction, confirmTaskDialog } from '../components/task-dialog.js?v=20261126-zai-1';
 import { operateTask } from '../components/task-operation.js';
 import { api } from '../api.js';
 import { escapeHtml, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';

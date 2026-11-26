@@ -13,16 +13,25 @@ const root = path.resolve(__dirname, '..');
     const errors = [];
     const requests = [];
     const dialogs = [];
-    let acceptConfirmation = false;
+    const nativeDialogs = [];
     let failSubmission = false;
     let holdPendingLookup = false;
     let releasePendingLookup;
     let pendingLookupStarted;
     page.on('pageerror', error => errors.push(error.stack));
+    // 生成 / 重新生成走站内对话框（#taskOpDialog），不应再出现浏览器原生对话框
     page.on('dialog', async dialog => {
-      dialogs.push(dialog.message());
-      await (acceptConfirmation ? dialog.accept() : dialog.dismiss());
+      nativeDialogs.push(dialog.message());
+      await dialog.dismiss();
     });
+    const answerDialog = async (accept, note) => {
+      const dlg = page.locator('#taskOpDialog');
+      await dlg.waitFor({ state: 'visible' });
+      dialogs.push(await dlg.innerText());
+      if (note !== undefined) await dlg.locator('textarea').fill(note);
+      await dlg.locator(accept ? 'footer [data-act="ok"]' : 'footer [data-act="cancel"]').click();
+      await dlg.waitFor({ state: 'hidden' });
+    };
     const cases = Array.from({ length: 40 }, (_, index) => ({
       title: `小用例 ${index + 1}`, case_type: 'feature', priority: 2,
       precondition: '', keywords: '', module_id: 0, stage: '',
@@ -104,9 +113,13 @@ const root = path.resolve(__dirname, '..');
     });
     await page.goto('http://app.test/');
     await page.waitForFunction(() => window.ready);
-    for (const name of ['frontend/style.css', 'frontend/css/main.css', 'frontend/css/weave.css']) {
-      await page.addStyleTag({ content: fs.readFileSync(path.join(root, name), 'utf8').replace(/@import[^;]+;/g, '') });
-    }
+    // 页面刷新会丢掉注入的样式表，刷新后要重新注入（正式页面始终加载 weave.css）
+    const addStyles = async () => {
+      for (const name of ['frontend/style.css', 'frontend/css/main.css', 'frontend/css/weave.css']) {
+        await page.addStyleTag({ content: fs.readFileSync(path.join(root, name), 'utf8').replace(/@import[^;]+;/g, '') });
+      }
+    };
+    await addStyles();
     const generate = page.locator('[data-ai-generate-story-id="43"]');
     assert.equal(await page.locator('[data-req-id="3"] summary .ai-generate-chip').count(), 1);
     assert.equal(await generate.evaluate(element => element.previousElementSibling.classList.contains('ai-result-slot')), true);
@@ -116,12 +129,15 @@ const root = path.resolve(__dirname, '..');
     assert.equal(await page.locator('[data-req-id="1"] [data-ai-generate-story-id]').count(), 0);
     assert.equal(await page.locator('[data-ai-generate-story-id="44"]').isDisabled(), true);
     await generate.click();
+    await answerDialog(false);
+    assert.match(dialogs.at(-1), /生成 AI 测试用例/);
+    assert.match(dialogs.at(-1), /需求 #43 · 新需求/, 'The dialog names the requirement being generated');
     assert.equal(requests.length, 0, 'Cancellation must not submit');
     assert.equal(await card.evaluate(element => element.open), wasOpen, 'Clicking the chip must not toggle the requirement card');
-    acceptConfirmation = true;
     holdPendingLookup = true;
     const pendingLookup = new Promise(resolve => { pendingLookupStarted = resolve; });
     await generate.click();
+    await answerDialog(true);
     await page.waitForFunction(() => document.querySelector('#aiTaskBanner')?.textContent.includes('用例正在生成，请稍后'));
     await pendingLookup;
     assert.deepEqual(requests[0], { execution_id: 99, story_ids: [43], select_all: false, user_note: '' });
@@ -141,31 +157,34 @@ const root = path.resolve(__dirname, '..');
     assert.equal(await generate.isVisible(), false, 'Rerender must keep the generation chip hidden after success');
     await page.getByRole('button', { name: '查看结果' }).click();
     await page.locator('#aiResultRegenerate').waitFor({ state: 'visible' });
-    assert.equal((await page.locator('#aiResultModalTitle').innerText()).trim(), 's#43');
+    assert.equal((await page.locator('#aiResultModalTitle').innerText()).trim(), '需求 #43');
     assert.equal(await page.locator('#aiResultRegenerate').isEnabled(), true);
     await page.evaluate(() => window.OmniQAStoryAI.closeModal());
     await page.reload();
     await page.waitForFunction(() => window.ready);
+    await addStyles();
     await generate.waitFor({ state: 'hidden', timeout: 2000 });
     assert.equal(await page.locator('[data-req-id="2"] .ai-generate-chip').isVisible(), true, 'Failed generation must keep the retry action');
 
     // Both failed and successful result dialogs allow regeneration with confirmation.
     await page.evaluate(() => window.OmniQAStoryAI.openForStory(42));
-    await page.getByText('生成失败', { exact: true }).waitFor();
-    acceptConfirmation = false;
+    await page.locator('#aiResultModalBody').getByText('生成失败', { exact: true }).waitFor();
     await page.locator('#aiResultRegenerate').click();
+    await answerDialog(false);
     assert.equal(requests.length, 1);
-    acceptConfirmation = true;
     await page.locator('#aiResultRegenerate').click();
+    await answerDialog(true, '只生成回归用例');
     await page.locator('#aiResultModal').waitFor({ state: 'hidden' });
     assert.equal(requests[1].story_ids[0], 42);
-    assert.match(dialogs.at(-1), /是否重新生成/);
+    assert.equal(requests[1].user_note, '只生成回归用例', 'The optional note is forwarded to the AI workflow');
+    assert.match(dialogs.at(-1), /重新生成用例/);
     results.get(42).ai_status = 'failed';
     await page.evaluate(() => handlers.zentao_ai_batch_completed({ payload: { batch_id: 'batch-2', success: 0, failed: 1 } }));
     await page.getByText('AI 处理失败，全部 1 条未生成', { exact: true }).waitFor();
     await page.evaluate(() => window.OmniQAStoryAI.openForStory(42));
     failSubmission = true;
     await page.locator('#aiResultRegenerate').click();
+    await answerDialog(true);
     await page.waitForFunction(() => messages.some(message => message[0] === '生成服务暂不可用'));
     assert.equal(await page.locator('#aiResultRegenerate').isDisabled(), false);
     assert.equal(await page.locator('#aiResultModal').isVisible(), true, 'Submission failure must allow retry in place');
@@ -228,6 +247,7 @@ const root = path.resolve(__dirname, '..');
     await page.evaluate(() => handlers.zentao_ai_batch_completed({ payload: { batch_id: 'untracked', story_ids: [44], success: 1, failed: 0 } }));
     await page.locator('[data-req-id="4"] .ai-generate-chip').waitFor({ state: 'hidden', timeout: 2000 });
     assert.deepEqual(errors, []);
+    assert.deepEqual(nativeDialogs, [], 'No native browser dialogs');
     console.log('AI generation UI passed: success hides chips across SSE, polling, rerenders and reloads; stale responses, retries, regeneration, scroll retention and background operations verified.');
   } finally {
     await browser.close();

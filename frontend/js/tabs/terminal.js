@@ -2,6 +2,7 @@
 // 设备网格 + 状态徽标 + 获取/释放操作权 + 内嵌 ws-scrcpy 画面。
 // 锁与状态由后端 /api/terminals 控制面权威维护；画面经 ws-scrcpy 播放器 iframe 呈现。
 import { api } from '../api.js';
+import { confirmDialog } from '../components/dialog.js?v=20261126-zai-1';
 
 const STATUS_META = {
   offline: { text: '离线', color: '#94a3b8', bg: '#f1f5f9' },
@@ -147,7 +148,7 @@ export async function releaseDevice(deviceId) {
 }
 
 export async function forceReleaseDevice(deviceId) {
-  if (!confirm('强制释放将解除他人对该终端的占用，确定继续吗？')) return;
+  if (!(await confirmDialog({ icon: 'i-ban', tone: 'red', danger: true, title: '强制释放终端', message: '将解除他人对该终端的占用。', okText: '强制释放' }))) return;
   try {
     await api(`/api/terminals/${deviceId}/control/force-release`, { method: 'POST', headers: window.H });
     if (heldDeviceId === deviceId) { heldDeviceId = null; stopHeartbeat(); }
@@ -159,7 +160,7 @@ export async function forceReleaseDevice(deviceId) {
 }
 
 export async function preemptDevice(deviceId) {
-  if (!confirm('抢占会中断该终端上正在运行的自动化测试，确定继续吗？')) return;
+  if (!(await confirmDialog({ icon: 'i-alert', tone: 'red', danger: true, title: '抢占终端', message: '抢占会中断该终端上正在运行的自动化测试。', okText: '确认抢占' }))) return;
   try {
     await api(`/api/terminals/${deviceId}/control/preempt`, { method: 'POST', headers: window.H });
     heldDeviceId = deviceId;

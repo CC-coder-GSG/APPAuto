@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { confirmDialog } from '../components/dialog.js?v=20261126-zai-1';
 
 // Jenkins 标签：尽量复刻原生 Jenkins 的体验。
 // - 视图切换 + Job 列表（状态色、最近构建）
@@ -155,7 +156,7 @@ export async function saveJenkinsBinding() {
 }
 
 export async function deleteJenkinsBinding() {
-  if (!confirm('确定要删除你的 Jenkins 账号绑定吗？')) return;
+  if (!(await confirmDialog({ danger: true, title: '删除 Jenkins 账号绑定', message: '删除后将无法通过平台触发构建，需要时可以重新绑定。' }))) return;
   try {
     await api('/jenkins/binding/me', { method: 'DELETE' });
     window.showMessage && window.showMessage('Jenkins 绑定已删除', 'success');
@@ -364,7 +365,7 @@ export async function buildJenkinsJob(safeName) {
     openJenkinsBuildModal(name);
     return;
   }
-  if (!confirm(`确认触发 Job「${name}」的构建吗？`)) return;
+  if (!(await confirmDialog({ icon: 'i-play', tone: 'green', title: '触发构建', sub: name, message: '将立即在 Jenkins 上开始一次新的构建。', okText: '开始构建' }))) return;
   try {
     const res = await (await api(`/jenkins/jobs/${encodeURIComponent(name)}/build`, { method: 'POST', headers: window.H, body: {} })).json();
     window.showMessage && window.showMessage(res.message || '已触发构建', 'success');

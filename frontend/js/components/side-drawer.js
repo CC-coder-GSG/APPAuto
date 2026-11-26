@@ -5,6 +5,16 @@
 const drawers = new Map();
 let keyBound = false;
 
+// 锁住页面滚动。页面原本有滚动条时保留滚动条槽位（sd-gutter），否则滚动条消失、背景会横向跳动约一个滚动条宽
+function setScrollLock(locked) {
+  const html = document.documentElement;
+  if (locked && !html.classList.contains('sd-locked')) {
+    html.classList.toggle('sd-gutter', window.innerWidth > html.clientWidth);
+  }
+  html.classList.toggle('sd-locked', locked);
+  if (!locked) html.classList.remove('sd-gutter');
+}
+
 const CLOSE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
 
 function topmostOpen() {
@@ -61,7 +71,7 @@ function build(key) {
       const done = () => { root.hidden = true; };
       if (matchMedia('(prefers-reduced-motion: reduce)').matches) done();
       else setTimeout(done, 220);
-      document.documentElement.classList.toggle('sd-locked', [...drawers.values()].some((x) => x !== d && !x.root.hidden));
+      setScrollLock([...drawers.values()].some((x) => x !== d && !x.root.hidden));
       const cb = d.onClose; d.onClose = null;
       try { cb && cb(); } catch (_) { /* 回调失败不影响关闭 */ }
       if (d.previousFocus?.isConnected) d.previousFocus.focus({ preventScroll: true });
@@ -101,7 +111,7 @@ export function openDrawer({ key, size = 'lg', head = '', tools = '', body = '',
   if (!wasOpen) {
     d.previousFocus = document.activeElement;
     d.root.hidden = false;
-    document.documentElement.classList.add('sd-locked');
+    setScrollLock(true);
     // 先渲染初始位置再加 is-open，过渡才会生效
     requestAnimationFrame(() => requestAnimationFrame(() => d.root.classList.add('is-open')));
     d.panel.focus({ preventScroll: true });

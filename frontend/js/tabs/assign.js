@@ -3,6 +3,7 @@ export { loadAssignProgress, toggleAssignProgressPendingOnly };
 import './assign-linked-tasks.js?v=20261022-1';
 
 import { api } from '../api.js';
+import { confirmDialog } from '../components/dialog.js?v=20261126-zai-1';
 import { state } from '../state.js';
 import { renderPreviewBtn, escapeHtml } from '../utils.js?v=20261014-2';
 import { showLoading, hideLoading } from '../components/common.js';
@@ -283,10 +284,16 @@ export async function toggleFinalTest() {
     currentlyEnabled = false;
   }
   const nextEnabled = !currentlyEnabled;
-  const msg = nextEnabled
-    ? '确认让该版本进入最终测试阶段？\n\n进入后：所有人在「我的工作台」选择该版本时都能看到全部需求，并各自独立勾选（不影响原有分配与勾选状态）。'
-    : '确认关闭该版本的最终测试阶段？\n\n关闭后恢复原有分配视图，最终测试数据会被保留，再次开启将延续。';
-  if (!confirm(msg)) return;
+  const ok = await confirmDialog(nextEnabled ? {
+    icon: 'i-play', tone: 'green', title: '进入最终测试阶段',
+    message: '进入后，所有人在「我的工作台」选择该版本时都能看到全部需求，并各自独立勾选（不影响原有分配与勾选状态）。',
+    okText: '进入最终测试',
+  } : {
+    icon: 'i-pause', title: '关闭最终测试阶段',
+    message: '关闭后恢复原有分配视图。最终测试数据会被保留，再次开启时会延续。',
+    okText: '关闭最终测试',
+  });
+  if (!ok) return;
 
   try {
     await api('/final-test/toggle', {
@@ -349,7 +356,7 @@ async function runAssignAction(kind) {
   let payload;
   try { payload = selectedAssignPayload(); }
   catch (err) { window.showMessage?.(err.message, 'error'); return; }
-  if (kind === 'publish' && !(window.confirmPush && window.confirmPush())) return;
+  if (kind === 'publish' && !(window.confirmPush && await window.confirmPush())) return;
   const selected = (state.assignReqs || []).filter(r => selectedRequirements.has(Number(r.id)));
   const context = currentAssignContext();
   const majorName = document.getElementById('assignMajorSelect')?.selectedOptions[0]?.textContent || '';

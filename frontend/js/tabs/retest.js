@@ -504,7 +504,7 @@ export async function retestDismissBug(bugId, reqId, checked) {
 }
 
 export async function pushRetest() {
-  if (!(window.confirmPush && window.confirmPush())) return;
+  if (!(window.confirmPush && await window.confirmPush())) return;
   if (getRetestMode() !== 'version') {
     window.showMessage && window.showMessage('查看所有待复测需求模式下不支持一键推送，请切换到按大版本查看后再推送', 'error');
     return;

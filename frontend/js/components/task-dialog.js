@@ -192,13 +192,66 @@ function mountTextField(container, { label, value = '', placeholder = '', prefix
   };
 }
 
-// 打开对话框。hours / text 有值时带输入，确认时校验；返回 Promise<{hours?, text?}|null>
-function openDialog({ icon, tone = 'accent', title, sub = '', facts = '', message = '', hours = null, text = null, okText = '确定', cancelText = '取消', danger = false }) {
+// 多字段表单（密码修改、新建主题等）：fields = [{ name, label, type: text|password|textarea, value,
+// placeholder, hint, prefix, required = true, maxlength, rows, validate(v, values) }]
+// 只渲染一项时与单行输入同款；read() 全部通过返回 { name: value }，否则在首个出错项行内报错。
+function mountFields(container, fields) {
+  container.innerHTML = fields.map((f, i) => {
+    const id = `taskOpField${i}`;
+    const req = f.required !== false;
+    const max = f.maxlength ? ` maxlength="${Number(f.maxlength)}"` : '';
+    const control = f.type === 'textarea'
+      ? `<div class="tod-area"><textarea id="${id}" rows="${Number(f.rows) || 4}"${max} placeholder="${escapeHtml(f.placeholder || '')}">${escapeHtml(f.value ?? '')}</textarea></div>`
+      : `<div class="tod-text">${f.prefix ? `<span class="tod-prefix">${escapeHtml(f.prefix)}</span>` : ''}<input id="${id}" type="${f.type === 'password' ? 'password' : 'text'}" autocomplete="${f.type === 'password' ? 'new-password' : 'off'}"${max} value="${escapeHtml(f.value ?? '')}" placeholder="${escapeHtml(f.placeholder || '')}"></div>`;
+    return `<div class="tod-hours tod-field" data-field="${i}">
+      <label class="tod-label" for="${id}">${escapeHtml(f.label || '')}${req ? '' : '<small>可留空</small>'}</label>
+      ${control}
+      ${f.hint ? `<p class="tod-hint">${escapeHtml(f.hint)}</p>` : ''}
+      <p class="tod-err" role="alert" hidden></p>
+    </div>`;
+  }).join('');
+  const rows = fields.map((f, i) => {
+    const box = container.querySelector(`[data-field="${i}"]`);
+    const input = box.querySelector('input, textarea');
+    const err = box.querySelector('.tod-err');
+    const shell = box.querySelector('.tod-text, .tod-area');
+    const showErr = (msg) => { err.textContent = msg; err.hidden = !msg; shell.classList.toggle('is-invalid', !!msg); };
+    input.addEventListener('input', () => showErr(''));
+    return { f, input, showErr };
+  });
+  return {
+    input: rows[0]?.input,
+    read() {
+      const values = {};
+      rows.forEach(({ f, input }) => {
+        let v = f.type === 'password' ? input.value : input.value.trim();
+        if (f.prefix && v.toLowerCase().startsWith(f.prefix.toLowerCase())) v = v.slice(f.prefix.length).trim();
+        values[f.name] = v;
+      });
+      for (const { f, input, showErr } of rows) {
+        const v = values[f.name];
+        const problem = (f.required !== false && !v) ? `请填写${f.label || '内容'}` : (f.validate ? f.validate(v, values) || '' : '');
+        if (problem) {
+          showErr(problem);
+          input.focus();
+          input.select?.();
+          return null;
+        }
+      }
+      return values;
+    },
+  };
+}
+
+// 打开对话框。hours / text / fields 有值时带输入，确认时校验；返回 Promise<{hours?, text?, values?}|null>
+// alertOnly：只有一个「知道了」按钮（替代 window.alert）；wide：宽一档的卡片（带多行输入时用）
+export function openDialog({ icon, tone = 'accent', title, sub = '', facts = '', message = '', hours = null, text = null, fields = null, okText = '确定', cancelText = '取消', danger = false, alertOnly = false, wide = false }) {
   if (active) close(null);
   const el = ensureRoot();
   el.dataset.tone = tone;
+  const hasInput = !!(hours || text || fields?.length);
   el.innerHTML = `
-    <div class="atl-card atl-card--sm tod-card">
+    <div class="atl-card atl-card--sm tod-card${wide ? ' tod-card--wide' : ''}">
       <header class="atl-head">
         <span class="atl-icon tod-icon" aria-hidden="true"><svg><use href="#${icon}"/></svg></span>
         <div class="atl-head-text">
@@ -210,20 +263,22 @@ function openDialog({ icon, tone = 'accent', title, sub = '', facts = '', messag
       <div class="atl-body atl-body--form tod-body">
         ${facts}
         ${message ? `<p class="tod-msg">${message}</p>` : ''}
-        ${hours || text ? '<div class="tod-hours-slot"></div>' : ''}
+        ${hasInput ? '<div class="tod-hours-slot"></div>' : ''}
       </div>
       <footer class="atl-foot">
-        <button type="button" class="secondary" data-act="cancel">${escapeHtml(cancelText)}</button>
+        ${alertOnly ? '' : `<button type="button" class="secondary" data-act="cancel">${escapeHtml(cancelText)}</button>`}
         <button type="button" class="tod-ok${danger ? ' tod-ok--danger' : ''}" data-act="ok">${escapeHtml(okText)}</button>
       </footer>
     </div>`;
   const slot = el.querySelector('.tod-hours-slot');
-  const field = hours ? mountHoursField(slot, hours) : (text ? mountTextField(slot, text) : null);
+  const field = hours ? mountHoursField(slot, hours)
+    : text ? mountTextField(slot, text)
+      : fields?.length ? mountFields(slot, fields) : null;
   const input = field?.input;
   const submit = () => {
     if (!field) { close({}); return; }
     const v = field.read();
-    if (v !== null) close(hours ? { hours: v } : { text: v });
+    if (v !== null) close(hours ? { hours: v } : text ? { text: v } : { values: v });
   };
   const onClick = (e) => {
     const btn = e.target.closest('button[data-act]');
@@ -237,6 +292,7 @@ function openDialog({ icon, tone = 'accent', title, sub = '', facts = '', messag
     el.style.display = 'flex';
     requestAnimationFrame(() => {
       if (input) { input.focus(); input.select?.(); }
+      else if (danger) el.querySelector('footer [data-act="cancel"]')?.focus();
       else el.querySelector('[data-act="ok"]')?.focus();
     });
   });

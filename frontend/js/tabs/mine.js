@@ -6,7 +6,7 @@ import { runZentaoOperation, operationPending, prepareOperationModal } from '../
 import { verifyBugResult } from '../components/bug-result-operation.js';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 import { closeModal, openModal } from '../components/modal.js';
-import { askTaskHours, mountHoursField, confirmTaskDialog, promptTaskDialog } from '../components/task-dialog.js';
+import { askTaskHours, mountHoursField, confirmTaskDialog, promptTaskDialog } from '../components/task-dialog.js?v=20261126-zai-1';
 import { renderCaseReviewControls } from '../components/case-review.js?v=20260714-1';
 import { renderBugVersion } from '../components/bug-version.js?v=20261022-found-version-1';
 import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge, sourceTypeZh } from '../utils.js?v=20261014-2';
@@ -1722,7 +1722,7 @@ export function renderMineCards({ preserveCards = false, changedIds = null } = {
     const ztStorySlot = ztStoryId ? `<span class="zt-story-slot" data-zt-story-id="${ztStoryId}" style="margin-left:6px; vertical-align:middle;"></span>` : '';
     const aiResultSlot = ztStoryId ? `<span class="ai-result-slot" data-story-id="${ztStoryId}" style="margin-left:6px; vertical-align:middle;"></span>` : '';
     const generateCaseChip = !caseHtml && ztStoryId && window.canAccessRawTab?.('zentao-ai')
-      ? `<button type="button" class="ai-generate-chip" data-ai-generate-story-id="${ztStoryId}" data-ai-execution-id="${Number(req.zentao_execution_id) || ''}" title="${req.zentao_execution_id ? '为该需求生成 AI 测试用例' : '该需求所属大版本尚未关联禅道执行'}" ${req.zentao_execution_id ? '' : 'disabled'}>生成用例</button>`
+      ? `<button type="button" class="ai-generate-chip" data-ai-generate-story-id="${ztStoryId}" data-ai-execution-id="${Number(req.zentao_execution_id) || ''}" data-ai-story-title="${escapeHtml(req.title || '')}" title="${req.zentao_execution_id ? '为该需求生成 AI 测试用例' : '该需求所属大版本尚未关联禅道执行'}" ${req.zentao_execution_id ? '' : 'disabled'}>生成用例</button>`
       : '';
     const reqIdHtml = ztStoryId
       ? `<span class="qa-story-id-nohref" data-zt-story-id="${ztStoryId}">${req.zentao_req_id}</span>`
@@ -2245,13 +2245,13 @@ export async function addFreeBug(reqId) {
 }
 
 export async function pushCase() {
-  if (!(window.confirmPush && window.confirmPush())) return;
+  if (!(window.confirmPush && await window.confirmPush())) return;
   await api('/push/case-progress', { method: 'POST', headers: window.H, body: { major_version_id: Number(document.getElementById('mineMajorSelect')?.value || 0) } });
   window.showMessage && window.showMessage('用例进度已推送');
 }
 
 export async function pushTest() {
-  if (!(window.confirmPush && window.confirmPush())) return;
+  if (!(window.confirmPush && await window.confirmPush())) return;
   await api(`/push/test-progress?minor_version_id=${Number(document.getElementById('mineMinorSelect')?.value || 0)}&major_version_id=${Number(document.getElementById('mineMajorSelect')?.value || 0)}`, { method: 'POST' });
   window.showMessage && window.showMessage('测试进度已推送');
 }

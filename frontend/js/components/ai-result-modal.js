@@ -1,6 +1,11 @@
 import { api } from '../api.js';
 import { mapZentaoStatus } from '../zentao-status-map.js';
-import { openCaseEditor } from './ai-case-editor.js?v=20261013-1';
+import { openCaseEditor } from './ai-case-editor.js?v=20261126-zai-1';
+
+// AI 用例结果弹窗 v2（2026-11-26，weave.css R20 .aiv-*；外壳复用 R16 .atl-*）
+// 结构：头部（需求标题 + 状态）→ 概览条（用例 / 风险 / 待确认 + 归属字段）→ 概要 → 用例卡片（可折叠，
+// 步骤表）→ 风险点 / 待确认问题 → 底栏（重新生成 · 复制全部 · 整理并提交禅道）。
+// 对外接口不变：window.OmniQAStoryAI.openForStory / closeModal；#aiResultRegenerate 由 ai-tasks.js 统一管理。
 
 const MODAL_ID = 'aiResultModal';
 let latestRequest = 0;
@@ -14,60 +19,74 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+const icon = (id) => `<svg class="ui-ic" aria-hidden="true"><use href="#${id}"/></svg>`;
+const textOf = (x) => (typeof x === 'string' ? x : JSON.stringify(x));
+
 function ensureModalRoot() {
   let root = document.getElementById(MODAL_ID);
   if (root) return root;
   root = document.createElement('div');
   root.id = MODAL_ID;
-  root.className = 'hidden';
-  root.style.cssText = 'position:fixed; inset:0; background:rgba(15,23,42,0.55); z-index:2000; display:none; padding:32px 16px; overflow:auto;';
+  root.className = 'hidden atl-root aiv-root';
+  root.style.display = 'none';
   root.innerHTML = `
-    <div style="max-width:980px; margin:0 auto; background:#fff; border-radius:10px; box-shadow:0 12px 40px rgba(0,0,0,0.3); padding:24px;">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
-        <div style="flex:1;">
-          <div id="aiResultModalTitle" style="font-size:18px; font-weight:700; color:#0f172a; margin-bottom:4px;"></div>
-          <div id="aiResultModalMeta" style="font-size:12px; color:#64748b;"></div>
+    <div class="atl-card aiv-card" role="dialog" aria-modal="true" aria-labelledby="aiResultModalTitle">
+      <header class="atl-head">
+        <span class="atl-icon" aria-hidden="true"><svg><use href="#i-sparkles"/></svg></span>
+        <div class="atl-head-text">
+          <h3 id="aiResultModalTitle"></h3>
+          <div id="aiResultModalMeta" class="atl-sub aiv-meta"></div>
         </div>
-        <button type="button" id="aiResultRegenerate" data-ai-generate-story-id="" data-ai-execution-id="" data-ai-regenerate disabled class="aiqa-btn aiqa-btn--secondary">重新生成</button>
-        <button type="button" onclick="window.OmniQAStoryAI && window.OmniQAStoryAI.closeModal()" style="border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; padding:4px 12px; cursor:pointer;">关闭</button>
-      </div>
-      <div id="aiResultModalBody" style="margin-top:16px;"></div>
+        <button type="button" class="atl-close" data-aiv-close aria-label="关闭" title="关闭（Esc）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+      </header>
+      <div id="aiResultModalBody" class="aiv-body"></div>
+      <footer class="atl-foot aiv-foot">
+        <button type="button" id="aiResultRegenerate" class="secondary aiv-regen" data-ai-generate-story-id="" data-ai-execution-id="" data-ai-regenerate disabled>重新生成</button>
+        <div id="aiResultActions" class="aiv-actions"></div>
+      </footer>
     </div>
   `;
   document.body.appendChild(root);
+  root.addEventListener('mousedown', (e) => { root._downOnBackdrop = e.target === root; });
   root.addEventListener('click', (e) => {
-    if (e.target === root) closeModal();
+    if ((e.target === root && root._downOnBackdrop) || e.target.closest('[data-aiv-close]')) closeModal();
   });
   return root;
 }
 
-function renderList(arr) {
-  if (!Array.isArray(arr) || !arr.length) return '<span class="muted">无</span>';
-  return `<ul style="margin:4px 0 0 18px; padding:0;">${arr.map((x) => `<li style="margin:2px 0;">${escapeHtml(typeof x === 'string' ? x : JSON.stringify(x))}</li>`).join('')}</ul>`;
+// Esc 关闭；整理弹窗打开时（它在上层）不处理，通用对话框在捕获阶段已先拦截
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const root = document.getElementById(MODAL_ID);
+  if (!root || root.classList.contains('hidden')) return;
+  const editor = document.getElementById('aiCaseEditor');
+  if (editor && editor.style.display !== 'none') return;
+  e.preventDefault();
+  closeModal();
+});
+
+function renderList(arr, emptyText) {
+  if (!Array.isArray(arr) || !arr.length) return `<p class="aiv-none">${emptyText}</p>`;
+  return `<ul class="aiv-list">${arr.map((x) => `<li>${escapeHtml(textOf(x))}</li>`).join('')}</ul>`;
 }
 
 function renderParagraphs(text) {
-  if (!text) return '<span class="muted">无</span>';
-  const safe = escapeHtml(text);
-  return safe.split(/\n\s*\n/).map((p) => `<p style="margin:0 0 8px; line-height:1.7; color:#1f2937;">${p.replace(/\n/g, '<br>')}</p>`).join('');
+  if (!text) return '<p class="aiv-none">无</p>';
+  return escapeHtml(text).split(/\n\s*\n/).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
 }
 
 function renderSteps(steps) {
-  if (!Array.isArray(steps) || !steps.length) return '<span class="muted">无</span>';
+  if (!Array.isArray(steps) || !steps.length) return '<p class="aiv-none">无步骤</p>';
   return `
-    <table class="qa-table" style="margin:6px 0 0; width:100%; border-collapse:collapse;">
-      <thead><tr><th style="width:56px;">序号</th><th>步骤</th><th>预期</th></tr></thead>
-      <tbody>
-        ${steps.map((s, i) => `
-          <tr>
-            <td>${i + 1}</td>
-            <td style="white-space:pre-wrap;">${escapeHtml(typeof s === 'string' ? s : (s?.step ?? ''))}</td>
-            <td style="white-space:pre-wrap;">${escapeHtml(typeof s === 'string' ? '' : (s?.expected ?? ''))}</td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>
-  `;
+    <div class="aiv-steps" role="table">
+      <div class="aiv-steps-head" role="row"><span role="columnheader">#</span><span role="columnheader">操作步骤</span><span role="columnheader">预期结果</span></div>
+      ${steps.map((s, i) => `
+        <div class="aiv-step" role="row">
+          <span class="aiv-step-no" role="cell">${i + 1}</span>
+          <div class="aiv-step-do" role="cell">${escapeHtml(typeof s === 'string' ? s : (s?.step ?? ''))}</div>
+          <div class="aiv-step-exp" role="cell">${escapeHtml(typeof s === 'string' ? '' : (s?.expected ?? '')) || '<span class="aiv-none">—</span>'}</div>
+        </div>`).join('')}
+    </div>`;
 }
 
 function getTestCases(data) {
@@ -94,42 +113,43 @@ function buildCaseTemplate(testCase, index = 0) {
   ].filter(Boolean).join('\n');
 }
 
+function caseChips(testCase) {
+  const chips = [];
+  if (testCase.case_type) chips.push(`<span class="aiv-chip">${escapeHtml(testCase.case_type)}</span>`);
+  if (testCase.priority) chips.push(`<span class="aiv-chip aiv-chip--pri">P${escapeHtml(String(testCase.priority).replace(/^p/i, ''))}</span>`);
+  const steps = Array.isArray(testCase.steps) ? testCase.steps.length : 0;
+  chips.push(`<span class="aiv-chip aiv-chip--muted">${steps} 步</span>`);
+  return chips.join('');
+}
+
 function renderTestCases(testCases) {
   if (!testCases.length) return '';
   return `
-    <div style="margin:18px 0 14px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <div style="font-weight:700; color:#0f172a;">测试用例 <span style="color:#64748b; font-weight:500;">（${testCases.length} 条）</span></div>
-        <span style="font-size:12px; color:#64748b;">点击标题展开或收起</span>
+    <section class="aiv-section">
+      <div class="aiv-section-head">
+        <h4>${icon('i-cases')}测试用例 <span class="aiv-count">${testCases.length}</span></h4>
+        <button type="button" class="aiv-text-btn" data-aiv-toggle-all>全部展开</button>
       </div>
-      ${testCases.map((testCase, index) => {
-        const fields = [
-          ['类型', testCase.case_type],
-          ['优先级', testCase.priority],
-          ['关键词', testCase.keywords],
-        ].filter((item) => item[1]);
-        return `
-          <details ${index === 0 ? 'open' : ''} style="border:1px solid #dbe3ef; border-radius:8px; margin-bottom:8px; overflow:hidden; background:#fff;">
-            <summary style="cursor:pointer; padding:11px 14px; background:#f8fafc; color:#0f172a; font-weight:600; line-height:1.5;">
-              <span style="color:#64748b; margin-right:6px;">${index + 1}.</span>${escapeHtml(testCase.title || `测试用例 ${index + 1}`)}
+      <div class="aiv-cases">
+        ${testCases.map((testCase, index) => `
+          <details class="aiv-case" ${index === 0 ? 'open' : ''}>
+            <summary>
+              <span class="aiv-case-no">${index + 1}</span>
+              <span class="aiv-case-title">${escapeHtml(testCase.title || `测试用例 ${index + 1}`)}</span>
+              <span class="aiv-case-chips">${caseChips(testCase)}</span>
+              <svg class="ui-ic aiv-case-caret" aria-hidden="true"><use href="#i-chevron-down"/></svg>
             </summary>
-            <div style="padding:14px; border-top:1px solid #e2e8f0;">
-              ${fields.length ? `<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:6px 12px; margin-bottom:12px;">
-                ${fields.map(([key, value]) => `<div><span style="color:#64748b;">${escapeHtml(key)}：</span>${escapeHtml(value)}</div>`).join('')}
-              </div>` : ''}
-              ${testCase.precondition ? `<div style="margin-bottom:12px;"><div style="font-weight:600; margin-bottom:4px;">前置条件</div>${renderParagraphs(testCase.precondition)}</div>` : ''}
-              <div style="margin-bottom:12px;"><div style="font-weight:600; margin-bottom:4px;">步骤 / 预期</div>${renderSteps(testCase.steps)}</div>
-              ${testCase.testcase_template ? `<div>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                  <div style="font-weight:600;">用例模板</div>
-                  <button type="button" data-ai-copy-case="${index}" style="border:1px solid #cbd5e1; background:#fff; border-radius:6px; padding:2px 10px; cursor:pointer; font-size:12px;">复制本条</button>
-                </div>
-                <textarea readonly style="width:100%; min-height:130px; font-family:Consolas,Menlo,monospace; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">${escapeHtml(testCase.testcase_template)}</textarea>
-              </div>` : ''}
+            <div class="aiv-case-body">
+              ${testCase.precondition ? `<div class="aiv-pre"><span class="aiv-k">前置条件</span><div>${renderParagraphs(testCase.precondition)}</div></div>` : ''}
+              ${renderSteps(testCase.steps)}
+              <div class="aiv-case-foot">
+                ${testCase.keywords ? `<span class="aiv-kw"><span class="aiv-k">关键词</span>${escapeHtml(testCase.keywords)}</span>` : '<span></span>'}
+                <button type="button" class="aiv-text-btn" data-ai-copy-case="${index}">${icon('i-copy')}复制本条</button>
+              </div>
             </div>
-          </details>`;
-      }).join('')}
-    </div>`;
+          </details>`).join('')}
+      </div>
+    </section>`;
 }
 
 function copyToClipboard(text) {
@@ -172,38 +192,56 @@ function buildStoryTemplate(data) {
     data?.priority ? `【优先级】${data.priority}` : '',
     data?.precondition ? `\n【前置条件】\n${data.precondition}` : '',
     steps.length ? `\n【步骤】\n${stepLines}` : '',
-    risks.length ? `\n【风险点】\n${risks.map((x) => `  - ${typeof x === 'string' ? x : JSON.stringify(x)}`).join('\n')}` : '',
-    questions.length ? `\n【待确认问题】\n${questions.map((x) => `  - ${typeof x === 'string' ? x : JSON.stringify(x)}`).join('\n')}` : '',
+    risks.length ? `\n【风险点】\n${risks.map((x) => `  - ${textOf(x)}`).join('\n')}` : '',
+    questions.length ? `\n【待确认问题】\n${questions.map((x) => `  - ${textOf(x)}`).join('\n')}` : '',
     testCases.length ? `\n【测试用例（${testCases.length} 条）】\n\n${testCases.map((item, index) => buildCaseTemplate(item, index)).join('\n\n--------------------\n\n')}` : '',
     data?.testcase_template ? `\n【用例模板】\n${data.testcase_template}` : '',
   ].filter(Boolean).join('\n');
 }
 
+const STATUS_TONE = { success: 'ok', failed: 'err', pending: 'run' };
+// AI 处理状态不是禅道状态，mapZentaoStatus 不认识（会原样显示 success / failed），这里单独翻译
+const STATUS_TEXT = { success: '生成成功', failed: '生成失败', pending: '生成中' };
+
+function renderHeader(data, testCases) {
+  const root = ensureModalRoot();
+  root.querySelector('#aiResultModalTitle').textContent = data.title || `需求 #${data.story_id}`;
+  const tone = STATUS_TONE[data.ai_status] || 'muted';
+  root.querySelector('#aiResultModalMeta').innerHTML = [
+    `<span class="aiv-sid">#${escapeHtml(data.story_id)}</span>`,
+    `<span class="aiv-status aiv-status--${tone}">${escapeHtml(STATUS_TEXT[data.ai_status] || mapZentaoStatus(data.ai_status))}</span>`,
+    testCases.length ? `<span>${testCases.length} 条用例</span>` : '',
+    data.updated_at ? `<span title="批次 ${escapeHtml(data.batch_id || '')}">更新于 ${escapeHtml(String(data.updated_at).replace('T', ' ').slice(0, 16))}</span>` : '',
+  ].filter(Boolean).join('');
+}
+
 function render(data) {
   const root = ensureModalRoot();
-  const title = root.querySelector('#aiResultModalTitle');
-  const meta = root.querySelector('#aiResultModalMeta');
   const body = root.querySelector('#aiResultModalBody');
+  const actions = root.querySelector('#aiResultActions');
 
   const regenerateButton = root.querySelector('#aiResultRegenerate');
   regenerateButton.dataset.aiGenerateStoryId = String(data.story_id);
   regenerateButton.dataset.aiExecutionId = String(data.execution_id || '');
+  regenerateButton.dataset.aiStoryTitle = data.title || '';
   regenerateButton.disabled = !data.execution_id;
   regenerateButton.title = data.execution_id ? '重新生成该需求的 AI 测试用例' : '该结果缺少禅道执行信息，无法重新生成';
   window.OmniQAStoryAI?.refreshGenerationButtons?.(root);
 
-  const statusLabel = mapZentaoStatus(data.ai_status);
-  const statusColor = data.ai_status === 'success' ? '#166534' : data.ai_status === 'failed' ? '#b91c1c' : '#475569';
   const testCases = getTestCases(data);
-  title.innerHTML = `s#${data.story_id} ${escapeHtml(data.title || '')}`;
-  meta.innerHTML = `状态：<span style="color:${statusColor}; font-weight:600;">${escapeHtml(statusLabel)}</span>${testCases.length ? ` · 用例 ${testCases.length} 条` : ''} · 批次 ${escapeHtml(data.batch_id)} · 更新 ${escapeHtml(data.updated_at || '')}`;
+  renderHeader(data, testCases);
 
   if (data.ai_status !== 'success') {
     body.innerHTML = `
-      <div style="padding:16px; border:1px solid #fecaca; border-radius:8px; background:#fef2f2; color:#991b1b;">
-        <div style="font-weight:600; margin-bottom:6px;">AI 处理未成功</div>
-        <div style="white-space:pre-wrap;">${escapeHtml(data.ai_error_message || '无错误信息')}</div>
+      <div class="aiv-fail" role="alert">
+        <span class="aiv-fail-icon">${icon('i-alert')}</span>
+        <div>
+          <div class="aiv-fail-title">AI 处理未成功</div>
+          <div class="aiv-fail-msg">${escapeHtml(data.ai_error_message || '无错误信息')}</div>
+          <p class="aiv-fail-tip">可以点击左下角「重新生成」再试一次；如果反复失败，请检查需求描述是否完整。</p>
+        </div>
       </div>`;
+    actions.innerHTML = '';
     openModal();
     return;
   }
@@ -212,70 +250,75 @@ function render(data) {
     ['模块', data.module_name], ['场景', data.scene_name], ['阶段', data.stage_name],
     ['用例类型', data.case_type], ['优先级', data.priority], ['关键词', data.keywords],
   ].filter((r) => r[1]);
-
+  const risks = Array.isArray(data.risk_points) ? data.risk_points : [];
+  const questions = Array.isArray(data.questions_to_confirm) ? data.questions_to_confirm : [];
   const template = buildStoryTemplate(data);
 
   body.innerHTML = `
-    ${metaFields.length ? `<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:6px 12px; padding:10px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:14px;">
-      ${metaFields.map(([k, v]) => `<div><span style="color:#64748b;">${escapeHtml(k)}：</span><span style="color:#0f172a;">${escapeHtml(v)}</span></div>`).join('')}
-    </div>` : ''}
-
-    <div style="margin-bottom:14px;">
-      <div style="font-weight:600; color:#0f172a; margin-bottom:4px;">概要说明</div>
-      ${renderParagraphs(data.briefing)}
+    <div class="aiv-overview">
+      <div class="aiv-stats">
+        <div class="aiv-stat"><b>${testCases.length || (Array.isArray(data.steps) && data.steps.length ? 1 : 0)}</b><span>测试用例</span></div>
+        <div class="aiv-stat aiv-stat--warn"><b>${risks.length}</b><span>风险点</span></div>
+        <div class="aiv-stat aiv-stat--info"><b>${questions.length}</b><span>待确认问题</span></div>
+      </div>
+      ${metaFields.length ? `<dl class="aiv-fields">${metaFields.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd title="${escapeHtml(v)}">${escapeHtml(v)}</dd></div>`).join('')}</dl>` : ''}
     </div>
 
-    ${!testCases.length && data.precondition ? `<div style="margin-bottom:14px;">
-      <div style="font-weight:600; color:#0f172a; margin-bottom:4px;">前置条件</div>
-      ${renderParagraphs(data.precondition)}
-    </div>` : ''}
+    ${data.briefing ? `<section class="aiv-section">
+      <div class="aiv-section-head"><h4>${icon('i-file')}概要说明</h4></div>
+      <div class="aiv-prose">${renderParagraphs(data.briefing)}</div>
+    </section>` : ''}
 
-    ${!testCases.length ? `<div style="margin-bottom:14px;">
-      <div style="font-weight:600; color:#0f172a; margin-bottom:4px;">步骤 / 预期</div>
+    ${!testCases.length ? `<section class="aiv-section">
+      <div class="aiv-section-head"><h4>${icon('i-cases')}步骤 / 预期</h4></div>
+      ${data.precondition ? `<div class="aiv-pre"><span class="aiv-k">前置条件</span><div>${renderParagraphs(data.precondition)}</div></div>` : ''}
       ${renderSteps(data.steps)}
-    </div>` : ''}
+    </section>` : ''}
+
+    <div class="aiv-notes">
+      <section class="aiv-note aiv-note--warn">
+        <h4>${icon('i-alert')}风险点</h4>
+        ${renderList(risks, '未识别到风险点')}
+      </section>
+      <section class="aiv-note aiv-note--info">
+        <h4>${icon('i-info')}待确认问题</h4>
+        ${renderList(questions, '没有需要确认的问题')}
+      </section>
+    </div>
 
     ${renderTestCases(testCases)}
 
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:14px;">
-      <div>
-        <div style="font-weight:600; color:#0f172a; margin-bottom:4px;">风险点</div>
-        ${renderList(data.risk_points)}
-      </div>
-      <div>
-        <div style="font-weight:600; color:#0f172a; margin-bottom:4px;">待确认问题</div>
-        ${renderList(data.questions_to_confirm)}
-      </div>
-    </div>
-
-    ${!testCases.length && data.testcase_template ? `<div style="margin-bottom:14px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-        <div style="font-weight:600; color:#0f172a;">用例模板</div>
-        <button type="button" data-ai-copy="template" style="border:1px solid #cbd5e1; background:#fff; border-radius:6px; padding:2px 10px; cursor:pointer; font-size:12px;">复制</button>
-      </div>
-      <textarea readonly style="width:100%; min-height:180px; font-family:Consolas,Menlo,monospace; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">${escapeHtml(data.testcase_template)}</textarea>
-    </div>` : ''}
-
-    <div style="display:flex; gap:8px; justify-content:flex-end; border-top:1px solid #e2e8f0; padding-top:12px;">
-      <button type="button" data-ai-organize style="border:1px solid #2563eb; background:#fff; color:#2563eb; border-radius:6px; padding:6px 14px; cursor:pointer;">整理并提交禅道</button>
-      <button type="button" data-ai-copy="zentao" style="border:1px solid #2563eb; background:#2563eb; color:#fff; border-radius:6px; padding:6px 14px; cursor:pointer;">${testCases.length ? '复制全部用例' : '复制禅道模板'}</button>
-    </div>
+    ${!testCases.length && data.testcase_template ? `<section class="aiv-section">
+      <div class="aiv-section-head"><h4>${icon('i-file')}用例模板</h4><button type="button" class="aiv-text-btn" data-ai-copy="template">${icon('i-copy')}复制</button></div>
+      <pre class="aiv-template">${escapeHtml(data.testcase_template)}</pre>
+    </section>` : ''}
   `;
 
-  body.querySelectorAll('[data-ai-copy]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const kind = btn.getAttribute('data-ai-copy');
-      if (kind === 'template') copyToClipboard(data.testcase_template || '');
-      else if (kind === 'zentao') copyToClipboard(template);
-    });
-  });
-  body.querySelector('[data-ai-organize]')?.addEventListener('click', () => openCaseEditor(data.id));
+  actions.innerHTML = `
+    <button type="button" class="secondary" data-ai-copy="zentao">${icon('i-copy')}${testCases.length ? '复制全部用例' : '复制禅道模板'}</button>
+    <button type="button" data-ai-organize>${icon('i-send')}整理并提交禅道</button>`;
+
+  actions.querySelector('[data-ai-copy="zentao"]').addEventListener('click', () => copyToClipboard(template));
+  actions.querySelector('[data-ai-organize]').addEventListener('click', () => openCaseEditor(data.id));
+  body.querySelector('[data-ai-copy="template"]')?.addEventListener('click', () => copyToClipboard(data.testcase_template || ''));
   body.querySelectorAll('[data-ai-copy-case]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const index = Number(btn.getAttribute('data-ai-copy-case'));
       if (Number.isInteger(index) && testCases[index]) copyToClipboard(buildCaseTemplate(testCases[index], index));
     });
   });
+  const toggleAll = body.querySelector('[data-aiv-toggle-all]');
+  if (toggleAll) {
+    const cards = () => [...body.querySelectorAll('.aiv-case')];
+    const sync = () => { toggleAll.textContent = cards().every((d) => d.open) ? '全部收起' : '全部展开'; };
+    toggleAll.addEventListener('click', () => {
+      const open = !cards().every((d) => d.open);
+      cards().forEach((d) => { d.open = open; });
+      sync();
+    });
+    body.querySelectorAll('.aiv-case').forEach((d) => d.addEventListener('toggle', sync));
+    sync();
+  }
 
   openModal();
 }
@@ -283,7 +326,7 @@ function render(data) {
 function openModal() {
   const root = ensureModalRoot();
   root.classList.remove('hidden');
-  root.style.display = 'block';
+  root.style.display = 'flex';
 }
 
 function closeModal() {
@@ -292,6 +335,12 @@ function closeModal() {
   if (!root) return;
   root.classList.add('hidden');
   root.style.display = 'none';
+}
+
+function renderPlaceholder(html) {
+  const root = ensureModalRoot();
+  root.querySelector('#aiResultModalBody').innerHTML = html;
+  root.querySelector('#aiResultActions').innerHTML = '';
 }
 
 async function openForStory(storyId) {
@@ -305,25 +354,27 @@ async function openForStory(storyId) {
   regenerateButton.dataset.aiExecutionId = '';
   regenerateButton.disabled = true;
   regenerateButton.textContent = '重新生成';
-  const body = root.querySelector('#aiResultModalBody');
-  const title = root.querySelector('#aiResultModalTitle');
-  const meta = root.querySelector('#aiResultModalMeta');
-  title.textContent = `s#${id}`;
-  meta.textContent = '';
-  body.innerHTML = '<div class="muted" style="padding:16px; text-align:center;">加载中...</div>';
+  root.querySelector('#aiResultModalTitle').textContent = `需求 #${id}`;
+  root.querySelector('#aiResultModalMeta').innerHTML = '<span class="aiv-status aiv-status--run">加载中</span>';
+  renderPlaceholder(`
+    <div class="aiv-skeleton" aria-busy="true" aria-label="加载中">
+      <i class="aiv-sk aiv-sk--bar"></i><i class="aiv-sk"></i><i class="aiv-sk"></i><i class="aiv-sk aiv-sk--short"></i>
+    </div>`);
   openModal();
   try {
     const res = await api(`/zentao/ai/story/${id}/latest`);
     const data = await res.json();
     if (request !== latestRequest) return;
     if (!data || !data.id) {
-      body.innerHTML = '<div class="muted" style="padding:24px; text-align:center;">暂无 AI 处理结果</div>';
+      root.querySelector('#aiResultModalMeta').innerHTML = `<span class="aiv-sid">#${id}</span>`;
+      renderPlaceholder(`<div class="aiv-empty">${icon('i-sparkles')}<p>该需求还没有 AI 处理结果</p></div>`);
       return;
     }
     render(data);
   } catch (err) {
     if (request !== latestRequest) return;
-    body.innerHTML = `<div style="padding:16px; color:#b91c1c;">${escapeHtml(err.message || '加载失败')}</div>`;
+    root.querySelector('#aiResultModalMeta').innerHTML = `<span class="aiv-sid">#${id}</span>`;
+    renderPlaceholder(`<div class="aiv-fail" role="alert"><span class="aiv-fail-icon">${icon('i-alert')}</span><div><div class="aiv-fail-title">加载失败</div><div class="aiv-fail-msg">${escapeHtml(err.message || '加载失败')}</div></div></div>`);
   }
 }
 

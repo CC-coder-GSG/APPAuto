@@ -226,9 +226,17 @@ function detail(req, query, refreshed = false) {
     assert.equal(await page.locator('[data-progress-row]').count(), 4);
 
     // Enter final test through the real toggle: the existing board must switch immediately.
-    page.on('dialog', dialog => dialog.accept());
+    // 进入 / 关闭最终测试都走站内确认框（#taskOpDialog），不再是浏览器原生 confirm
+    const confirmInDialog = async (title) => {
+      const dlg = page.locator('#taskOpDialog');
+      await dlg.waitFor({ state: 'visible' });
+      assert.match(await dlg.innerText(), title);
+      await dlg.locator('footer [data-act="ok"]').click();
+      await dlg.waitFor({ state: 'hidden' });
+    };
     await page.locator('#assignProgressStatus').selectOption('failed');
     await page.locator('#finalTestToggleBtn').click();
+    await confirmInDialog(/进入最终测试阶段/);
     await page.waitForSelector('.assign-progress-final-test');
     assert.match(await page.locator('.assign-progress-panel-heading p').innerText(), /最终测试/);
     assert.equal(await page.locator('#assignProgressStatus').inputValue(), '', 'normal-only filters are reset');
@@ -270,6 +278,7 @@ function detail(req, query, refreshed = false) {
       await page.screenshot({ path: process.env.PROGRESS_SCREENSHOT.replace('.png', '-final-test.png') });
     }
     await page.locator('#finalTestToggleBtn').click();
+    await confirmInDialog(/关闭最终测试阶段/);
     await page.waitForFunction(() => !document.getElementById('assignProgressArea').classList.contains('assign-progress-final-test'));
     assert.equal(await page.locator('[data-progress-row]').count(), 4, 'closing final test restores the assignment view');
     assert.match(await page.locator('#assignProgressArea').textContent(), /关联 Bug/);

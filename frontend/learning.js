@@ -2,6 +2,12 @@ function renderLearningOriginal(q, index) {
   return `<div class="learning-original"><div class="muted">${learningEsc(learningType(q.question_type || ''))} · ${q.max_score ?? q.score ?? 0} 分</div><strong class="learning-prompt">${q.position ?? index}. ${learningEsc(q.prompt)}</strong>${(q.options || []).length ? `<ol class="learning-original-options" type="A">${q.options.map(o => `<li>${learningEsc(o)}</li>`).join('')}</ol>` : ''}</div>`;
 }
 
+// 确认框：正式页面走全站对话框（components/dialog.js）；只有独立测试页没加载对话框模块时才退回浏览器原生框
+function learningConfirm(opts) {
+  if (window.OmniQADialog) return window.OmniQADialog.confirm(opts);
+  return Promise.resolve(window.confirm(opts.message || opts.title || ''));
+}
+
 let learningContentsCache = [];
 let learningQuizzesCache = [];
 let activeQuiz = null;
@@ -228,7 +234,7 @@ async function uploadLearningFiles(url, files, host) {
 }
 
 async function deleteLearningContent(id) {
-  if (!confirm('确定删除这项学习内容？')) return;
+  if (!(await learningConfirm({ danger: true, title: '删除学习内容', message: '删除这项学习内容，删除后无法恢复。' }))) return;
   try { await api(`/learning/contents/${id}`, {method:'DELETE'}); showMessage('已删除'); loadLearningCenter(); }
   catch(e) { showMessage(e.message, 'error'); }
 }
@@ -283,7 +289,7 @@ function closeLearningFilePreview() {
 }
 
 async function deleteLearningContentFile(fileId, contentId) {
-  if (!confirm('确定删除这个附件？')) return;
+  if (!(await learningConfirm({ danger: true, title: '删除附件', message: '附件删除后无法恢复。' }))) return;
   try {
     await api(`/learning/content-files/${fileId}`, {method:'DELETE'});
     await loadLearningCenter();
@@ -339,8 +345,8 @@ function addQuestionEditorFromData(q) {
       ${q.question_type === 'short_answer' ? '<p class="muted wide">简答题提交后由出题人手工评分。</p>' : ''}
     </div><details class="qe-preview"><summary>查看题目预览</summary><div class="qe-preview-body"></div></details><p class="qe-error" role="alert" hidden></p>`;
   host.appendChild(el);
-  el.querySelector('.qe-remove-question').onclick = () => {
-    if (!confirm('确定删除这道题目？未保存的内容将被移除。')) return;
+  el.querySelector('.qe-remove-question').onclick = async () => {
+    if (!(await learningConfirm({ danger: true, title: '删除题目', message: '这道题目里未保存的内容会被移除。', okText: '删除题目' }))) return;
     el.remove(); renumberQuestionEditors();
   };
   if (choice) {
@@ -522,19 +528,19 @@ async function saveQuizDraft() {
 }
 
 async function startLearningQuiz(id) {
-  if (!confirm('开始后题目将对团队成员可见，且不能再编辑。确定开始？')) return;
+  if (!(await learningConfirm({ icon: 'i-play', tone: 'green', title: '开始答题', message: '开始后题目对团队成员可见，且不能再编辑。', okText: '开始答题' }))) return;
   try { await api(`/learning/quizzes/${id}/start`, {method:'POST'}); showMessage('答题已开始'); loadLearningCenter(); }
   catch(e) { showMessage(e.message, 'error'); }
 }
 
 async function closeLearningQuiz(id) {
-  if (!confirm('确定结束答题？未提交成员将无法再提交。')) return;
+  if (!(await learningConfirm({ icon: 'i-ban', tone: 'red', title: '结束答题', message: '结束后未提交的成员将无法再提交。', okText: '结束答题' }))) return;
   try { await api(`/learning/quizzes/${id}/close`, {method:'POST'}); showMessage('答题已结束'); loadLearningCenter(); }
   catch(e) { showMessage(e.message, 'error'); }
 }
 
 async function deleteLearningQuiz(id) {
-  if (!confirm('确定删除这个草稿？')) return;
+  if (!(await learningConfirm({ danger: true, title: '删除草稿', message: '删除这个答题草稿，删除后无法恢复。' }))) return;
   try { await api(`/learning/quizzes/${id}`, {method:'DELETE'}); showMessage('已删除'); loadLearningCenter(); }
   catch(e) { showMessage(e.message, 'error'); }
 }
@@ -572,7 +578,10 @@ function renderTakeQuestion(q) {
 }
 
 async function submitCurrentQuiz() {
-  if (!activeQuiz || !confirm(activeQuizPreview ? '提交这份预览答卷？' : '正式答卷只能提交一次，确认提交？')) return;
+  if (!activeQuiz) return;
+  if (!(await learningConfirm(activeQuizPreview
+    ? { icon: 'i-send', title: '提交预览答卷', message: '这是预览答卷，提交后可查看判分效果。', okText: '提交' }
+    : { icon: 'i-send', title: '提交答卷', message: '正式答卷只能提交一次，提交后不可修改。', okText: '提交答卷' }))) return;
   const answers = activeQuiz.questions.map(q => {
     let answer;
     if (q.question_type === 'single_choice') answer = document.querySelector(`input[name="q_${q.id}"]:checked`)?.value ?? null;
@@ -633,7 +642,7 @@ async function gradeLearningSubmission(quizId, submissionId) {
 }
 
 async function releaseLearningResults(id, showAnswers) {
-  if (!confirm(`确定发布成绩并${showAnswers ? '展示' : '隐藏'}参考答案？`)) return;
+  if (!(await learningConfirm({ icon: 'i-check', tone: 'green', title: '发布成绩', message: `发布成绩，并${showAnswers ? '展示' : '隐藏'}参考答案。`, okText: '发布成绩' }))) return;
   try { await api(`/learning/quizzes/${id}/release`, {method:'POST', headers:H, body:JSON.stringify({show_answers:showAnswers})}); showMessage('成绩已发布'); reviewLearningQuiz(id); }
   catch(e) { showMessage(e.message, 'error'); }
 }

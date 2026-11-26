@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { confirmDialog, promptDialog } from '../components/dialog.js?v=20261126-zai-1';
 
 /**
  * 软件功能树状图谱（Feature Tree）
@@ -547,7 +548,7 @@ function isDescendant(ancestorId, nodeId) {
   return found;
 }
 
-function chooseCopyTarget(target) {
+async function chooseCopyTarget(target) {
   const { sourceId, sourceName } = state.copyMode;
   if (target.id === sourceId) {
     window.showMessage && window.showMessage('不能复制到自身，请另选目标节点', 'error');
@@ -557,7 +558,11 @@ function chooseCopyTarget(target) {
     window.showMessage && window.showMessage('不能复制到它自己的子分支下，请另选目标节点', 'error');
     return;
   }
-  if (!window.confirm(`将「${sourceName}」及其所有子分支复制到「${target.name}」下？\n（仅复制节点与功能备注，不保留测试状态/测试说明）`)) return;
+  if (!(await confirmDialog({
+    icon: 'i-copy', title: '复制分支', sub: `${sourceName} → ${target.name}`,
+    message: `将「${sourceName}」及其所有子分支复制到「${target.name}」下。\n只复制节点与功能备注，不保留测试状态和测试说明。`,
+    okText: '复制',
+  }))) return;
   doCopy(sourceId, target.id);
 }
 
@@ -620,9 +625,8 @@ function currentUserId() { return (window.currentUser && window.currentUser.id) 
 
 // ── 写操作 ────────────────────────────────────────────────
 async function addBranch(node) {
-  const name = window.prompt(`在「${node.name}」下新建分支，输入名称：`, '');
+  const name = await promptDialog({ icon: 'i-plus', title: '新建分支', sub: `上级：${node.name}`, label: '分支名称', okText: '创建' });
   if (name == null) return;
-  if (!name.trim()) { window.showMessage && window.showMessage('名称不能为空', 'error'); return; }
   try {
     await api('/feature-tree/nodes', { method: 'POST', body: { software_id: state.softwareId, parent_id: node.id, name: name.trim() } });
     await reload();
@@ -630,9 +634,8 @@ async function addBranch(node) {
 }
 
 async function renameNode(node) {
-  const name = window.prompt('重命名分支：', node.name);
+  const name = await promptDialog({ title: '重命名分支', label: '分支名称', value: node.name, okText: '保存' });
   if (name == null) return;
-  if (!name.trim()) { window.showMessage && window.showMessage('名称不能为空', 'error'); return; }
   try {
     await api(`/feature-tree/nodes/${node.id}`, { method: 'PUT', body: { name: name.trim() } });
     await reload();
@@ -640,7 +643,7 @@ async function renameNode(node) {
 }
 
 async function deleteNode(node) {
-  if (!window.confirm(`确定删除分支「${node.name}」及其所有子分支、标记？此操作不可恢复。`)) return;
+  if (!(await confirmDialog({ danger: true, title: '删除分支', sub: node.name, message: '该分支及其所有子分支、标记会一并删除，且无法恢复。' }))) return;
   try {
     await api(`/feature-tree/nodes/${node.id}`, { method: 'DELETE' });
     await reload();
@@ -773,7 +776,10 @@ async function caseAction(nodeId, caseNumericId, action) {
   }
   if (action === 'unlink') {
     const label = c ? `用例 ${c.case_id}` : '该用例';
-    if (!window.confirm(`解除「${(node && node.name) || '节点'}」与 ${label} 的关联？（不会删除禅道用例本身）`)) return;
+    if (!(await confirmDialog({
+      icon: 'i-unlink', title: '解除用例关联', sub: `${(node && node.name) || '节点'} · ${label}`,
+      message: '只解除功能树节点与用例的关联，不会删除禅道用例本身。', okText: '解除关联',
+    }))) return;
     try {
       await api(`/feature-tree/nodes/${nodeId}/cases/${caseNumericId}`, { method: 'DELETE' });
       await reload({ force: true });

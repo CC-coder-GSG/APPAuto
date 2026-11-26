@@ -1,5 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
+import { confirmDialog, promptDialog, formDialog } from '../components/dialog.js?v=20261126-zai-1';
 import { withPrefix, renderBugLink, renderCaseLink } from '../utils.js';
 const TAB_PERMISSION_OPTIONS = [
   { key: 'bugly', label: 'Bugly 问题中心' },
@@ -508,7 +509,7 @@ export function renderDataOverview() {
 
 export async function toggleRole(userId, currentRole) {
   const nextRole = currentRole === 'admin' ? 'user' : 'admin';
-  if (!confirm(`确定将该用户设为${nextRole === 'admin' ? '管理员' : '普通用户'}吗？`)) return;
+  if (!(await confirmDialog({ icon: 'i-user', title: '修改用户角色', message: `将该用户设为${nextRole === 'admin' ? '管理员' : '普通用户'}。`, okText: `设为${nextRole === 'admin' ? '管理员' : '普通用户'}` }))) return;
   try {
     await api(`/users/${userId}/role`, { method: 'PUT', headers: window.H, body: { role: nextRole } });
     window.showMessage && window.showMessage('角色切换成功', 'success');
@@ -606,7 +607,7 @@ export async function createSoftwareFromZentao() {
 
 export async function toggleTeamMember(userId, targetStatus) {
   const text = targetStatus ? '组员' : '编外人员';
-  if (!confirm(`确定将该用户设为${text}吗？`)) return;
+  if (!(await confirmDialog({ icon: 'i-user', title: '修改组员状态', message: `将该用户设为${text}。`, okText: `设为${text}` }))) return;
   try {
     await api(`/users/${userId}/team-status`, { method: 'PUT', headers: window.H, body: { is_team_member: targetStatus } });
     window.showMessage && window.showMessage(`已更新为${text}`, 'success');
@@ -618,7 +619,7 @@ export async function toggleTeamMember(userId, targetStatus) {
 }
 
 export async function removeUser(userId, username) {
-  if (!confirm(`确认删除用户【${username}】吗？此操作不可恢复。`)) return;
+  if (!(await confirmDialog({ danger: true, title: '删除用户', sub: username, message: '用户删除后无法恢复。', okText: '删除用户' }))) return;
   try {
     await api(`/users/${userId}`, { method: 'DELETE' });
     window.showMessage && window.showMessage('用户删除成功', 'success');
@@ -846,7 +847,7 @@ export async function saveUserTabPermissions() {
 }
 
 export async function renameUserDisplayName(userId, currentDisplayName, username) {
-  const next = prompt(`请输入用户【${username}】的新显示名称：`, currentDisplayName || username);
+  const next = await promptDialog({ icon: 'i-user', title: '修改显示名称', sub: `用户 ${username}`, label: '显示名称', value: currentDisplayName || username, maxlength: 64, okText: '保存' });
   if (!next) return;
   const clean = String(next).trim();
   if (!clean) return;
@@ -861,7 +862,11 @@ export async function renameUserDisplayName(userId, currentDisplayName, username
 }
 
 export async function editUserZentaoAccount(userId, currentAccount, username) {
-  const next = prompt(`请输入用户【${username}】对应的禅道账号（account，留空清除）：`, currentAccount || '');
+  const next = await promptDialog({
+    icon: 'i-plug', title: '设置禅道账号', sub: `用户 ${username}`,
+    label: '禅道账号（account）', value: currentAccount || '', required: false,
+    hint: '留空表示清除该用户的禅道账号映射。', okText: '保存',
+  });
   if (next === null) return;  // 取消
   const clean = String(next).trim();
   try {
@@ -875,7 +880,7 @@ export async function editUserZentaoAccount(userId, currentAccount, username) {
 }
 
 export async function removeVersion(id) {
-  if (!confirm('高危操作：删除版本将级联删除所有下挂需求、用例和 Bug，确定继续吗？')) return;
+  if (!(await confirmDialog({ danger: true, title: '删除版本（高危）', message: '删除版本会级联删除其下所有需求、用例和 Bug，且无法恢复。', okText: '删除版本' }))) return;
   await api('/versions/' + id, { method: 'DELETE' });
   window.showMessage && window.showMessage('版本已删除');
   await window.loadVersions();
@@ -883,21 +888,21 @@ export async function removeVersion(id) {
 }
 
 export async function removeReq(id) {
-  if (!confirm('确定删除该需求及其用例、执行记录吗？')) return;
+  if (!(await confirmDialog({ danger: true, title: '删除需求', message: '该需求及其用例、执行记录会一并删除。', okText: '删除需求' }))) return;
   await api('/requirements/' + id, { method: 'DELETE' });
   window.showMessage && window.showMessage('需求已删除');
   await loadDataOverview();
 }
 
 export async function removeBug(id) {
-  if (!confirm('确定删除该 Bug 吗？')) return;
+  if (!(await confirmDialog({ danger: true, title: '删除 Bug', message: '删除该 Bug 记录。', okText: '删除 Bug' }))) return;
   await api('/bugs/' + id, { method: 'DELETE' });
   window.showMessage && window.showMessage('Bug 已删除');
   await loadDataOverview();
 }
 
 export async function editVersion(id, no, type, parent) {
-  const newNo = prompt('版本号', no);
+  const newNo = await promptDialog({ icon: 'i-build', title: '修改版本号', label: '版本号', value: no, okText: '保存' });
   if (!newNo) return;
   const software_id = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
   await api('/versions/' + id, {
@@ -911,17 +916,25 @@ export async function editVersion(id, no, type, parent) {
 }
 
 export async function editReq(id, z, title, major) {
-  const zNum = prompt('需求号数字部分', z.replace('r#', ''));
-  if (!zNum) return;
-  const t = prompt('需求标题', title);
-  if (!t) return;
+  const values = await formDialog({
+    icon: 'i-edit', title: '编辑需求', okText: '保存',
+    fields: [
+      { name: 'zNum', label: '需求编号', prefix: 'r#', value: z.replace('r#', ''), validate: (v) => (/^\d+$/.test(v) ? '' : '请输入数字编号') },
+      { name: 't', label: '需求标题', value: title, maxlength: 255 },
+    ],
+  });
+  if (!values) return;
+  const { zNum, t } = values;
   await api('/requirements/' + id, { method: 'PUT', headers: window.H, body: { zentao_req_id: withPrefix('r#', zNum), title: t, major_version_id: major } });
   window.showMessage && window.showMessage('需求已更新');
   await loadDataOverview();
 }
 
 export async function editBug(id, b) {
-  const num = prompt('Bug数字部分', b.replace('b#', ''));
+  const num = await promptDialog({
+    icon: 'i-bug', title: '修改 Bug 编号', label: 'Bug 编号', prefix: 'b#', value: b.replace('b#', ''),
+    validate: (v) => (/^\d+$/.test(v) ? '' : '请输入数字编号'), okText: '保存',
+  });
   if (!num) return;
   await api('/bugs/' + id + '?new_bug_id=' + encodeURIComponent(withPrefix('b#', num)), { method: 'PUT' });
   window.showMessage && window.showMessage('Bug已更新');
@@ -1216,7 +1229,7 @@ export async function applyVersionDiff() {
     window.showMessage && window.showMessage('请先勾选要应用的差异', 'error');
     return;
   }
-  if (!confirm(`将应用 ${actions.length} 条修复，确认？`)) return;
+  if (!(await confirmDialog({ icon: 'i-wrench', title: '应用版本差异修复', message: `将应用所选的 ${actions.length} 条修复。`, okText: `应用 ${actions.length} 条` }))) return;
   try {
     const res = await api(`/api/admin/versions/apply-diff?major_version_id=${versionDiffState.majorId}`, {
       method: 'POST',

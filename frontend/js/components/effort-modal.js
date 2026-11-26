@@ -1,7 +1,7 @@
 import { runZentaoOperation, operationPending, prepareOperationModal } from './zentao-operation.js';
 import { api } from '../api.js';
 import { escapeHtml } from '../utils.js';
-import { confirmTaskDialog } from './task-dialog.js';
+import { confirmTaskDialog } from './task-dialog.js?v=20261126-zai-1';
 
 // 工时记录弹窗（任务看板 / 任务工作台共用，2026-07-17 工时口径升级配套）。
 // 展示某禅道任务已提交的工时记录（暂停/完成时平台按天自动结算 + 手工记录），

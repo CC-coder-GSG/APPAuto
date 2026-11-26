@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { state } from '../state.js';
 import { withPrefix, sourceTypeZh, escapeHtml } from '../utils.js';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
-import { confirmTaskDialog } from '../components/task-dialog.js';
+import { confirmTaskDialog } from '../components/task-dialog.js?v=20261126-zai-1';
 
 let overallTestSseBound = false;
 let overallTestUnreadClearTimer = null;
@@ -818,7 +818,7 @@ export function closeZentaoBugPreview() {
 }
 
 export async function pushOverallTest() {
-  if (!(window.confirmPush && window.confirmPush())) return;
+  if (!(window.confirmPush && await window.confirmPush())) return;
   const res = await (await api(`/overall-test/push-status?major_version_id=${Number(document.getElementById('s5MajorSelect')?.value || 0)}&minor_version_id=${Number(document.getElementById('s5MinorSelect')?.value || 0)}`, { method: 'POST' })).json();
   window.showMessage && window.showMessage(`整体状态已推送，剩余未闭环 ${res.remaining}`);
 }

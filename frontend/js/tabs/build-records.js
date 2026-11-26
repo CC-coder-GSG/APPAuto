@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { closeModal, openModal } from '../components/modal.js';
-import { openDrawer, getDrawer } from '../components/side-drawer.js';
+import { openDrawer, getDrawer } from '../components/side-drawer.js?v=20261126-zai-1';
 
 // 2026-11-25 排版 v2：状态统计条（可点筛选）+ 按日期分组的紧凑构建行；点行在右侧抽屉看完整详情
 // （变更日志 / Jenkins 链接 / 小版本归档与禅道写回状态 / 重试 / 切换归属）。

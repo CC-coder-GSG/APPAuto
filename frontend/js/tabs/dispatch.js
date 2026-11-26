@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { confirmDialog, promptDialog } from '../components/dialog.js?v=20261126-zai-1';
 import { state } from '../state.js';
 import { withPrefix, renderBugLink } from '../utils.js';
 
@@ -136,12 +137,11 @@ export async function dispatchEditBug(id) {
   const zentaoBugId = bug.zentao_bug_id || '';
   if (zentaoBugId) {
     const current = bug.zentao_bug_title ? String(bug.zentao_bug_title).replace(/&amp;/g, '&') : '';
-    const title = prompt('请输入 Bug 标题：', current);
+    const title = await promptDialog({
+      icon: 'i-bug', title: '修改 Bug 标题', sub: `禅道 Bug #${zentaoBugId}`,
+      label: 'Bug 标题', value: current, maxlength: 255, okText: '保存并同步禅道',
+    });
     if (title === null) return;
-    if (!title.trim()) {
-      window.showMessage && window.showMessage('标题不能为空', 'error');
-      return;
-    }
     try {
       await api(`/zentao/bugs/${Number(zentaoBugId)}`, { method: 'PUT', headers: window.H, body: { title: title.trim() } });
       window.showMessage && window.showMessage('禅道 Bug 标题已更新', 'success');
@@ -150,7 +150,11 @@ export async function dispatchEditBug(id) {
       window.showMessage && window.showMessage(err.message || '标题更新失败', 'error');
     }
   } else {
-    const num = prompt('请输入正确的 Bug 数字部分：', String(bug.bug_id || '').replace('b#', ''));
+    const num = await promptDialog({
+      icon: 'i-wrench', title: '纠正 Bug 编号', label: 'Bug 编号', prefix: 'b#',
+      value: String(bug.bug_id || '').replace('b#', ''),
+      validate: (v) => (/^\d+$/.test(v) ? '' : '请输入数字编号'), okText: '保存',
+    });
     if (!num) return;
     try {
       await api('/bugs/' + id + '?new_bug_id=' + encodeURIComponent(withPrefix('b#', num)), { method: 'PUT' });
@@ -167,13 +171,11 @@ export async function dispatchRemoveBug(id) {
   if (!bug) return;
   const zentaoBugId = bug.zentao_bug_id || '';
   if (zentaoBugId) {
-    const confirmed = window.confirm(
-      `⚠️ 删除禅道 Bug\n\n` +
-      `将对禅道执行删除操作（软删除，deleted=true）。\n` +
-      `当前实例删除后暂无稳定可用的 REST 恢复接口，请谨慎操作！\n\n` +
-      `本地记录将标记为“已删除”并从大盘隐藏，不会彻底清除（保留审计记录）。\n\n` +
-      `确认删除禅道 Bug #${zentaoBugId} 吗？`
-    );
+    const confirmed = await confirmDialog({
+      danger: true, title: '删除禅道 Bug', sub: `禅道 Bug #${zentaoBugId}`,
+      message: '将对禅道执行删除操作（软删除）。当前禅道实例暂无稳定可用的恢复接口，请谨慎操作。\n\n本地记录会标记为「已删除」并从大盘隐藏，审计记录保留。',
+      okText: '删除禅道 Bug',
+    });
     if (!confirmed) return;
     try {
       await api(`/zentao/bugs/${Number(zentaoBugId)}`, { method: 'DELETE' });
@@ -183,7 +185,7 @@ export async function dispatchRemoveBug(id) {
       window.showMessage && window.showMessage(err.message || '删除失败', 'error');
     }
   } else {
-    if (!confirm('确定要在该大版本下移除这个 Bug 吗？')) return;
+    if (!(await confirmDialog({ danger: true, title: '移除 Bug', message: '从该大版本下彻底移除这个 Bug 记录。', okText: '移除' }))) return;
     try {
       await api('/bugs/' + id, { method: 'DELETE' });
       window.showMessage && window.showMessage('Bug 已彻底移除', 'success');

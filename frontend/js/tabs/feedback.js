@@ -1,7 +1,8 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
+import { confirmDialog } from '../components/dialog.js?v=20261126-zai-1';
 import { renderBugLink, escapeHtml } from '../utils.js';
-import { openDrawer, getDrawer, closeDrawer } from '../components/side-drawer.js';
+import { openDrawer, getDrawer, closeDrawer } from '../components/side-drawer.js?v=20261126-zai-1';
 import { wireImageViewer } from '../components/image-viewer.js';
 
 // 2026-11-25 排版 v2：列表改为可点击的行卡片；新建反馈 / 反馈详情都在右侧抽屉里完成，
@@ -388,7 +389,7 @@ export async function uploadFeedbackFiles(feedbackId) {
 }
 
 export async function deleteFeedbackAttachment(attachmentId, feedbackId) {
-  if (!confirm('确定删除该附件吗？')) return;
+  if (!(await confirmDialog({ danger: true, title: '删除附件', message: '附件删除后无法恢复。' }))) return;
   await api(`/feedbacks/attachments/${attachmentId}`, { method: 'DELETE' });
   window.showMessage && window.showMessage('附件已删除', 'success');
   await openFeedbackDetail(feedbackId);
@@ -655,7 +656,7 @@ export async function linkFeedbackBug(feedbackId) {
 }
 
 export async function unlinkFeedbackBug(feedbackId, bugId) {
-  if (!confirm('确定解除该 Bug 关联吗？')) return;
+  if (!(await confirmDialog({ icon: 'i-unlink', title: '解除 Bug 关联', message: '只解除反馈与该 Bug 的关联，不会删除禅道里的 Bug。', okText: '解除关联' }))) return;
   await api(`/feedbacks/${feedbackId}/bugs/${bugId}`, { method: 'DELETE' });
   window.showMessage && window.showMessage('已解除 Bug 关联', 'success');
   await openFeedbackDetail(feedbackId);

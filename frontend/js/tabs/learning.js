@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { confirmDialog, formDialog } from '../components/dialog.js?v=20261126-zai-1';
 
 let learningSseBound = false;
 
@@ -71,9 +72,15 @@ async function loadTopicList() {
 }
 
 export async function openCreateTopic() {
-  const title = prompt('请输入学习主题标题：');
-  if (!title || !title.trim()) return;
-  const description = prompt('主题简介（可留空）：') || '';
+  const values = await formDialog({
+    icon: 'i-book', title: '新建学习主题', okText: '创建主题',
+    fields: [
+      { name: 'title', label: '主题标题', maxlength: 200 },
+      { name: 'description', label: '主题简介', type: 'textarea', rows: 3, required: false, placeholder: '简要说明这个主题要学什么' },
+    ],
+  });
+  if (!values) return;
+  const { title, description } = values;
   try {
     await api('/learning/topics', { method: 'POST', headers: window.H, body: { title: title.trim(), description } });
     window.showMessage && window.showMessage('主题已创建', 'success');
@@ -84,7 +91,7 @@ export async function openCreateTopic() {
 }
 
 export async function deleteTopic(topicId, title) {
-  if (!confirm(`确定删除学习主题「${title || ''}」吗？\n\n将一并删除该主题下的全部资料文件、考核题目与作答/成绩记录，且不可恢复。`)) return;
+  if (!(await confirmDialog({ danger: true, title: '删除学习主题', sub: title || '', message: '该主题下的全部资料文件、考核题目与作答 / 成绩记录会一并删除，且无法恢复。', okText: '删除主题' }))) return;
   try {
     await api(`/learning/topics/${topicId}`, { method: 'DELETE' });
     window.showMessage && window.showMessage('主题已删除', 'success');
@@ -250,7 +257,7 @@ export function downloadMaterial(materialId) {
 }
 
 export async function deleteMaterial(materialId, topicId) {
-  if (!confirm('确定删除该资料吗？')) return;
+  if (!(await confirmDialog({ danger: true, title: '删除资料', message: '资料删除后无法恢复。' }))) return;
   try {
     await api(`/learning/materials/${materialId}`, { method: 'DELETE' });
     window.showMessage && window.showMessage('已删除', 'success');
@@ -404,7 +411,7 @@ export async function saveQuestions(assessmentId, silent) {
 }
 
 export async function saveAndPublish(assessmentId) {
-  if (!confirm('确认提交出题并发布答题？发布后题目不可再修改，其余成员将收到答题通知。')) return;
+  if (!(await confirmDialog({ icon: 'i-send', title: '发布答题', message: '发布后题目不可再修改，其余成员会收到答题通知。', okText: '提交并发布' }))) return;
   const ok = await saveQuestions(assessmentId, true);
   if (!ok) return;
   try {
@@ -476,7 +483,7 @@ export async function submitPaper(assessmentId) {
       if (el && el.value.trim()) answers[qid] = el.value.trim();
     }
   });
-  if (!confirm('确认提交作答？提交后不可修改。')) return;
+  if (!(await confirmDialog({ icon: 'i-send', title: '提交作答', message: '提交后不可修改。', okText: '提交作答' }))) return;
   try {
     const res = await (await api(`/learning/assessments/${assessmentId}/submit`, { method: 'POST', headers: window.H, body: { answers } })).json();
     window.showMessage && window.showMessage(res.message || '已提交', 'success');
@@ -533,7 +540,7 @@ export async function gradeAnswer(answerId, assessmentId) {
 }
 
 export async function finalize(assessmentId) {
-  if (!confirm('确认完成批改并公示成绩？公示后所有人可见排行与逐题解析。')) return;
+  if (!(await confirmDialog({ icon: 'i-check', tone: 'green', title: '公示成绩', message: '完成批改并公示后，所有人都能看到排行与逐题解析。', okText: '公示成绩' }))) return;
   try {
     await api(`/learning/assessments/${assessmentId}/finalize`, { method: 'POST', headers: window.H, body: {} });
     window.showMessage && window.showMessage('成绩已公示', 'success');

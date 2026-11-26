@@ -1,5 +1,6 @@
 import { operateTask } from '../components/task-operation.js';
-import { confirmTaskAction } from '../components/task-dialog.js';
+import { confirmTaskAction } from '../components/task-dialog.js?v=20261126-zai-1';
+import { confirmDialog } from '../components/dialog.js?v=20261126-zai-1';
 import { api } from '../api.js';
 import { renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
 import { showLoading, hideLoading } from '../components/common.js';
@@ -649,7 +650,7 @@ export async function submitStatus() {
 
 export async function archive() {
   if (!state.editingTaskId) return;
-  if (!confirm('确认归档该任务？归档后默认不会出现在看板。')) return;
+  if (!(await confirmDialog({ icon: 'i-file', title: '归档任务', message: '归档后该任务默认不再出现在看板上。', okText: '归档' }))) return;
   try {
     await api(`/task-board/tasks/${state.editingTaskId}/archive`, { method: 'POST', body: {} });
     window.showMessage && window.showMessage('任务已归档', 'success');
@@ -665,7 +666,7 @@ export async function carryOver() {
   const d = new Date(state.date || todayISO());
   d.setDate(d.getDate() + 1);
   const target = d.toISOString().slice(0, 10);
-  if (!confirm(`确认把该任务顺延到 ${target} 吗？`)) return;
+  if (!(await confirmDialog({ icon: 'i-clock', title: '顺延任务', message: `把该任务顺延到 ${target}。`, okText: '确认顺延' }))) return;
   try {
     await api(`/task-board/tasks/${state.editingTaskId}/carry-over`, {
       method: 'POST', body: { to_date: target },

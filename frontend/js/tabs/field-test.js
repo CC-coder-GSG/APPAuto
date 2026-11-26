@@ -1,6 +1,7 @@
 ﻿import { api } from '../api.js';
 import { withPrefix, renderBugLink, escapeHtml } from '../utils.js';
-import { openDrawer, getDrawer, closeDrawer } from '../components/side-drawer.js';
+import { confirmDialog } from '../components/dialog.js?v=20261126-zai-1';
+import { openDrawer, getDrawer, closeDrawer } from '../components/side-drawer.js?v=20261126-zai-1';
 
 const PURPOSE_ZH = { requirement: '需求测试', feature: '功能测试' };
 const RESULT_ZH = { passed: '测试通过', failed: '测试未通过' };
@@ -399,7 +400,7 @@ export async function openFieldTestDetail(recordId) {
 }
 
 export async function unlinkFieldTestBug(recordId, bugTrackingId) {
-  if (!confirm('确定解除这个 Bug 关联吗？')) return;
+  if (!(await confirmDialog({ icon: 'i-unlink', title: '解除 Bug 关联', message: '只解除外业记录与该 Bug 的关联，不会删除禅道里的 Bug。', okText: '解除关联' }))) return;
   try {
     await api(`/field-tests/${recordId}/bugs/${bugTrackingId}`, { method: 'DELETE' });
     window.showMessage && window.showMessage('已解除该 Bug 关联', 'success');

@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { escapeHtml, renderCaseLink } from '../utils.js';
-import { loadAutomationPanel } from '../components/automation-panel.js?v=20261020-http-uuid-1';
+import { loadAutomationPanel } from '../components/automation-panel.js?v=20261126-zai-1';
 
 const testcaseCenterState = {
   view: null,

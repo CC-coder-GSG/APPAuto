@@ -136,14 +136,22 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     await page.waitForFunction(()=>document.getElementById('dcTaskSummary').textContent.includes('已完成'));
     await page.screenshot({path:path.join(scratch,'database-compare.png'),fullPage:true});
     const selectedId = (await page.locator('#dcTaskSummary').innerText()).match(/任务编号 ([0-9a-f]{32})/)[1];
+    // 删除确认走站内对话框（#taskOpDialog），不再是浏览器原生 confirm
+    const answerDialog = async (accept) => {
+      const dlg = page.locator('#taskOpDialog');
+      await dlg.waitFor({ state: 'visible' });
+      assert.match(await dlg.innerText(), /对比历史/);
+      await dlg.locator(accept ? 'footer [data-act="ok"]' : 'footer [data-act="cancel"]').click();
+      await dlg.waitFor({ state: 'hidden' });
+    };
     // Dismissing confirmation preserves both history and files.
-    page.once('dialog', dialog => dialog.dismiss());
     await page.locator(`[data-delete-task="${selectedId}"]`).click();
+    await answerDialog(false);
     await page.waitForFunction(()=>!document.getElementById('dcCleanup').disabled);
     assert.equal(await page.locator('#dcHistory tbody tr').count(),2);
     // Removing the task currently open also clears its result panel.
-    page.once('dialog', dialog => dialog.accept());
     await page.locator(`[data-delete-task="${selectedId}"]`).click();
+    await answerDialog(true);
     await page.waitForFunction(()=>document.getElementById('dcTaskPanel').hidden).catch(async error=>{
       console.error(await page.locator('#dcMessage').innerText());
       console.error(await page.locator('#dcHistory').innerText());
@@ -152,8 +160,8 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     await page.waitForFunction(()=>document.getElementById('dcHistory').querySelectorAll('tbody tr').length===1);
     await page.locator('#dcSelectPage').check();
     assert.match(await page.locator('#dcDeleteSelected').innerText(),/1/);
-    page.once('dialog', dialog => dialog.accept());
     await page.locator('#dcDeleteSelected').click();
+    await answerDialog(true);
     await page.waitForFunction(()=>document.getElementById('dcHistory').textContent.includes('暂无比较任务'));
     assert.equal(await page.locator('#dcStart').isDisabled(),true);
     assert.equal(await page.locator('#dcPreviewArea').innerText(),'');
@@ -166,8 +174,8 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     await page.locator('#dcStart').click();
     await page.waitForFunction(()=>document.getElementById('dcTaskSummary').textContent.includes('已完成'));
     await page.waitForFunction(()=>!document.getElementById('dcCleanup').disabled);
-    page.once('dialog', dialog => dialog.accept());
     await page.locator('#dcCleanup').click();
+    await answerDialog(true);
     await page.waitForFunction(()=>document.getElementById('dcHistory').textContent.includes('暂无比较任务'));
     assert.deepEqual(fs.readdirSync(inputDirectory),[abandonedPreview]);
     await page.screenshot({path:path.join(scratch,'history-cleaned.png'),fullPage:true});

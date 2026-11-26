@@ -4,13 +4,13 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css?v=20261103-final-presence-ui-2">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261126-epvlock-2">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261126-zai-1">
   <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261126-epvlock-2"></script>
+  <script type="module" src="/static/js/app.js?v=20261126-zai-1"></script>
   <script src="/static/js/weave-motion.js?v=20261124-shell-v2-2" defer></script>
   <script src="/static/js/shell.js?v=20261125-pagehead-1" defer></script>
   <script>
@@ -74,6 +74,20 @@
       <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></symbol>
       <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></symbol>
       <symbol id="i-pipette" viewBox="0 0 24 24"><path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z"/></symbol>
+      <!-- 2026-11-26 对话框 / AI 用例页用 -->
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></symbol>
+      <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+      <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></symbol>
+      <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+      <symbol id="i-unlink" viewBox="0 0 24 24"><path d="m18.84 12.25 1.72-1.71a4.84 4.84 0 0 0-6.84-6.84l-1.72 1.71"/><path d="m5.17 11.75-1.71 1.71a4.84 4.84 0 0 0 6.84 6.84l1.71-1.71"/><path d="M8 2v3"/><path d="M2 8h3"/><path d="M16 22v-3"/><path d="M22 16h-3"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></symbol>
+      <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></symbol>
+      <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
+      <symbol id="i-minimize" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></symbol>
     </defs>
   </svg>
 
@@ -1480,35 +1494,44 @@
   <section id="tab-zentao-ai" class="hidden card">
     <div class="ph">
       <span class="ph-icon" aria-hidden="true"><svg><use href="#i-sparkles"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-sparkles"/></svg>
-      <div class="ph-text"><h2>禅道AI用例生成</h2><p class="page-desc">从禅道读取执行中的需求并转发到 n8n，由 AI 协助生成测试用例或设计评审材料</p></div>
+      <div class="ph-text"><h2>禅道AI用例生成</h2><p class="page-desc">选择禅道执行并勾选需求，批量交给 AI 生成测试用例；生成在后台进行，完成后可在需求旁的 AI 标记里查看和提交</p></div>
       <div class="ph-actions">
         <button class="secondary" onclick="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.reload()"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>刷新执行列表</button>
       </div>
     </div>
     <div class="fb">
       <label class="fb-field fb-field--grow"><span class="fb-k">执行</span><select id="zentaoAiExecutionSelect" onchange="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.onExecutionChange()"></select></label>
-      <button onclick="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.loadStories()">加载需求</button>
+      <button id="zentaoAiLoadBtn" onclick="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.loadStories()"><svg class="ui-ic" aria-hidden="true"><use href="#i-download"/></svg>加载需求</button>
       <div id="zentaoAiExecMeta" class="muted fb-meta"></div>
     </div>
-    <div class="row" style="margin-top:12px; gap:12px; align-items:center;">
-      <label style="cursor:pointer;">
-        <input type="checkbox" id="zentaoAiSelectAll" onchange="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.toggleSelectAll(this.checked)"> 全选本执行下全部需求
-      </label>
-      <span id="zentaoAiSelectedCount" class="muted"></span>
-    </div>
-    <div style="margin-top:12px; border:1px solid #e2e8f0; border-radius:8px; max-height:360px; overflow:auto;">
-      <table class="qa-table" style="margin:0;">
-        <thead><tr><th style="width:42px;"></th><th>ID</th><th>标题</th><th>优先级</th><th>状态</th><th>阶段</th><th>指派</th><th>所属产品</th></tr></thead>
-        <tbody id="zentaoAiStoryTbody"><tr><td colspan="8" class="muted" style="text-align:center; padding:18px;">请选择执行并点击“加载需求”</td></tr></tbody>
-      </table>
-    </div>
-    <div style="margin-top:12px;">
-      <label style="display:block; font-weight:600; color:#0f172a;">额外说明（会和需求一起发给 n8n）</label>
-      <textarea id="zentaoAiUserNote" rows="3" style="width:100%; box-sizing:border-box;" placeholder="可选：写下希望 AI 关注的点，例如『只生成回归用例，忽略性能』"></textarea>
-    </div>
-    <div class="row" style="margin-top:12px; gap:12px;">
-      <button onclick="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.submit()">提交给 AI 处理</button>
-      <span id="zentaoAiSubmitState" class="muted"></span>
+    <!-- 2026-11-26 v2：左侧需求列表（可搜索、整行点选）+ 右侧提交面板；样式 weave.css R21（.zai-*） -->
+    <div class="zai-layout">
+      <div class="zai-panel">
+        <div class="zai-panel-head">
+          <h3>执行中的需求<span id="zentaoAiStoryCount" class="zai-count">0</span></h3>
+          <label class="fb-search zai-search"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg><input id="zentaoAiSearch" type="search" placeholder="按 ID 或标题筛选" autocomplete="off" oninput="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.onSearch(this.value)"></label>
+          <label class="fb-check"><input type="checkbox" id="zentaoAiSelectAll" onchange="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.toggleSelectAll(this.checked)">全选本执行下全部需求</label>
+        </div>
+        <div class="zai-table-wrap">
+          <table class="zai-table">
+            <thead><tr><th class="zai-col-check"></th><th class="zai-col-id">ID</th><th>标题</th><th class="zai-col-pri">优先级</th><th class="zai-col-st">状态</th><th class="zai-col-st">阶段</th><th class="zai-col-who">指派</th><th class="zai-col-prod">所属产品</th></tr></thead>
+            <tbody id="zentaoAiStoryTbody"><tr class="zai-state-row"><td colspan="8"><div class="zai-state"><svg class="ui-ic" aria-hidden="true"><use href="#i-sparkles"/></svg><b>先选择一个禅道执行</b><span>选好执行后点击「加载需求」，再勾选要交给 AI 的需求</span></div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <aside class="zai-side">
+        <h3>提交给 AI</h3>
+        <div class="zai-picked"><b id="zentaoAiSelectedNum">0</b><span id="zentaoAiSelectedCount">条需求已选</span></div>
+        <label class="zai-note-label" for="zentaoAiUserNote">补充说明<small>可选</small></label>
+        <textarea id="zentaoAiUserNote" rows="5" maxlength="2000" placeholder="写下希望 AI 关注的点，例如「只生成回归用例，忽略性能」"></textarea>
+        <button id="zentaoAiSubmitBtn" class="zai-submit" disabled onclick="window.OmniQAZentaoAiTab && window.OmniQAZentaoAiTab.submit()"><svg class="ui-ic" aria-hidden="true"><use href="#i-sparkles"/></svg>开始生成用例</button>
+        <span id="zentaoAiSubmitState" class="zai-submit-state" role="status"></span>
+        <ul class="zai-tips">
+          <li>生成在后台进行，期间可以继续其他操作</li>
+          <li>完成后右下角会提示，需求标题旁出现 <b>AI</b> 标记</li>
+          <li>点 AI 标记查看结果，再「整理并提交禅道」</li>
+        </ul>
+      </aside>
     </div>
   </section>
 
@@ -2183,7 +2206,7 @@
 
 </div>
 
-<script src="/static/learning.js?v=20260915-1"></script>
+<script src="/static/learning.js?v=20261126-zai-1"></script>
 <script>
 const token=localStorage.getItem('token'); if(!token) location.href='/login';
 const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
@@ -2217,7 +2240,8 @@ function sourceTypeZh(v){
   return m[v] || v;
 }
 function logout(){localStorage.removeItem('token');location.href='/login'}
-function confirmPush(){return confirm('确定要向企微群发送吗？')}
+// 企微推送确认：返回 Promise<boolean>，调用处 await（全站对话框见 js/components/dialog.js）
+function confirmPush(){return window.OmniQADialog?window.OmniQADialog.confirm({icon:'i-send',title:'推送到企微群',message:'将把这条消息发送到企业微信群，发送后无法撤回。',okText:'发送'}):Promise.resolve(false)}
 const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','database-compare','terminal','learning','bugly','competitor-analysis'];
 const DEFAULT_ALLOWED_TABS=['mine','task-board','feedback','retest','overall-test','field-test','testcase-center','report','jenkins','learning'];
 const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test','task','review'];
@@ -3124,7 +3148,7 @@ async function pushTest(){return window.OmniQAMineTab.pushTest()}
 async function ensureFeedbackTab(){
   if(window.OmniQAFeedbackTab) return window.OmniQAFeedbackTab;
   try{
-    await import('/static/js/tabs/feedback.js?v=20261125-fbft-3');
+    await import('/static/js/tabs/feedback.js?v=20261126-zai-1');
   }catch(_e){}
   if(!window.OmniQAFeedbackTab){
     showMessage('反馈模块未加载，请按 Ctrl+F5 强制刷新页面后重试', 'error');
