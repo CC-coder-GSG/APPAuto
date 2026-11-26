@@ -300,7 +300,10 @@ function openModal() {
   if (root.hidden) {
     _lastFocus = document.activeElement;
     root.hidden = false;
-    document.documentElement.classList.add('epv-open');
+    // 页面原本有滚动条时保留滚动条槽位，否则锁滚动后滚动条消失，背景会横向跳动
+    const html = document.documentElement;
+    html.classList.toggle('epv-gutter', window.innerWidth > html.clientWidth);
+    html.classList.add('epv-locked');
     root.querySelector('.epv-panel').scrollTop = 0;
     root.scrollTop = 0;
     root.querySelector('.epv-panel').focus({ preventScroll: true });
@@ -314,7 +317,7 @@ function close() {
   const root = document.getElementById(MODAL_ID);
   if (!root || root.hidden) return;
   root.hidden = true;
-  document.documentElement.classList.remove('epv-open');
+  document.documentElement.classList.remove('epv-locked', 'epv-gutter');
   if (_lastFocus?.isConnected) _lastFocus.focus({ preventScroll: true });
   _lastFocus = null;
 }

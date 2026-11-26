@@ -3306,7 +3306,9 @@ details:not([open]) > .lift-ring { display: none !important; }
    结构见 js/components/entity-preview-modal.js（.epv-*），图片查看器样式在 image-viewer.js 内。
    z-index 高于业务弹窗（10000），低于图片查看器（20000），从任意弹窗里点预览都不会被盖住。
    ============================================================ */
-html.epv-open { overflow: hidden; }
+/* 状态类不能叫 epv-open：会命中下方「在禅道打开」按钮的 .epv-open 样式，把整页 html 变成 34px 高的 inline-flex */
+html.epv-locked { overflow: hidden; }
+html.epv-locked.epv-gutter { scrollbar-gutter: stable; }
 .epv-overlay {
   position: fixed;
   inset: 0;
