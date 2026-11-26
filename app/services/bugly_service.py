@@ -8,19 +8,18 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_, exists, func, update, Text
+from sqlalchemy import or_, func, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 
-from app.models import User, UserRole, AuditLog
+from app.models import User, AuditLog
 from app.models.bugly import (
-    BuglyApplication, BuglyIssue, BuglyReport, BuglyReportRevision,
-    BuglyImportBatch, BuglyGrant, BuglyPublication,
+    BuglyApplication, BuglyIssue, BuglyReport, BuglyReportRevision, BuglyImportBatch,
 )
-from app.services.permission_service import ensure_admin, ensure_tab_access, get_allowed_tabs, serialize_tab_permissions
+from app.services.permission_service import ensure_tab_access
 from app.services.bugly_privacy import hide_user_ids, user_id_values
 from app.services.bugly_import import (
-    digest, merge_payload, normalize_report, parse_file, report_columns, source_zone, utc_expiry,
+    digest, merge_payload, normalize_report, parse_file, report_columns, source_zone,
 )
 from app.utils.time_utils import utc_now_naive
 
@@ -54,16 +53,18 @@ def sensitive_values(payload):
 
 
 class BuglyService:
+    """Bugly 问题中心。
+
+    访问控制只有一层：数据中心里勾选了「Bugly 问题中心」页面权限的内部账号即可查看与维护全部应用、
+    问题、上报和导入（2026-11-26 起不再有应用 / 问题级授权、外部只读账号和对外发布）。
+    """
+
     def __init__(self, db, user):
         self.db, self.user = db, user
 
-    @property
-    def admin(self):
-        return self.user.account_type != "external" and self.user.role == UserRole.ADMIN
-
     def internal(self):
         if self.user.account_type == "external":
-            raise HTTPException(403, "外部账号只能浏览发布内容")
+            raise HTTPException(403, "外部账号已停用")
         ensure_tab_access(self.user, "bugly")
 
     def audit(self, action, target, detail=None):
@@ -85,72 +86,30 @@ class BuglyService:
             self.db.rollback()
             raise HTTPException(409, "数据已变化或编号重复，请刷新后重试")
 
-    def grants(self):
-        return self.db.query(BuglyGrant).filter(
-            BuglyGrant.user_id == self.user.id,
-            or_(BuglyGrant.expires_at.is_(None), BuglyGrant.expires_at > utc_now_naive()),
-        )
-
-    def visible_clause(self):
-        return exists().where(and_(
-            BuglyGrant.user_id == self.user.id,
-            BuglyGrant.application_id == BuglyIssue.application_id,
-            or_(BuglyGrant.issue_id.is_(None), BuglyGrant.issue_id == BuglyIssue.id),
-            or_(BuglyGrant.expires_at.is_(None), BuglyGrant.expires_at > utc_now_naive()),
-        ))
-
-    def authorize(self, application_id, issue_id=None, operation="view"):
-        if self.admin:
-            return
-        query = self.grants().filter(BuglyGrant.application_id == application_id)
-        query = query.filter(or_(BuglyGrant.issue_id.is_(None), BuglyGrant.issue_id == issue_id)) if issue_id else query.filter(BuglyGrant.issue_id.is_(None))
-        if operation == "edit":
-            query = query.filter(BuglyGrant.role == "editor")
-        elif operation == "publish":
-            query = query.filter(BuglyGrant.can_publish.is_(True))
-        elif operation == "sensitive":
-            query = query.filter(BuglyGrant.can_sensitive.is_(True))
-        if not query.first() or (self.user.account_type == "external" and operation != "view"):
-            raise HTTPException(403, "没有该应用或问题的操作权限")
-
-    def permitted(self, issue, operation):
-        try:
-            self.authorize(issue.application_id, issue.id, operation)
-            return True
-        except HTTPException:
-            return False
-
     def application(self, app_id):
         app = self.db.get(BuglyApplication, app_id)
         if not app:
             raise HTTPException(404, "应用不存在")
         return app
 
-    def issue(self, issue_id, operation="view"):
+    def issue(self, issue_id):
         row = self.db.get(BuglyIssue, issue_id)
         if not row:
             raise HTTPException(404, "问题不存在")
-        self.authorize(row.application_id, row.id, operation)
         return row
 
     def applications(self):
         self.internal()
-        query = self.db.query(BuglyApplication)
-        if not self.admin:
-            query = query.filter(BuglyApplication.id.in_(self.grants().with_entities(BuglyGrant.application_id)))
-        rows = query.order_by(BuglyApplication.name).all()
-        result = []
-        for app in rows:
-            writable = self.admin or self.grants().filter(BuglyGrant.application_id == app.id, BuglyGrant.issue_id.is_(None), BuglyGrant.role == "editor").first() is not None
-            result.append({"id": app.id, "name": app.name, "source_host": app.source_host,
-                           "bugly_app_id": app.bugly_app_id, "package_name": app.package_name,
-                           "platform": app.platform, "source_timezone": app.source_timezone,
-                           "software_id": app.software_id, "can_edit": writable})
-        return result
+        rows = self.db.query(BuglyApplication).order_by(BuglyApplication.name).all()
+        return [{"id": app.id, "name": app.name, "source_host": app.source_host,
+                 "bugly_app_id": app.bugly_app_id, "package_name": app.package_name,
+                 "platform": app.platform, "source_timezone": app.source_timezone,
+                 "software_id": app.software_id,
+                 "issue_count": self.db.query(func.count(BuglyIssue.id)).filter(BuglyIssue.application_id == app.id).scalar() or 0}
+                for app in rows]
 
     def create_application(self, data):
         self.internal()
-        ensure_admin(self.user)
         source_zone(data["source_timezone"])
         host = data["source_host"].strip().lower()
         if not re.fullmatch(r"[a-z0-9.-]+", host):
@@ -169,7 +128,6 @@ class BuglyService:
     def create_issue(self, data):
         self.internal()
         self.application(data["application_id"])
-        self.authorize(data["application_id"], operation="edit")
         row = BuglyIssue(**data)
         self.db.add(row)
         try:
@@ -184,7 +142,6 @@ class BuglyService:
     def summary(self, issue):
         app = self.application(issue.application_id)
         reports = self.db.query(BuglyReport).filter_by(issue_id=issue.id)
-        publication = self.db.get(BuglyPublication, issue.id)
         return {"id": issue.id, "application_id": app.id, "application_name": app.name,
                 "source_issue_id": issue.source_issue_id, "title": issue.title,
                 "status": issue.status, "exception_type": issue.exception_type,
@@ -192,62 +149,44 @@ class BuglyService:
                 "report_count": reports.count(),
                 "last_occurred_at": iso(reports.with_entities(func.max(BuglyReport.occurred_at)).scalar()),
                 "versions": [v[0] for v in reports.with_entities(BuglyReport.app_version).filter(BuglyReport.app_version != "").distinct().limit(20)],
-                "published": bool(publication and publication.active),
-                "unpublished_changes": bool(publication and publication.source_version != issue.version),
+                "owner_id": issue.owner_id,
                 "updated_at": iso(issue.updated_at)}
 
-    def issue_query(self, filters, external=False):
-        if not external:
-            self.internal()
+    def issue_query(self, filters):
+        self.internal()
         query = self.db.query(BuglyIssue)
-        if not self.admin:
-            query = query.filter(self.visible_clause())
-        if external:
-            # Search approved content, never current internal issue/report fields.
-            query = query.join(BuglyPublication).filter(BuglyPublication.active.is_(True), BuglyIssue.archived.is_(False))
-        elif not filters.get("include_archived"):
+        if not filters.get("include_archived"):
             query = query.filter(BuglyIssue.archived.is_(False))
         if filters.get("application_id"):
             query = query.filter(BuglyIssue.application_id == filters["application_id"])
-        if external:
-            # Snapshot JSON filtering is independent from unreviewed internal data.
-            if filters.get("q"):
-                query = query.filter(BuglyPublication.snapshot.cast(Text).contains(filters["q"], autoescape=True))
-        else:
-            if filters.get("status"):
-                query = query.filter(BuglyIssue.status == filters["status"])
-            if filters.get("exception_type"):
-                query = query.filter(BuglyIssue.exception_type == filters["exception_type"])
-            reports = self.db.query(BuglyReport.issue_id)
-            for key, column in (("app_version", BuglyReport.app_version), ("device", BuglyReport.device)):
-                if filters.get(key):
-                    reports = reports.filter(column.contains(filters[key], autoescape=True))
-            for key, comparator in (("since", BuglyReport.occurred_at.__ge__), ("until", BuglyReport.occurred_at.__le__)):
-                if filters.get(key):
-                    reports = reports.filter(comparator(filters[key]))
-            if any(filters.get(k) for k in ("app_version", "device", "since", "until")):
-                query = query.filter(BuglyIssue.id.in_(reports))
-            if filters.get("q"):
-                value = filters["q"]
-                matching = self.db.query(BuglyReport.issue_id).filter(or_(BuglyReport.stack_text.contains(value, autoescape=True), BuglyReport.source_report_id.contains(value, autoescape=True)))
-                query = query.filter(or_(BuglyIssue.title.contains(value, autoescape=True), BuglyIssue.source_issue_id.contains(value, autoescape=True), BuglyIssue.id.in_(matching)))
+        if filters.get("status"):
+            query = query.filter(BuglyIssue.status == filters["status"])
+        if filters.get("exception_type"):
+            query = query.filter(BuglyIssue.exception_type == filters["exception_type"])
+        reports = self.db.query(BuglyReport.issue_id)
+        for key, column in (("app_version", BuglyReport.app_version), ("device", BuglyReport.device)):
+            if filters.get(key):
+                reports = reports.filter(column.contains(filters[key], autoescape=True))
+        for key, comparator in (("since", BuglyReport.occurred_at.__ge__), ("until", BuglyReport.occurred_at.__le__)):
+            if filters.get(key):
+                reports = reports.filter(comparator(filters[key]))
+        if any(filters.get(k) for k in ("app_version", "device", "since", "until")):
+            query = query.filter(BuglyIssue.id.in_(reports))
+        if filters.get("q"):
+            value = filters["q"]
+            matching = self.db.query(BuglyReport.issue_id).filter(or_(BuglyReport.stack_text.contains(value, autoescape=True), BuglyReport.source_report_id.contains(value, autoescape=True)))
+            query = query.filter(or_(BuglyIssue.title.contains(value, autoescape=True), BuglyIssue.source_issue_id.contains(value, autoescape=True), BuglyIssue.id.in_(matching)))
         return query
 
-    def list_issues(self, filters, external=False):
-        query = self.issue_query(filters, external)
+    def list_issues(self, filters):
+        query = self.issue_query(filters)
         total = query.count()
         page, size = filters.get("page", 1), filters.get("page_size", 20)
         rows = query.order_by(BuglyIssue.updated_at.desc(), BuglyIssue.id.desc()).offset((page - 1) * size).limit(size).all()
-        if external:
-            items = []
-            for row in rows:
-                publication = self.db.get(BuglyPublication, row.id)
-                snapshot = publication.snapshot
-                items.append({key: snapshot.get(key) for key in ("title", "source_issue_id", "application_name", "exception_type")}
-                             | {"id": row.id, "application_id": row.application_id, "report_count": len(snapshot["reports"]), "published_at": iso(publication.published_at)})
-        else:
-            items = [self.summary(row) for row in rows]
-        return {"items": items, "total": total, "page": page, "page_size": size}
+        # 状态计数（不受状态筛选本身影响），页面上做成可点的状态筛选条
+        counted = self.issue_query({**filters, "status": ""}).with_entities(BuglyIssue.status, func.count(BuglyIssue.id)).group_by(BuglyIssue.status)
+        return {"items": [self.summary(row) for row in rows], "total": total, "page": page, "page_size": size,
+                "status_counts": {status: count for status, count in counted}}
 
     def list_reports(self, filters):
         self.internal()
@@ -270,16 +209,15 @@ class BuglyService:
         items = []
         for row in rows:
             issue = self.db.get(BuglyIssue, row.issue_id)
-            publication = self.db.get(BuglyPublication, issue.id)
             items.append({"id": row.id, "issue_id": issue.id, "title": issue.title,
                           "source_issue_id": issue.source_issue_id, "source_report_id": row.source_report_id,
                           "application_name": self.application(issue.application_id).name,
                           "app_version": row.app_version, "device": row.device,
                           "occurred_at": iso(row.occurred_at), "stack_mode": row.stack_mode,
-                          "report_count": 1, "published": bool(publication and publication.active), "status": issue.status})
+                          "report_count": 1, "status": issue.status})
         return {"items": items, "total": total, "page": page, "page_size": size}
 
-    def report_dict(self, row, sensitive=False):
+    def report_dict(self, row, sensitive=True):
         payload = row.payload
         display = hide_user_ids({"payload": payload, "stack_text": row.stack_text})
         hidden_values = sensitive_values(payload)
@@ -299,10 +237,9 @@ class BuglyService:
     def detail(self, issue_id):
         self.internal()
         issue = self.issue(issue_id)
+        owner = self.db.get(User, issue.owner_id) if issue.owner_id else None
         return self.summary(issue) | {"analysis": issue.analysis, "external_note": issue.external_note,
-                                     "owner_id": issue.owner_id, "can_edit": self.permitted(issue, "edit"),
-                                     "can_publish": self.permitted(issue, "publish"),
-                                     "can_sensitive": self.permitted(issue, "sensitive")}
+                                     "owner_name": owner.shown_name if owner else None}
 
     def reports(self, issue_id, page=1, page_size=20, q=""):
         self.internal()
@@ -320,22 +257,22 @@ class BuglyService:
         row = self.db.get(BuglyReport, report_id)
         if not row:
             raise HTTPException(404, "上报不存在")
-        issue = self.issue(row.issue_id)
-        return self.report_dict(row, self.permitted(issue, "sensitive"))
+        self.issue(row.issue_id)
+        return self.report_dict(row)
 
     def report_revisions(self, report_id):
         self.internal()
         row = self.db.get(BuglyReport, report_id)
         if not row:
             raise HTTPException(404, "上报不存在")
-        self.issue(row.issue_id, "sensitive")
+        self.issue(row.issue_id)
         return [{"revision": revision.revision, "created_at": iso(revision.created_at),
                  "payload": hide_user_ids(revision.payload), "batch_id": revision.batch_id}
                 for revision in self.db.query(BuglyReportRevision).filter_by(report_id=row.id).order_by(BuglyReportRevision.id.desc()).limit(50)]
 
     def update_issue(self, issue_id, data, expected_version):
         self.internal()
-        row = self.issue(issue_id, "edit")
+        row = self.issue(issue_id)
         if row.version != expected_version:
             raise HTTPException(409, "问题已被修改，请刷新后保存")
         if "source_issue_id" in data and row.source_issue_id and data["source_issue_id"] != row.source_issue_id:
@@ -349,10 +286,6 @@ class BuglyService:
         for key, value in data.items():
             setattr(row, key, value)
         row.updated_at = utc_now_naive()
-        if data.get("archived"):
-            publication = self.db.get(BuglyPublication, row.id)
-            if publication:
-                publication.active = False
         self.audit("issue.update", row.id)
         self.commit()
         return self.detail(row.id)
@@ -381,7 +314,7 @@ class BuglyService:
 
     def create_report(self, issue_id, payload):
         self.internal()
-        issue = self.issue(issue_id, "edit")
+        issue = self.issue(issue_id)
         if issue.archived:
             raise HTTPException(409, "问题已归档，请恢复后新增上报")
         if payload.get("reportId") and self.db.query(BuglyReport).filter_by(issue_id=issue.id, source_report_id=payload["reportId"]).first():
@@ -394,10 +327,9 @@ class BuglyService:
     def preview_import(self, app_id, filename, data, assigned_issue_id=None):
         self.internal()
         app = self.application(app_id)
-        assigned = self.issue(assigned_issue_id, "edit") if assigned_issue_id else None
+        assigned = self.issue(assigned_issue_id) if assigned_issue_id else None
         if assigned and assigned.application_id != app_id:
             raise HTTPException(422, "归属问题不属于所选应用")
-        self.authorize(app_id, assigned_issue_id, "edit")
         items, diagnostics = parse_file(filename, data, assigned)
         seen = set()
         for item in items:
@@ -447,9 +379,6 @@ class BuglyService:
         row = self.db.get(BuglyImportBatch, batch_id)
         if not row:
             raise HTTPException(404, "导入记录不存在")
-        self.authorize(row.application_id, row.diagnostics.get("assigned_issue_id"), "edit")
-        if not self.admin and row.actor_id != self.user.id:
-            raise HTTPException(403, "仅上传者或管理员可查看该导入任务")
         return row
 
     def confirm_import(self, batch_id):
@@ -471,7 +400,6 @@ class BuglyService:
                     result["items"].append({"row": item["row"], "error": item["error"]})
                     continue
                 issue = self.db.get(BuglyIssue, item["issue_id"]) if item["issue_id"] else self.db.query(BuglyIssue).filter_by(application_id=batch.application_id, source_issue_id=item["source_issue_id"]).first()
-                self.authorize(batch.application_id, issue.id if issue else None, "edit")
                 if issue and issue.archived:
                     raise HTTPException(409, "问题已归档，请重新预览")
                 existing = self.db.query(BuglyReport).filter_by(issue_id=issue.id, source_report_id=item["payload"]["reportId"]).first() if issue else None
@@ -496,166 +424,11 @@ class BuglyService:
 
     def import_history(self):
         self.internal()
-        query = self.db.query(BuglyImportBatch)
-        if not self.admin:
-            query = query.filter(BuglyImportBatch.actor_id == self.user.id)
-        rows = query.order_by(BuglyImportBatch.created_at.desc()).limit(50).all()
+        rows = self.db.query(BuglyImportBatch).order_by(BuglyImportBatch.created_at.desc()).limit(50).all()
         result = []
         for row in rows:
-            try:
-                self.batch(row.id)
-                result.append(self.batch_dict(row))
-            except HTTPException:
-                pass
+            item = self.batch_dict(row)
+            actor = self.db.get(User, row.actor_id) if row.actor_id else None
+            item["actor_name"] = actor.shown_name if actor else None
+            result.append(item)
         return result
-
-    def publication_preview(self, issue_id):
-        self.internal()
-        issue = self.issue(issue_id, "publish")
-        reports = self.db.query(BuglyReport).filter_by(issue_id=issue.id).order_by(BuglyReport.id).all()
-        if len(reports) > 2000:
-            raise HTTPException(422, "单次发布最多 2000 条上报，请缩小数据范围")
-        snapshot_reports = []
-        sensitive = []
-        for row in reports:
-            sensitive.extend(sensitive_values(row.payload))
-        for row in reports:
-            snapshot_reports.append({"id": row.id, "source_report_id": row.source_report_id,
-                                     "app_version": redact(row.app_version, sensitive), "device": redact(row.device, sensitive),
-                                     "os_version": redact(row.os_version, sensitive), "occurred_at": iso(row.occurred_at),
-                                     "stack_text": redact(row.stack_text, sensitive), "stack_mode": row.stack_mode})
-        return hide_user_ids({"source_version": issue.version, "snapshot": {
-            "title": redact(issue.title, sensitive), "source_issue_id": issue.source_issue_id,
-            "application_name": redact(self.application(issue.application_id).name, sensitive),
-            "exception_type": redact(issue.exception_type, sensitive), "external_note": redact(issue.external_note, sensitive),
-            "reports": snapshot_reports,
-        }})
-
-    def publish(self, issue_id, source_version, snapshot):
-        self.internal()
-        issue = self.issue(issue_id, "publish")
-        if issue.archived or issue.version != source_version:
-            raise HTTPException(409, "问题已变化或已归档，请重新预览")
-        valid_ids = {r[0] for r in self.db.query(BuglyReport.id).filter_by(issue_id=issue.id)}
-        ids = [r["id"] for r in snapshot["reports"]]
-        if not set(ids).issubset(valid_ids) or len(ids) != len(set(ids)):
-            raise HTTPException(422, "发布快照包含无效或重复的上报记录")
-        snapshot = hide_user_ids(snapshot)
-        publication = self.db.get(BuglyPublication, issue.id)
-        if publication:
-            publication.snapshot, publication.source_version = snapshot, source_version
-            publication.active, publication.published_by = True, self.user.id
-            publication.published_at, publication.version = utc_now_naive(), publication.version + 1
-        else:
-            self.db.add(BuglyPublication(issue_id=issue.id, snapshot=snapshot, source_version=source_version, published_by=self.user.id))
-        # Touch the versioned issue to detect a concurrent import/change before commit.
-        issue.updated_at = utc_now_naive()
-        self.flush()
-        publication = self.db.get(BuglyPublication, issue.id)
-        publication.source_version = issue.version
-        self.audit("publication.publish", issue.id)
-        self.commit()
-        return {"message": "已发布审核后的快照"}
-
-    def withdraw(self, issue_id):
-        self.internal()
-        issue = self.issue(issue_id, "publish")
-        publication = self.db.get(BuglyPublication, issue.id)
-        if publication:
-            publication.active = False
-        self.audit("publication.withdraw", issue.id)
-        self.commit()
-        return {"message": "已撤回"}
-
-    def external_detail(self, issue_id):
-        issue = self.issue(issue_id)
-        publication = self.db.get(BuglyPublication, issue.id)
-        if not publication or not publication.active or issue.archived:
-            raise HTTPException(404, "内容尚未发布或已撤回")
-        self.audit("external.view", issue.id)
-        self.commit()
-        return {"id": issue.id, "application_id": issue.application_id, "publication_version": publication.version,
-                "published_at": iso(publication.published_at), **hide_user_ids(publication.snapshot)}
-
-    def external_applications(self):
-        query = self.db.query(BuglyIssue).join(BuglyPublication).filter(self.visible_clause(), BuglyPublication.active.is_(True), BuglyIssue.archived.is_(False))
-        names = {}
-        for issue in query:
-            publication = self.db.get(BuglyPublication, issue.id)
-            names[issue.application_id] = publication.snapshot["application_name"]
-        return [{"id": key, "name": value} for key, value in names.items()]
-
-    def grant(self, data):
-        self.internal()
-        ensure_admin(self.user)
-        user = self.db.get(User, data["user_id"])
-        if not user:
-            raise HTTPException(404, "用户不存在")
-        self.application(data["application_id"])
-        if data.get("issue_id") and self.issue(data["issue_id"]).application_id != data["application_id"]:
-            raise HTTPException(422, "问题不属于所选应用")
-        if user.account_type == "external" and (data["role"] != "viewer" or data["can_sensitive"] or data["can_publish"]):
-            raise HTTPException(422, "外部账号仅支持只读脱敏授权")
-        data["expires_at"] = utc_expiry(data.get("expires_at"))
-        scope = str(data["issue_id"]) if data.get("issue_id") else "*"
-        row = self.db.query(BuglyGrant).filter_by(user_id=user.id, application_id=data["application_id"], scope=scope).first()
-        if row:
-            for key, value in data.items():
-                setattr(row, key, value)
-            row.granted_by = self.user.id
-        else:
-            row = BuglyGrant(**data, scope=scope, granted_by=self.user.id)
-            self.db.add(row)
-        if user.account_type != "external":
-            user.tab_permissions = serialize_tab_permissions(get_allowed_tabs(user) + ["bugly"])
-        self.flush()
-        self.audit("grant.save", row.id)
-        self.commit()
-        return {"id": row.id}
-
-    def list_grants(self):
-        self.internal()
-        ensure_admin(self.user)
-        return [{"id": row.id, "user_id": row.user_id, "username": self.db.get(User, row.user_id).shown_name,
-                 "application_id": row.application_id, "application_name": self.application(row.application_id).name,
-                 "issue_id": row.issue_id, "issue_title": self.db.get(BuglyIssue, row.issue_id).title if row.issue_id else None,
-                 "role": row.role, "can_sensitive": row.can_sensitive,
-                 "can_publish": row.can_publish, "expires_at": iso(row.expires_at)} for row in self.db.query(BuglyGrant).order_by(BuglyGrant.id.desc())]
-
-    def revoke(self, grant_id):
-        self.internal()
-        ensure_admin(self.user)
-        row = self.db.get(BuglyGrant, grant_id)
-        if not row:
-            raise HTTPException(404, "授权不存在")
-        self.db.delete(row)
-        self.audit("grant.revoke", grant_id)
-        self.commit()
-        return {"message": "授权已撤销"}
-
-    def create_external_account(self, data):
-        self.internal()
-        ensure_admin(self.user)
-        if self.db.query(User).filter_by(username=data["username"]).first():
-            raise HTTPException(409, "用户名已存在")
-        user = User(username=data["username"], display_name=data["display_name"] or data["username"],
-                    password_hash=User.hash_password(data["password"]), role=UserRole.USER,
-                    account_type="external", is_team_member=False, tab_permissions="[]",
-                    expires_at=utc_expiry(data.get("expires_at")))
-        self.db.add(user)
-        self.flush()
-        self.audit("account.create", user.id)
-        self.commit()
-        return {"id": user.id}
-
-    def update_external_account(self, user_id, data):
-        self.internal()
-        ensure_admin(self.user)
-        user = self.db.get(User, user_id)
-        if not user or user.account_type != "external":
-            raise HTTPException(404, "外部账号不存在")
-        user.is_active, user.expires_at = data["is_active"], utc_expiry(data.get("expires_at"))
-        user.session_token = user.session_token_mobile = None
-        self.audit("account.update", user.id)
-        self.commit()
-        return {"message": "账号状态已更新，原会话已失效"}

@@ -80,7 +80,7 @@ def normalize_tab_permissions(tab_keys: list[str] | None) -> list[str]:
 
 def get_allowed_tabs(user) -> list[str]:
     if getattr(user, "account_type", "internal") == "external":
-        return ["bugly"]
+        return []
     role_value = getattr(user.role, "value", user.role)
     if role_value == "admin":
         return list(ALL_TAB_KEYS)

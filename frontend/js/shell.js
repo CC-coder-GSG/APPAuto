@@ -40,7 +40,7 @@
     report: "tabReportBtn", activity: "tabActivityBtn", data: "tabDataBtn",
     dispatch: "tabDispatchBtn", "zentao-ai": "tabZentaoAiBtn", jenkins: "tabJenkinsBtn",
     "cad-test": "tabCadTestBtn", terminal: "tabTerminalBtn", learning: "tabLearningBtn",
-    tools: "tabToolsBtn",
+    tools: "tabToolsBtn", bugly: "tabBuglyBtn", "competitor-analysis": "tabCompetitorAnalysisBtn",
   };
 
   function moveIndicator() {

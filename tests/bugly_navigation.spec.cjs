@@ -11,7 +11,9 @@ const source = (name) => {
 };
 const button = html.match(/<button\b[^>]*\bid="tabBuglyBtn"[^>]*>([\s\S]*?)<\/button>/);
 assert(button, 'Bugly entry must exist in the dashboard');
-assert(button[0].includes("window.location.href='/bugly'"));
+assert(button[0].includes("showTab('bugly')"), 'Bugly opens as an in-app tab');
+assert(!button[0].includes('data-nav-external'), 'Bugly is no longer an external page');
+assert(html.includes('<section id="tab-bugly"'), 'Bugly tab section must exist');
 
 for (const [name, user, visible] of [
   ['administrator', {role:'admin',allowed_tabs:[]}, true],

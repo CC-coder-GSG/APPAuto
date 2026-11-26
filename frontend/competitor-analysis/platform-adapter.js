@@ -4,9 +4,17 @@
 
   const REPORT_URL = '/competitor-analysis/report';
 
+  // 嵌在主应用页签里时（iframe），登录失效 / 无权限要整页跳转，而不是只跳 iframe 里面
+  function topLocation() {
+    try {
+      if (window.top && window.top !== window && window.top.location.origin === window.location.origin) return window.top.location;
+    } catch (_) { /* 跨源时退回自身 */ }
+    return window.location;
+  }
+
   function redirectToLogin() {
     localStorage.removeItem('token');
-    window.location.replace('/login');
+    topLocation().replace('/login');
   }
 
   async function request(options = {}) {
@@ -26,7 +34,7 @@
       },
     });
     if (response.status === 401) redirectToLogin();
-    if (response.status === 403) window.location.replace('/dashboard');
+    if (response.status === 403) topLocation().replace('/dashboard');
     if (!response.ok) {
       let message = `请求失败 (HTTP ${response.status})`;
       try {

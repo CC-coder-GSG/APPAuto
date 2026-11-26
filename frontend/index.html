@@ -4,15 +4,15 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css?v=20261103-final-presence-ui-2">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261126-hc-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261126-bgl-1">
   <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261126-hc-1"></script>
-  <script src="/static/js/weave-motion.js?v=20261124-shell-v2-2" defer></script>
-  <script src="/static/js/shell.js?v=20261125-pagehead-1" defer></script>
+  <script type="module" src="/static/js/app.js?v=20261126-bgl-1"></script>
+  <script src="/static/js/weave-motion.js?v=20261126-bgl-1" defer></script>
+  <script src="/static/js/shell.js?v=20261126-bgl-1" defer></script>
   <script>
     /* 壳层布局标记 + 侧栏收起态需在首帧前生效，避免加载时宽度跳变（shell.js 负责后续切换） */
     document.documentElement.classList.add('omniqa-shell');
@@ -182,8 +182,8 @@
         <div class="nav-group-label">分析洞察</div>
         <button id="tabReportBtn" onclick="showTab('report')"><svg class="nav-ic"><use href="#i-report"/></svg><span class="nav-label">报表中心</span></button>
         <button id="tabActivityBtn" class="hidden" onclick="showTab('activity')"><svg class="nav-ic"><use href="#i-activity"/></svg><span class="nav-label">活动中心</span></button>
-        <button id="tabCompetitorAnalysisBtn" class="hidden" data-nav-external onclick="window.location.href='/competitor-analysis'"><svg class="nav-ic"><use href="#i-compass"/></svg><span class="nav-label">竞品分析工作台</span><svg class="nav-ext-ic"><use href="#i-external"/></svg></button>
-        <button id="tabBuglyBtn" class="hidden" data-nav-external onclick="window.location.href='/bugly'"><svg class="nav-ic"><use href="#i-alert"/></svg><span class="nav-label">Bugly 问题中心</span><svg class="nav-ext-ic"><use href="#i-external"/></svg></button>
+        <button id="tabCompetitorAnalysisBtn" class="hidden" onclick="showTab('competitor-analysis')"><svg class="nav-ic"><use href="#i-compass"/></svg><span class="nav-label">竞品分析工作台</span></button>
+        <button id="tabBuglyBtn" class="hidden" onclick="showTab('bugly')"><svg class="nav-ic"><use href="#i-alert"/></svg><span class="nav-label">Bugly 问题中心</span></button>
       </div>
       <div class="nav-group" data-group="效率工具">
         <div class="nav-group-label">效率工具</div>
@@ -1491,6 +1491,32 @@
     </div>
   </section>
 
+  <!-- Bugly 问题中心（2026-11-26 并入主应用；逻辑 js/tabs/bugly.js，样式 weave.css R23 .bgl-*）
+       权限只看数据中心勾选的页面权限，页签内不再有账号与授权管理 -->
+  <section id="tab-bugly" class="hidden card">
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-alert"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-alert"/></svg>
+      <div class="ph-text"><h2>Bugly 问题中心</h2><p class="page-desc">集中整理 Bugly 采集的崩溃与异常上报，查看堆栈、设备与版本，跟踪每个问题的处理进度</p></div>
+      <div class="ph-actions">
+        <button class="secondary" onclick="window.OmniQABuglyTab && window.OmniQABuglyTab.openApplications()"><svg class="ui-ic" aria-hidden="true"><use href="#i-layers"/></svg>应用管理</button>
+        <button class="secondary" onclick="window.OmniQABuglyTab && window.OmniQABuglyTab.openHistory()"><svg class="ui-ic" aria-hidden="true"><use href="#i-clock"/></svg>导入记录</button>
+        <button class="secondary" id="buglyNewIssueBtn" onclick="window.OmniQABuglyTab && window.OmniQABuglyTab.openNewIssue()"><svg class="ui-ic" aria-hidden="true"><use href="#i-plus"/></svg>新增问题</button>
+        <button id="buglyImportBtn" onclick="window.OmniQABuglyTab && window.OmniQABuglyTab.openImport()"><svg class="ui-ic" aria-hidden="true"><use href="#i-upload"/></svg>导入文件</button>
+      </div>
+    </div>
+    <div id="buglyRoot"></div>
+  </section>
+
+  <!-- 竞品分析工作台（2026-11-26 并入主应用）：原页面以 ?embed=1 嵌入（嵌入态隐藏自带顶栏、改用 Weave 配色）；
+       逻辑 js/tabs/competitor-analysis.js，外框样式 weave.css R24 .cpa-* -->
+  <section id="tab-competitor-analysis" class="hidden card">
+    <div class="ph">
+      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-compass"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-compass"/></svg>
+      <div class="ph-text"><h2>竞品分析工作台</h2><p class="page-desc">对比各竞品的功能表现，沉淀重点分析与阶段性结论；内容由团队共同编辑，自动保存到平台</p></div>
+    </div>
+    <div class="cpa-frame-wrap" id="competitorFrameWrap"><div class="cpa-loading" id="competitorLoading"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>正在加载竞品分析工作台…</div></div>
+  </section>
+
   <section id="tab-zentao-ai" class="hidden card">
     <div class="ph">
       <span class="ph-icon" aria-hidden="true"><svg><use href="#i-sparkles"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-sparkles"/></svg>
@@ -2532,7 +2558,7 @@ function applyTabVisibility(){
   }
 }
 function getDefaultVisibleTab(){
-  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','tools','terminal','learning']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','tools','terminal','learning','bugly','competitor-analysis']
     .find((name)=>canAccessTab(name)) || 'mine';
 }
 function getTabNamespaceName(name){
@@ -2557,6 +2583,8 @@ function getTabNamespaceName(name){
     terminal:'OmniQATerminalTab',
     learning:'OmniQALearningTab',
     'feature-tree':'OmniQAFeatureTreeTab',
+    bugly:'OmniQABuglyTab',
+    'competitor-analysis':'OmniQACompetitorTab',
   }[name] || '';
 }
 function isTabRuntimeReady(name){
@@ -2565,7 +2593,7 @@ function isTabRuntimeReady(name){
   return !!window[nsName];
 }
 function getFirstRuntimeReadyTab(){
-  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','tools','terminal']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','tools','terminal','bugly','competitor-analysis']
     .find((tabName)=>canAccessTab(tabName) && isTabRuntimeReady(tabName)) || null;
 }
 async function showTab(name){
@@ -2589,7 +2617,7 @@ async function showTab(name){
     if(!fallback || fallback===name) return;
     name = fallback;
   }
-  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','tools','terminal','learning','feature-tree'].forEach(x=>{
+  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','tools','terminal','learning','bugly','competitor-analysis','feature-tree'].forEach(x=>{
     const el=document.getElementById('tab-'+x);
     if(el) el.classList.add('hidden');
   });
@@ -2620,6 +2648,8 @@ async function showTab(name){
     loadLearningCenter().catch(err=>showMessage(err.message||'加载学习中心失败','error'));
   }
   if(name==='report'){loadReportOnDemand()}
+  if(name === 'bugly') { window.OmniQABuglyTab?.activate().catch(err=>showMessage(err.message||'加载 Bugly 问题中心失败','error')); }
+  if(name === 'competitor-analysis') { window.OmniQACompetitorTab?.activate(); }
 }
 function isAllUsersReport(){return currentUser && currentUser.role==='admin' && reportUserSelect && reportUserSelect.value==='0'}
 function adjustReportChartVisibility(){
@@ -2691,9 +2721,13 @@ async function init(){
     try{ await window.OmniQABootReady; }catch(_){}
   }
   currentUser=await (await api('/auth/me')).json();
-  if(currentUser.account_type==='external'){location.replace('/bugly/external');return;}
-  if(currentUser.role!=='admin' && Array.isArray(currentUser.allowed_tabs) && currentUser.allowed_tabs.length===1 && currentUser.allowed_tabs[0]==='bugly'){location.replace('/bugly');return;}
-  if(currentUser.role!=='admin' && Array.isArray(currentUser.allowed_tabs) && currentUser.allowed_tabs.length===1 && currentUser.allowed_tabs[0]==='competitor-analysis'){location.replace('/competitor-analysis');return;}
+  // 外部只读账号（原 Bugly 对外发布用）已于 2026-11-26 停用：提示后退出
+  if(currentUser.account_type==='external'){
+    if(window.OmniQADialog) await window.OmniQADialog.alert({title:'外部账号已停用',message:'Bugly 对外发布与外部只读账号已下线，如需查看资料请联系管理员开通内部账号。',okText:'退出登录'});
+    try{ await api('/auth/logout',{method:'POST'}); }catch(_){}
+    logout();
+    return;
+  }
   window.currentUser = currentUser;
   if(window.OmniQAStateActions && typeof window.OmniQAStateActions.setCurrentUser === 'function'){
     window.OmniQAStateActions.setCurrentUser(currentUser);
@@ -2721,6 +2755,9 @@ async function init(){
   if(window.SelectMemory) window.SelectMemory.applyAll();
   const automationLink = new URLSearchParams(location.search).has('automation_repository');
   const canOpenAutomation = currentUser.role === 'admin' || (currentUser.allowed_tabs || []).includes('testcase-center');
+  // ?tab=xxx：旧的 /bugly、/competitor-analysis 地址会重定向到这里
+  const linkedTab = new URLSearchParams(location.search).get('tab');
+  if(linkedTab && ['bugly','competitor-analysis'].includes(linkedTab) && canAccessTab(linkedTab)){ await showTab(linkedTab); return; }
   await showTab(automationLink && canOpenAutomation ? 'testcase-center' : getDefaultVisibleTab());
 }
 

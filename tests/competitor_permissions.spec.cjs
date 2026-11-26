@@ -14,7 +14,9 @@ const keys = html.match(/const ALL_TAB_KEYS=([^;]+);/)[1];
 const defaults = html.match(/const DEFAULT_ALLOWED_TABS=([^;]+);/)[1];
 const button = html.match(/<button\b[^>]*\bid="tabCompetitorAnalysisBtn"[^>]*>[\s\S]*?<\/button>/)[0];
 assert(button.includes('class="hidden"'));
-assert(button.includes("window.location.href='/competitor-analysis'"));
+assert(button.includes("showTab('competitor-analysis')"), 'Competitor analysis opens as an in-app tab');
+assert(!button.includes('data-nav-external'));
+assert(html.includes('<section id="tab-competitor-analysis"'));
 assert(read('js/tabs/data.js').includes("{ key: 'competitor-analysis', label: '竞品分析工作台' }"));
 
 for (const [name, user, visible] of [

@@ -9,7 +9,7 @@ def ensure_active_account(user):
 
 
 def ensure_account_route(user, request):
-    """An external session never authorizes any of the existing internal APIs."""
+    """External (Bugly read-only) accounts were retired on 2026-11-26: they may only see who they are and sign out."""
     if user.account_type != "external":
         return
     path, method = request.url.path, request.method
@@ -17,6 +17,4 @@ def ensure_account_route(user, request):
         ("GET", "/auth/me"), ("PUT", "/auth/password"), ("POST", "/auth/logout"),
     }:
         return
-    if method == "GET" and path.startswith("/api/bugly/external/"):
-        return
-    raise HTTPException(status_code=403, detail="外部账号仅可访问获授权的 Bugly 发布内容")
+    raise HTTPException(status_code=403, detail="外部账号已停用，请联系管理员")

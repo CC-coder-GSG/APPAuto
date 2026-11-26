@@ -14,7 +14,7 @@ from app.api.deps import get_current_user, get_db
 from app.api.routes import auth, bugly, users
 from app.core.exceptions import AppError
 from app.models import User, UserRole
-from app.models.bugly import BuglyGrant, BuglyIssue, BuglyReport, BuglyReportRevision, BuglyImportBatch, BuglyPublication
+from app.models.bugly import BuglyGrant, BuglyIssue, BuglyReport, BuglyReportRevision, BuglyImportBatch
 from app.services.auth_service import AuthService
 from app.services.permission_service import get_allowed_tabs
 from app.utils.time_utils import utc_now_naive
@@ -57,14 +57,6 @@ def application(ctx, name="Android 正式版"):
     return r.json()["id"]
 
 
-def grant(ctx, app_id, name="partner", **kwargs):
-    client, people, _ = ctx
-    r = client.post("/api/bugly/grants", headers=people["manager"][1],
-                    json={"user_id": people[name][0].id, "application_id": app_id, **kwargs})
-    assert r.status_code == 200, r.text
-    return r.json()["id"]
-
-
 def envelope(report_ids=("1001", "1002"), issue_id="12345", stack="Exception\n  at app.Main.run(Main.java:23)\n  at app.Start.main(Start.java:4)"):
     return {"schemaVersion": 1, "issue": {"issueId": issue_id, "title": "#12345 页面切换崩溃"},
             "totalSucceeded": len(report_ids), "totalDiscovered": len(report_ids) + 1, "totalFailed": 1,
@@ -98,15 +90,6 @@ def imported(ctx, app_id, data=None):
     result = response.json()
     issue_id = next((i["issue_id"] for i in result["result"]["items"] if "issue_id" in i), None)
     return result, db.get(BuglyIssue, issue_id)
-
-
-def published(ctx, issue_id):
-    client, people, _ = ctx
-    candidate = client.get(f"/api/bugly/issues/{issue_id}/publication-preview", headers=people["manager"][1])
-    assert candidate.status_code == 200, candidate.text
-    response = client.post(f"/api/bugly/issues/{issue_id}/publication", headers=people["manager"][1], json=candidate.json())
-    assert response.status_code == 200, response.text
-    return candidate.json()
 
 
 def test_json_roundtrip_and_idempotent_confirmation(context):
@@ -162,91 +145,50 @@ def test_csv_bom_quotes_multiline_and_missing_fields_preserved(context):
     assert row.payload["rawDetailText"] == "private raw token=secret-123"
 
 
-def test_external_only_sees_approved_snapshot_and_no_internal_search(context):
-    app_id = application(context)
-    _, issue = imported(context, app_id, envelope(stack="secret-user-998 token=topsecret /home/build/private/file.cpp\n at app.Main:9"))
-    grant(context, app_id)
-    client, people, db = context
-    external = people["partner"][1]
-    assert client.get("/api/bugly/external/issues", headers=external).json()["total"] == 0
-    candidate = published(context, issue.id)
-    detail = client.get(f"/api/bugly/external/issues/{issue.id}", headers=external)
-    assert detail.status_code == 200
-    assert detail.headers["cache-control"] == "no-store"
-    serialized = json.dumps(detail.json())
-    for secret in ("secret-user-998", "topsecret", "/home/build", "rawDetailText", "captureDiagnostics", "detailFields", "pageUrl", "analysis"):
-        assert secret not in serialized
-    assert "已脱敏" in detail.json()["reports"][0]["stack_text"]
-    row = db.get(BuglyIssue, issue.id)
-    r = client.patch(f"/api/bugly/issues/{issue.id}", headers=people["manager"][1],
-                     json={"expected_version": row.version, "title": "Unpublished Secret Title", "analysis": "internal secret"})
-    assert r.status_code == 200, r.text
-    changed = client.get(f"/api/bugly/external/issues/{issue.id}", headers=external).json()
-    assert changed["title"] == candidate["snapshot"]["title"]
-    assert client.get("/api/bugly/external/issues?q=Unpublished", headers=external).json()["total"] == 0
-
-
 @pytest.mark.parametrize("path,method", [("/users", "get"), ("/api/sse/stream", "get"),
-    ("/api/bugly/applications", "get"), ("/api/bugly/imports", "get"), ("/api/bugly/grants", "get"),
+    ("/api/bugly/applications", "get"), ("/api/bugly/imports", "get"), ("/api/bugly/issues", "get"),
     ("/api/bugly/issues", "post")])
-def test_external_account_cannot_use_internal_api(context, path, method):
+def test_retired_external_account_cannot_use_any_api(context, path, method):
     client, people, _ = context
     r = getattr(client, method)(path, headers=people["partner"][1])
     assert r.status_code == 403, r.text
+    assert get_allowed_tabs(people["partner"][0]) == []
+    assert client.get("/auth/me", headers=people["partner"][1]).status_code == 200
 
 
-def test_problem_level_grants_and_revocation(context):
-    app_id = application(context)
-    _, first = imported(context, app_id)
-    _, second = imported(context, app_id, envelope(issue_id="54321"))
-    published(context, first.id)
-    published(context, second.id)
-    grant_id = grant(context, app_id, issue_id=first.id)
+@pytest.mark.parametrize("path", ["/api/bugly/grants", "/api/bugly/external/issues", "/api/bugly/external/applications",
+                                  "/api/bugly/issues/1/publication-preview"])
+def test_permission_and_publication_endpoints_are_removed(context, path):
     client, people, _ = context
-    external = people["partner"][1]
-    assert client.get("/api/bugly/external/issues", headers=external).json()["total"] == 1
-    assert client.get(f"/api/bugly/external/issues/{second.id}", headers=external).status_code == 403
-    client.delete(f"/api/bugly/grants/{grant_id}", headers=people["manager"][1])
-    assert client.get(f"/api/bugly/external/issues/{first.id}", headers=external).status_code == 403
-    assert client.get("/api/bugly/external/applications", headers=external).json() == []
+    assert client.get(path, headers=people["manager"][1]).status_code in (404, 405)
 
 
-def test_internal_viewer_cannot_edit_and_raw_fields_are_restricted(context):
+def test_page_permission_alone_grants_full_access(context):
+    """数据中心勾选了「Bugly 问题中心」的普通账号，不需要任何应用 / 问题授权就能查看、编辑、导入和看原始资料。"""
     app_id = application(context)
     _, issue = imported(context, app_id)
-    grant(context, app_id, "reader")
     client, people, db = context
     reader = people["reader"][1]
-    assert client.get(f"/api/bugly/issues/{issue.id}", headers=reader).status_code == 200
+    apps = client.get("/api/bugly/applications", headers=reader).json()
+    assert [a["id"] for a in apps] == [app_id] and apps[0]["issue_count"] == 1
+    assert client.get("/api/bugly/issues", headers=reader).json()["total"] == 1
+    r = client.patch(f"/api/bugly/issues/{issue.id}", headers=reader, json={"expected_version": issue.version, "analysis": "reader analysis"})
+    assert r.status_code == 200, r.text
     report = db.query(BuglyReport).first()
     data = client.get(f"/api/bugly/reports/{report.id}", headers=reader).json()
-    assert "rawDetailText" not in data["payload"]
-    assert "用户ID" not in data["payload"]["detailFields"]
-    r = client.patch(f"/api/bugly/issues/{issue.id}", headers=reader, json={"expected_version":issue.version,"analysis":"overwrite"})
-    assert r.status_code == 403
-    assert preview(context, app_id, name="reader").status_code == 403
+    assert data["payload"]["rawDetailText"] == "private raw token=secret-123"
+    assert client.get(f"/api/bugly/reports/{report.id}/revisions", headers=reader).status_code == 200
+    assert preview(context, app_id, name="reader").status_code == 200
+    created = client.post("/api/bugly/applications", headers=reader, json={"name": "iOS 正式版", "platform": "iOS"})
+    assert created.status_code == 201, created.text
 
 
-def test_grant_expiry_blocks_access(context):
+def test_import_history_is_shared_with_uploader_name(context):
     app_id = application(context)
-    _, issue = imported(context, app_id)
-    published(context, issue.id)
-    grant_id = grant(context, app_id)
-    row = context[2].get(BuglyGrant, grant_id)
-    row.expires_at = utc_now_naive()-timedelta(seconds=1)
-    context[2].commit()
-    assert context[0].get("/api/bugly/external/issues", headers=context[1]["partner"][1]).json()["total"] == 0
-
-
-def test_account_disable_and_expiry_invalidate_login(context):
-    client, people, db = context
-    r = client.patch(f"/api/bugly/accounts/{people['partner'][0].id}", headers=people["manager"][1], json={"is_active":False})
-    assert r.status_code == 200
-    assert client.get("/auth/me", headers=people["partner"][1]).status_code == 401
-    assert client.post("/auth/token", data={"username":"partner","password":"testpass123"}).status_code == 401
-    partner = db.get(User, people["partner"][0].id)
-    partner.is_active=True;partner.expires_at=utc_now_naive()-timedelta(days=1);db.commit()
-    assert client.post("/auth/token", data={"username":"partner","password":"testpass123"}).status_code == 401
+    imported(context, app_id)
+    client, people, _ = context
+    rows = client.get("/api/bugly/imports", headers=people["reader"][1]).json()
+    assert len(rows) == 1 and rows[0]["actor_name"] == "manager"
 
 
 def test_previews_detect_intervening_updates_and_preserve_atomicity(context):
@@ -283,33 +225,11 @@ def test_unknown_issue_requires_assignment_and_fallback_is_kept(context):
     assert db.query(BuglyReport).count() == 2
 
 
-def test_withdraw_publish_version_conflict_and_snapshot_whitelist(context):
-    app_id = application(context)
-    _, issue = imported(context, app_id)
-    grant(context,app_id)
-    client, people, db = context
-    candidate = published(context, issue.id)
-    candidate["snapshot"]["rawDetailText"] = "leak"
-    assert client.post(f"/api/bugly/issues/{issue.id}/publication",headers=people["manager"][1],json=candidate).status_code == 422
-    candidate["snapshot"].pop("rawDetailText")
-    assert client.post(f"/api/bugly/issues/{issue.id}/publication",headers=people["manager"][1],json=candidate).status_code == 409
-    client.delete(f"/api/bugly/issues/{issue.id}/publication",headers=people["manager"][1])
-    assert client.get(f"/api/bugly/external/issues/{issue.id}",headers=people["partner"][1]).status_code == 404
-
-
-def test_external_cannot_receive_write_sensitive_or_publishing_grant(context):
-    app_id=application(context)
-    client,people,_=context
-    for extra in ({"role":"editor"},{"can_sensitive":True},{"can_publish":True}):
-        r=client.post('/api/bugly/grants',headers=people['manager'][1],json={"user_id":people['partner'][0].id,"application_id":app_id,**extra})
-        assert r.status_code==422
-
-
 def test_logout_revokes_sessions_and_null_session_is_not_valid(context):
     client,people,_=context
-    external=people['partner'][1]
-    assert client.post('/auth/logout',headers=external).status_code==200
-    assert client.get('/auth/me',headers=external).status_code==401
+    reader=people['reader'][1]
+    assert client.post('/auth/logout',headers=reader).status_code==200
+    assert client.get('/auth/me',headers=reader).status_code==401
 
 
 def test_pagination_filters_and_duplicate_application_errors(context):
@@ -332,7 +252,6 @@ def test_empty_tab_permissions_do_not_restore_default_access(context):
 def test_data_console_can_grant_and_revoke_bugly_page_access(context):
     app_id = application(context)
     _, issue = imported(context, app_id)
-    grant(context, app_id, "reader")
     client, people, db = context
     reader, reader_headers = people["reader"]
     manager_headers = people["manager"][1]
@@ -346,45 +265,36 @@ def test_data_console_can_grant_and_revoke_bugly_page_access(context):
         assert json.loads(db.get(User, reader.id).tab_permissions) == tabs
         assert client.get('/api/bugly/issues', headers=reader_headers).status_code == expected_status
         assert client.get(f'/api/bugly/issues/{issue.id}', headers=reader_headers).status_code == expected_status
+        assert client.post('/api/bugly/issues', headers=reader_headers,
+                           json={"application_id": app_id, "title": "页面权限验证"}).status_code == (201 if expected_status == 200 else 403)
 
     response = client.put(permission_url, headers=reader_headers, json={"allowed_tabs": ["bugly"]})
     assert response.status_code == 403
     assert get_allowed_tabs(reader) == []
 
 
-def test_global_report_view_and_revision_permissions(context):
+def test_global_report_view_and_revisions(context):
     app_id=application(context)
     imported(context,app_id)
     imported(context,app_id,envelope(("1001",),stack="new revision stack"))
-    grant(context,app_id,"reader")
     client,people,_=context
     reports=client.get('/api/bugly/reports?device=Pixel',headers=people['reader'][1]).json()
     assert reports['total']==2
     report_id=reports['items'][0]['id']
-    assert client.get(f'/api/bugly/reports/{report_id}/revisions',headers=people['reader'][1]).status_code==403
-    revisions=client.get(f'/api/bugly/reports/{report_id}/revisions',headers=people['manager'][1])
+    revisions=client.get(f'/api/bugly/reports/{report_id}/revisions',headers=people['reader'][1])
     assert revisions.status_code==200
     assert client.get('/api/bugly/reports',headers=people['partner'][1]).status_code==403
 
 
-def test_deleted_user_grants_are_removed(context):
+def test_deleted_user_legacy_grants_are_removed(context):
     app_id=application(context)
-    grant(context,app_id)
     client,people,db=context
-    target=people['partner'][0].id
+    target=people['reader'][0].id
+    db.add(BuglyGrant(user_id=target, application_id=app_id, scope="*", role="viewer", granted_by=people["manager"][0].id))
+    db.commit()
     response=client.delete(f'/users/{target}',headers=people['manager'][1])
     assert response.status_code==200,response.text
     assert db.query(BuglyGrant).filter_by(user_id=target).count()==0
-
-
-def test_account_expiry_roundtrips_with_utc_timezone(context):
-    client,people,_=context
-    target=people['partner'][0].id
-    r=client.patch(f'/api/bugly/accounts/{target}',headers=people['manager'][1],json={"is_active":True,"expires_at":"2030-01-01T12:00:00+09:00"})
-    assert r.status_code==200
-    user=next(u for u in client.get('/users',headers=people['manager'][1]).json() if u['id']==target)
-    assert user['expires_at']=='2030-01-01T03:00:00Z'
-    assert client.patch(f'/api/bugly/accounts/{target}',headers=people['manager'][1],json={"is_active":False,"expires_at":user['expires_at']}).status_code==200
 
 
 def test_manual_issue_can_add_source_id_but_cannot_take_existing_id(context):
@@ -401,19 +311,29 @@ def test_manual_issue_can_add_source_id_but_cannot_take_existing_id(context):
     assert client.patch(f'/api/bugly/issues/{manual}',headers=manager,json={"expected_version":r.json()['version'],"source_issue_id":"99999"}).status_code==422
 
 
-def test_sensitive_values_inside_stack_are_masked_for_internal_reader(context):
+def test_issue_detail_reports_owner_name(context):
+    app_id=application(context)
+    _,issue=imported(context,app_id)
+    client,people,_=context
+    manager=people['manager'][1]
+    r=client.patch(f'/api/bugly/issues/{issue.id}',headers=manager,json={"expected_version":issue.version,"owner_id":people['reader'][0].id,"status":"processing"})
+    assert r.status_code==200,r.text
+    assert r.json()['owner_name']=='reader' and r.json()['owner_id']==people['reader'][0].id
+
+
+def test_user_ids_in_stack_are_hidden_for_every_reader(context):
     app_id=application(context)
     imported(context,app_id,envelope(stack="Exception for secret-user-998\n at app.Main:11"))
-    grant(context,app_id,"reader")
     client,people,db=context
     report=db.query(BuglyReport).first()
     r=client.get(f'/api/bugly/reports/{report.id}',headers=people['reader'][1])
     assert r.status_code==200
     assert 'secret-user-998' not in r.json()['stack_text']
+    assert 'app.Main:11' in r.json()['stack_text']
 
 
 @pytest.mark.parametrize("name", ["manager", "reader"])
-def test_user_ids_are_hidden_even_with_raw_data_permission_and_in_revisions(context, name):
+def test_user_ids_are_hidden_with_raw_data_and_in_revisions(context, name):
     app_id = application(context)
     data = envelope(("1001",), stack="Exception for secret-user-998 and diagnostic-secret\n at Main.java:23")
     capture = data["reports"][0]
@@ -427,7 +347,6 @@ def test_user_ids_are_hidden_even_with_raw_data_permission_and_in_revisions(cont
     }
     capture["visibleTabs"] = {"user_id": "tab-secret", "stack": True}
     batch, issue = imported(context, app_id, data)
-    grant(context, app_id, "reader", can_sensitive=True)
     client, people, db = context
     report = db.query(BuglyReport).filter_by(issue_id=issue.id).one()
     original_payload = json.dumps(report.payload, sort_keys=True)
@@ -478,25 +397,13 @@ def test_user_ids_are_hidden_in_import_diagnostics_and_history(context):
     assert db.get(BuglyImportBatch, batch_id).diagnostics["failures"][0]["userId"] == "failed-user-secret"
 
 
-def test_user_ids_are_hidden_in_publication_and_existing_snapshots(context):
+def test_issue_list_reports_status_counts_independent_of_status_filter(context):
     app_id = application(context)
-    _, issue = imported(context, app_id)
-    grant(context, app_id)
-    client, people, db = context
-    headers = people["manager"][1]
-    candidate = client.get(f'/api/bugly/issues/{issue.id}/publication-preview', headers=headers).json()
-    candidate["snapshot"]["reports"][0]["stack_text"] = "User ID: reviewed-user-secret\n at Main.java:23"
-    response = client.post(f'/api/bugly/issues/{issue.id}/publication', headers=headers, json=candidate)
-    assert response.status_code == 200, response.text
-    publication = db.get(BuglyPublication, issue.id)
-    assert "reviewed-user-secret" not in json.dumps(publication.snapshot)
-
-    # Historical approved snapshots receive the same hiding without republishing them.
-    legacy = json.loads(json.dumps(publication.snapshot))
-    legacy["reports"][0]["stack_text"] = "用户ID：legacy-user-secret\n at Main.java:23"
-    publication.snapshot = legacy
-    db.commit()
-    response = client.get(f'/api/bugly/external/issues/{issue.id}', headers=people["partner"][1])
-    assert response.status_code == 200, response.text
-    assert "legacy-user-secret" not in response.text
-    assert 'Main.java:23' in response.json()["reports"][0]["stack_text"]
+    _, first = imported(context, app_id)
+    _, second = imported(context, app_id, envelope(issue_id="54321"))
+    client, people, _ = context
+    manager = people["manager"][1]
+    client.patch(f"/api/bugly/issues/{second.id}", headers=manager, json={"expected_version": second.version, "status": "closed"})
+    data = client.get("/api/bugly/issues?status=closed", headers=manager).json()
+    assert data["total"] == 1
+    assert data["status_counts"] == {"pending": 1, "closed": 1}

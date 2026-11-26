@@ -644,7 +644,7 @@ function ensureUserTabPermissionModal() {
         <button class="secondary" onclick="closeUserTabPermissionModal()">关闭</button>
       </div>
       <div id="userTabPermissionOptions" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px;"></div>
-      <p class="muted" style="margin:14px 0 0; line-height:1.6;">勾选“Bugly 问题中心”可开放页面访问，取消勾选可关闭访问。具体应用或问题的查看、编辑、发布权限，请在 <a href="/bugly">Bugly 问题中心</a> 的“账号与权限管理”中配置。</p>
+      <p class="muted" style="margin:14px 0 0; line-height:1.6;">勾选“Bugly 问题中心”即可查看并维护全部 Bugly 应用、问题与上报（含导入），取消勾选即关闭访问；Bugly 页面内不再单独授权。</p>
       <div class="row" style="justify-content:flex-end; margin:18px 0 0;">
         <button class="secondary" onclick="closeUserTabPermissionModal()">取消</button>
         <button onclick="saveUserTabPermissions()">保存权限</button>

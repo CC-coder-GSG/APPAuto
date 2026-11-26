@@ -34,7 +34,7 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'activity', path: './tabs/activity.js?v=20261125-timeline-3' },
   { name: 'assign', path: './tabs/assign.js?v=20261126-hc-1' },
   { name: 'dispatch', path: './tabs/dispatch.js?v=20261126-zai-1' },
-  { name: 'data', path: './tabs/data.js?v=20261126-zai-1' },
+  { name: 'data', path: './tabs/data.js?v=20261126-bgl-1' },
   { name: 'zentao-ai', path: './tabs/zentao-ai.js?v=20261126-zai-1' },
   { name: 'jenkins', path: './tabs/jenkins.js?v=20261126-zai-1' },
   { name: 'cad-test', path: './tabs/cad-test.js?v=20261126-zai-1' },
@@ -42,6 +42,8 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'terminal', path: './tabs/terminal.js?v=20261126-zai-1' },
   { name: 'learning', path: './tabs/learning.js?v=20261126-zai-1' },
   { name: 'feature-tree', path: './tabs/feature-tree.js?v=20261126-zai-1' },
+  { name: 'bugly', path: './tabs/bugly.js?v=20261126-bgl-1' },
+  { name: 'competitor-analysis', path: './tabs/competitor-analysis.js?v=20261126-bgl-1' },
 ];
 
 window.__omniqaOptionalModuleFailures = {};

@@ -90,7 +90,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
@@ -183,18 +183,24 @@ def mobile_page():
     return FileResponse(str(FRONTEND_DIR / "mobile.html"), headers=_NO_CACHE_HTML)
 
 
+# 竞品分析工作台、Bugly 问题中心已并入主应用页签（2026-11-26）。旧地址重定向到对应页签；
+# 竞品分析页本身以 ?embed=1 嵌在主应用的页签里。
 @app.get("/competitor-analysis", include_in_schema=False)
-def competitor_analysis_page():
-    return FileResponse(
-        str(FRONTEND_DIR / "competitor-analysis" / "index.html"),
-        headers=_NO_CACHE_HTML,
-    )
+def competitor_analysis_page(embed: str | None = None):
+    if embed:
+        return FileResponse(
+            str(FRONTEND_DIR / "competitor-analysis" / "index.html"),
+            headers=_NO_CACHE_HTML,
+        )
+    return RedirectResponse("/?tab=competitor-analysis", status_code=302)
 
 
 @app.get("/bugly", include_in_schema=False)
 @app.get("/bugly/external", include_in_schema=False)
-def bugly_page():
-    return FileResponse(str(FRONTEND_DIR / "bugly" / "index.html"), headers=_NO_CACHE_HTML)
+def bugly_page(request: Request):
+    issue = request.query_params.get("issue")
+    target = "/?tab=bugly" + (f"&bugly_issue={int(issue)}" if issue and issue.isdigit() else "")
+    return RedirectResponse(target, status_code=302)
 
 
 def _push_daily_report() -> None:

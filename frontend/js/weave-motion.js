@@ -22,6 +22,7 @@
     data: "tabDataBtn", dispatch: "tabDispatchBtn", "zentao-ai": "tabZentaoAiBtn",
     jenkins: "tabJenkinsBtn", "cad-test": "tabCadTestBtn", terminal: "tabTerminalBtn",
     learning: "tabLearningBtn", tools: "tabToolsBtn",
+    bugly: "tabBuglyBtn", "competitor-analysis": "tabCompetitorAnalysisBtn",
   };
   // retest / overall-test 是工作台子页，归并到 mine
   const ALIAS = { retest: "mine", "overall-test": "mine", "database-compare": "tools" };
