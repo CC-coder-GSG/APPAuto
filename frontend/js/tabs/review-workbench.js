@@ -2,7 +2,7 @@
 // 大部分展示逻辑与需求工作台同构（复用 mine-req-card 样式与流光动效），
 // 但不含用例完成/测试完成勾选与 Bug 列表。2026-11-24 排版 v2：共用 mrc-* 结构（weave.css R6/R8/R9）。
 import { api } from '../api.js';
-import { escapeHtml, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
+import { escapeHtml, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261126-hc-1';
 import { renderCaseReviewControls } from '../components/case-review.js?v=20260714-1';
 
 let reviewData = [];

@@ -2,7 +2,7 @@ import { prepareOperationModal } from '../components/zentao-operation.js';
 import { askTaskHours, confirmTaskAction, confirmTaskDialog } from '../components/task-dialog.js?v=20261126-zai-1';
 import { operateTask } from '../components/task-operation.js';
 import { api } from '../api.js';
-import { escapeHtml, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
+import { escapeHtml, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261126-hc-1';
 import { showLoading, hideLoading, setLoadingText } from '../components/common.js';
 
 // 任务工作台：展示当前账号名下的禅道任务。

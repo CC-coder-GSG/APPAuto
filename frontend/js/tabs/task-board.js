@@ -2,7 +2,7 @@ import { operateTask } from '../components/task-operation.js';
 import { confirmTaskAction } from '../components/task-dialog.js?v=20261126-zai-1';
 import { confirmDialog } from '../components/dialog.js?v=20261126-zai-1';
 import { api } from '../api.js';
-import { renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
+import { renderTaskStoryChangeBadge } from '../utils.js?v=20261126-hc-1';
 import { showLoading, hideLoading } from '../components/common.js';
 
 const STATUS_META = {
@@ -940,9 +940,15 @@ function monthTaskEntry(t, markKey) {
   const meta = MONTH_MARK_META[markKey];
   const hours = markKey === 'same_day' && t.consumed != null ? ` ${t.consumed}h` : '';
   const person = t.assigned_to_realname || t.assigned_to || '';
-  const title = `#${t.task_id} ${t.name || ''}\n指派：${person || '未指派'}\n状态：${(ZT_STATUS_META[t.status] || {}).label || t.status}`;
+  const st = ZT_STATUS_META[t.status] || {};
+  // 悬浮信息卡（components/hover-card.js）
+  const card = {
+    k: '禅道任务', id: `#${t.task_id}`, t: t.name || '', s: st.label || t.status || '',
+    tone: { wait: 'gray', doing: 'blue', changed: 'blue', done: 'green', pause: 'amber', cancel: 'gray', closed: 'gray' }[t.status] || 'gray',
+    rows: [['指派', person || '未指派'], ['当天', `${meta.label}${hours}`], ['计划', [dayOf(t.est_started), dayOf(t.deadline)].filter(Boolean).join(' → ')]],
+  };
   return `
-    <div title="${escapeHtml(title)}" style="display:flex; align-items:center; gap:4px; font-size:11px; padding:2px 4px; border-radius:4px; background:${meta.bg}; color:${meta.color}; overflow:hidden;">
+    <div data-hc="${escapeHtml(JSON.stringify(card))}" style="display:flex; align-items:center; gap:4px; font-size:11px; padding:2px 4px; border-radius:4px; background:${meta.bg}; color:${meta.color}; overflow:hidden;">
       <span style="flex-shrink:0; font-weight:600;">${meta.label}${hours}</span>
       <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">#${t.task_id} ${escapeHtml(t.name || '')}</span>
     </div>`;

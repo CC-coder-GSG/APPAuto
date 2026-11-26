@@ -1,6 +1,6 @@
 import { wireImageViewer, closeImageViewer } from './image-viewer.js';
 import { api } from '../api.js';
-import { renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
+import { renderTaskStoryChangeBadge } from '../utils.js?v=20261126-hc-1';
 
 // Unified preview modal for Zentao stories / bugs / testcases / tasks.
 // Exposes:

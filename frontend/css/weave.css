@@ -7596,3 +7596,88 @@ button.ai-generate-chip.is-generating { animation: aigBreath 1.6s ease-in-out in
   #tab-zentao-ai .zai-side { position: static; }
   #tab-zentao-ai .zai-col-prod, #tab-zentao-ai .zai-col-who { display: none; }
 }
+
+/* ============================================================
+   R22 悬浮卡 v1（2026-11-26）：替代浏览器原生 title 小黄框
+   逻辑 js/components/hover-card.js（#omniqaHoverCard，.hc-*）
+   .hc--tip  普通 title 文字提示（深色小气泡，默认在上方）
+   .hc--rich 结构化信息卡（任务 / Bug：类型 + 编号 + 状态 + 标题 + 字段，默认在下方）
+   z 21000：比对话框 13000、图片查看器 20000 高，低于 toast 99999；pointer-events:none 不挡点击
+   ============================================================ */
+.hc {
+  position: fixed; left: 0; top: 0; z-index: 21000;
+  box-sizing: border-box; max-width: min(340px, calc(100vw - 16px));
+  pointer-events: none; opacity: 0;
+  transform: translateY(var(--hc-shift, 3px));
+  transition: opacity 0.14s ease, transform 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.hc[data-side="top"] { --hc-shift: -3px; }
+.hc.is-in { opacity: 1; transform: none; }
+.hc[hidden] { display: none !important; }
+.hc::before {
+  content: ""; position: absolute; left: var(--hc-arrow, 50%); width: 9px; height: 9px;
+  margin-left: -4.5px; transform: rotate(45deg); background: inherit;
+}
+.hc[data-side="bottom"]::before { top: -5px; }
+.hc[data-side="top"]::before { bottom: -5px; }
+
+/* 文字提示 */
+.hc--tip {
+  padding: 6px 10px; border-radius: 8px;
+  background: rgba(32, 29, 27, 0.94); color: #fafaf9;
+  box-shadow: 0 6px 18px -6px rgba(28, 25, 23, 0.45);
+  font-size: 12.5px; line-height: 1.55; font-weight: 450;
+}
+.hc-text { white-space: pre-line; overflow-wrap: anywhere; }
+
+/* 信息卡 */
+.hc--rich {
+  width: max-content; min-width: 230px; padding: 12px 14px 12px;
+  border: 1px solid var(--w-hairline-strong, rgba(28, 25, 23, 0.16)); border-radius: 12px;
+  background: var(--w-raised, #fff); color: var(--w-ink, #1c1917);
+  box-shadow: 0 16px 36px -12px rgba(28, 25, 23, 0.3), 0 2px 6px rgba(28, 25, 23, 0.06);
+}
+.hc--rich[data-side="bottom"]::before { border-left: 1px solid var(--w-hairline-strong, rgba(28, 25, 23, 0.16)); border-top: 1px solid var(--w-hairline-strong, rgba(28, 25, 23, 0.16)); }
+.hc--rich[data-side="top"]::before { border-right: 1px solid var(--w-hairline-strong, rgba(28, 25, 23, 0.16)); border-bottom: 1px solid var(--w-hairline-strong, rgba(28, 25, 23, 0.16)); }
+.hc-head { display: flex; align-items: center; gap: 6px; min-height: 20px; }
+.hc-kind { font-size: 11.5px; font-weight: 600; color: var(--w-ink-faint, #78716c); }
+.hc-id { font: 650 12.5px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--w-ink-soft, #44403c); }
+.hc-status {
+  display: inline-flex; align-items: center; height: 20px; margin-left: auto; padding: 0 8px;
+  border-radius: 999px; font-size: 11.5px; font-weight: 650; white-space: nowrap;
+}
+.hc-tone--blue { background: rgba(37, 99, 235, 0.1); color: #1d4ed8; }
+.hc-tone--green { background: rgba(22, 163, 74, 0.12); color: #15803d; }
+.hc-tone--amber { background: rgba(234, 179, 8, 0.18); color: #a16207; }
+.hc-tone--red { background: rgba(220, 38, 38, 0.1); color: #b91c1c; }
+.hc-tone--orange { background: rgba(234, 88, 12, 0.12); color: #c2410c; }
+.hc-tone--purple { background: rgba(124, 58, 237, 0.1); color: #6d28d9; }
+.hc-tone--gray { background: rgba(28, 25, 23, 0.07); color: #57534e; }
+.hc-title {
+  margin-top: 7px; font-size: 13.5px; font-weight: 620; line-height: 1.5; color: var(--w-ink, #1c1917);
+  overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.hc-note { margin-top: 6px; font-size: 12px; line-height: 1.5; color: var(--w-ink-faint, #78716c); }
+.hc-rows {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 14px;
+  margin: 10px 0 0; padding-top: 10px; border-top: 1px dashed var(--w-hairline-strong, rgba(28, 25, 23, 0.16));
+}
+.hc-rows > div { display: contents; }
+.hc-rows dt { font-size: 12px; color: var(--w-ink-faint, #78716c); white-space: nowrap; }
+.hc-rows dd { margin: 0; font-size: 12.5px; font-weight: 550; color: var(--w-ink-soft, #44403c); overflow-wrap: anywhere; }
+.hc-hint {
+  display: flex; align-items: center; gap: 5px; margin-top: 10px;
+  font-size: 11.5px; font-weight: 550; color: var(--w-accent-ink, #b8430e);
+}
+.hc-hint .ui-ic { width: 12px; height: 12px; }
+
+/* Bug 标题 ⓘ：图标按钮化，悬浮出信息卡 */
+.qa-title-tip {
+  display: inline-grid !important; place-items: center; width: 18px; height: 18px;
+  margin-left: 3px !important; border-radius: 50%; vertical-align: middle;
+  color: var(--w-ink-faint, #78716c) !important; cursor: help; outline: none;
+  transition: background 0.12s, color 0.12s;
+}
+.qa-title-tip .ui-ic { width: 14px; height: 14px; }
+.qa-title-tip:hover, .qa-title-tip:focus-visible { background: rgba(var(--w-accent-rgb), 0.1); color: var(--w-accent-ink) !important; }
+.qa-title-tip:focus-visible { box-shadow: 0 0 0 2px rgba(var(--w-accent-rgb), 0.35); }

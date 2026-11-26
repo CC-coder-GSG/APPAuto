@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { state } from '../state.js';
-import { escapeHtml, renderPreviewBtn } from '../utils.js?v=20261014-2';
+import { escapeHtml, renderPreviewBtn } from '../utils.js?v=20261126-hc-1';
 
 const h = value => escapeHtml(String(value ?? ''));
 const opened = new Set();

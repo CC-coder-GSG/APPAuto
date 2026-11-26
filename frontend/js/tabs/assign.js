@@ -1,11 +1,11 @@
-﻿import { loadAssignProgress, toggleAssignProgressPendingOnly, resetAssignProgressContext } from './assign-progress.js?v=20261103-final-stats-1';
+﻿import { loadAssignProgress, toggleAssignProgressPendingOnly, resetAssignProgressContext } from './assign-progress.js?v=20261126-hc-1';
 export { loadAssignProgress, toggleAssignProgressPendingOnly };
-import './assign-linked-tasks.js?v=20261022-1';
+import './assign-linked-tasks.js?v=20261126-hc-1';
 
 import { api } from '../api.js';
 import { confirmDialog } from '../components/dialog.js?v=20261126-zai-1';
 import { state } from '../state.js';
-import { renderPreviewBtn, escapeHtml } from '../utils.js?v=20261014-2';
+import { renderPreviewBtn, escapeHtml } from '../utils.js?v=20261126-hc-1';
 import { showLoading, hideLoading } from '../components/common.js';
 
 function getUsers() {

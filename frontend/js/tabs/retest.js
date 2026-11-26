@@ -1,6 +1,6 @@
 ﻿import { api } from '../api.js';
 import { state } from '../state.js';
-import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261014-2';
+import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge } from '../utils.js?v=20261126-hc-1';
 let retestSseBound = false;
 let retestPreflightPromise = null;
 let retestPreflightKey = '';
@@ -47,6 +47,7 @@ const TASK_CHIP_TONE = {
   cancel: { zh: '已取消', bg: '#f8fafc', fg: '#94a3b8', bd: '#e2e8f0' },
   closed: { zh: '已关闭', bg: '#f8fafc', fg: '#94a3b8', bd: '#e2e8f0' },
 };
+const TASK_HC_TONE = { doing: 'blue', changed: 'blue', wait: 'gray', pause: 'amber', done: 'green', cancel: 'gray', closed: 'gray' };
 function renderStoryTaskChips(tasks, domScope, reqId) {
   if (!tasks || !tasks.length) return '';
   const MAX_INLINE = 3;
@@ -57,11 +58,14 @@ function renderStoryTaskChips(tasks, domScope, reqId) {
     const assignee = t.assigned_to_name ? `<span class="qa-task-chip-assignee">👤${escapeHtml(t.assigned_to_name)}</span>` : '';
     // 完成者单独展示：任务完成后 assignedTo 常已流转给下一环节的人
     const finisher = t.finished_by_name ? `<span class="qa-task-chip-assignee">✔${escapeHtml(t.finished_by_name)}完成</span>` : '';
-    const tip = `任务 #${t.task_id}【${tone.zh}】${t.name || ''}`
-      + (t.assigned_to_name ? ` · 当前指派：${t.assigned_to_name}` : '')
-      + (t.finished_by_name ? ` · 由 ${t.finished_by_name} 完成` : '')
-      + '（点击预览）';
-    return `<span class="qa-task-chip${struck}" style="background:${tone.bg}; color:${tone.fg}; border-color:${tone.bd};" title="${escapeHtml(tip)}"
+    // 悬浮信息卡（components/hover-card.js）
+    const card = {
+      k: '禅道任务', id: `#${t.task_id}`, t: t.name || '', s: tone.zh, tone: TASK_HC_TONE[t.status] || 'gray',
+      rows: [['当前指派', t.assigned_to_name || ''], ['完成人', t.finished_by_name || '']],
+      hint: '点击预览任务详情',
+    };
+    const label = `任务 #${t.task_id}【${tone.zh}】${t.name || ''}`;
+    return `<span class="qa-task-chip${struck}" style="background:${tone.bg}; color:${tone.fg}; border-color:${tone.bd};" data-hc="${escapeHtml(JSON.stringify(card))}" aria-label="${escapeHtml(label)}"
       onclick="event.preventDefault(); event.stopPropagation(); window.OmniQAPreview && window.OmniQAPreview.openTask(${t.task_id})">
       ⚙#${t.task_id}<span class="qa-task-chip-title">${escapeHtml(t.name || '')}</span>${assignee}${finisher}<span class="qa-task-chip-status">${tone.zh}</span></span>`;
   };

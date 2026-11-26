@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { state } from '../state.js';
-import { escapeHtml } from '../utils.js?v=20261014-2';
+import { escapeHtml } from '../utils.js?v=20261126-hc-1';
 
 const h = value => escapeHtml(String(value ?? ''));
 const statusNames = { wait: '未开始', doing: '进行中', changed: '进行中', pause: '已暂停', done: '已完成', closed: '已关闭' };

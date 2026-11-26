@@ -52,7 +52,10 @@ export function renderBugLink(bug) {
     : numericId
       ? `<span class="qa-bug-id-nohref" data-zt-bug-id="${numericId}">${bugId}</span>`
       : `<span>${bugId}</span>`;
-  const tip = title ? `<span class="qa-title-tip" title="${title}">ⓘ</span>` : '';
+  // ⓘ 悬浮显示 Bug 信息卡（components/hover-card.js：禅道水合缓存里有状态 / 严重程度 / 指派就一起显示）
+  const tip = title
+    ? `<span class="qa-title-tip" tabindex="0" role="img" aria-label="${title}" data-hc-bug="${escapeHtml(numericId)}" data-hc-bug-title="${title}"><svg class="ui-ic" aria-hidden="true"><use href="#i-info"/></svg></span>`
+    : '';
   return `${link}${tip}`;
 }
 

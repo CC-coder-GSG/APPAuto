@@ -26,7 +26,7 @@
  *
  * Page-level indicator: <span id="ztSyncDot"> in the header shows sync state.
  *
- * Exposes: window.OmniQAZentao = { hydrateContainer, invalidate }
+ * Exposes: window.OmniQAZentao = { hydrateContainer, invalidate, refreshVisible, peekBug }
  */
 
 import { loadHydration, hydrationEpoch, invalidateHydration } from './components/hydration-queue.js?v=20261105-hydration-1';
@@ -159,6 +159,7 @@ function invalidate() {
     delete el.dataset.ztPending;
     delete el.dataset.ztStale;
     el.removeAttribute('title');
+    delete el.dataset.hcTitle;
   });
   _setIndicator('idle');
 }
@@ -204,8 +205,7 @@ function _renderBugSlot(d, { showTitle = false } = {}) {
     : '';
 
   const titleHtml = (showTitle && d.title)
-    ? `<span class="qa-title-tip" title="${_escHtml(d.title)}"
-         style="color:#64748b;font-size:11px;margin-left:2px;cursor:help;">ⓘ</span>`
+    ? `<span class="qa-title-tip" tabindex="0" role="img" aria-label="${_escHtml(d.title)}" data-hc-bug="${_escHtml(d.id ?? '')}" data-hc-bug-title="${_escHtml(d.title)}"><svg class="ui-ic" aria-hidden="true"><use href="#i-info"/></svg></span>`
     : '';
 
   return `${statusBadge}${resBadge}${assignee}${titleHtml}`;
@@ -335,6 +335,7 @@ function _fillSlot(el, kind, data) {
   delete el.dataset.ztPending;
   delete el.dataset.ztStale;
   el.removeAttribute('title');
+  delete el.dataset.hcTitle;   // 悬浮卡显示期间暂存的 title（components/hover-card.js），一并清掉
   if (kind === 'bugs') {
     const parent = el.parentElement;
     el.innerHTML = _renderBugSlot(data, { showTitle: !parent?.querySelector('.qa-title-tip') && el.dataset.ztNoTitle !== '1' });
@@ -438,4 +439,9 @@ function refreshVisible() {
   hydrateContainer(container);
 }
 
-window.OmniQAZentao = { hydrateContainer, invalidate, refreshVisible };
+// 只读缓存（悬浮信息卡用）：undefined = 未加载 / 已过期，null = 禅道中不存在
+function peekBug(id) {
+  return _cacheGet(_bugCache, String(id));
+}
+
+window.OmniQAZentao = { hydrateContainer, invalidate, refreshVisible, peekBug };

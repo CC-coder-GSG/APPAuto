@@ -9,7 +9,7 @@ import { closeModal, openModal } from '../components/modal.js';
 import { askTaskHours, mountHoursField, confirmTaskDialog, promptTaskDialog } from '../components/task-dialog.js?v=20261126-zai-1';
 import { renderCaseReviewControls } from '../components/case-review.js?v=20260714-1';
 import { renderBugVersion } from '../components/bug-version.js?v=20261022-found-version-1';
-import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge, sourceTypeZh } from '../utils.js?v=20261014-2';
+import { escapeHtml, renderBugLink, renderCaseLink, renderPreviewBtn, renderTaskStoryChangeBadge, sourceTypeZh } from '../utils.js?v=20261126-hc-1';
 
 const RESULT_OPTIONS = [
   { value: 'passed', label: '通过' },
@@ -141,6 +141,7 @@ const TASK_CHIP_TONE = {
   cancel: { zh: '已取消', bg: '#f8fafc', fg: '#94a3b8', bd: '#e2e8f0' },
   closed: { zh: '已关闭', bg: '#f8fafc', fg: '#94a3b8', bd: '#e2e8f0' },
 };
+const TASK_HC_TONE = { doing: 'blue', changed: 'blue', wait: 'gray', pause: 'amber', done: 'green', cancel: 'gray', closed: 'gray' };
 function renderStoryTaskChips(tasks, domScope, reqId, managedTaskIds = []) {
   if (!tasks || !tasks.length) return '';
   // 管理任务已有专属标签/选择器；同一任务不再在标题下重复展示。
@@ -161,11 +162,15 @@ function renderStoryTaskChips(tasks, domScope, reqId, managedTaskIds = []) {
     const assignee = t.assigned_to_name ? `<span class="qa-task-chip-assignee">👤${escapeHtml(t.assigned_to_name)}</span>` : '';
     // 完成者单独展示：任务完成后 assignedTo 常已流转给下一环节的人
     const finisher = t.finished_by_name ? `<span class="qa-task-chip-assignee">✔${escapeHtml(t.finished_by_name)}完成</span>` : '';
-    const tip = `任务 #${t.task_id}【${tone.zh}】${t.name || ''}`
-      + (t.assigned_to_name ? ` · 当前指派：${t.assigned_to_name}` : '')
-      + (t.finished_by_name ? ` · 由 ${t.finished_by_name} 完成` : '')
-      + (pending ? '（点击查看需求变更并确认）' : '（点击预览）');
-    return `<span class="qa-task-chip${struck}" style="background:${tone.bg}; color:${tone.fg}; border-color:${tone.bd};" title="${escapeHtml(tip)}"
+    // 悬浮信息卡（components/hover-card.js）；aria-label 保留一句话版本给读屏
+    const card = {
+      k: '禅道任务', id: `#${t.task_id}`, t: t.name || '', s: tone.zh, tone: pending ? 'orange' : (TASK_HC_TONE[t.status] || 'gray'),
+      rows: [['当前指派', t.assigned_to_name || ''], ['完成人', t.finished_by_name || '']],
+      note: pending ? '关联的研发需求有变更，待确认' : '',
+      hint: pending ? '点击查看需求变更并确认' : '点击预览任务详情',
+    };
+    const label = `任务 #${t.task_id}【${tone.zh}】${t.name || ''}`;
+    return `<span class="qa-task-chip${struck}" style="background:${tone.bg}; color:${tone.fg}; border-color:${tone.bd};" data-hc="${escapeHtml(JSON.stringify(card))}" aria-label="${escapeHtml(label)}"
       onclick="event.preventDefault(); event.stopPropagation(); window.OmniQAPreview && window.OmniQAPreview.${pending ? 'openTaskStoryChange' : 'openTask'}(${t.task_id})">
       ⚙#${t.task_id}<span class="qa-task-chip-title">${escapeHtml(t.name || '')}</span>${assignee}${finisher}<span class="qa-task-chip-status">${tone.zh}</span></span>`;
   };

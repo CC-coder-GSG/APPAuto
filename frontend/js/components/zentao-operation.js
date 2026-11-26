@@ -122,7 +122,7 @@ function applyTriggerLocks() {
       el.classList.toggle('is-op-spinning', BUSY.includes(op.state) && triggerSignature(el) === op.triggerSignature);
     } else if (el.hasAttribute('data-op-locked')) {
       if ('disabled' in el && el.getAttribute('data-op-locked') !== 'pre') el.disabled = false;
-      if (el.dataset.opTitle) el.title = el.dataset.opTitle; else el.removeAttribute('title');
+      if (el.dataset.opTitle) el.title = el.dataset.opTitle; else { el.removeAttribute('title'); delete el.dataset.hcTitle; }
       el.removeAttribute('data-op-locked');
       el.removeAttribute('aria-busy');
       el.removeAttribute('aria-disabled');
