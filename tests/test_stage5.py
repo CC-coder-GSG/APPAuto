@@ -307,3 +307,48 @@ def test_stage5_sync_zentao_major_bugs_retries_once_when_zentao_token_expired(db
     assert len(rows) == 1
     assert rows[0].bug_id == "b#7301"
     assert invalidated == [user.id]
+
+
+def test_stage5_sync_zentao_major_bugs_keeps_bugs_resolved_in_our_build_under_their_own_major(db_session):
+    """
+    builds/{id}/bugs 返回的是「在该构建里解决」的 Bug。其他版本发现、修进本版本构建的 Bug
+    （线上 34186：执行 s40416、发现于 40416008、解决于 4.0.5.0 的构建）不能被改挂到当前同步的大版本。
+    """
+    old_major = _create_major(db_session, "V4.0.4.16")
+    old_major.zentao_execution_id = 2033
+    old_minor = _create_minor(db_session, old_major.id, "4.0.4.16.261124_fm(40416008)")
+    old_minor.zentao_build_id = 5329
+    major = _create_major(db_session, "V4.0.5.0")
+    major.zentao_execution_id = 1875
+    db_session.commit()
+    user = _create_user(db_session, "stage5_sync_user_cross")
+    # 之前被错挂到 4.0.5.0 的存量记录，同步后应回到 4.0.4.16
+    stale = BugTracking(major_version_id=major.id, requirement_id=None, source_type=BugSourceType.MANUAL, bug_id="b#34186",
+                        created_by_id=user.id, zentao_bug_id="34186", zentao_execution_id="1875")
+    db_session.add(stale)
+    db_session.commit()
+
+    service = Stage5Service(db_session)
+    fake_client = _FakeZentaoClient({
+        "executions/1875/bugs": {"bugs": [
+            {"id": 9001, "title": "本版本发现的 Bug", "execution": 1875, "openedBuild": {}},
+        ]},
+        "executions/1875/builds": {"builds": [{"id": 5432, "name": "4.0.5.0.261127(40500040)"}]},
+        "builds/5432/bugs": {"bugs": [
+            {"id": 34186, "title": "林业大师分享功能无法使用", "execution": 2033, "openedBuild": "5329", "status": "resolved"},
+            {"id": 9002, "title": "只挂在本版本构建、无执行信息的 Bug", "openedBuild": {}},
+        ]},
+    })
+    service._get_zentao_client_ctx = lambda user_id: (fake_client, "http://zentao")  # type: ignore[method-assign]
+
+    result = service.sync_zentao_major_bugs(major_version_id=major.id, current_user=user)
+
+    by_id = {row.zentao_bug_id: row for row in db_session.query(BugTracking).all()}
+    assert result["remote_total"] == 3
+    assert by_id["34186"].major_version_id == old_major.id
+    assert by_id["34186"].found_minor_version_id == old_minor.id
+    assert by_id["34186"].zentao_execution_id == "2033"
+    assert by_id["9001"].major_version_id == major.id
+    assert by_id["9002"].major_version_id == major.id
+    overview_ids = {b["zentao_bug_id"] for b in service.overview(major.id, user)["bug_pool"]}
+    assert overview_ids == {"9001", "9002"}

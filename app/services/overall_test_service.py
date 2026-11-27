@@ -1800,14 +1800,22 @@ class OverallTestService:
                 .first()
             )
 
-        matched_minor_id = self._match_minor_by_build_ids(major.id, normalized.get("opened_build_ids") or [])
+        # 归属大版本按 Bug 自身信息判定（发现版本 → 所属执行 → 影响版本），与全量同步同一口径。
+        # 单版本同步除了拉本执行的 Bug，还会拉本版本各构建的 builds/{id}/bugs——禅道这个接口
+        # 返回的是「在该构建里解决」的 Bug。以前一律改挂到当前大版本，导致别的版本发现、
+        # 在本版本构建修复的 Bug（如 40416 的 34186 修进 4.0.5.0 构建）被拉进当前版本，
+        # 并和全量同步来回抢。现在只有判定不出归属时才落到当前同步的大版本。
+        target_major_id, matched_minor_id = self._resolve_major_minor_for_bug(normalized, major)
+        if matched_minor_id is None and target_major_id == major.id:
+            matched_minor_id = self._match_minor_by_build_ids(major.id, normalized.get("opened_build_ids") or [])
+        in_this_major = target_major_id == major.id
         # Pin the actor to the real Zentao opener when possible
         resolved_actor = self._resolve_actor_from_opened_by(normalized.get("opened_by_account"), actor)
 
         created = bug_row is None
         if bug_row is None:
             bug_row = BugTracking(
-                major_version_id=major.id,
+                major_version_id=target_major_id,
                 requirement_id=None,
                 source_type=BugSourceType.MANUAL,
                 source_ref=None,
@@ -1817,7 +1825,7 @@ class OverallTestService:
             )
             self.db.add(bug_row)
         else:
-            bug_row.major_version_id = major.id
+            bug_row.major_version_id = target_major_id
             if matched_minor_id:
                 bug_row.found_minor_version_id = matched_minor_id
             bug_row.bug_id = normalized["bug_id"]
@@ -1825,11 +1833,14 @@ class OverallTestService:
                 bug_row.source_type = BugSourceType.MANUAL
                 bug_row.zentao_display_bucket = "overall"
 
+        # Bug 自带所属执行时以它为准，不再用当前同步的执行覆盖（否则看不出它原本属于哪个版本）
+        own_execution = bool(normalized.get("execution_ref_id"))
+        target_major = major if in_this_major else self.db.query(Version).filter(Version.id == target_major_id).first()
         updated = self._write_bug_fields_from_normalized(
             bug_row,
             normalized,
-            execution_id=execution_id,
-            execution_name=major.zentao_execution_name_cache or major.version_no,
+            execution_id=None if (own_execution or not in_this_major) else execution_id,
+            execution_name=(target_major.zentao_execution_name_cache or target_major.version_no) if target_major else None,
             sync_message="通过整体测试版本全量同步",
             touched_if_existing=not created,
         )
