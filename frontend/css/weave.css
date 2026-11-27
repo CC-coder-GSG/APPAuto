@@ -159,17 +159,18 @@ html.nav-animating body { transition: padding-left var(--w-base) var(--w-swift);
   flex-shrink: 0;
   overflow: hidden;
 }
-.nav-brand img {
+/* 品牌标志：内联 SVG（omniqa-logo.png 左侧图形矢量化），品牌藏青色 */
+.nav-brand-mark {
+  display: block;
   width: auto;
-  height: 30px;
-  max-width: 56px;
-  object-fit: contain;
+  height: 26px;
   flex-shrink: 0;
-  filter: drop-shadow(0 2px 6px rgba(79, 70, 229, 0.18));
+  color: #3c4f67;
+  transition: transform var(--w-base) var(--w-spring);
 }
+.nav-brand:hover .nav-brand-mark { transform: rotate(-6deg) scale(1.04); }
 .nav-brand-text { min-width: 0; line-height: 1.25; white-space: nowrap; overflow: hidden; }
-.nav-brand-text strong { display: block; font-size: 14px; font-weight: 650; color: var(--w-ink); }
-.nav-brand-text span { font-size: 11px; color: var(--w-ink-faint); letter-spacing: 0.08em; }
+.nav-brand-text strong { display: block; font-size: 15px; font-weight: 700; letter-spacing: 0.02em; color: var(--w-ink); }
 
 .nav-scroll {
   position: relative;
@@ -358,7 +359,7 @@ html.nav-animating body { transition: padding-left var(--w-base) var(--w-swift);
   html.omniqa-shell.nav-collapsed body { padding-left: var(--w-sb-collapsed) !important; }
   html.nav-collapsed #tabs { width: var(--w-sb-collapsed) !important; }
   html.nav-collapsed .nav-brand { justify-content: center; padding: 0; }
-  html.nav-collapsed .nav-brand img { max-width: 44px; }
+  html.nav-collapsed .nav-brand-mark { height: 24px; }
   html.nav-collapsed .nav-brand-text,
   html.nav-collapsed #tabs .nav-label,
   html.nav-collapsed #tabs .nav-ext-ic { display: none !important; }
