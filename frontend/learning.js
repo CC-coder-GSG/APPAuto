@@ -1336,53 +1336,366 @@ function formatLearningAnswer(answer) {
 }
 
 // ============================ 批阅与统计 ============================
+// 逐题统计：每题一行（题型 / 题干 / 作答人数 / 正确率），点开看选项分布和每个人的答案。
+// 答卷批阅：每份答卷默认折叠成一行，同时只展开一份；展开后右侧吸顶导航可跳到指定题目、保存、切换上一份 / 下一份。
+// 展开 / 筛选只在原地切换显隐，不重绘，正在批阅的分数不会丢。
 
-async function reviewLearningQuiz(id) {
+const learningReview = { quizId: null, quiz: null, stats: null, subs: [], openSub: null, openQ: null, filter: 'all' };
+
+function lrnAnswerTone(a) {
+  if (a.awarded_score === null || a.awarded_score === undefined) return 'pending';
+  if (a.is_correct) return 'right';
+  return Number(a.awarded_score) > 0 ? 'partial' : 'wrong';
+}
+
+function lrnScoreTone(value, max) {
+  if (value === '' || value === null || value === undefined || Number.isNaN(Number(value))) return 'pending';
+  const v = Number(value);
+  if (v >= Number(max)) return 'right';
+  return v > 0 ? 'partial' : 'wrong';
+}
+
+const LRN_TONE_TEXT = { right: '正确', wrong: '错误', partial: '部分得分', pending: '待评分' };
+
+async function reviewLearningQuiz(id, opts = {}) {
   try {
     const [quiz, stats, submissions] = await Promise.all([
       api(`/learning/quizzes/${id}`).then(r => r.json()),
       api(`/learning/quizzes/${id}/stats`).then(r => r.json()),
       api(`/learning/quizzes/${id}/submissions`).then(r => r.json())
     ]);
+    if (learningReview.quizId !== quiz.id) Object.assign(learningReview, { quizId: quiz.id, openSub: null, openQ: null, filter: 'all' });
+    if (opts.openSub !== undefined) learningReview.openSub = opts.openSub;
+    Object.assign(learningReview, { quiz, stats, subs: submissions });
     activeQuiz = quiz;
-    showLearningPanel('quizReviewPanel');
+    const wasHidden = document.getElementById('quizReviewPanel')?.classList.contains('hidden');
+    if (wasHidden) showLearningPanel('quizReviewPanel');
+    bindLearningReview();
     reviewQuizTitle.textContent = `批阅与统计：${quiz.title}`;
-    const judged = stats.questions.filter(q => q.correct_rate !== null);
-    const avg = judged.length ? Math.round(judged.reduce((n, q) => n + q.correct_rate, 0) / judged.length) : null;
-    const pendingReview = submissions.filter(s => !s.is_preview && s.status !== 'graded').length;
-    quizStatsBody.innerHTML = `
-      <div class="lrn-review-meta"><span class="lrn-status lrn-status--${quiz.status}">${learningStatus(quiz.status)}</span>${quiz.content ? `<button type="button" class="lrn-chip lrn-chip--link" data-lrn-open="${quiz.content.id}">${lrnIc(quiz.content.kind === 'course' ? 'book' : 'file')}<span>随课 · ${learningEsc(quiz.content.title)}</span></button>` : '<span class="lrn-chip">独立答题活动</span>'}<span>${quiz.question_count} 题 · ${quiz.total_points} 分</span></div>
-      <div class="lrn-kpis">
-        <div><b>${stats.submitted_count}<small> / ${stats.expected_count}</small></b><span>已提交</span><div class="lrn-bar"><span style="width:${stats.expected_count ? Math.round(stats.submitted_count * 100 / stats.expected_count) : 0}%"></span></div></div>
-        <div><b>${stats.pending_count}</b><span>未提交</span></div>
-        <div><b>${stats.graded_count}</b><span>已批阅</span></div>
-        <div class="${pendingReview ? 'is-warn' : ''}"><b>${pendingReview}</b><span>待人工批阅</span></div>
-        <div><b>${avg === null ? '—' : `${avg}%`}</b><span>平均正确率</span></div>
-      </div>
-      <div class="lrn-section-head"><h3>逐题统计</h3><span class="lrn-section-note">正确率按自动判分与已批阅的答卷计算</span></div>
-      <div class="lrn-qstats">${stats.questions.map(q => `<div class="lrn-qstat">${renderLearningOriginal(q, q.position, (q.options || []).length ? { correct: q.correct_answers || [] } : null)}
-        ${(q.options || []).length || !(q.correct_answers || []).length ? '' : `<p class="lrn-ra-line lrn-ra-ref">参考答案：${learningEsc(formatLearningAnswer(q.correct_answers))}</p>`}
-        <div class="lrn-qstat-rate"><span>作答 ${q.answered_count} 人 · ${q.correct_rate === null ? '待人工评分' : `正确率 ${q.correct_rate}%`}</span><div class="stats-bar lrn-bar${q.correct_rate !== null && q.correct_rate < 60 ? ' is-low' : ''}"><span style="width:${q.correct_rate || 0}%"></span></div></div>
-        <details class="lrn-qstat-answers"><summary>查看所有人的答案（${q.answers.length}）</summary>${q.answers.map(a => `<p><b>${learningEsc(a.username)}</b><span>${learningEsc(formatLearningAnswer(a.answer))}</span><i class="lrn-mark ${a.is_correct === null ? 'is-pending' : a.is_correct ? 'is-right' : 'is-wrong'}">${a.is_correct === null ? '待评' : a.is_correct ? '正确' : '错误'}</i></p>`).join('') || '<p class="muted">暂无</p>'}</details>
-      </div>`).join('')}</div>`;
-    const release = quiz.status === 'closed'
-      ? `<div class="lrn-release${quiz.results_released ? ' is-done' : ''}">${lrnIc(quiz.results_released ? 'check' : 'send')}<div><b>${quiz.results_released ? '成绩已发布' : '完成批阅后发布成绩'}</b><span>${quiz.results_released ? (quiz.show_answers ? '成员可以看到得分和参考答案' : '成员可以看到得分，参考答案未公开') : (pendingReview ? `还有 ${pendingReview} 份答卷待批阅` : '所有答卷已批阅，可以发布')}</span></div><div class="learning-item-actions"><button onclick="releaseLearningResults(${quiz.id},true)">发布成绩并展示答案</button><button class="secondary" onclick="releaseLearningResults(${quiz.id},false)">发布成绩但隐藏答案</button></div></div>`
-      : (quiz.status === 'open' ? `<div class="lrn-release">${lrnIc('clock')}<div><b>答题进行中</b><span>结束答题后才能发布成绩</span></div></div>` : '');
-    quizSubmissionsBody.innerHTML = `<div class="lrn-section-head"><h3>答卷批阅</h3><span class="lrn-section-note">${submissions.length} 份${pendingReview ? ` · 待批阅 ${pendingReview}` : ''}</span></div>` + release + (submissions.map(renderReviewSubmission).join('') || lrnEmpty('check', '暂时没有答卷', '成员提交后会出现在这里'));
+    lrnRenderReviewStats();
+    lrnRenderReviewSubs();
+    if (opts.scrollToSub && learningReview.openSub) lrnScrollToSub(learningReview.openSub);
   } catch(e) { showMessage(e.message, 'error'); }
 }
 
-function renderReviewSubmission(s) {
-  return `<div class="review-submission lrn-sub" data-submission="${s.id}"><div class="lrn-sub-head"><h4>${learningEsc(s.username)}</h4>${s.is_preview ? '<span class="lrn-chip lrn-chip--draft">出题人预览</span>' : ''}<span class="lrn-status ${s.status === 'graded' ? 'lrn-status--graded' : 'lrn-status--pending'}">${s.status === 'graded' ? `已批阅 ${s.total_score} 分` : '待批阅'}</span><span class="lrn-sub-time">${lrnDate(s.submitted_at)} 提交</span></div>
-    <div class="learning-answer-table"><table><thead><tr><th>题目/答案</th><th>参考答案</th><th>得分</th><th>批语</th></tr></thead><tbody>${s.answers.map(a => `<tr data-question="${a.question_id}" class="${a.is_correct === null ? 'is-pending' : a.is_correct ? 'is-right' : 'is-wrong'}"><td>${renderLearningOriginal(a,a.position)}<p class="lrn-ra-line"><span>作答</span>${learningEsc(formatLearningAnswer(a.answer))}</p></td><td>${learningEsc(lrnRefAnswer(a.correct_answers))}</td><td><input class="review-score" type="number" min="0" max="${a.max_score}" step="0.5" value="${a.awarded_score ?? ''}" placeholder="/${a.max_score}" aria-label="第 ${a.position} 题得分，满分 ${a.max_score}"></td><td><input class="review-comment" value="${learningEsc(a.reviewer_comment || '')}" placeholder="可选" aria-label="第 ${a.position} 题批语"></td></tr>`).join('')}</tbody></table></div><div class="lrn-sub-foot"><button onclick="gradeLearningSubmission(${activeQuiz.id},${s.id})">${lrnIc('check')}保存批阅</button></div></div>`;
+function lrnRenderReviewStats() {
+  const { quiz, stats, subs } = learningReview;
+  const judged = stats.questions.filter(q => q.correct_rate !== null);
+  const avg = judged.length ? Math.round(judged.reduce((n, q) => n + q.correct_rate, 0) / judged.length) : null;
+  const pendingReview = subs.filter(s => !s.is_preview && s.status !== 'graded').length;
+  quizStatsBody.innerHTML = `
+    <div class="lrn-review-meta"><span class="lrn-status lrn-status--${quiz.status}">${learningStatus(quiz.status)}</span>${quiz.content ? `<button type="button" class="lrn-chip lrn-chip--link" data-lrn-open="${quiz.content.id}">${lrnIc(quiz.content.kind === 'course' ? 'book' : 'file')}<span>随课 · ${learningEsc(quiz.content.title)}</span></button>` : '<span class="lrn-chip">独立答题活动</span>'}<span>${quiz.question_count} 题 · ${quiz.total_points} 分</span></div>
+    <div class="lrn-kpis">
+      <div><b>${stats.submitted_count}<small> / ${stats.expected_count}</small></b><span>已提交</span><div class="lrn-bar"><span style="width:${stats.expected_count ? Math.round(stats.submitted_count * 100 / stats.expected_count) : 0}%"></span></div></div>
+      <div><b>${stats.pending_count}</b><span>未提交</span></div>
+      <div><b>${stats.graded_count}</b><span>已批阅</span></div>
+      <div class="${pendingReview ? 'is-warn' : ''}"><b>${pendingReview}</b><span>待人工批阅</span></div>
+      <div><b>${avg === null ? '—' : `${avg}%`}</b><span>平均正确率</span></div>
+    </div>
+    <div class="lrn-section-head"><h3>逐题统计</h3><span class="lrn-section-note">点击题目查看选项分布和每个人的答案</span></div>
+    <div class="lrn-qtable">
+      <div class="lrn-qt-cols" aria-hidden="true"><span>题号</span><span>题目</span><span>作答</span><span>正确率</span></div>
+      ${stats.questions.map(q => lrnQuestionStatRow(q)).join('')}
+    </div>`;
 }
 
-async function gradeLearningSubmission(quizId, submissionId) {
+function lrnQuestionStatRow(q) {
+  const open = learningReview.openQ === q.id;
+  const rate = q.correct_rate;
+  const pending = q.answered_count - q.judged_count;
+  const tone = rate === null ? 'pending' : rate >= 80 ? 'good' : rate >= 60 ? 'mid' : 'low';
+  return `<div class="lrn-qt-row${open ? ' is-open' : ''}" data-lrn-qstat="${q.id}">
+    <button type="button" class="lrn-qt-head" aria-expanded="${open}">
+      <span class="lrn-qt-no">${q.position}</span>
+      <span class="lrn-qt-main"><span class="lrn-qt-type">${learningType(q.question_type)} · ${q.score} 分</span><span class="lrn-qt-prompt">${learningEsc(q.prompt)}</span></span>
+      <span class="lrn-qt-count">${q.answered_count} 人</span>
+      <span class="lrn-qt-rate lrn-qt-rate--${tone}"><span class="lrn-qt-bar"><i style="width:${rate || 0}%"></i></span><b>${rate === null ? '待评分' : `${Math.round(rate)}%`}</b>${pending > 0 && rate !== null ? `<small>${pending} 待评</small>` : ''}</span>
+      ${lrnIc('chevron-down', 'lrn-qt-chev')}
+    </button>
+    <div class="lrn-qt-detail"${open ? '' : ' hidden'}>${open ? lrnQuestionStatDetail(q) : ''}</div>
+  </div>`;
+}
+
+function lrnQuestionStatDetail(q) {
+  const choice = (q.options || []).length > 0;
+  const correct = new Set((q.correct_answers || []).map(String));
+  let right = '';
+  if (choice) {
+    const total = q.answers.length || 0;
+    const counts = q.options.map(o => q.answers.filter(a => (Array.isArray(a.answer) ? a.answer.map(String) : [String(a.answer ?? '')]).includes(String(o))).length);
+    const blank = q.answers.filter(a => a.answer == null || a.answer === '' || (Array.isArray(a.answer) && !a.answer.length)).length;
+    right = `<div class="lrn-dist"><div class="lrn-dist-title">选项分布<small>共 ${total} 人作答${blank ? ` · ${blank} 人未选` : ''}</small></div>
+      ${q.options.map((o, i) => { const pct = total ? Math.round(counts[i] * 100 / total) : 0; return `<div class="lrn-dist-row${correct.has(String(o)) ? ' is-correct' : ''}"><span class="lrn-dist-letter">${quizOptionLetter(i)}</span><span class="lrn-dist-text">${learningEsc(o)}</span><span class="lrn-dist-bar"><i style="width:${pct}%"></i></span><b>${counts[i]} 人</b><small>${pct}%</small></div>`; }).join('')}
+    </div>`;
+  }
+  const people = q.answers.length
+    ? q.answers.map(a => `<div class="lrn-pa"><b>${learningEsc(a.username)}</b><span>${learningEsc(formatLearningAnswer(a.answer))}</span><i class="lrn-mark ${a.is_correct === null ? 'is-pending' : a.is_correct ? 'is-right' : 'is-wrong'}">${a.is_correct === null ? '待评' : a.is_correct ? '正确' : '错误'}</i></div>`).join('')
+    : '<p class="muted lrn-none">暂无作答</p>';
+  return `<div class="lrn-qt-detail-grid">
+    <div class="lrn-qt-detail-q">${renderLearningOriginal(q, q.position, choice ? { correct: q.correct_answers || [] } : null)}${!choice && (q.correct_answers || []).length ? `<p class="lrn-ra-line lrn-ra-ref">参考答案：${learningEsc(formatLearningAnswer(q.correct_answers))}</p>` : ''}</div>
+    <div class="lrn-qt-detail-a">${right}<div class="lrn-dist-title">每个人的答案<small>${q.answers.length} 人</small></div><div class="lrn-pa-list">${people}</div></div>
+  </div>`;
+}
+
+function lrnSubVisible(s) {
+  const f = learningReview.filter;
+  if (f === 'pending') return s.status !== 'graded';
+  if (f === 'graded') return s.status === 'graded';
+  return true;
+}
+
+function lrnRenderReviewSubs() {
+  const { quiz, subs } = learningReview;
+  const pendingReview = subs.filter(s => !s.is_preview && s.status !== 'graded').length;
+  const counts = { all: subs.length, pending: subs.filter(s => s.status !== 'graded').length, graded: subs.filter(s => s.status === 'graded').length };
+  const release = quiz.status === 'closed'
+    ? `<div class="lrn-release${quiz.results_released ? ' is-done' : ''}">${lrnIc(quiz.results_released ? 'check' : 'send')}<div><b>${quiz.results_released ? '成绩已发布' : '完成批阅后发布成绩'}</b><span>${quiz.results_released ? (quiz.show_answers ? '成员可以看到得分和参考答案' : '成员可以看到得分，参考答案未公开') : (pendingReview ? `还有 ${pendingReview} 份答卷待批阅` : '所有答卷已批阅，可以发布')}</span></div><div class="learning-item-actions"><button onclick="releaseLearningResults(${quiz.id},true)">发布成绩并展示答案</button><button class="secondary" onclick="releaseLearningResults(${quiz.id},false)">发布成绩但隐藏答案</button></div></div>`
+    : (quiz.status === 'open' ? `<div class="lrn-release">${lrnIc('clock')}<div><b>答题进行中</b><span>结束答题后才能发布成绩；现在也可以先批阅已提交的答卷</span></div></div>` : '');
+  if (learningReview.openSub && !subs.some(s => s.id === learningReview.openSub)) learningReview.openSub = null;
+  quizSubmissionsBody.innerHTML = `
+    <div class="lrn-section-head lrn-subs-head"><h3>答卷批阅</h3><span class="lrn-section-note">${subs.length} 份${pendingReview ? ` · 待批阅 ${pendingReview}` : ''} · 点击姓名展开答卷</span><span class="lrn-grow"></span>
+      ${subs.length ? `<div class="lrn-seg lrn-seg--sm" role="tablist" aria-label="答卷筛选">${[['all', '全部'], ['pending', '待批阅'], ['graded', '已批阅']].map(([k, t]) => `<button type="button" role="tab" data-lrn-sub-filter="${k}" class="${learningReview.filter === k ? 'is-active' : ''}" aria-selected="${learningReview.filter === k}">${t}<b>${counts[k]}</b></button>`).join('')}</div>` : ''}
+    </div>
+    ${release}
+    <div class="lrn-subs">${subs.map(s => renderReviewSubmission(s)).join('') || lrnEmpty('check', '暂时没有答卷', '成员提交后会出现在这里')}</div>
+    <p class="muted lrn-none lrn-subs-empty" hidden>没有符合筛选条件的答卷</p>`;
+  lrnApplySubFilter();
+}
+
+function renderReviewSubmission(s) {
+  const open = learningReview.openSub === s.id;
+  const total = learningReview.quiz?.total_points ?? s.answers.reduce((n, a) => n + Number(a.max_score || 0), 0);
+  const waiting = s.answers.filter(a => lrnAnswerTone(a) === 'pending').length;
+  const score = s.status === 'graded' ? `<b>${s.total_score}</b> / ${total}` : `自动 <b>${s.auto_score}</b> 分${waiting ? ` · ${waiting} 题待评` : ''}`;
+  return `<div class="review-submission lrn-sub${open ? ' is-open' : ''}" data-submission="${s.id}"${lrnSubVisible(s) ? '' : ' hidden'}>
+    <button type="button" class="lrn-sub-head" data-lrn-sub-toggle="${s.id}" aria-expanded="${open}">
+      <span class="lrn-sub-avatar" aria-hidden="true">${learningEsc(String(s.username || '?').slice(0, 1).toUpperCase())}</span>
+      <span class="lrn-sub-who"><b>${learningEsc(s.username)}</b>${s.is_preview ? '<span class="lrn-chip lrn-chip--draft">出题人预览</span>' : ''}<small>${lrnDate(s.submitted_at)} 提交</small></span>
+      <span class="lrn-sub-strip" aria-hidden="true">${s.answers.map(a => `<i class="is-${lrnAnswerTone(a)}"></i>`).join('')}</span>
+      <span class="lrn-status ${s.status === 'graded' ? 'lrn-status--graded' : 'lrn-status--pending'}">${s.status === 'graded' ? '已批阅' : '待批阅'}</span>
+      <span class="lrn-sub-score">${score}</span>
+      ${lrnIc('chevron-down', 'lrn-qt-chev')}
+    </button>
+    <div class="lrn-sub-body"${open ? ' data-rendered="1"' : ' hidden'}>${open ? lrnSubBody(s) : ''}</div>
+  </div>`;
+}
+
+function lrnSubBody(s) {
+  const total = learningReview.quiz?.total_points ?? s.answers.reduce((n, a) => n + Number(a.max_score || 0), 0);
+  return `<div class="lrn-sub-qs">${s.answers.map(a => {
+    const tone = lrnAnswerTone(a);
+    const choice = (a.options || []).length > 0;
+    const chosen = Array.isArray(a.answer) ? a.answer : (a.answer == null ? [] : [a.answer]);
+    return `<section class="lrn-sq is-${tone}" id="lrn-sq-${s.id}-${a.question_id}" data-question="${a.question_id}" data-max="${a.max_score}">
+      <i class="lrn-mark lrn-sq-mark is-${tone === 'right' ? 'right' : tone === 'pending' ? 'pending' : 'wrong'}">${tone === 'pending' ? '待评分' : a.is_correct === null ? '人工评分' : LRN_TONE_TEXT[tone]}</i>
+      ${renderLearningOriginal(a, a.position, choice ? { chosen, correct: a.correct_answers || [] } : null)}
+      <p class="lrn-ra-line"><span>作答</span>${learningEsc(formatLearningAnswer(a.answer))}</p>
+      ${!choice && (a.correct_answers || []).length ? `<p class="lrn-ra-line lrn-ra-ref"><span>参考答案</span>${learningEsc(formatLearningAnswer(a.correct_answers))}</p>` : ''}
+      <div class="lrn-sq-grade">
+        <label>得分<input class="review-score" type="number" min="0" max="${a.max_score}" step="0.5" value="${a.awarded_score ?? ''}" placeholder="0–${a.max_score}" aria-label="第 ${a.position} 题得分，满分 ${a.max_score}"><small>/ ${a.max_score}</small></label>
+        <label class="lrn-sq-comment">批语<input class="review-comment" value="${learningEsc(a.reviewer_comment || '')}" placeholder="可选" aria-label="第 ${a.position} 题批语"></label>
+      </div>
+    </section>`;
+  }).join('')}</div>
+  <aside class="lrn-sub-nav" aria-label="题目导航">
+    <div class="lrn-sub-nav-title">题目导航<small>${s.answers.length} 题</small></div>
+    <div class="lrn-sub-nav-grid">${s.answers.map(a => `<button type="button" class="is-${lrnAnswerTone(a)}" data-lrn-jump="${s.id}-${a.question_id}" data-q="${a.question_id}" aria-label="跳到第 ${a.position} 题（${LRN_TONE_TEXT[lrnAnswerTone(a)]}）">${a.position}</button>`).join('')}</div>
+    <div class="lrn-sub-nav-legend"><span><i class="is-right"></i>正确</span><span><i class="is-partial"></i>部分</span><span><i class="is-wrong"></i>错误</span><span><i class="is-pending"></i>待评</span></div>
+    <div class="lrn-sub-nav-sum" data-lrn-sum="${s.id}">${lrnSubSumHtml(s.answers.map(a => ({ v: a.awarded_score ?? '', max: a.max_score })), total)}</div>
+    <div class="lrn-sub-nav-actions" data-lrn-actions>${lrnSubNavControls(s.id).actions}</div>
+    <div class="lrn-sub-nav-pager" data-lrn-pager>${lrnSubNavControls(s.id).pager}</div>
+  </aside>`;
+}
+
+// 「保存并批阅下一份」与上一份 / 下一份按当前筛选后的顺序计算，展开时重新生成
+function lrnSubNavControls(id) {
+  const visible = learningReview.subs.filter(lrnSubVisible);
+  const index = visible.findIndex(x => x.id === id);
+  const hasNext = index >= 0 && index < visible.length - 1;
+  return {
+    actions: `<button type="button" data-lrn-grade="${id}">${lrnIc('check')}保存批阅</button>${hasNext ? `<button type="button" class="secondary" data-lrn-grade="${id}" data-next="1">保存并批阅下一份</button>` : ''}`,
+    pager: `<button type="button" class="secondary" data-lrn-sub-step="-1" ${index <= 0 ? 'disabled' : ''}>${lrnIc('chevron-left')}上一份</button><span>${index + 1} / ${visible.length}</span><button type="button" class="secondary" data-lrn-sub-step="1" ${hasNext ? '' : 'disabled'}>下一份${lrnIc('chevron-right')}</button>`,
+  };
+}
+
+function lrnRefreshSubNav(el, id) {
+  const c = lrnSubNavControls(id);
+  const actions = el.querySelector('[data-lrn-actions]');
+  const pager = el.querySelector('[data-lrn-pager]');
+  if (actions) actions.innerHTML = c.actions;
+  if (pager) pager.innerHTML = c.pager;
+}
+
+function lrnSubSumHtml(items, total) {
+  const scored = items.filter(x => x.v !== '' && x.v !== null && !Number.isNaN(Number(x.v)));
+  const sum = scored.reduce((n, x) => n + Number(x.v), 0);
+  return `<span>已评分 <b>${scored.length} / ${items.length}</b></span><span>合计 <b>${Math.round(sum * 100) / 100}</b> / ${total}</span>`;
+}
+
+function lrnApplySubFilter() {
+  const host = quizSubmissionsBody;
+  let shown = 0;
+  learningReview.subs.forEach(s => {
+    const el = host.querySelector(`.lrn-sub[data-submission="${s.id}"]`);
+    if (!el) return;
+    const vis = lrnSubVisible(s);
+    el.hidden = !vis;
+    if (vis) shown++;
+  });
+  const empty = host.querySelector('.lrn-subs-empty');
+  if (empty) empty.hidden = !(learningReview.subs.length && !shown);
+  host.querySelectorAll('[data-lrn-sub-filter]').forEach(b => {
+    const on = b.dataset.lrnSubFilter === learningReview.filter;
+    b.classList.toggle('is-active', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+}
+
+function lrnToggleSub(id, forceOpen = null) {
+  const host = quizSubmissionsBody;
+  const willOpen = forceOpen ?? learningReview.openSub !== id;
+  host.querySelectorAll('.lrn-sub.is-open').forEach(el => {
+    el.classList.remove('is-open');
+    el.querySelector('.lrn-sub-head')?.setAttribute('aria-expanded', 'false');
+    const body = el.querySelector('.lrn-sub-body');
+    if (body) body.hidden = true;
+  });
+  learningReview.openSub = willOpen ? id : null;
+  if (!willOpen) return;
+  const el = host.querySelector(`.lrn-sub[data-submission="${id}"]`);
+  const s = learningReview.subs.find(x => x.id === id);
+  if (!el || !s) return;
+  const body = el.querySelector('.lrn-sub-body');
+  // 首次展开才渲染；之后只切换显隐，已填写但未保存的分数会保留
+  if (!body.dataset.rendered) { body.innerHTML = lrnSubBody(s); body.dataset.rendered = '1'; }
+  else lrnRefreshSubNav(el, id);
+  body.hidden = false;
+  el.classList.add('is-open');
+  el.querySelector('.lrn-sub-head')?.setAttribute('aria-expanded', 'true');
+  lrnScrollToSub(id);
+}
+
+function lrnScrollToSub(id) {
+  const el = quizSubmissionsBody.querySelector(`.lrn-sub[data-submission="${id}"]`);
+  if (!el) return;
+  requestAnimationFrame(() => el.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+}
+
+function lrnUpdateSubNav(subEl) {
+  const s = learningReview.subs.find(x => x.id === Number(subEl.dataset.submission));
+  if (!s) return;
+  const items = [...subEl.querySelectorAll('.lrn-sq')].map(sec => {
+    const v = sec.querySelector('.review-score').value;
+    const tone = lrnScoreTone(v, sec.dataset.max);
+    sec.className = `lrn-sq is-${tone}`;
+    const chip = subEl.querySelector(`.lrn-sub-nav-grid [data-q="${sec.dataset.question}"]`);
+    if (chip) chip.className = `is-${tone}`;
+    return { v, max: sec.dataset.max };
+  });
+  const sum = subEl.querySelector('[data-lrn-sum]');
+  if (sum) sum.innerHTML = lrnSubSumHtml(items, learningReview.quiz?.total_points ?? 0);
+}
+
+function bindLearningReview() {
+  const panel = document.getElementById('quizReviewPanel');
+  if (!panel || panel.dataset.bound) return;
+  panel.dataset.bound = '1';
+  panel.addEventListener('click', e => {
+    const qHead = e.target.closest('.lrn-qt-head');
+    if (qHead) {
+      const row = qHead.closest('[data-lrn-qstat]');
+      const id = Number(row.dataset.lrnQstat);
+      const open = learningReview.openQ !== id;
+      panel.querySelectorAll('.lrn-qt-row.is-open').forEach(r => { r.classList.remove('is-open'); r.querySelector('.lrn-qt-head').setAttribute('aria-expanded', 'false'); r.querySelector('.lrn-qt-detail').hidden = true; });
+      learningReview.openQ = open ? id : null;
+      if (open) {
+        const q = learningReview.stats.questions.find(x => x.id === id);
+        const detail = row.querySelector('.lrn-qt-detail');
+        detail.innerHTML = lrnQuestionStatDetail(q);
+        detail.hidden = false;
+        row.classList.add('is-open');
+        qHead.setAttribute('aria-expanded', 'true');
+      }
+      return;
+    }
+    const toggle = e.target.closest('[data-lrn-sub-toggle]');
+    if (toggle) { lrnToggleSub(Number(toggle.dataset.lrnSubToggle)); return; }
+    const filter = e.target.closest('[data-lrn-sub-filter]');
+    if (filter) {
+      learningReview.filter = filter.dataset.lrnSubFilter;
+      const open = learningReview.subs.find(s => s.id === learningReview.openSub);
+      if (open && !lrnSubVisible(open)) lrnToggleSub(open.id, false);
+      lrnApplySubFilter();
+      const openEl = learningReview.openSub && quizSubmissionsBody.querySelector(`.lrn-sub[data-submission="${learningReview.openSub}"]`);
+      if (openEl) lrnRefreshSubNav(openEl, learningReview.openSub);
+      return;
+    }
+    const jump = e.target.closest('[data-lrn-jump]');
+    if (jump) {
+      const target = document.getElementById(`lrn-sq-${jump.dataset.lrnJump}`);
+      if (target) {
+        target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        target.classList.remove('is-flash');
+        void target.offsetWidth;
+        target.classList.add('is-flash');
+        setTimeout(() => target.querySelector('.review-score')?.focus({ preventScroll: true }), 350);
+      }
+      return;
+    }
+    const step = e.target.closest('[data-lrn-sub-step]');
+    if (step) {
+      const visible = learningReview.subs.filter(lrnSubVisible);
+      const index = visible.findIndex(s => s.id === learningReview.openSub);
+      const next = visible[index + Number(step.dataset.lrnSubStep)];
+      if (next) lrnToggleSub(next.id, true);
+      return;
+    }
+    const grade = e.target.closest('[data-lrn-grade]');
+    if (grade) gradeLearningSubmission(learningReview.quizId, Number(grade.dataset.lrnGrade), { next: !!grade.dataset.next });
+  });
+  panel.addEventListener('input', e => {
+    if (!e.target.classList.contains('review-score')) return;
+    const sub = e.target.closest('.lrn-sub');
+    if (sub) lrnUpdateSubNav(sub);
+  });
+}
+
+async function gradeLearningSubmission(quizId, submissionId, opts = {}) {
   const card = document.querySelector(`[data-submission="${submissionId}"]`);
-  const grades = [...card.querySelectorAll('tr[data-question]')].map(row => ({question_id:Number(row.dataset.question), awarded_score:row.querySelector('.review-score').value === '' ? NaN : Number(row.querySelector('.review-score').value), reviewer_comment:row.querySelector('.review-comment').value || null}));
-  if (grades.some(g => Number.isNaN(g.awarded_score))) return showMessage('请为所有题目填写得分', 'error');
-  try { await api(`/learning/quizzes/${quizId}/submissions/${submissionId}/grade`, {method:'PUT', headers:H, body:JSON.stringify({grades})}); showMessage('批阅已保存'); reviewLearningQuiz(quizId); }
-  catch(e) { showMessage(e.message, 'error'); }
+  if (!card) return;
+  const rows = [...card.querySelectorAll('[data-question]')];
+  const grades = rows.map(row => {
+    const raw = row.querySelector('.review-score').value;
+    return { question_id: Number(row.dataset.question), awarded_score: raw === '' ? NaN : Number(raw), reviewer_comment: row.querySelector('.review-comment').value || null };
+  });
+  const missing = rows.find((row, i) => Number.isNaN(grades[i].awarded_score));
+  if (missing) {
+    missing.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    missing.querySelector('.review-score')?.focus({ preventScroll: true });
+    return showMessage('请为所有题目填写得分', 'error');
+  }
+  const over = rows.find((row, i) => grades[i].awarded_score > Number(row.dataset.max) || grades[i].awarded_score < 0);
+  if (over) {
+    over.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    over.querySelector('.review-score')?.focus({ preventScroll: true });
+    return showMessage(`得分需在 0 到 ${over.dataset.max} 之间`, 'error');
+  }
+  let nextId = learningReview.openSub;
+  if (opts.next) {
+    const visible = learningReview.subs.filter(lrnSubVisible);
+    const index = visible.findIndex(s => s.id === submissionId);
+    // 优先跳到后面第一份待批阅的答卷，没有就按顺序下一份
+    nextId = (visible.slice(index + 1).find(s => s.status !== 'graded') || visible[index + 1] || {}).id ?? null;
+  }
+  card.querySelectorAll('[data-lrn-grade]').forEach(b => { b.disabled = true; });
+  try {
+    await api(`/learning/quizzes/${quizId}/submissions/${submissionId}/grade`, {method:'PUT', headers:H, body:JSON.stringify({grades})});
+    showMessage('批阅已保存');
+    await reviewLearningQuiz(quizId, { openSub: nextId, scrollToSub: opts.next });
+  } catch(e) {
+    showMessage(e.message, 'error');
+    card.querySelectorAll('[data-lrn-grade]').forEach(b => { b.disabled = false; });
+  }
 }
 
 async function releaseLearningResults(id, showAnswers) {
