@@ -373,9 +373,9 @@ function buildS5RowHtml(b, allVersionsMode) {
       s5Btn('', 'eye', '预览', `openS5PreviewById(${b.id})`, { title: '预览禅道 Bug', extra: `data-preview-kind="bug" data-preview-id="${Number(b.zentao_bug_id)}"` }),
       isEffectivelyClosed || isZentaoDeleted
         ? s5Btn('is-off', 'user', '指派', `openS5AssignById(${b.id})`, { title: '已关闭的禅道 Bug 不能再指派，请先重新激活', disabled: true })
-        : s5Btn('', 'user', '指派', `openS5AssignById(${b.id})`),
+        : s5Btn('', 'user', '指派', `openS5AssignById(${b.id})`, { extra: `data-meta-prefetch="${Number(b.zentao_bug_id)}"` }),
       canReactivate && !isZentaoDeleted
-        ? s5Btn('s5-act--green', 'rotate', '激活', `openS5ReactivateById(${b.id})`, { title: '重新激活该 Bug' })
+        ? s5Btn('s5-act--green', 'rotate', '激活', `openS5ReactivateById(${b.id})`, { title: '重新激活该 Bug', extra: `data-meta-prefetch="${Number(b.zentao_bug_id)}"` })
         : '<span class="s5-act-gap" aria-hidden="true"></span>',
     ].join('')
     : '<span class="s5-local-hint">本地记录</span>';
@@ -408,15 +408,26 @@ function buildS5OtherRecordsHtml(records) {
   if (!(records && records.length > 0)) {
     return '<div class="s5-empty-line">暂无其他测试人员的闭环记录</div>';
   }
+  // 两行布局：第一行 头像 + 姓名 + 结论胶囊；第二行 发包版本（过长省略，悬停看全名）。
+  // 以前一行塞下所有内容，发包名不换行把「修复通过」挤成竖排、卡片被撑高，长发包名还会溢出卡片。
+  const verdict = (record) => {
+    if (!record.test_done) return '<span class="st-pill st-pill--red">未闭环</span>';
+    const tone = { fixed: 'green', false_alarm: 'amber', rejected: 'gray' }[String(record.resolution || '')] || 'green';
+    return `<span class="st-pill st-pill--${tone}">${escapeHtml(getS5ResolutionLabel(record.resolution))}</span>`;
+  };
   return `<ul class="s5-others">${records.map((record) => {
     const name = String(record.username || '-');
-    return `<li>
+    const minor = String(record.minor_version_no || '-');
+    return `<li class="s5-other">
       <span class="fbk-avatar" aria-hidden="true">${escapeHtml(name.slice(0, 1).toUpperCase())}</span>
-      <span class="s5-other-name">${escapeHtml(name)}</span>
-      ${record.test_done
-        ? `<span class="st-pill st-pill--green">已闭环</span><span class="s5-other-res">${escapeHtml(getS5ResolutionLabel(record.resolution))}</span>`
-        : '<span class="st-pill st-pill--red">未闭环</span>'}
-      <span class="s5-other-minor">发包 ${escapeHtml(record.minor_version_no || '-')}</span>
+      <div class="s5-other-main">
+        <div class="s5-other-top">
+          <span class="s5-other-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+          ${record.source === 'zentao_sync' ? '<span class="s5-other-src" title="由禅道关闭自动同步">禅道同步</span>' : ''}
+          ${verdict(record)}
+        </div>
+        <div class="s5-other-minor" title="发包 ${escapeHtml(minor)}"><span>发包</span><b>${escapeHtml(minor)}</b></div>
+      </div>
     </li>`;
   }).join('')}</ul>`;
 }
@@ -920,25 +931,66 @@ export async function submitS5Bug() {
 // In-memory state for the reactivate / assign modals
 let reactivateContext = {};
 let assignContext = {};
-let _s5ActionMeta = { users: {}, builds: {} };
+const EMPTY_META = Object.freeze({ users: {}, builds: {}, build_list: [] });
 
-async function _loadActionMeta(ztId, action = 'activate') {
-  try {
-    const data = await (await api(`/zentao/bugs/${ztId}/action-meta?action=${action}`)).json();
-    _s5ActionMeta = data || { users: {}, builds: {} };
-  } catch {
-    _s5ActionMeta = { users: {}, builds: {} };
-  }
-  return _s5ActionMeta;
+// 指派人 / 影响版本候选数据：前端按 Bug 缓存 90 秒，悬停「激活 / 指派」按钮时预取，
+// 打开弹窗时多半已经就绪；写后校验传 fresh 绕过两端缓存。
+const META_TTL_MS = 90 * 1000;
+const _metaCache = new Map();
+
+function _forgetActionMeta(ztId) {
+  for (const key of [..._metaCache.keys()]) if (key.endsWith(`:${Number(ztId)}`)) _metaCache.delete(key);
+}
+
+function _loadActionMeta(ztId, action = 'activate', { fresh = false } = {}) {
+  const key = `${action}:${Number(ztId)}`;
+  const hit = _metaCache.get(key);
+  if (!fresh && hit && Date.now() - hit.at < META_TTL_MS) return hit.promise;
+  const promise = (async () => {
+    try {
+      const data = await (await api(`/zentao/bugs/${ztId}/action-meta?action=${action}${fresh ? '&fresh=1' : ''}`)).json();
+      return data || EMPTY_META;
+    } catch {
+      _metaCache.delete(key);
+      return EMPTY_META;
+    }
+  })();
+  _metaCache.set(key, { at: Date.now(), promise });
+  return promise;
+}
+
+export function prefetchS5ActionMeta(ztId) {
+  if (Number(ztId) > 0) _loadActionMeta(Number(ztId), 'activate');
+}
+
+let _metaPrefetchBound = false;
+function bindActionMetaPrefetch() {
+  if (_metaPrefetchBound) return;
+  _metaPrefetchBound = true;
+  const onIntent = (ev) => {
+    const btn = ev.target?.closest?.('[data-meta-prefetch]');
+    if (btn && btn.getAttribute('aria-disabled') !== 'true') prefetchS5ActionMeta(btn.dataset.metaPrefetch);
+  };
+  document.addEventListener('pointerover', onIntent, { passive: true });
+  document.addEventListener('focusin', onIntent);
+}
+bindActionMetaPrefetch();
+
+function _currentZentaoAccount(users) {
+  const me = window.currentUser || state.currentUser || {};
+  const names = [me.username, me.display_name].filter(Boolean).map((v) => String(v).toLowerCase());
+  return Object.keys(users || {}).find((acc) => names.includes(String(acc).toLowerCase()))
+    || Object.entries(users || {}).find(([, name]) => names.includes(String(name).toLowerCase()))?.[0]
+    || '';
 }
 
 function _buildSearchableUserSelect(selectId, users, currentAssigned = '') {
   const container = document.getElementById(selectId + 'Container');
   if (!container) return;
 
-  const entries = Object.entries(users || {}).sort((a, b) => a[1].localeCompare(b[1], 'zh-CN'));
+  const entries = Object.entries(users || {}).sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'zh-CN'));
   if (!entries.length) {
-    container.innerHTML = '<div style="color:#94a3b8; font-size:13px;">未获取到候选人列表</div>';
+    container.innerHTML = '<div class="s5-cb-empty">未获取到候选人列表（可稍后重试，或直接提交保持当前指派）</div>';
     return;
   }
 
@@ -948,16 +1000,17 @@ function _buildSearchableUserSelect(selectId, users, currentAssigned = '') {
   const clearId = `${selectId}ClearBtn`;
 
   container.innerHTML = `
-    <div style="position:relative;" data-s5-combobox>
+    <div class="s5-cb" data-s5-combobox>
       <input type="hidden" id="${hiddenId}" value="">
-      <div style="display:flex; gap:6px;">
-        <input id="${inputId}" autocomplete="off"
-          placeholder="点击选择指派人（可按姓名/账号过滤）"
-          style="flex:1; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
-        <button type="button" class="secondary" id="${clearId}"
-          style="padding:6px 10px; font-size:12px;">清除</button>
+      <div class="s5-cb-row">
+        <span class="s5-cb-field">
+          <svg class="ui-ic" aria-hidden="true"><use href="#i-user"/></svg>
+          <input id="${inputId}" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="${dropdownId}"
+            placeholder="选择指派人（可按姓名 / 账号搜索）">
+        </span>
+        <button type="button" class="secondary s5-cb-clear" id="${clearId}">清除</button>
       </div>
-      <div id="${dropdownId}" style="display:none; position:absolute; left:0; right:0; top:100%; margin-top:4px; max-height:220px; overflow-y:auto; background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; box-shadow:0 4px 12px rgba(15,23,42,0.08); z-index:20;"></div>
+      <div id="${dropdownId}" class="s5-cb-menu" role="listbox" hidden></div>
     </div>`;
 
   const input = document.getElementById(inputId);
@@ -965,47 +1018,79 @@ function _buildSearchableUserSelect(selectId, users, currentAssigned = '') {
   const dropdown = document.getElementById(dropdownId);
   const clearBtn = document.getElementById(clearId);
   if (!input || !hidden || !dropdown || !clearBtn) return;
+  let activeIndex = -1;
+
+  function pick(acc, name) {
+    hidden.value = acc || '';
+    input.value = name || '';
+    close();
+    hidden.dispatchEvent(new Event('change', { bubbles: true }));
+  }
 
   function renderOptions(filter = '') {
     const kw = String(filter || '').toLowerCase();
     const items = entries.filter(([acc, name]) => !kw
       || String(acc).toLowerCase().includes(kw)
       || String(name).toLowerCase().includes(kw));
+    activeIndex = items.findIndex(([acc]) => acc === hidden.value);
     if (!items.length) {
-      dropdown.innerHTML = '<div style="padding:8px 10px; color:#94a3b8; font-size:13px;">无匹配候选人</div>';
+      dropdown.innerHTML = '<div class="s5-cb-none">无匹配候选人</div>';
       return;
     }
-    dropdown.innerHTML = items.map(([acc, name]) => `
-      <div class="s5-assign-option" data-account="${escapeHtml(acc)}" data-name="${escapeHtml(name)}"
-        style="padding:8px 10px; font-size:13px; color:#0f172a; cursor:pointer; border-bottom:1px solid #f1f5f9;">
-        <span style="font-weight:600;">${escapeHtml(name)}</span>
-        <span style="color:#94a3b8; margin-left:6px; font-size:12px;">${escapeHtml(acc)}</span>
-      </div>
-    `).join('');
-    Array.from(dropdown.querySelectorAll('.s5-assign-option')).forEach((opt) => {
-      opt.addEventListener('mousedown', (ev) => {
-        ev.preventDefault();
-        hidden.value = opt.getAttribute('data-account') || '';
-        input.value = opt.getAttribute('data-name') || '';
-        dropdown.style.display = 'none';
-      });
-      opt.addEventListener('mouseenter', () => { opt.style.background = '#f1f5f9'; });
-      opt.addEventListener('mouseleave', () => { opt.style.background = ''; });
-    });
+    dropdown.innerHTML = items.map(([acc, name], i) => `
+      <div class="s5-assign-option${i === activeIndex ? ' is-active' : ''}${acc === hidden.value ? ' is-selected' : ''}" role="option"
+        data-account="${escapeHtml(acc)}" data-name="${escapeHtml(name)}">
+        <span class="s5-cb-avatar" aria-hidden="true">${escapeHtml(String(name || acc).slice(0, 1))}</span>
+        <b>${escapeHtml(name)}</b><small>${escapeHtml(acc)}</small>
+      </div>`).join('');
   }
 
-  function openDropdown() {
-    renderOptions(input.value);
-    dropdown.style.display = 'block';
+  function open() {
+    renderOptions(hidden.value ? '' : input.value);
+    dropdown.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    dropdown.querySelector('.is-selected')?.scrollIntoView({ block: 'nearest' });
+  }
+  function close() {
+    dropdown.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+  }
+  function move(step) {
+    const opts = [...dropdown.querySelectorAll('.s5-assign-option')];
+    if (!opts.length) return;
+    activeIndex = (activeIndex + step + opts.length) % opts.length;
+    opts.forEach((o, i) => o.classList.toggle('is-active', i === activeIndex));
+    opts[activeIndex].scrollIntoView({ block: 'nearest' });
   }
 
-  input.addEventListener('focus', openDropdown);
-  input.addEventListener('click', openDropdown);
+  dropdown.addEventListener('mousedown', (ev) => {
+    const opt = ev.target.closest('.s5-assign-option');
+    if (!opt) return;
+    ev.preventDefault();
+    pick(opt.dataset.account, opt.dataset.name);
+  });
+  input.addEventListener('focus', open);
+  input.addEventListener('click', open);
   input.addEventListener('input', () => {
     hidden.value = '';
     renderOptions(input.value);
+    dropdown.hidden = false;
   });
-  input.addEventListener('blur', () => setTimeout(() => { dropdown.style.display = 'none'; }, 120));
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      if (dropdown.hidden) open();
+      move(ev.key === 'ArrowDown' ? 1 : -1);
+    } else if (ev.key === 'Enter' && !dropdown.hidden) {
+      const opt = dropdown.querySelectorAll('.s5-assign-option')[activeIndex];
+      if (opt) { ev.preventDefault(); pick(opt.dataset.account, opt.dataset.name); }
+    } else if (ev.key === 'Escape' && !dropdown.hidden) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      close();
+    }
+  });
+  input.addEventListener('blur', () => setTimeout(close, 120));
   clearBtn.addEventListener('click', () => {
     hidden.value = '';
     input.value = '';
@@ -1020,6 +1105,68 @@ function _buildSearchableUserSelect(selectId, users, currentAssigned = '') {
   }
 }
 
+// 激活弹窗：快捷指派（解决人 / 我自己）
+function _renderReactivateQuickUsers(meta) {
+  const wrap = document.getElementById('s5ReactivateQuickUsers');
+  if (!wrap) return;
+  const users = meta.users || {};
+  const chips = [];
+  if (meta.resolved_by && users[meta.resolved_by]) chips.push({ acc: meta.resolved_by, label: `解决人 · ${users[meta.resolved_by]}` });
+  const me = _currentZentaoAccount(users);
+  if (me && me !== meta.resolved_by) chips.push({ acc: me, label: `我自己 · ${users[me]}` });
+  if (meta.current_assigned && users[meta.current_assigned] && !chips.some((c) => c.acc === meta.current_assigned)) {
+    chips.push({ acc: meta.current_assigned, label: `当前指派 · ${users[meta.current_assigned]}` });
+  }
+  wrap.hidden = !chips.length;
+  wrap.innerHTML = chips.map((c) => `<button type="button" class="rx-chip" data-rx-user="${escapeHtml(c.acc)}">${escapeHtml(c.label)}</button>`).join('');
+  _syncReactivateQuickUsers();
+}
+
+function _syncReactivateQuickUsers() {
+  const value = document.getElementById('s5ReactivateUserSelect')?.value || '';
+  document.querySelectorAll('#s5ReactivateQuickUsers [data-rx-user]').forEach((b) => b.classList.toggle('is-on', b.dataset.rxUser === value));
+}
+
+function _renderReactivateBuilds(meta) {
+  const buildSel = document.getElementById('s5ReactivateBuildSelect');
+  if (!buildSel) return;
+  const list = Array.isArray(meta.build_list) && meta.build_list.length
+    ? meta.build_list
+    : Object.entries(meta.builds || {}).map(([id, name]) => ({ id, name }));
+  const original = new Set((meta.opened_builds || []).map(String));
+  buildSel.innerHTML = '<option value="">-- 选择影响版本（可选）--</option>'
+    + list.map((b) => `<option value="${escapeHtml(String(b.id))}">${escapeHtml(String(b.name))}${original.has(String(b.id)) ? '（原发现版本）' : ''}</option>`).join('');
+}
+
+function _bindReactivateUi() {
+  // 面板自身 onclick 会 stopPropagation，事件必须挂在面板上；按元素打标，弹窗被替换后也能重新绑定
+  const modal = document.getElementById('s5ReactivateModal');
+  const panel = modal?.querySelector('.rx-panel') || modal;
+  if (!panel || panel.dataset.rxBound) return;
+  panel.dataset.rxBound = '1';
+  panel.addEventListener('click', (ev) => {
+    const userChip = ev.target.closest('[data-rx-user]');
+    if (userChip) {
+      const meta = reactivateContext.meta || {};
+      _buildSearchableUserSelect('s5ReactivateUserSelect', meta.users || {}, userChip.dataset.rxUser);
+      _syncReactivateQuickUsers();
+      return;
+    }
+    const phrase = ev.target.closest('[data-rx-phrase]');
+    if (phrase) {
+      const ta = document.getElementById('s5ReactivateComment');
+      if (!ta) return;
+      const text = phrase.dataset.rxPhrase;
+      ta.value = ta.value.trim() ? `${ta.value.replace(/\s+$/, '')}\n${text}` : text;
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    }
+  });
+  panel.addEventListener('change', (ev) => {
+    if (ev.target.id === 's5ReactivateUserSelect') _syncReactivateQuickUsers();
+  });
+}
+
 // 激活成功后的刷新回调：由入口方（我的工作台/特派面板）传入，默认刷新测试工作台。
 
 
@@ -1032,37 +1179,54 @@ function _setS5ReactivateSubmitting(submitting) {
     : '确认重新激活';
 }
 
+function _setReactivateSub(ztId, title) {
+  const sub = document.getElementById('s5ReactivateSub');
+  if (!sub) return;
+  sub.textContent = '';
+  const id = document.createElement('b');
+  id.textContent = `Bug #${ztId}`;
+  sub.append(id);
+  if (title) sub.append(document.createTextNode(` · ${String(title).replace(/&amp;/g, '&')}`));
+}
+
 export function openS5ReactivateModal(bugDbId, zentaoBugId, opts = {}) {
   if (!operationPending(`bug:${reactivateContext.ztId}`)) reactivateContext.resolve?.(false);
   const context = reactivateContext = { bugDbId, ztId:zentaoBugId };
   context.onDone = typeof opts.onDone === 'function' ? opts.onDone : null;
   const modal = document.getElementById('s5ReactivateModal');
   if (!modal) return;
+  _bindReactivateUi();
 
   // Reset form
   _setS5ReactivateSubmitting(false);
   const commentEl = document.getElementById('s5ReactivateComment');
   if (commentEl) commentEl.value = '';
+  const row = (state.overallTestRows || []).find((b) => b.id === bugDbId);
+  _setReactivateSub(zentaoBugId, row?.zentao_bug_title || '');
   const userContainer = document.getElementById('s5ReactivateUserSelectContainer');
-  if (userContainer) userContainer.innerHTML = '<div style="color:#94a3b8; font-size:13px;">加载候选人中...</div>';
+  if (userContainer) userContainer.innerHTML = '<div class="rx-skel" aria-label="加载候选人中"><i></i></div>';
+  const quick = document.getElementById('s5ReactivateQuickUsers');
+  if (quick) { quick.hidden = true; quick.innerHTML = ''; }
+  const buildSel = document.getElementById('s5ReactivateBuildSelect');
+  if (buildSel) { buildSel.innerHTML = '<option value="">正在读取影响版本…</option>'; buildSel.disabled = true; }
+  const hint = document.getElementById('s5ReactivateMetaHint');
+  if (hint) hint.textContent = '';
 
   prepareOperationModal(modal);
   modal.classList.remove('hidden');
   modal.style.display = 'flex';
   bindModalEsc('s5ReactivateModal', closeS5ReactivateModal);
 
-  // Load action meta for user list and build list
+  // 指派人 + 影响版本：多数情况下悬停按钮时已预取完成，这里直接命中缓存
   _loadActionMeta(zentaoBugId, 'activate').then((meta) => {
     if (reactivateContext !== context) return;
     context.meta = meta;
-    _buildSearchableUserSelect('s5ReactivateUserSelect', meta.users, meta.current_assigned || '');
-    // Populate build select
-    const buildSel = document.getElementById('s5ReactivateBuildSelect');
-    if (buildSel) {
-      const builds = meta.builds || {};
-      buildSel.innerHTML = '<option value="">-- 选择影响版本（可选）--</option>' +
-        Object.entries(builds).map(([bid, bname]) => `<option value="${escapeHtml(bid)}">${escapeHtml(String(bname))}</option>`).join('');
-    }
+    if (!row?.zentao_bug_title && meta.title) _setReactivateSub(zentaoBugId, meta.title);
+    _buildSearchableUserSelect('s5ReactivateUserSelect', meta.users, meta.resolved_by || meta.current_assigned || '');
+    _renderReactivateQuickUsers(meta);
+    _renderReactivateBuilds(meta);
+    if (buildSel) buildSel.disabled = false;
+    if (hint && !Object.keys(meta.users || {}).length) hint.textContent = '未取到禅道候选数据，可直接提交保持原指派';
   });
 }
 
@@ -1093,6 +1257,7 @@ export async function submitS5Reactivate() {
     restore:() => {
       reactivateContext = context;
       _buildSearchableUserSelect('s5ReactivateUserSelect', context.meta?.users || {}, assignedTo);
+      _renderReactivateQuickUsers(context.meta || {});
       document.getElementById('s5ReactivateBuildSelect').innerHTML = builds;
     },
     run:async () => (await api(`/zentao/bugs/${Number(context.ztId)}/active`, {
@@ -1103,6 +1268,7 @@ export async function submitS5Reactivate() {
       return bug.status === 'active' ? true : null;
     },
     onSuccess:async () => {
+      _forgetActionMeta(context.ztId);
       const resolve = context.resolve; context.resolve = null;
       if (reactivateContext === context) closeS5ReactivateModal();
       if (resolve) resolve(true);
@@ -1165,10 +1331,11 @@ export async function submitS5Assign() {
       method:'POST', body:{assigned_to:assignedTo,comment},
     })).json(),
     verify:async () => {
-      const meta = await _loadActionMeta(Number(context.ztId), 'activate');
+      const meta = await _loadActionMeta(Number(context.ztId), 'activate', { fresh: true });
       return meta.current_assigned === assignedTo ? true : null;
     },
     onSuccess:async () => {
+      _forgetActionMeta(context.ztId);
       if (assignContext === context) closeS5AssignModal();
       await loadOverallTest({syncBeforeLoad:false,showSuccess:false});
     },

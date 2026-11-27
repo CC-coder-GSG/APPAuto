@@ -23,7 +23,10 @@ import json
 import logging
 import mimetypes
 import re
+import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
@@ -42,7 +45,7 @@ from app.models.enums import VersionType
 from app.models.user_zentao_binding import UserZentaoBinding
 from app.services.audit_service import audit
 from app.services.zentao_auth_service import get_valid_token, invalidate_token
-from app.services.zentao_build_names import resolve_build_labels
+from app.services.zentao_build_names import clean_build_name, resolve_build_labels
 from app.services.zentao_client_service import ZentaoClient, ZentaoAPIError
 from app.services.zentao_normalizer import normalize_bug_detail
 from app.utils.time_utils import local_now
@@ -805,10 +808,71 @@ async def upload_inline_bug_image(
     }
 
 
+# ── 激活 / 指派弹窗的候选数据（指派人 + 影响版本） ───────────────────────────────
+# 以前每次打开弹窗都串行请求两次禅道（动作页 JSON → 执行构建列表），且不缓存。现在：
+# 1. 用本地记录的 Bug 所属执行提前并行拉构建列表（与页面请求同时发出）；
+# 2. 执行构建列表缓存 10 分钟、单个 Bug 的候选数据缓存 2 分钟（前端悬停按钮时预取即可命中）；
+# 3. 写操作（激活 / 指派 / 关闭）前清掉该 Bug 的缓存；写后校验用 fresh=1 绕过缓存。
+_META_TTL_SECONDS = 120
+_EXEC_BUILDS_TTL_SECONDS = 600
+_META_CACHE: dict[tuple[int, int, str], tuple[float, dict]] = {}
+_EXEC_BUILDS_CACHE: dict[tuple[int, int], tuple[float, list[str]]] = {}
+_META_LOCK = threading.Lock()
+_META_POOL = ThreadPoolExecutor(max_workers=6, thread_name_prefix="zt-bug-meta")
+
+
+def _forget_bug_meta(zt_id: int) -> None:
+    with _META_LOCK:
+        for key in [k for k in _META_CACHE if k[1] == int(zt_id)]:
+            _META_CACHE.pop(key, None)
+
+
+def _cached_execution_build_ids(client: ZentaoClient, user_id: int, execution_id: int) -> list[str]:
+    key = (int(user_id), int(execution_id))
+    now = time.monotonic()
+    with _META_LOCK:
+        hit = _EXEC_BUILDS_CACHE.get(key)
+        if hit and now - hit[0] < _EXEC_BUILDS_TTL_SECONDS:
+            return hit[1]
+    ids = list(client.get_execution_build_ids(execution_id))
+    with _META_LOCK:
+        if len(_EXEC_BUILDS_CACHE) > 500:
+            _EXEC_BUILDS_CACHE.clear()
+        _EXEC_BUILDS_CACHE[key] = (time.monotonic(), ids)
+    return ids
+
+
+def _local_execution_hint(db: Session, zt_id: int) -> Optional[int]:
+    row = (
+        db.query(BugTracking.zentao_execution_id)
+        .filter(BugTracking.zentao_bug_id == str(zt_id), BugTracking.zentao_execution_id.isnot(None))
+        .first()
+    )
+    try:
+        return int(row[0]) if row and str(row[0]).strip() else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _account_of(value) -> str:
+    if isinstance(value, dict):
+        return str(value.get("account") or value.get("realname") or "")
+    return str(value or "")
+
+
+def _build_id_list(value) -> list[str]:
+    if isinstance(value, dict):
+        return [str(k) for k in value.keys() if str(k).strip()]
+    if isinstance(value, list):
+        return [str(v.get("id") if isinstance(v, dict) else v) for v in value if v]
+    return [part.strip() for part in str(value or "").split(",") if part.strip()]
+
+
 @router.get("/bugs/{zt_id}/action-meta")
 def get_bug_action_meta(
     zt_id: int,
     action: str = "activate",
+    fresh: bool = False,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -817,11 +881,25 @@ def get_bug_action_meta(
     bug action page (activate / resolve / view / close).
 
     The `users` dict has the form {"account": "display_name"} and is suitable
-    for building a searchable assignee dropdown.
+    for building a searchable assignee dropdown. `build_list` carries the
+    same builds newest-first (a JS object would reorder numeric keys).
     """
+    cache_key = (int(current_user.id), int(zt_id), str(action))
+    if not fresh:
+        with _META_LOCK:
+            hit = _META_CACHE.get(cache_key)
+        if hit and time.monotonic() - hit[0] < _META_TTL_SECONDS:
+            return {**hit[1], "cached": True}
+
     client = _get_client(current_user.id, db)
     if client is None:
-        return {"users": {}, "builds": {}}
+        return {"users": {}, "builds": {}, "build_list": []}
+
+    # 用本地记录的所属执行先把构建列表请求发出去，和页面请求并行
+    hint_exec = _local_execution_hint(db, zt_id)
+    hint_future = (
+        _META_POOL.submit(_cached_execution_build_ids, client, current_user.id, hint_exec) if hint_exec else None
+    )
 
     meta = client.get_bug_action_meta(zt_id, action)
     if meta is None:
@@ -834,7 +912,7 @@ def get_bug_action_meta(
                 break
 
     if meta is None:
-        return {"users": {}, "builds": {}}
+        return {"users": {}, "builds": {}, "build_list": []}
 
     users_raw = meta.get("users") or {}
     builds_raw = meta.get("builds") or {}
@@ -843,6 +921,8 @@ def get_bug_action_meta(
     # Normalize users: strip leading "X:" prefix from display names (activate page quirk)
     users: dict[str, str] = {}
     for account, display in users_raw.items():
+        if not account:
+            continue
         if isinstance(display, str) and len(display) > 2 and display[1] == ":":
             display = display[2:]
         users[account] = display
@@ -859,13 +939,15 @@ def get_bug_action_meta(
                 builds[str(b.get("id", ""))] = b.get("name") or str(b.get("id", ""))
 
     current_assigned = ""
+    resolved_by = ""
+    opened_builds: list[str] = []
+    title = ""
     bug_execution_id: Optional[int] = None
     if isinstance(bug_raw, dict):
-        at = bug_raw.get("assignedTo")
-        if isinstance(at, dict):
-            current_assigned = at.get("account") or at.get("realname") or ""
-        else:
-            current_assigned = str(at or "")
+        current_assigned = _account_of(bug_raw.get("assignedTo"))
+        resolved_by = _account_of(bug_raw.get("resolvedBy"))
+        opened_builds = _build_id_list(bug_raw.get("openedBuild"))
+        title = str(bug_raw.get("title") or "")
         execution_raw = bug_raw.get("execution")
         if isinstance(execution_raw, dict):
             try:
@@ -883,18 +965,45 @@ def get_bug_action_meta(
     # instances, or freshly created executions) so the user is never
     # stuck with an empty dropdown.
     if bug_execution_id and builds:
-        execution_build_ids = set(client.get_execution_build_ids(bug_execution_id))
+        try:
+            if hint_future is not None and bug_execution_id == hint_exec:
+                execution_build_ids = set(hint_future.result(timeout=20))
+            else:
+                execution_build_ids = set(_cached_execution_build_ids(client, current_user.id, bug_execution_id))
+        except Exception as exc:  # noqa: BLE001 — 取不到执行构建时退回全量列表
+            logger.info("action-meta execution builds unavailable bug=%s err=%s", zt_id, exc)
+            execution_build_ids = set()
         if execution_build_ids:
             filtered = {bid: name for bid, name in builds.items() if bid in execution_build_ids}
             if filtered:
                 builds = filtered
 
-    return {
+    # 新构建在前；名称去掉 "(64-bit)" 架构后缀，与平台版本号同格式。trunk（主干）放最后
+    def _order(item):
+        bid = item[0]
+        return (0, -int(bid)) if bid.isdecimal() else (1, 0)
+
+    build_list = [
+        {"id": bid, "name": "主干" if bid == "trunk" else (clean_build_name(name) or bid)}
+        for bid, name in sorted(builds.items(), key=_order)
+        if bid
+    ]
+
+    result = {
         "users": users,
         "builds": builds,
+        "build_list": build_list,
         "current_assigned": current_assigned,
+        "resolved_by": resolved_by if resolved_by in users else "",
+        "opened_builds": opened_builds,
+        "title": title,
         "execution_id": bug_execution_id,
     }
+    with _META_LOCK:
+        if len(_META_CACHE) > 1000:
+            _META_CACHE.clear()
+        _META_CACHE[cache_key] = (time.monotonic(), result)
+    return result
 
 
 @router.put("/bugs/{zt_id}")
@@ -950,6 +1059,7 @@ def close_zentao_bug(
     - closed   → skip Zentao call (already closed), just return success
     - active   → rejected with 422: must be resolved before closing
     """
+    _forget_bug_meta(zt_id)
     client = _get_client(current_user.id, db)
     if client is None:
         raise HTTPException(status_code=400, detail="当前用户未配置可用的禅道绑定")
@@ -1010,6 +1120,7 @@ def active_zentao_bug(
     Also resets the local BugTracking `closed` flag to False so the row
     shows up again as pending in Overall Test.
     """
+    _forget_bug_meta(zt_id)
     client = _get_client(current_user.id, db)
     if client is None:
         raise HTTPException(status_code=400, detail="当前用户未配置可用的禅道绑定")
@@ -1071,6 +1182,7 @@ def assign_zentao_bug(
     """
     Reassign a Zentao bug without changing its current status.
     """
+    _forget_bug_meta(zt_id)
     if not payload.assigned_to:
         raise HTTPException(status_code=400, detail="必须指定指派人 (assigned_to)")
 

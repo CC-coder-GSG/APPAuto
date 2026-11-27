@@ -6787,12 +6787,18 @@ section.card .brc-more button { height: 32px; min-height: 0 !important; padding:
 #tab-overall-test .s5-sec h5 { display: flex; align-items: center; gap: 6px; margin: 0 !important; padding: 0 !important; border: none !important; font-size: 12.5px !important; font-weight: 650 !important; color: var(--w-ink-soft) !important; }
 .s5-sec h5 em { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: rgba(28, 25, 23, 0.07); font: normal 600 11px/18px system-ui, sans-serif; text-align: center; color: var(--w-ink-soft); }
 .s5-note { padding: 10px 12px; border-radius: 10px; background: rgba(28, 25, 23, 0.04); font-size: 13px; line-height: 1.7; color: var(--w-ink); white-space: pre-wrap; word-break: break-word; }
-.s5-others { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
-.s5-others li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 10px; border: 1px solid var(--w-hairline); border-radius: 10px; background: var(--w-surface); font-size: 12.5px; }
-.s5-others .st-pill { height: 22px; font-size: 11.5px; }
-.s5-other-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--w-ink); }
-.s5-other-res { color: var(--w-ink-soft); }
-.s5-other-minor { margin-left: auto; white-space: nowrap; color: var(--w-ink-faint); }
+/* 其他人闭环记录（2026-11-27 改为两行：姓名 + 结论 / 发包版本，长发包名省略不撑破卡片） */
+.s5-others { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
+.s5-others li.s5-other { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; padding: 9px 12px; border: 1px solid var(--w-hairline); border-radius: 10px; background: var(--w-surface); font-size: 12.5px; }
+.s5-others .fbk-avatar { width: 28px; height: 28px; font-size: 12px; }
+.s5-other-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.s5-other-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.s5-other-top .st-pill { flex: 0 0 auto; height: 20px; margin-left: auto; padding: 0 8px 0 7px; font-size: 11.5px; }
+.s5-other-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; color: var(--w-ink); }
+.s5-other-src { flex: 0 0 auto; padding: 0 5px; border-radius: 4px; background: rgba(13, 148, 136, 0.1); font-size: 10.5px; line-height: 17px; color: #0f766e; }
+.s5-other-minor { display: flex; align-items: baseline; gap: 5px; min-width: 0; font-size: 11.5px; color: var(--w-ink-faint); }
+.s5-other-minor span { flex: 0 0 auto; }
+.s5-other-minor b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11.5px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--w-ink-soft); }
 .s5-empty-line { font-size: 12.5px; color: var(--w-ink-faint); }
 .s5-tools { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 12px; border-top: 1px dashed var(--w-hairline-strong); }
 #tab-overall-test .s5-tools .s5-tool {
@@ -9191,3 +9197,66 @@ button.ai-generate-chip.is-generating { animation: aigBreath 1.6s ease-in-out in
 @media (prefers-reduced-motion: reduce) {
   #cadModal.cad-modal, #cadModal .cad-modal-panel { animation: none; }
 }
+
+
+/* ============================================================
+   R28 重新激活禅道 Bug 弹窗 v2（2026-11-27）：结构 index.html #s5ReactivateModal（.rx-*），逻辑 js/tabs/overall-test.js
+   指派人下拉 .s5-cb-*（激活 / 指派两个弹窗共用，_buildSearchableUserSelect 生成）
+   ============================================================ */
+#s5ReactivateModal.rx-modal { position: fixed; inset: 0; z-index: 10000; align-items: center; justify-content: center; padding: 20px; background: rgba(28, 25, 23, 0.4); backdrop-filter: blur(2px); }
+#s5ReactivateModal .rx-panel { display: flex; flex-direction: column; width: min(560px, 100%); max-height: min(90vh, 860px); overflow: hidden; border: 1px solid var(--w-hairline); border-radius: 18px; background: var(--w-raised, #fff); box-shadow: 0 24px 64px rgba(28, 25, 23, 0.24); animation: rxPop .22s var(--w-swift); }
+@keyframes rxPop { from { opacity: 0; transform: translateY(8px) scale(.985); } }
+#s5ReactivateModal .rx-head { display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px 14px; border-bottom: 1px solid var(--w-hairline); }
+#s5ReactivateModal .rx-head-ic { display: grid; place-items: center; flex: 0 0 auto; width: 38px; height: 38px; border-radius: 11px; background: rgba(22, 163, 74, 0.12); color: #15803d; }
+#s5ReactivateModal .rx-head-ic .ui-ic { width: 19px; height: 19px; }
+#s5ReactivateModal .rx-head-text { flex: 1 1 auto; min-width: 0; }
+#s5ReactivateModal .rx-head h3 { margin: 0 !important; font-size: 16.5px !important; font-weight: 700 !important; color: var(--w-ink) !important; }
+#s5ReactivateModal .rx-sub { margin: 3px 0 0; overflow: hidden; font-size: 12.5px; color: var(--w-ink-soft); text-overflow: ellipsis; white-space: nowrap; }
+#s5ReactivateModal .rx-sub b { font: 650 12px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--w-ink); }
+#s5ReactivateModal button.rx-x { display: inline-grid; place-items: center; flex: 0 0 auto; width: 30px; height: 30px; min-height: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 8px !important; background: transparent !important; box-shadow: none !important; color: var(--w-ink-soft) !important; font-size: 20px !important; line-height: 1; transform: none !important; }
+#s5ReactivateModal button.rx-x:hover { background: rgba(28, 25, 23, 0.06) !important; color: var(--w-ink) !important; }
+#s5ReactivateModal .atl-op-slot { padding: 12px 20px 0; }
+#s5ReactivateModal .rx-body { display: flex; flex-direction: column; gap: 16px; padding: 16px 20px 18px; overflow: auto; }
+#s5ReactivateModal .rx-field { display: flex; flex-direction: column; gap: 7px; margin: 0; }
+#s5ReactivateModal .rx-label { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: 13px; font-weight: 650; color: var(--w-ink); }
+#s5ReactivateModal .rx-label small { font-size: 11.5px; font-weight: 400; color: var(--w-ink-faint); }
+#s5ReactivateModal .rx-select, #s5ReactivateModal .rx-textarea { width: 100%; box-sizing: border-box; font-size: 13.5px; }
+#s5ReactivateModal .rx-select { height: 38px; }
+#s5ReactivateModal .rx-textarea { min-height: 76px; resize: vertical; line-height: 1.55; }
+#s5ReactivateModal .rx-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+#s5ReactivateModal .rx-chips[hidden] { display: none; }
+#s5ReactivateModal button.rx-chip {
+  display: inline-flex; align-items: center; height: 26px; min-height: 0 !important; padding: 0 10px !important; border: 1px solid var(--w-hairline-strong) !important; border-radius: 999px !important;
+  background: var(--w-surface, #fbfaf8) !important; box-shadow: none !important; color: var(--w-ink-soft) !important; font-size: 12px !important; font-weight: 500 !important; transform: none !important;
+}
+#s5ReactivateModal button.rx-chip:hover { border-color: rgba(var(--w-accent-rgb), 0.45) !important; color: var(--w-ink) !important; }
+#s5ReactivateModal button.rx-chip.is-on { border-color: rgba(22, 163, 74, 0.5) !important; background: rgba(22, 163, 74, 0.08) !important; color: #15803d !important; font-weight: 650 !important; }
+#s5ReactivateModal .rx-skel { height: 38px; overflow: hidden; border-radius: 9px; background: rgba(28, 25, 23, 0.05); }
+#s5ReactivateModal .rx-skel i { display: block; width: 40%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.75), transparent); animation: rxShimmer 1.1s ease-in-out infinite; }
+@keyframes rxShimmer { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+#s5ReactivateModal .rx-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--w-hairline); }
+#s5ReactivateModal .rx-hint { flex: 1 1 auto; font-size: 12px; color: #b45309; }
+#s5ReactivateModal button.rx-submit { background: #16a34a !important; }
+#s5ReactivateModal button.rx-submit:hover { background: #15803d !important; box-shadow: 0 4px 14px rgba(22, 163, 74, 0.3) !important; }
+@media (max-width: 640px) {
+  #s5ReactivateModal.rx-modal { align-items: flex-end; padding: 0; }
+  #s5ReactivateModal .rx-panel { max-height: 94vh; border-radius: 18px 18px 0 0; }
+}
+@media (prefers-reduced-motion: reduce) { #s5ReactivateModal .rx-panel, #s5ReactivateModal .rx-skel i { animation: none; } }
+
+/* 指派人下拉（激活 / 指派弹窗共用） */
+.s5-cb { position: relative; }
+.s5-cb-row { display: flex; gap: 6px; }
+.s5-cb-field { position: relative; display: flex; flex: 1 1 auto; align-items: center; min-width: 0; }
+.s5-cb-field .ui-ic { position: absolute; left: 10px; width: 15px; height: 15px; color: var(--w-ink-faint); pointer-events: none; }
+.s5-cb-field input { width: 100%; height: 38px; box-sizing: border-box; padding-left: 32px !important; font-size: 13.5px; }
+button.s5-cb-clear { height: 38px; min-height: 0 !important; padding: 0 12px !important; font-size: 12.5px !important; }
+.s5-cb-menu { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; max-height: 240px; overflow-y: auto; padding: 4px; border: 1px solid var(--w-hairline-strong); border-radius: 12px; background: #fff; box-shadow: 0 12px 32px rgba(28, 25, 23, 0.14); }
+.s5-cb-menu[hidden] { display: none; }
+.s5-cb-menu .s5-assign-option { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; font-size: 13px; color: var(--w-ink); cursor: pointer; }
+.s5-cb-menu .s5-assign-option b { font-weight: 600; }
+.s5-cb-menu .s5-assign-option small { margin-left: auto; font-size: 11.5px; color: var(--w-ink-faint); }
+.s5-cb-menu .s5-assign-option:hover, .s5-cb-menu .s5-assign-option.is-active { background: rgba(28, 25, 23, 0.05); }
+.s5-cb-menu .s5-assign-option.is-selected b { color: var(--w-accent-ink); }
+.s5-cb-avatar { display: inline-grid; place-items: center; flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; background: rgba(var(--w-accent-rgb), 0.12); font-size: 11px; font-weight: 700; color: var(--w-accent-ink); }
+.s5-cb-none, .s5-cb-empty { padding: 8px 10px; font-size: 12.5px; color: var(--w-ink-faint); }

@@ -5,13 +5,13 @@
   <title>测量软件测试平台</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/css/main.css?v=20261127-rpt-1">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261127-brand-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261127-rx-2">
   <link rel="stylesheet" href="/static/learning.css?v=20261127-lrn-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261127-rpt-2"></script>
+  <script type="module" src="/static/js/app.js?v=20261127-rx-2"></script>
   <script src="/static/js/weave-motion.js?v=20261127-rpt-1" defer></script>
   <script src="/static/js/shell.js?v=20261127-rpt-1" defer></script>
   <script>
@@ -1921,33 +1921,48 @@
     </div>
   </div>
 
-  <!-- Overall Test Reactivate Bug Modal -->
-  <div id="s5ReactivateModal" class="hidden" onclick="closeS5ReactivateModal()" style="position:fixed; inset:0; background:rgba(15,23,42,.42); z-index:10000; display:none; align-items:center; justify-content:center;">
-    <div onclick="event.stopPropagation()" style="width:min(520px, 95vw); max-height:90vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.22); padding:24px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-        <h3 style="margin:0; color:#0f172a; font-size:16px;">🔄 重新激活禅道 Bug</h3>
-        <button class="secondary" onclick="closeS5ReactivateModal()" style="padding:4px 10px; font-size:13px;">✕ 关闭</button>
-      </div>
-      <div style="margin-bottom:14px;">
-        <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:6px;">重新指派给</label>
-        <div id="s5ReactivateUserSelectContainer">
-          <div style="color:#94a3b8; font-size:13px;">加载候选人中...</div>
+  <!-- 重新激活禅道 Bug（2026-11-27 v2：样式 weave.css R28 .rx-*；逻辑 js/tabs/overall-test.js openS5ReactivateModal） -->
+  <div id="s5ReactivateModal" class="hidden rx-modal" onclick="closeS5ReactivateModal()" style="display:none;">
+    <div class="rx-panel" role="dialog" aria-modal="true" aria-labelledby="s5ReactivateTitle" onclick="event.stopPropagation()">
+      <header class="rx-head">
+        <span class="rx-head-ic" aria-hidden="true"><svg class="ui-ic"><use href="#i-rotate"/></svg></span>
+        <div class="rx-head-text">
+          <h3 id="s5ReactivateTitle">重新激活禅道 Bug</h3>
+          <p id="s5ReactivateSub" class="rx-sub"></p>
+        </div>
+        <button type="button" class="rx-x" onclick="closeS5ReactivateModal()" aria-label="关闭" title="关闭（Esc）">×</button>
+      </header>
+      <div class="atl-op-slot"></div>
+      <div class="rx-body">
+        <div class="rx-field">
+          <div class="rx-label">重新指派给<small>默认指派回解决人</small></div>
+          <div id="s5ReactivateUserSelectContainer">
+            <div class="rx-skel" aria-label="加载候选人中"><i></i></div>
+          </div>
+          <div id="s5ReactivateQuickUsers" class="rx-chips" hidden></div>
+        </div>
+        <div class="rx-field">
+          <label class="rx-label" for="s5ReactivateBuildSelect">影响版本<small>可选，选问题重新出现的版本；新构建在前</small></label>
+          <select id="s5ReactivateBuildSelect" class="rx-select">
+            <option value="">-- 选择影响版本（可选）--</option>
+          </select>
+        </div>
+        <div class="rx-field">
+          <label class="rx-label" for="s5ReactivateComment">重新激活说明<small>同步写入禅道备注</small></label>
+          <textarea id="s5ReactivateComment" class="rx-textarea" rows="3" placeholder="填写重新激活的原因，例如复测步骤、复现环境"></textarea>
+          <div class="rx-chips" id="s5ReactivatePhrases">
+            <button type="button" class="rx-chip" data-rx-phrase="复测未通过，问题仍可复现">复测未通过</button>
+            <button type="button" class="rx-chip" data-rx-phrase="修复后引入了新问题">修复引入新问题</button>
+            <button type="button" class="rx-chip" data-rx-phrase="仅部分修复，以下场景仍有问题：">仅部分修复</button>
+            <button type="button" class="rx-chip" data-rx-phrase="在新版本中问题再次出现">新版本再次出现</button>
+          </div>
         </div>
       </div>
-      <div style="margin-bottom:14px;">
-        <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:6px;">影响版本（可选）</label>
-        <select id="s5ReactivateBuildSelect" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px;">
-          <option value="">-- 选择影响版本（可选）--</option>
-        </select>
-      </div>
-      <div style="margin-bottom:20px;">
-        <label style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:6px;">重新激活说明</label>
-        <textarea id="s5ReactivateComment" placeholder="填写重新激活的原因（将同步写入禅道备注）" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:4px; font-size:13px; resize:vertical; min-height:60px;"></textarea>
-      </div>
-      <div style="display:flex; gap:10px; justify-content:flex-end;">
-        <button class="secondary" onclick="closeS5ReactivateModal()">取消</button>
-        <button id="s5ReactivateSubmitBtn" onclick="submitS5Reactivate()">确认重新激活</button>
-      </div>
+      <footer class="rx-foot">
+        <span id="s5ReactivateMetaHint" class="rx-hint"></span>
+        <button type="button" class="secondary" onclick="closeS5ReactivateModal()">取消</button>
+        <button type="button" id="s5ReactivateSubmitBtn" class="rx-submit" onclick="submitS5Reactivate()">确认重新激活</button>
+      </footer>
     </div>
   </div>
 
