@@ -19,7 +19,6 @@ const RUNTIME = {
   counters: {
     zentaoNew: 0,
     minePrimary: 0,
-    mineSecondaryBugDispatch: 0,
     feedback: 0,
     retest: 0,
     overallBug: 0,
@@ -61,7 +60,6 @@ function debugError(...args) { if (SSE_DEBUG) console.error('[SSE]', ...args); }
 
 const SCOPE_COUNTER_MAP = {
   mine_requirement:     'minePrimary',
-  mine_bug_dispatch:    'mineSecondaryBugDispatch',
   feedback_task:        'feedback',
   retest_requirement:   'retest',
   overall_bug:          'overallBug',
@@ -110,7 +108,6 @@ function queueUnreadByEvent(message) {
   const payload = message?.payload || {};
   const item = payload?.item || {};
   if (type === 'workbench_requirement_created' && payload?.id)   markUnread('mine_requirement', payload.id);
-  if (type === 'bug_dispatch_created'          && payload?.id)   markUnread('mine_bug_dispatch', payload.id);
   if (type === 'feedback_task_created'         && payload?.id)   markUnread('feedback_task', payload.id);
   if (type === 'retest_requirement_created'    && payload?.id)   markUnread('retest_requirement', payload.id);
   if (type === 'overall_bug_created'           && payload?.id)   markUnread('overall_bug', payload.id);
@@ -130,7 +127,6 @@ function updateNavBadges() {
     minePrimaryEl.textContent = workbenchPrimary > 0 ? String(workbenchPrimary) : '';
     minePrimaryEl.classList.toggle('hidden', workbenchPrimary <= 0);
   }
-  badge('tabMineSecondaryBadge', 'mineSecondaryBugDispatch');
   badge('tabFeedbackBadge',    'feedback');
   badge('workbenchDemandBadge', 'minePrimary');
   badge('workbenchRetestBadge', 'retest');
@@ -146,7 +142,7 @@ function bumpCounterByEvent() {
 // ─── Active tab detection ────────────────────────────────────────────────────
 
 function visibleTabName() {
-  const names = ['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','report','activity','data','dispatch'];
+  const names = ['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','report','activity','data'];
   return names.find((n) => {
     const domId = `tab-${n}`;
     const el = document.getElementById(domId);

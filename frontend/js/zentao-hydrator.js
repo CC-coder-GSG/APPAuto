@@ -413,7 +413,7 @@ function refreshVisible() {
     else container = document.getElementById('mineCards') || document.querySelector('[data-workbench-panel="demand"]');
   }
   if (!container) {
-    const tabNames = ['assign','feedback','field-test','build-records','report','activity','data','dispatch'];
+    const tabNames = ['assign','feedback','field-test','build-records','report','activity','data'];
     for (const name of tabNames) {
       const panel = document.getElementById('tab-' + name);
       if (panel && !panel.classList.contains('hidden')) { container = panel; break; }

@@ -35,37 +35,6 @@ function moduleZh(value) {
   return map[value] || value || '动态';
 }
 
-function moduleBadgeStyle(module) {
-  const map = {
-    bug: { bg: '#fff7ed', color: '#c2410c', border: '#fdba74' },
-    requirement: { bg: '#eff6ff', color: '#1d4ed8', border: '#93c5fd' },
-    feedback: { bg: '#ecfeff', color: '#0f766e', border: '#99f6e4' },
-    field_test: { bg: '#fefce8', color: '#a16207', border: '#fde68a' },
-    retest: { bg: '#eef2ff', color: '#4338ca', border: '#c7d2fe' },
-    admin: { bg: '#f8fafc', color: '#475569', border: '#cbd5e1' },
-  };
-  return map[module] || map.admin;
-}
-
-function levelStyle(level) {
-  const map = {
-    info: { bg: '#f8fafc', color: '#475569' },
-    important: { bg: '#dbeafe', color: '#1d4ed8' },
-    critical: { bg: '#fee2e2', color: '#b91c1c' },
-  };
-  return map[level] || map.info;
-}
-
-function formatShanghaiTime(value) {
-  if (!value) return '-';
-  const text = String(value).trim();
-  // 后端用 local_now()（服务器上海本地时间）存无时区时间戳，按 +08:00 解析；旧代码补 Z 当 UTC 会晚 8 小时
-  const normalized = /Z$|[+-]\d{2}:\d{2}$/.test(text) ? text : `${text.replace(' ', 'T')}+08:00`;
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) return text;
-  return date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
-}
-
 function saveLocalState() {
   const payload = {
     page: state.page,
@@ -126,25 +95,60 @@ function fillActorOptions(savedActorId = '0') {
   select.value = Array.from(select.options).some((opt) => opt.value === String(savedActorId)) ? String(savedActorId) : '0';
 }
 
+// 模块 → 圆点色（与动态流左侧标记一致）
+const MODULE_DOT = { bug: '#e34948', requirement: '#2a78d6', feedback: '#1baf7a', field_test: '#eda100', retest: '#6250d6', admin: '#a8a29e' };
+
 function renderSummary(summary) {
   const wrap = document.getElementById('activitySummaryCards');
   const highlightWrap = document.getElementById('activityHighlights');
   if (!wrap || !highlightWrap) return;
 
+  const rangeEl = document.getElementById('activitySummaryRange');
+  if (rangeEl) rangeEl.textContent = `近 ${getRangeDays()} 天`;
+
   const cards = summary?.cards || [];
-  wrap.innerHTML = cards.map((card) => `
-    <div class="metric-card" style="min-width:150px;">
-      <div class="metric-title">${card.label}</div>
-      <div class="metric-value" style="font-size:26px; color:#0f172a;">${card.count}</div>
-    </div>
-  `).join('');
+  const max = Math.max(1, ...cards.map((c) => Number(c.count) || 0));
+  wrap.innerHTML = cards.length
+    ? `<ul class="act-stats">${cards.map((card) => `
+        <li><span class="act-stat-k">${esc(card.label)}</span>
+          <span class="act-stat-bar"><i style="width:${Math.max(4, Math.round((Number(card.count) || 0) / max * 100))}%"></i></span>
+          <b>${Number(card.count) || 0}</b></li>`).join('')}</ul>`
+    : '<div class="act-empty-s">当前范围内暂无可统计的动作</div>';
 
   const highlights = summary?.highlights || [];
   if (!highlights.length) {
-    highlightWrap.innerHTML = '<div class="muted" style="padding:10px 0;">当前时间范围内暂无关键动态。</div>';
+    highlightWrap.innerHTML = '<div class="act-empty-s">当前时间范围内暂无关键动态</div>';
     return;
   }
-  highlightWrap.innerHTML = highlights.map((item) => `<div class="activity-highlight-item">• ${item.summary}</div>`).join('');
+  highlightWrap.innerHTML = `<ul class="act-hl">${highlights.map((item) => {
+    const p = shanghaiParts(item.created_at);
+    const clickable = item.target_id ? ` role="button" tabindex="0" onclick="openActivityItem(${Number(item.id) || 0}, '${esc(item.module)}', ${Number(item.target_id) || 0})" onkeydown="if(event.key==='Enter'){this.click()}"` : '';
+    return `<li class="activity-highlight-item${item.target_id ? ' is-link' : ''}"${clickable}>
+      <span class="act-dot" style="--dot:${MODULE_DOT[item.module] || MODULE_DOT.admin}"></span>
+      <span class="act-hl-text">${esc(item.summary || item.action_text || '-')}</span>
+      <time>${esc(p.day ? `${p.day.slice(5)} ${p.time}` : p.time)}</time>
+    </li>`;
+  }).join('')}</ul>`;
+}
+
+function syncRangeSeg() {
+  const days = String(getRangeDays());
+  document.querySelectorAll('#activityRangeSeg [data-act-days]').forEach((btn) => {
+    const on = btn.getAttribute('data-act-days') === days;
+    btn.classList.toggle('is-active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+
+function bindActivityUi() {
+  const seg = document.getElementById('activityRangeSeg');
+  if (!seg || seg.dataset.bound) return;
+  seg.dataset.bound = '1';
+  seg.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-act-days]');
+    if (!btn) return;
+    setActivityRange(Number(btn.getAttribute('data-act-days'))).catch((err) => window.showMessage && window.showMessage(err.message || '加载动态失败', 'error'));
+  });
 }
 
 function renderPagination() {
@@ -165,37 +169,49 @@ function renderFeed(feed) {
 
   const items = feed?.items || [];
   state.total = Number(feed?.total || 0);
-  totalEl.innerText = `共 ${state.total} 条`;
+  totalEl.innerText = `共 ${state.total} 条 · 点击一条查看对象时间线`;
 
   if (!items.length) {
-    wrap.innerHTML = '<div class="muted" style="padding:18px 0; text-align:center;">当前筛选条件下暂无动态。</div>';
+    wrap.innerHTML = `<div class="atl-empty act-empty"><svg class="atl-empty-ic" aria-hidden="true"><use href="#i-activity"/></svg>
+      <strong>暂无动态</strong><span>换个时间范围或清空筛选条件试试。</span></div>`;
     renderPagination();
     return;
   }
 
-  wrap.innerHTML = items.map((item) => {
-    const level = levelStyle(item.level);
-    const module = moduleBadgeStyle(item.module);
-    const targetLine = [item.target_no, item.target_title].filter(Boolean).join(' / ');
-    return `
-      <div class="activity-feed-item" data-activity-id="${item.id}" onclick="openActivityItem(${item.id}, '${item.module}', ${item.target_id || 0})">
-        <div class="row" style="justify-content:space-between; align-items:flex-start; gap:12px; margin:0;">
-          <div style="min-width:0; flex:1;">
-            <div class="row" style="gap:8px; align-items:center; margin:0 0 6px 0; flex-wrap:wrap;">
-              <span class="badge" style="border-radius:999px; background:${module.bg}; color:${module.color}; border:1px solid ${module.border};">${moduleZh(item.module)}</span>
-              <span class="badge" style="border-radius:999px; background:${level.bg}; color:${level.color}; border:none;">${item.action_text || item.action || '-'}</span>
-              <span class="muted" style="font-size:12px;">${formatShanghaiTime(item.created_at)}</span>
-              <span class="muted" style="font-size:12px;">${item.actor_name || '系统'}</span>
+  const groups = [];
+  items.forEach((item) => {
+    const p = shanghaiParts(item.created_at);
+    let g = groups[groups.length - 1];
+    if (!g || g.day !== p.day) { g = { day: p.day, rows: [] }; groups.push(g); }
+    g.rows.push({ item, time: p.time });
+  });
+  wrap.innerHTML = groups.map((g) => `
+    <section class="act-day">
+      <h4 class="act-day-label">${esc(dayLabel(g.day))}<span>${g.rows.length} 条</span></h4>
+      <ol class="act-list">${g.rows.map(({ item, time }) => {
+        const lv = item.level === 'critical' ? 'critical' : (isImportantItem(item) ? 'important' : 'info');
+        const targetLine = [item.target_no, item.target_title].filter(Boolean).join(' · ');
+        const actor = item.actor_name || '系统';
+        const open = `openActivityItem(${Number(item.id) || 0}, '${esc(item.module)}', ${Number(item.target_id) || 0})`;
+        return `
+        <li class="activity-feed-item act-row act-row--${lv}" data-activity-id="${item.id}" role="button" tabindex="0"
+            onclick="${open}" onkeydown="if(event.key==='Enter'){${open}}">
+          <time class="act-time">${esc(time)}</time>
+          <span class="act-dot" style="--dot:${MODULE_DOT[item.module] || MODULE_DOT.admin}" aria-hidden="true"></span>
+          <div class="act-body">
+            <div class="act-line1">
+              <span class="act-mod">${esc(moduleZh(item.module))}</span>
+              <span class="act-action">${esc(item.action_text || item.action || '-')}</span>
+              ${lv === 'critical' ? '<span class="st-pill st-pill--red">关键</span>' : lv === 'important' ? '<span class="st-pill st-pill--soft st-pill--amber">重要</span>' : ''}
             </div>
-            <div style="font-weight:700; color:#0f172a; line-height:1.55;">${item.summary || '-'}</div>
-            ${targetLine ? `<div class="muted" style="margin-top:4px; line-height:1.55;">${targetLine}</div>` : ''}
-            ${item.detail ? `<div class="muted" style="margin-top:4px; line-height:1.55;">${item.detail}</div>` : ''}
+            <div class="act-summary">${esc(item.summary || '-')}</div>
+            ${(targetLine || item.detail) ? `<div class="act-sub">${targetLine ? `<span>${esc(targetLine)}</span>` : ''}${item.detail ? `<span>${esc(item.detail)}</span>` : ''}</div>` : ''}
           </div>
-          <button class="secondary" onclick="event.stopPropagation(); openActivityItem(${item.id}, '${item.module}', ${item.target_id || 0})">查看</button>
-        </div>
-      </div>
-    `;
-  }).join('');
+          <span class="act-actor" title="操作人"><span class="fbk-avatar" aria-hidden="true">${esc(actor.slice(0, 1).toUpperCase())}</span>${esc(actor)}</span>
+          <svg class="ui-ic act-go" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+        </li>`;
+      }).join('')}</ol>
+    </section>`).join('');
 
   if (window.OmniQASSE && typeof window.OmniQASSE.mountAttention === 'function') {
     window.OmniQASSE.releaseAttention?.();
@@ -290,6 +306,8 @@ export async function loadActivityBoard() {
     restoredOnce = true;
   }
   fillActorOptions((document.getElementById('activityActorSelect')?.value || saved?.actorId || '0'));
+  bindActivityUi();
+  syncRangeSeg();
   const [summary, feed] = await Promise.all([fetchSummary(), fetchFeed()]);
   renderSummary(summary);
   renderFeed(feed);

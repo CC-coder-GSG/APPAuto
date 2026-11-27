@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
-  <link rel="stylesheet" href="/static/css/main.css?v=20261103-final-presence-ui-2">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261127-tbd-1">
+  <link rel="stylesheet" href="/static/css/main.css?v=20261127-rpt-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261127-rpt-1">
   <link rel="stylesheet" href="/static/learning.css?v=20261127-lrn-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
   <script src="/static/js/select-memory.js?v=20260622-1"></script>
-  <script type="module" src="/static/js/app.js?v=20261127-tbd-1"></script>
-  <script src="/static/js/weave-motion.js?v=20261126-bgl-1" defer></script>
-  <script src="/static/js/shell.js?v=20261126-bgl-1" defer></script>
+  <script type="module" src="/static/js/app.js?v=20261127-rpt-1"></script>
+  <script src="/static/js/weave-motion.js?v=20261127-rpt-1" defer></script>
+  <script src="/static/js/shell.js?v=20261127-rpt-1" defer></script>
   <script>
     /* 壳层布局标记 + 侧栏收起态需在首帧前生效，避免加载时宽度跳变（shell.js 负责后续切换） */
     document.documentElement.classList.add('omniqa-shell');
@@ -164,7 +164,7 @@
     <div class="nav-scroll">
       <div class="nav-group" data-group="工作台">
         <div class="nav-group-label">工作台</div>
-        <button id="tabMineBtn" onclick="showTab('mine')"><svg class="nav-ic"><use href="#i-mine"/></svg><span class="nav-label">我的工作台</span><span id="tabMinePrimaryBadge" class="nav-badge hidden"></span><span id="tabMineSecondaryBadge" class="nav-badge nav-badge--sub hidden"></span></button>
+        <button id="tabMineBtn" onclick="showTab('mine')"><svg class="nav-ic"><use href="#i-mine"/></svg><span class="nav-label">我的工作台</span><span id="tabMinePrimaryBadge" class="nav-badge hidden"></span></button>
         <button id="tabTaskBoardBtn" onclick="showTab('task-board')"><svg class="nav-ic"><use href="#i-board"/></svg><span class="nav-label">任务看板</span><span id="tabTaskBoardBadge" class="nav-badge hidden"></span></button>
         <button id="tabAssignBtn" onclick="showTab('assign')"><svg class="nav-ic"><use href="#i-assign"/></svg><span class="nav-label">任务分配台</span></button>
         <button id="tabFeedbackBtn" onclick="showTab('feedback')"><svg class="nav-ic"><use href="#i-feedback"/></svg><span class="nav-label">反馈记录与处理</span><span id="tabFeedbackBadge" class="nav-badge hidden"></span></button>
@@ -176,7 +176,6 @@
         <button id="tabBuildRecordsBtn" class="hidden" onclick="showTab('build-records')"><svg class="nav-ic"><use href="#i-build"/></svg><span class="nav-label">构建记录</span></button>
         <button id="tabJenkinsBtn" class="hidden" onclick="showTab('jenkins')"><svg class="nav-ic"><use href="#i-jenkins"/></svg><span class="nav-label">Jenkins</span></button>
         <button id="tabCadTestBtn" class="hidden" onclick="showTab('cad-test')"><svg class="nav-ic"><use href="#i-cad"/></svg><span class="nav-label">CAD测试统计</span></button>
-        <button id="tabDispatchBtn" class="hidden" onclick="showTab('dispatch')"><svg class="nav-ic"><use href="#i-bug"/></svg><span class="nav-label">BUG特派</span></button>
       </div>
       <div class="nav-group" data-group="分析洞察">
         <div class="nav-group-label">分析洞察</div>
@@ -1299,209 +1298,166 @@
     </div>
   </section>
 
+  <!-- 报表中心 v2（2026-11-27）：分区导航 + 指标卡 + 统一图表卡片；样式 weave.css R27 .rpt-*，元素 ID 均沿用旧版 -->
   <section id="tab-report" class="hidden card">
     <div class="ph">
       <span class="ph-icon" aria-hidden="true"><svg><use href="#i-report"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-report"/></svg>
       <div class="ph-text"><h2>报表中心</h2><p class="page-desc">版本质量、缺陷趋势与团队效率</p></div>
+      <div class="ph-actions">
+        <button class="secondary" onclick="exportReportPdf()"><svg class="ui-ic" aria-hidden="true"><use href="#i-download"/></svg>导出 PDF</button>
+        <button class="secondary" onclick="exportWeeklyTasks()" title="导出本周（周一~周日）每人的禅道任务工作内容"><svg class="ui-ic" aria-hidden="true"><use href="#i-file"/></svg>导出本周工作</button>
+      </div>
     </div>
     <div class="fb">
       <label class="fb-field"><span class="fb-k">大版本</span><select id="reportMajorSelect"></select></label>
       <div class="fb-field fb-range"><span class="fb-k">日期</span><input type="date" id="reportStartDate" aria-label="开始日期" data-range-role="start" data-range-pair="reportEndDate"><span class="fb-range-sep">至</span><input type="date" id="reportEndDate" aria-label="结束日期" data-range-role="end" data-range-pair="reportStartDate"></div>
+      <div class="rpt-presets" id="reportRangePresets" role="group" aria-label="快捷时间范围">
+        <button type="button" data-rpt-days="7">近 7 天</button>
+        <button type="button" data-rpt-days="30">近 30 天</button>
+        <button type="button" data-rpt-days="90">近 90 天</button>
+      </div>
       <label id="reportUserWrap" class="fb-field hidden"><span class="fb-k">人员</span><select id="reportUserSelect"></select></label>
       <div class="fb-actions">
-        <button onclick="queryReport()">查询报表</button>
-        <button class="secondary" onclick="exportReportPdf()">导出 PDF</button>
-        <button class="secondary" onclick="exportWeeklyTasks()" title="导出本周（周一~周日）每人的禅道任务工作内容，txt 文本">📄 导出本周工作</button>
+        <button onclick="queryReport()"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>查询报表</button>
       </div>
     </div>
 
-    <div id="reportContent" class="card">
-      <div class="metrics-grid">
-        <div class="metric-card" title="在所选时间段内执行过测试的不同需求数（按 TestExecution 去重）"><div class="metric-title">执行/测试过需求总数</div><div class="metric-value" id="mReq">0</div></div>
-        <div class="metric-card" title="在所选时间段内新增的本地测试用例数"><div class="metric-title">创建用例总数</div><div class="metric-value" id="mCase">0</div></div>
-        <div class="metric-card" title="按禅道真实 openedDate 过滤的新建 Bug 数（已排除禅道删除）"><div class="metric-title">创建Bug总数</div><div class="metric-value" id="mBug">0</div></div>
-        <div class="metric-card" title="需求复测结论变化的次数（以审计 retest.submit 为准）"><div class="metric-title">复测需求数</div><div class="metric-value" id="mRetest">0</div></div>
-        <div class="metric-card" title="本地 Stage5 验收完成 或 禅道单条关闭联动产生的 Stage5 记录"><div class="metric-title">关闭Bug数</div><div class="metric-value" id="mClosed">0</div></div>
-      </div>
-      <div class="chart-grid">
-        <div id="trendChart" class="chart-box"></div>
-        <div class="chart-box" style="position:relative;">
-          <select id="bugDistModeSelect" title="Bug分布视图模式" style="position:absolute; top:10px; right:12px; z-index:5; font-size:12px; padding:3px 6px;">
-            <option value="major" selected>按大版本分布</option>
-            <option value="source">按来源分布</option>
-          </select>
-          <div id="sourcePieChart" style="width:100%; height:100%;"></div>
-        </div>
-        <div id="radarChart" class="chart-box"></div>
-        <div id="teamCompareChart" class="chart-box"></div>
-      </div>
-      <div class="chart-box" style="height:480px; margin-top:20px; display:flex; flex-direction:column;">
-        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <strong style="color:#334155; font-size:15px;">各发包(小版本) Bug 检出分布</strong>
-          <span class="row" style="gap:6px; align-items:center;">
-            <label style="font-size:12px; color:#64748b;">大版本</label>
-            <select id="vbMajorSelect" style="font-size:12px; padding:3px 6px;"></select>
-          </span>
-        </div>
-        <div id="versionBugChart" style="flex:1; min-height:0;"></div>
-      </div>
-      <div style="margin-top: 26px; border-top: 2px dashed #cbd5e1; padding-top: 18px;">
-        <h3 style="margin:0 0 12px 0; color:#334155; text-align:center;">🚚 外业测试统计</h3>
-        <div class="chart-grid">
-          <div id="fieldTestTrendChart" class="chart-box"></div>
-          <div id="fieldTestPurposeChart" class="chart-box"></div>
-          <div id="fieldTestUserChart" class="chart-box"></div>
-        </div>
-      </div>
-      <div style="margin-top: 30px; border-top: 2px dashed #cbd5e1; padding-top: 20px; width: 100%;">
-        <h3 style="color: #334155; margin-bottom: 20px; text-align: center;">🚀 项目高阶质量与效能度量</h3>
+    <nav class="rpt-nav" id="reportSectionNav" aria-label="报表分区">
+      <a href="#rptSecOverview" data-rpt-nav="rptSecOverview" class="is-active">概览</a>
+      <a href="#rptSecBugs" data-rpt-nav="rptSecBugs">缺陷分布</a>
+      <a href="#rptSecField" data-rpt-nav="rptSecField">外业测试</a>
+      <a href="#rptSecQuality" data-rpt-nav="rptSecQuality">质量效能</a>
+      <a href="#rptSecGov" data-rpt-nav="rptSecGov">治理风险</a>
+      <a href="#rptSecSync" data-rpt-nav="rptSecSync">禅道同步</a>
+    </nav>
 
-        <div class="row" style="flex-wrap: wrap; margin-bottom: 20px;">
-          <div class="card" style="flex:1; min-width:45%;"><div id="topReqChart" style="height:350px;"></div></div>
-          <div class="card" style="flex:1; min-width:45%;"><div id="leakageChart" style="height:350px;"></div></div>
+    <div id="reportContent" class="rpt">
+      <section class="rpt-sec" id="rptSecOverview">
+        <div class="rpt-kpis">
+          <div class="rpt-kpi" style="--kc:#2a78d6"><span class="rpt-kpi-k">执行/测试过需求</span><b id="mReq">0</b><small>时段内有执行记录的需求（去重）</small></div>
+          <div class="rpt-kpi" style="--kc:#6250d6"><span class="rpt-kpi-k">创建用例</span><b id="mCase">0</b><small>时段内新增的本地测试用例</small></div>
+          <div class="rpt-kpi" style="--kc:#e34948"><span class="rpt-kpi-k">创建 Bug</span><b id="mBug">0</b><small>按禅道提交时间统计，已排除删除</small></div>
+          <div class="rpt-kpi" style="--kc:#eda100"><span class="rpt-kpi-k">复测需求</span><b id="mRetest">0</b><small>复测结论变化次数</small></div>
+          <div class="rpt-kpi" style="--kc:#1baf7a"><span class="rpt-kpi-k">关闭 Bug</span><b id="mClosed">0</b><small>本地验收或禅道关闭联动</small></div>
         </div>
-
-        <div class="row" style="flex-wrap: wrap;">
-          <div class="card" style="flex:1; min-width:45%;"><div id="funnelChart" style="height:350px;"></div></div>
-          <div class="card" style="flex:1; min-width:45%;"><div id="execChart" style="height:350px;"></div></div>
-        </div>
-      </div>
-
-      <div style="margin-top: 30px; border-top: 2px dashed #cbd5e1; padding-top: 20px; width: 100%;">
-        <h3 style="color: #334155; margin-bottom: 20px; text-align: center;">🛡️ 治理风险看板（阶段一）</h3>
-        <div id="governanceMetaHint" class="muted" style="margin-bottom: 12px; text-align: center;"></div>
-        <div class="metrics-grid">
-          <div class="metric-card" style="cursor:pointer;" onclick="openGovernanceDetail('overdue_requirements')"><div class="metric-title">超时未关闭需求</div><div class="metric-value" id="gReqOverdue">0</div></div>
-          <div class="metric-card" style="cursor:pointer;" onclick="openGovernanceDetail('overdue_feedbacks')"><div class="metric-title">超时未处理反馈</div><div class="metric-value" id="gFbOverdue">0</div></div>
-          <div class="metric-card" style="cursor:pointer;" onclick="openGovernanceDetail('unassigned_bugs')"><div class="metric-title">无人处理Bug</div><div class="metric-value" id="gBugUnassigned">0</div></div>
-          <div class="metric-card" style="cursor:pointer;" onclick="openGovernanceDetail('overdue_bugs')"><div class="metric-title">超时未关闭Bug</div><div class="metric-value" id="gBugOverdue">0</div></div>
-          <div class="metric-card" style="cursor:pointer;" onclick="openGovernanceDetail('stale_bugs')"><div class="metric-title">长期未更新Bug</div><div class="metric-value" id="gBugStale">0</div></div>
-          <div class="metric-card" style="cursor:pointer;" onclick="openGovernanceDetail('assigned_no_progress_bugs')"><div class="metric-title">已指派未处理Bug</div><div class="metric-value" id="gBugAssignedNoProgress">0</div></div>
-          <div class="metric-card"><div class="metric-title">反馈转Bug占比</div><div class="metric-value" id="gFeedbackToBugRatio">0%</div></div>
-        </div>
-        <div id="governanceDetailCard" class="card hidden" style="margin-top:12px; border:1px dashed #cbd5e1; box-shadow:none;">
-          <div class="row" style="justify-content:space-between; align-items:center;">
-            <h4 id="governanceDetailTitle" style="margin:0;">治理明细</h4>
-            <button class="secondary" onclick="closeGovernanceDetail()">收起</button>
+        <div class="rpt-grid rpt-grid--main">
+          <div class="rpt-card rpt-card--wide">
+            <div class="rpt-card-h"><b>工作量趋势</b><small>按天统计，点击图例可隐藏单条曲线</small></div>
+            <div id="trendChart" class="rpt-chart rpt-chart--tall"></div>
           </div>
-          <div class="muted" id="governanceDetailHint" style="margin-top:6px;"></div>
-          <table style="margin-top:10px;">
+          <div class="rpt-card" id="rptRadarCard">
+            <div class="rpt-card-h"><b>个人能力雷达</b><small>各项指标相对时段内产出</small></div>
+            <div id="radarChart" class="rpt-chart rpt-chart--tall"></div>
+          </div>
+          <div class="rpt-card rpt-card--full" id="rptTeamCard">
+            <div class="rpt-card-h"><b>团队对比</b><small>全员模式 · 人数多时可拖动右侧滑块</small></div>
+            <div id="teamCompareChart" class="rpt-chart rpt-chart--tall"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="rpt-sec" id="rptSecBugs">
+        <div class="rpt-sec-h"><h3>缺陷分布</h3><p>按大版本 / 来源看 Bug 构成，以及各发包检出的数量</p></div>
+        <div class="rpt-grid rpt-grid--2-1">
+          <div class="rpt-card">
+            <div class="rpt-card-h"><b>各发包（小版本）Bug 检出分布</b>
+              <label class="rpt-card-tool"><span>大版本</span><select id="vbMajorSelect"></select></label>
+            </div>
+            <div id="versionBugChart" class="rpt-chart rpt-chart--xl"></div>
+          </div>
+          <div class="rpt-card">
+            <div class="rpt-card-h"><b>Bug 分布</b>
+              <label class="rpt-card-tool"><select id="bugDistModeSelect" aria-label="Bug 分布视图">
+                <option value="major" selected>按大版本</option>
+                <option value="source">按来源</option>
+              </select></label>
+            </div>
+            <div id="sourcePieChart" class="rpt-chart rpt-chart--xl"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="rpt-sec" id="rptSecField">
+        <div class="rpt-sec-h"><h3>外业测试</h3><p>外业测试时长、目的与人员投入</p></div>
+        <div class="rpt-grid rpt-grid--3">
+          <div class="rpt-card"><div class="rpt-card-h"><b>时长趋势</b><small>分钟 / 天</small></div><div id="fieldTestTrendChart" class="rpt-chart"></div></div>
+          <div class="rpt-card"><div class="rpt-card-h"><b>测试目的分布</b><small>按时长</small></div><div id="fieldTestPurposeChart" class="rpt-chart"></div></div>
+          <div class="rpt-card" id="rptFieldUserCard"><div class="rpt-card-h"><b>人员时长对比</b><small>分钟</small></div><div id="fieldTestUserChart" class="rpt-chart"></div></div>
+        </div>
+      </section>
+
+      <section class="rpt-sec" id="rptSecQuality">
+        <div class="rpt-sec-h"><h3>质量与效能</h3><p>哪些需求问题最多、复测漏测比例、缺陷闭环转化与用例执行结果</p></div>
+        <div class="rpt-grid rpt-grid--2">
+          <div class="rpt-card"><div class="rpt-card-h"><b>需求 Bug 排行</b><small>Bug 最多的 7 个需求</small></div><div id="topReqChart" class="rpt-chart"></div></div>
+          <div class="rpt-card"><div class="rpt-card-h"><b>交叉复测漏测率</b><small>复测新增 Bug 占比</small></div><div id="leakageChart" class="rpt-chart"></div></div>
+          <div class="rpt-card"><div class="rpt-card-h"><b>缺陷闭环转化漏斗</b><small>发现 → 开发已解决 → 禅道已关闭 → 本地验收</small></div><div id="funnelChart" class="rpt-chart"></div></div>
+          <div class="rpt-card"><div class="rpt-card-h"><b>用例执行结果</b><small>时段内执行记录</small></div><div id="execChart" class="rpt-chart"></div></div>
+        </div>
+      </section>
+
+      <section class="rpt-sec" id="rptSecGov">
+        <div class="rpt-sec-h"><h3>治理风险</h3><p>超时、无人处理与长期不动的需求 / 反馈 / Bug；点指标查看明细</p><span id="governanceMetaHint" class="rpt-sec-note"></span></div>
+        <div class="rpt-risks">
+          <button type="button" class="rpt-risk" onclick="openGovernanceDetail('overdue_requirements')" data-gov="overdue_requirements"><span>超时未关闭需求</span><b id="gReqOverdue">0</b><svg class="ui-ic" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+          <button type="button" class="rpt-risk" onclick="openGovernanceDetail('overdue_feedbacks')" data-gov="overdue_feedbacks"><span>超时未处理反馈</span><b id="gFbOverdue">0</b><svg class="ui-ic" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+          <button type="button" class="rpt-risk" onclick="openGovernanceDetail('unassigned_bugs')" data-gov="unassigned_bugs"><span>无人处理 Bug</span><b id="gBugUnassigned">0</b><svg class="ui-ic" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+          <button type="button" class="rpt-risk" onclick="openGovernanceDetail('overdue_bugs')" data-gov="overdue_bugs"><span>超时未关闭 Bug</span><b id="gBugOverdue">0</b><svg class="ui-ic" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+          <button type="button" class="rpt-risk" onclick="openGovernanceDetail('stale_bugs')" data-gov="stale_bugs"><span>长期未更新 Bug</span><b id="gBugStale">0</b><svg class="ui-ic" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+          <button type="button" class="rpt-risk" onclick="openGovernanceDetail('assigned_no_progress_bugs')" data-gov="assigned_no_progress_bugs"><span>已指派未处理 Bug</span><b id="gBugAssignedNoProgress">0</b><svg class="ui-ic" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+          <div class="rpt-risk rpt-risk--plain"><span>反馈转 Bug 占比</span><b id="gFeedbackToBugRatio">0%</b></div>
+        </div>
+        <div id="governanceDetailCard" class="rpt-card rpt-detail hidden">
+          <div class="rpt-card-h"><b id="governanceDetailTitle">治理明细</b><small id="governanceDetailHint"></small>
+            <button type="button" class="rpt-x" onclick="closeGovernanceDetail()" aria-label="收起明细"><svg class="ui-ic" aria-hidden="true"><use href="#i-x-circle"/></svg>收起</button>
+          </div>
+          <div class="rpt-table-wrap"><table class="rpt-table">
             <thead id="governanceDetailHead"></thead>
             <tbody id="governanceDetailBody"></tbody>
-          </table>
+          </table></div>
         </div>
-
-        <div class="row" style="flex-wrap: wrap; margin-top: 12px;">
-          <div class="card" style="flex:1; min-width:45%;"><div id="governReqAgingChart" style="height:320px;"></div></div>
-          <div class="card" style="flex:1; min-width:45%;"><div id="governBugAgingChart" style="height:320px;"></div></div>
+        <div class="rpt-grid rpt-grid--2">
+          <div class="rpt-card"><div class="rpt-card-h"><b>需求状态停留时长</b><small>平均 / 最大天数</small></div><div id="governReqAgingChart" class="rpt-chart"></div></div>
+          <div class="rpt-card"><div class="rpt-card-h"><b>Bug 关闭耗时分布</b><small>按耗时区间计数</small></div><div id="governBugAgingChart" class="rpt-chart"></div></div>
+          <div class="rpt-card"><div class="rpt-card-h"><b>反馈最多需求 Top 10</b></div>
+            <div class="rpt-table-wrap"><table class="rpt-table rpt-table--rank"><thead><tr><th>需求</th><th>版本</th><th>状态</th><th class="num">反馈数</th></tr></thead><tbody id="gTopReqFeedbackTable"></tbody></table></div></div>
+          <div class="rpt-card"><div class="rpt-card-h"><b>缺陷最多需求 Top 10</b></div>
+            <div class="rpt-table-wrap"><table class="rpt-table rpt-table--rank"><thead><tr><th>需求</th><th>版本</th><th>状态</th><th class="num">Bug 数</th></tr></thead><tbody id="gTopReqBugTable"></tbody></table></div></div>
+          <div class="rpt-card"><div class="rpt-card-h"><b>反馈最多版本 Top 10</b></div>
+            <div class="rpt-table-wrap"><table class="rpt-table rpt-table--rank"><thead><tr><th>版本</th><th class="num">反馈数</th><th class="num">已处理</th><th class="num">未处理</th></tr></thead><tbody id="gFeedbackVersionTopTable"></tbody></table></div></div>
+          <div class="rpt-card"><div class="rpt-card-h"><b>长期未更新 Bug Top 10</b></div>
+            <div class="rpt-table-wrap"><table class="rpt-table rpt-table--rank"><thead><tr><th>Bug</th><th>版本</th><th>指派给</th><th class="num">未更新天数</th></tr></thead><tbody id="gStaleBugTopTable"></tbody></table></div></div>
         </div>
+      </section>
 
-        <div class="row" style="flex-wrap: wrap; margin-top: 12px;">
-          <div class="card" style="flex:1; min-width:45%;">
-            <h4 style="margin-top:0;">反馈最多需求 Top10</h4>
-            <table><thead><tr><th>需求</th><th>版本</th><th>状态</th><th>反馈数</th></tr></thead><tbody id="gTopReqFeedbackTable"></tbody></table>
-          </div>
-          <div class="card" style="flex:1; min-width:45%;">
-            <h4 style="margin-top:0;">缺陷最多需求 Top10</h4>
-            <table><thead><tr><th>需求</th><th>版本</th><th>状态</th><th>Bug数</th></tr></thead><tbody id="gTopReqBugTable"></tbody></table>
-          </div>
-        </div>
-
-        <div class="row" style="flex-wrap: wrap; margin-top: 12px;">
-          <div class="card" style="flex:1; min-width:45%;">
-            <h4 style="margin-top:0;">反馈最多版本 Top10</h4>
-            <table><thead><tr><th>版本</th><th>反馈数</th><th>已处理</th><th>未处理</th></tr></thead><tbody id="gFeedbackVersionTopTable"></tbody></table>
-          </div>
-          <div class="card" style="flex:1; min-width:45%;">
-            <h4 style="margin-top:0;">长期未更新 Bug Top10</h4>
-            <table><thead><tr><th>Bug</th><th>版本</th><th>指派给</th><th>未更新天数</th></tr></thead><tbody id="gStaleBugTopTable"></tbody></table>
-          </div>
-        </div>
-      </div>
-
-      <!-- Zentao Sync Health Panel -->
-      <div style="margin-top: 30px; border-top: 2px dashed #cbd5e1; padding-top: 20px; width: 100%;">
-        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:16px;">
-          <h3 style="color: #334155; margin:0;">🔄 禅道同步健康看板</h3>
-          <button class="secondary" onclick="loadZentaoSyncStats()">刷新同步统计</button>
+      <section class="rpt-sec" id="rptSecSync">
+        <div class="rpt-sec-h"><h3>禅道同步健康</h3><p>本地记录与禅道是否一致；点指标展开明细（最多 50 条）</p>
+          <button class="secondary rpt-sec-btn" onclick="loadZentaoSyncStats()"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>刷新同步统计</button>
         </div>
         <div id="zentaoSyncStatsArea">
-          <div class="metrics-grid">
-            <div class="metric-card" style="cursor:pointer;" onclick="document.getElementById('zsStaleDetail').classList.toggle('hidden')">
-              <div class="metric-title">⏰ 超60分钟未同步</div>
-              <div class="metric-value" id="zsStaleCount" style="color:#d97706;">0</div>
-            </div>
-            <div class="metric-card" style="cursor:pointer;" onclick="document.getElementById('zsZtClosedNoLocalDetail').classList.toggle('hidden')">
-              <div class="metric-title">🔒 禅道已关闭无本地闭环</div>
-              <div class="metric-value" id="zsZtClosedNoLocalCount" style="color:#dc2626;">0</div>
-            </div>
-            <div class="metric-card" style="cursor:pointer;" onclick="document.getElementById('zsLocalClosedNoZtDetail').classList.toggle('hidden')">
-              <div class="metric-title">⚠️ 本地已闭环禅道未关</div>
-              <div class="metric-value" id="zsLocalClosedNoZtCount" style="color:#ea580c;">0</div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-title">🗑️ 禅道已删除记录</div>
-              <div class="metric-value" id="zsDeletedCount" style="color:#6b7280;">0</div>
-            </div>
+          <div class="rpt-risks rpt-risks--4">
+            <button type="button" class="rpt-risk rpt-risk--amber" data-zs-toggle="zsStaleDetail"><span>超 60 分钟未同步</span><b id="zsStaleCount">0</b><svg class="ui-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
+            <button type="button" class="rpt-risk rpt-risk--red" data-zs-toggle="zsZtClosedNoLocalDetail"><span>禅道已关闭、本地未闭环</span><b id="zsZtClosedNoLocalCount">0</b><svg class="ui-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
+            <button type="button" class="rpt-risk rpt-risk--orange" data-zs-toggle="zsLocalClosedNoZtDetail"><span>本地已闭环、禅道未关</span><b id="zsLocalClosedNoZtCount">0</b><svg class="ui-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
+            <div class="rpt-risk rpt-risk--plain"><span>禅道已删除记录</span><b id="zsDeletedCount">0</b></div>
           </div>
-          <div id="zsStaleDetail" class="hidden" style="margin-top:12px;">
-            <div class="card" style="border:1px dashed #fcd34d; box-shadow:none;">
-              <h4 style="margin:0 0 10px; color:#92400e;">超时未同步 Bug 明细（最多50条）</h4>
-              <table><thead id="zsStaleTableHead"></thead><tbody id="zsStaleTable"></tbody></table>
-            </div>
+          <div id="zsStaleDetail" class="rpt-card rpt-detail hidden">
+            <div class="rpt-card-h"><b>超时未同步 Bug 明细</b></div>
+            <div class="rpt-table-wrap"><table class="rpt-table"><thead id="zsStaleTableHead"></thead><tbody id="zsStaleTable"></tbody></table></div>
           </div>
-          <div id="zsZtClosedNoLocalDetail" class="hidden" style="margin-top:12px;">
-            <div class="card" style="border:1px dashed #fca5a5; box-shadow:none;">
-              <h4 style="margin:0 0 10px; color:#b91c1c;">禅道已关闭、本地无人确认闭环（最多50条）</h4>
-              <table><thead id="zsZtClosedNoLocalTableHead"></thead><tbody id="zsZtClosedNoLocalTable"></tbody></table>
-            </div>
+          <div id="zsZtClosedNoLocalDetail" class="rpt-card rpt-detail hidden">
+            <div class="rpt-card-h"><b>禅道已关闭、本地无人确认闭环</b></div>
+            <div class="rpt-table-wrap"><table class="rpt-table"><thead id="zsZtClosedNoLocalTableHead"></thead><tbody id="zsZtClosedNoLocalTable"></tbody></table></div>
           </div>
-          <div id="zsLocalClosedNoZtDetail" class="hidden" style="margin-top:12px;">
-            <div class="card" style="border:1px dashed #fed7aa; box-shadow:none;">
-              <h4 style="margin:0 0 10px; color:#c2410c;">本地已确认闭环、禅道未关闭（最多50条）</h4>
-              <table><thead id="zsLocalClosedNoZtTableHead"></thead><tbody id="zsLocalClosedNoZtTable"></tbody></table>
-            </div>
+          <div id="zsLocalClosedNoZtDetail" class="rpt-card rpt-detail hidden">
+            <div class="rpt-card-h"><b>本地已确认闭环、禅道未关闭</b></div>
+            <div class="rpt-table-wrap"><table class="rpt-table"><thead id="zsLocalClosedNoZtTableHead"></thead><tbody id="zsLocalClosedNoZtTable"></tbody></table></div>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   </section>
 
-  <section id="tab-dispatch" class="hidden card">
-    <div class="ph">
-      <span class="ph-icon" aria-hidden="true"><svg><use href="#i-bug"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-bug"/></svg>
-      <div class="ph-text"><h2>BUG特派中心</h2><p class="page-desc">按编号检索缺陷，特派给指定成员做专项验证并跟踪处理</p></div>
-    </div>
-    <div class="fb">
-      <label class="fb-search fb-search--prefix"><span class="fb-prefix">b#</span><input id="dispatchBugNo" inputmode="numeric" oninput="digitsOnly(this)" onkeydown="if(event.key==='Enter') searchDispatchBug()" placeholder="输入 Bug 数字编号"></label>
-      <button onclick="searchDispatchBug()"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg>检索缺陷</button>
-    </div>
-
-    <div id="dispatchBugInfo" class="hidden card" style="margin-top: 16px; background: #f8fafc; border: 1px solid #cbd5e1;">
-      <div style="font-size: 16px; font-weight: bold; margin-bottom: 12px; color: #0f172a;" id="dispatchBugTitle"></div>
-      <div class="row" style="border-top: 1px dashed #94a3b8; padding-top: 12px;">
-        <label>特派给：</label>
-        <select id="dispatchUserSelect"></select>
-        <button onclick="confirmDispatchBug()">确认特派</button>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top: 24px; border-top: 2px solid #e2e8f0;">
-      <div class="row" style="justify-content: space-between; align-items: center;">
-        <h3 style="margin: 0; color: #334155;">📊 特派分发状态追踪大盘</h3>
-        <div class="row">
-          <label style="cursor: pointer; color: #475569; margin-right: 12px; font-weight: bold;">
-            <input type="checkbox" id="hideClosedDispatch" onchange="loadDispatchedAll()" checked> 隐藏已闭环
-          </label>
-          <button onclick="loadDispatchedAll()">刷新列表</button>
-        </div>
-      </div>
-      <table style="margin-top: 16px;">
-        <thead><tr><th>Bug 编号</th><th>特派负责人</th><th>当前处理状态</th></tr></thead>
-        <tbody id="dispatchAllTable"></tbody>
-      </table>
-    </div>
-  </section>
 
   <!-- Bugly 问题中心（2026-11-26 并入主应用；逻辑 js/tabs/bugly.js，样式 weave.css R23 .bgl-*）
        权限只看数据中心勾选的页面权限，页签内不再有账号与授权管理 -->
@@ -1573,22 +1529,28 @@
     </div>
   </section>
 
+  <!-- 活动中心 v2（2026-11-27）：左侧按天分组的紧凑动态流，右侧统计与关键动态；样式 weave.css R27 .act-*，逻辑 js/tabs/activity.js -->
   <section id="tab-activity" class="hidden card">
     <div class="ph">
       <span class="ph-icon" aria-hidden="true"><svg><use href="#i-activity"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-activity"/></svg>
-      <div class="ph-text"><h2>活动中心</h2><p class="page-desc">管理员可查看团队最近动态、对象时间线，并手动推送摘要通知</p></div>
+      <div class="ph-text"><h2>活动中心</h2><p class="page-desc">团队最近动态与对象时间线，可手动推送摘要到企业微信</p></div>
       <div class="ph-actions">
-        <button class="secondary" onclick="loadActivityBoard()"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>刷新动态</button>
-        <button onclick="pushActivitySummary()">推送最近动态</button>
+        <button class="secondary" onclick="loadActivityBoard()"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg>刷新</button>
+        <button onclick="pushActivitySummary()"><svg class="ui-ic" aria-hidden="true"><use href="#i-send"/></svg>推送最近动态</button>
       </div>
     </div>
 
     <div class="fb">
-      <label class="fb-field"><span class="fb-k">时间范围</span><select id="activityRangeDays" onchange="loadActivityBoard()">
+      <div class="act-seg" id="activityRangeSeg" role="group" aria-label="时间范围">
+        <button type="button" data-act-days="1">近 1 天</button>
+        <button type="button" data-act-days="3">近 3 天</button>
+        <button type="button" data-act-days="7">近 7 天</button>
+      </div>
+      <select id="activityRangeDays" hidden aria-hidden="true" tabindex="-1">
         <option value="1">最近1天</option>
         <option value="3">最近3天</option>
         <option value="7">最近7天</option>
-      </select></label>
+      </select>
       <label class="fb-field"><span class="fb-k">模块</span><select id="activityTargetType" onchange="loadActivityBoard()">
         <option value="">全部模块</option>
         <option value="bug">Bug</option>
@@ -1600,29 +1562,33 @@
       <label class="fb-field"><span class="fb-k">操作人</span><select id="activityActorSelect" onchange="loadActivityBoard()">
         <option value="0">全部人员</option>
       </select></label>
-      <label class="fb-search"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg><input id="activityKeyword" placeholder="搜索编号、标题、人员、摘要" onkeydown="if(event.key==='Enter'){loadActivityBoard()}"></label>
+      <label class="fb-search"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg><input id="activityKeyword" placeholder="搜索编号、标题、人员、摘要（回车）" onkeydown="if(event.key==='Enter'){loadActivityBoard()}"></label>
       <label class="fb-check"><input type="checkbox" id="activityOnlyImportant" onchange="loadActivityBoard()">仅看关键动态</label>
     </div>
 
-    <div id="activitySummaryCards" class="metrics-grid" style="margin-top:14px; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));"></div>
-
-    <div class="card" style="margin-top:16px; box-shadow:none; border:1px solid #e2e8f0;">
-      <div style="font-weight:700; color:#0f172a; margin-bottom:10px;">关键动态摘要</div>
-      <div id="activityHighlights"></div>
-    </div>
-
-    <div class="card" style="margin-top:16px; box-shadow:none; border:1px solid #e2e8f0;">
-      <div class="row" style="justify-content:space-between; align-items:center;">
-        <div style="font-weight:700; color:#0f172a;">动态列表</div>
-        <div id="activityFeedMeta" class="muted"></div>
+    <div class="act-layout">
+      <div class="act-main">
+        <div class="act-main-h">
+          <b>动态</b><span id="activityFeedMeta" class="act-meta"></span>
+        </div>
+        <div id="activityTopNotice" class="hidden muted sse-inline-notice" role="button" tabindex="0" onclick="revealActivityRealtimeNew()" onkeydown="onNoticeKeydown(event, revealActivityRealtimeNew)">有 0 条新活动</div>
+        <div id="activityFeedList"></div>
+        <div class="act-pager">
+          <span id="activityPaginationText" class="act-meta">第 1 / 1 页，共 0 条</span>
+          <button id="activityPrevBtn" class="secondary" onclick="prevActivityPage()"><svg class="ui-ic" aria-hidden="true"><use href="#i-chevron-left"/></svg>上一页</button>
+          <button id="activityNextBtn" class="secondary" onclick="nextActivityPage()">下一页<svg class="ui-ic" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+        </div>
       </div>
-      <div id="activityTopNotice" class="hidden muted sse-inline-notice" role="button" tabindex="0" onclick="revealActivityRealtimeNew()" onkeydown="onNoticeKeydown(event, revealActivityRealtimeNew)">有 0 条新活动</div>
-      <div id="activityFeedList" style="margin-top:12px;"></div>
-      <div class="row" style="justify-content:flex-end; align-items:center; gap:8px; margin-top:10px;">
-        <span id="activityPaginationText" class="muted">第 1 / 1 页，共 0 条</span>
-        <button id="activityPrevBtn" class="secondary" onclick="prevActivityPage()">上一页</button>
-        <button id="activityNextBtn" class="secondary" onclick="nextActivityPage()">下一页</button>
-      </div>
+      <aside class="act-side">
+        <div class="act-panel">
+          <div class="act-panel-h"><b>动作统计</b><small id="activitySummaryRange"></small></div>
+          <div id="activitySummaryCards"></div>
+        </div>
+        <div class="act-panel">
+          <div class="act-panel-h"><b>关键动态</b><small>最近 8 条</small></div>
+          <div id="activityHighlights"></div>
+        </div>
+      </aside>
     </div>
   </section>
 
@@ -2280,7 +2246,7 @@ function sourceTypeZh(v){
 function logout(){localStorage.removeItem('token');location.href='/login'}
 // 企微推送确认：返回 Promise<boolean>，调用处 await（全站对话框见 js/components/dialog.js）
 function confirmPush(){return window.OmniQADialog?window.OmniQADialog.confirm({icon:'i-send',title:'推送到企微群',message:'将把这条消息发送到企业微信群，发送后无法撤回。',okText:'发送'}):Promise.resolve(false)}
-const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','database-compare','terminal','learning','bugly','competitor-analysis'];
+const ALL_TAB_KEYS=['assign','mine','task-board','feedback','retest','overall-test','field-test','build-records','testcase-center','report','activity','data','zentao-ai','jenkins','cad-test','database-compare','terminal','learning','bugly','competitor-analysis'];
 const DEFAULT_ALLOWED_TABS=['mine','task-board','feedback','retest','overall-test','field-test','testcase-center','report','jenkins','learning'];
 const WORKBENCH_SUBTAB_ORDER=['demand','retest','overall-test','task','review'];
 const WORKBENCH_SUBTAB_ACCESS_MAP={ demand:'mine', retest:'retest', 'overall-test':'overall-test', task:'mine', review:'mine' };
@@ -2558,7 +2524,7 @@ function applyTabVisibility(){
     'assign':'tabAssignBtn','mine':'tabMineBtn','task-board':'tabTaskBoardBtn','feedback':'tabFeedbackBtn',
     'field-test':'tabFieldTestBtn','build-records':'tabBuildRecordsBtn','testcase-center':'tabTestcaseCenterBtn',
     'report':'tabReportBtn','activity':'tabActivityBtn',
-    'data':'tabDataBtn','dispatch':'tabDispatchBtn','zentao-ai':'tabZentaoAiBtn','jenkins':'tabJenkinsBtn','cad-test':'tabCadTestBtn','terminal':'tabTerminalBtn','learning':'tabLearningBtn'
+    'data':'tabDataBtn','zentao-ai':'tabZentaoAiBtn','jenkins':'tabJenkinsBtn','cad-test':'tabCadTestBtn','terminal':'tabTerminalBtn','learning':'tabLearningBtn'
   };
   ALL_TAB_KEYS.forEach((name)=>{
     const btn=document.getElementById(buttonMap[name]);
@@ -2570,7 +2536,7 @@ function applyTabVisibility(){
   }
 }
 function getDefaultVisibleTab(){
-  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','tools','terminal','learning','bugly','competitor-analysis']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','zentao-ai','jenkins','cad-test','tools','terminal','learning','bugly','competitor-analysis']
     .find((name)=>canAccessTab(name)) || 'mine';
 }
 function getTabNamespaceName(name){
@@ -2587,7 +2553,6 @@ function getTabNamespaceName(name){
     report:'OmniQAReportTab',
     activity:'OmniQAActivityTab',
     data:'OmniQADataTab',
-    dispatch:'OmniQADispatchTab',
     'zentao-ai':'OmniQAZentaoAiTab',
     jenkins:'OmniQAJenkinsTab',
     'cad-test':'OmniQACadTab',
@@ -2605,7 +2570,7 @@ function isTabRuntimeReady(name){
   return !!window[nsName];
 }
 function getFirstRuntimeReadyTab(){
-  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','tools','terminal','bugly','competitor-analysis']
+  return ['assign','task-board','mine','feedback','field-test','build-records','testcase-center','report','activity','data','zentao-ai','jenkins','cad-test','tools','terminal','bugly','competitor-analysis']
     .find((tabName)=>canAccessTab(tabName) && isTabRuntimeReady(tabName)) || null;
 }
 async function showTab(name){
@@ -2629,7 +2594,7 @@ async function showTab(name){
     if(!fallback || fallback===name) return;
     name = fallback;
   }
-  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai','jenkins','cad-test','tools','terminal','learning','bugly','competitor-analysis','feature-tree'].forEach(x=>{
+  ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','zentao-ai','jenkins','cad-test','tools','terminal','learning','bugly','competitor-analysis','feature-tree'].forEach(x=>{
     const el=document.getElementById('tab-'+x);
     if(el) el.classList.add('hidden');
   });
@@ -2637,10 +2602,8 @@ async function showTab(name){
   if(activeEl) activeEl.classList.remove('hidden');
   if(window.OmniQASSE && window.OmniQASSE.runtime && window.OmniQASSE.runtime.counters){
     if(name === 'feedback' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('feedback_task');
-    if(name === 'dispatch' && typeof window.OmniQASSE.clearScopeUnread === 'function') window.OmniQASSE.clearScopeUnread('mine_bug_dispatch');
   }
   if(name === 'assign') { window.OmniQAAssignTab && window.OmniQAAssignTab.activate && window.OmniQAAssignTab.activate().catch(()=>{}); }
-  if(name === 'dispatch') { loadDispatchedAll(); }
   if(name === 'data' && !dataOverviewCache) { loadDataOverview().catch(err=>showMessage(err.message||'加载数据管理台失败','error')); }
   if(name === 'data') { window.loadZtProjects && window.loadZtProjects().catch(()=>{}); }
   if(name === 'mine') { await switchWorkbenchSubtab(requestedSubtab || getDefaultWorkbenchSubtab(), { load:true }); }
@@ -2668,8 +2631,12 @@ function adjustReportChartVisibility(){
   const radarEl=document.getElementById('radarChart');
   const teamEl=document.getElementById('teamCompareChart');
   const allUsersMode=isAllUsersReport();
-  if(radarEl) radarEl.style.display=allUsersMode?'none':'';
-  if(teamEl) teamEl.style.display=allUsersMode?'':'none';
+  // 图表包在 .rpt-card 卡片里，显隐作用于整张卡片
+  const cardOf=(el)=>el?(el.closest('.rpt-card')||el):null;
+  if(radarEl) cardOf(radarEl).style.display=allUsersMode?'none':'';
+  if(teamEl) cardOf(teamEl).style.display=allUsersMode?'':'none';
+  const mainGrid=document.querySelector('#tab-report .rpt-grid--main');
+  if(mainGrid) mainGrid.classList.toggle('is-team', allUsersMode);
   if(radarChart) radarChart.resize();
   if(teamCompareChart) teamCompareChart.resize();
 }
@@ -2781,7 +2748,6 @@ async function loadUsers(){
   }
   if(window.OmniQAState) window.OmniQAState.users = users;
   fillReportUsers();
-  if(document.getElementById('dispatchUserSelect')) document.getElementById('dispatchUserSelect').innerHTML = users.map(u=>'<option value=\"'+u.id+'\">'+(u.display_name||u.username)+'</option>').join('')
   if(document.getElementById('feedbackAssigneeSelect')) {
     document.getElementById('feedbackAssigneeSelect').innerHTML = '<option value=\"\">全部</option>' + users.map(u=>'<option value=\"'+u.id+'\">'+(u.display_name||u.username)+'</option>').join('');
   }
@@ -2817,7 +2783,7 @@ async function onSoftwareChange(){
   await loadVersions();
   window.OmniQAFeatureTreeTab?.refreshWorkbenchEntry?.();
   // 切换软件后，刷新当前页内容，确保旧软件数据不残留
-  const visible = ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','dispatch','zentao-ai'].find(x=>{
+  const visible = ['assign','mine','task-board','feedback','field-test','build-records','testcase-center','report','activity','data','zentao-ai'].find(x=>{
     const el=document.getElementById('tab-'+x);
     return el && !el.classList.contains('hidden');
   });
@@ -2831,7 +2797,6 @@ async function onSoftwareChange(){
     if(visible==='build-records') await loadBuildRecordsBoard();
     if(visible==='data') await loadDataOverview();
     if(visible==='assign') await loadAssignBoard();
-    if(visible==='dispatch') await loadDispatchedAll();
   }
 }
 function fillReportUsers(){const s=document.getElementById('reportUserSelect');if(!s) return; const allOpt=currentUser&&currentUser.role==='admin'?'<option value="0">全员</option>':''; s.innerHTML=allOpt+users.map(u=>`<option value="${u.id}">${u.display_name||u.username}${u.is_team_member===false?'(编外)':''}</option>`).join('');adjustReportChartVisibility()}
@@ -3632,39 +3597,27 @@ async function editBug(id,b){
 }
 
 async function saveDispatchedBug(id) {
-  return window.OmniQADispatchTab.saveDispatchedBug(id);
+  return window.OmniQAMineAssignedBugs.saveDispatchedBug(id);
 }
 
 function toggleDispatchedClose(id, checked) {
-  return window.OmniQADispatchTab.toggleDispatchedClose(id, checked);
+  return window.OmniQAMineAssignedBugs.toggleDispatchedClose(id, checked);
 }
 
 async function dispatchEditBug(id) {
-  return window.OmniQADispatchTab.dispatchEditBug(id);
+  return window.OmniQAMineAssignedBugs.dispatchEditBug(id);
 }
 
 async function dispatchRemoveBug(id) {
-  return window.OmniQADispatchTab.dispatchRemoveBug(id);
+  return window.OmniQAMineAssignedBugs.dispatchRemoveBug(id);
 }
 
 function dispatchAssignBug(id) {
-  return window.OmniQADispatchTab.dispatchAssignBug(id);
+  return window.OmniQAMineAssignedBugs.dispatchAssignBug(id);
 }
 
 function dispatchReactivateBug(id) {
-  return window.OmniQADispatchTab.dispatchReactivateBug(id);
-}
-
-async function searchDispatchBug() {
-  return window.OmniQADispatchTab.searchDispatchBug();
-}
-
-async function confirmDispatchBug() {
-  return window.OmniQADispatchTab.confirmDispatchBug();
-}
-
-async function loadDispatchedAll() {
-  return window.OmniQADispatchTab.loadDispatchedAll();
+  return window.OmniQAMineAssignedBugs.dispatchReactivateBug(id);
 }
 
 async function changeMyPassword() {

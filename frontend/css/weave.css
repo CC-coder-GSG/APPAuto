@@ -8808,3 +8808,378 @@ button.ai-generate-chip.is-generating { animation: aigBreath 1.6s ease-in-out in
 @media (prefers-reduced-motion: reduce) {
   #taskBoardModal .tbd-modal-panel, #taskBoardModal .tbd-modal-backdrop, #tab-task-board article.tbd-card[data-task-card] { transition: none !important; }
 }
+
+
+/* ============================================================
+   R27 报表中心 / 活动中心 / CAD 测试统计 v2（2026-11-27）
+   报表：index.html #tab-report（.rpt-*），图表主题 js/components/charts.js（echarts theme 'omniqa'，标题改由卡片 HTML 承担）
+   活动：index.html #tab-activity + js/tabs/activity.js（.act-*，左侧按天分组的动态流 + 右侧统计）
+   CAD：js/tabs/cad-test.js 整页渲染进 #cadTestRoot（.cad-*，版本页签 + 进度/筛选 + 卡片 / 版本对比矩阵），弹窗 #cadModal 挂 body
+   全局 button / table / th / td / .card 都带 !important，这里用 #tab-* 级选择器压回
+   ============================================================ */
+#tab-report .ui-ic, #tab-activity .ui-ic, #tab-cad-test .ui-ic, #cadModal .ui-ic { width: 15px; height: 15px; flex: 0 0 auto; }
+#tab-report .ph-actions button, #tab-activity .ph-actions button, #tab-cad-test .ph-actions button,
+#tab-report .fb-actions button, #tab-cad-test .fb-actions button, #tab-cad-test .cad-stats > button,
+#tab-activity .act-pager button { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ── 报表：快捷时间 + 分区导航 ─────────────────────────── */
+#tab-report .rpt-presets, #tab-activity .act-seg, #tab-cad-test .cad-filter, #tab-cad-test .cad-view {
+  display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: rgba(28, 25, 23, 0.06);
+}
+#tab-report .rpt-presets button, #tab-activity .act-seg button, #tab-cad-test .cad-filter button, #tab-cad-test .cad-view button {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; min-height: 0 !important; padding: 0 11px !important; border: 0 !important; border-radius: 8px !important;
+  background: transparent !important; box-shadow: none !important; color: var(--w-ink-soft) !important; font-size: 12.5px !important; font-weight: 600 !important; transform: none !important; white-space: nowrap;
+}
+#tab-report .rpt-presets button:hover, #tab-activity .act-seg button:hover, #tab-cad-test .cad-filter button:hover, #tab-cad-test .cad-view button:hover { color: var(--w-ink) !important; }
+#tab-report .rpt-presets button.is-active, #tab-activity .act-seg button.is-active, #tab-cad-test .cad-filter button.is-active, #tab-cad-test .cad-view button.is-active {
+  background: #fff !important; color: var(--w-ink) !important; box-shadow: 0 1px 2px rgba(28, 25, 23, 0.12), 0 0 0 1px rgba(28, 25, 23, 0.04) !important;
+}
+#tab-cad-test .cad-filter button span { min-width: 18px; padding: 0 5px; border-radius: 999px; background: rgba(28, 25, 23, 0.07); font: 650 11px/17px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--w-ink-soft); text-align: center; }
+
+#tab-report .rpt-nav {
+  position: sticky; top: calc(var(--w-tb-h, 56px) + 6px); z-index: 5; display: flex; gap: 4px; overflow-x: auto; margin: 14px 0 4px; padding: 5px;
+  border: 1px solid var(--w-hairline); border-radius: 12px; background: rgba(251, 250, 248, 0.92); backdrop-filter: blur(10px); scrollbar-width: none;
+}
+#tab-report .rpt-nav::-webkit-scrollbar { display: none; }
+#tab-report .rpt-nav a { flex: 0 0 auto; padding: 5px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--w-ink-soft); text-decoration: none; transition: background .15s, color .15s; }
+#tab-report .rpt-nav a:hover { background: rgba(28, 25, 23, 0.05); color: var(--w-ink); }
+#tab-report .rpt-nav a.is-active { background: var(--w-accent-soft); color: var(--w-accent-ink); }
+
+/* ── 报表：分区 / 指标 / 卡片 ──────────────────────────── */
+#tab-report #reportContent.rpt { display: flex; flex-direction: column; gap: 28px; margin-top: 12px; padding: 0 !important; background: transparent !important; border: 0 !important; box-shadow: none !important; }
+#tab-report .rpt-sec { scroll-margin-top: 120px; }
+#tab-report .rpt-sec-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0 0 12px; padding-top: 18px; border-top: 1px solid var(--w-hairline); }
+#tab-report .rpt-sec-h h3 { margin: 0 !important; font-size: 16px !important; font-weight: 700 !important; color: var(--w-ink) !important; }
+#tab-report .rpt-sec-h p { flex: 1 1 260px; margin: 0; font-size: 12.5px; color: var(--w-ink-faint); }
+#tab-report .rpt-sec-note:not(:empty) { flex-basis: 100%; padding: 6px 10px; border-radius: 8px; background: rgba(234, 179, 8, 0.12); font-size: 12px; color: #a16207; }
+#tab-report .rpt-sec-btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px !important; font-size: 12.5px !important; }
+
+#tab-report .rpt-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+#tab-report .rpt-kpi { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 13px 14px 12px; overflow: hidden; border: 1px solid var(--w-hairline); border-radius: 14px; background: var(--w-raised, #fff); }
+#tab-report .rpt-kpi::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 3px 3px 0; background: var(--kc); }
+#tab-report .rpt-kpi-k { font-size: 12px; font-weight: 650; color: var(--w-ink-soft); }
+#tab-report .rpt-kpi b { font: 700 28px/1.15 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: -0.02em; color: var(--w-ink); font-variant-numeric: tabular-nums; }
+#tab-report .rpt-kpi small { overflow: hidden; font-size: 11px; color: var(--w-ink-faint); text-overflow: ellipsis; white-space: nowrap; }
+
+#tab-report .rpt-grid { display: grid; gap: 12px; }
+#tab-report .rpt-grid--main { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+#tab-report .rpt-grid--main.is-team { grid-template-columns: minmax(0, 1fr); }
+#tab-report .rpt-grid--2-1 { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+#tab-report .rpt-grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#tab-report .rpt-grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#tab-report .rpt-grid--3.rpt-grid--two-up { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#tab-report .rpt-card--full { grid-column: 1 / -1; }
+
+#tab-report .rpt-card { display: flex; flex-direction: column; min-width: 0; padding: 14px 16px 12px; border: 1px solid var(--w-hairline); border-radius: 14px; background: var(--w-raised, #fff); }
+#tab-report .rpt-card-h { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 28px; margin-bottom: 8px; }
+#tab-report .rpt-card-h > b { font-size: 13.5px; font-weight: 700; color: var(--w-ink); }
+#tab-report .rpt-card-h > small { flex: 1 1 auto; font-size: 11.5px; color: var(--w-ink-faint); }
+#tab-report .rpt-card-tool { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12px; color: var(--w-ink-faint); }
+#tab-report .rpt-card-tool select { height: 28px; min-height: 0 !important; padding: 0 26px 0 8px !important; font-size: 12px !important; }
+#tab-report .rpt-chart { width: 100%; height: 300px; min-height: 0; }
+#tab-report .rpt-chart--tall { height: 330px; }
+#tab-report .rpt-chart--xl { height: 380px; }
+
+/* 治理 / 同步：可点指标 */
+#tab-report .rpt-risks { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 12px; }
+#tab-report .rpt-risks--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+#tab-report .rpt-risk {
+  --rc: #dc2626;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; gap: 2px 8px; height: auto; min-height: 0 !important; padding: 11px 12px !important;
+  border: 1px solid var(--w-hairline) !important; border-radius: 12px !important; background: var(--w-raised, #fff) !important; box-shadow: none !important;
+  color: var(--w-ink) !important; font-weight: 400 !important; text-align: left; transform: none !important;
+}
+#tab-report .rpt-risk span { grid-column: 1; font-size: 12px; font-weight: 600; color: var(--w-ink-soft); }
+#tab-report .rpt-risk b { grid-column: 1; font: 700 22px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--rc); font-variant-numeric: tabular-nums; }
+#tab-report .rpt-risk .ui-ic { grid-column: 2; grid-row: 1 / 3; color: var(--w-ink-faint); transition: transform .2s var(--w-swift); }
+#tab-report .rpt-risk--amber { --rc: #b45309; }
+#tab-report .rpt-risk--orange { --rc: #c2410c; }
+#tab-report .rpt-risk--red { --rc: #b91c1c; }
+#tab-report .rpt-risk--plain b { color: var(--w-ink); }
+#tab-report .rpt-risk.is-zero b { color: var(--w-ink-faint); }
+#tab-report button.rpt-risk:hover { border-color: var(--w-hairline-strong) !important; box-shadow: 0 4px 14px rgba(28, 25, 23, 0.06) !important; }
+#tab-report button.rpt-risk:hover .ui-ic { color: var(--w-ink-soft); }
+#tab-report button.rpt-risk.is-active { border-color: color-mix(in srgb, var(--rc) 45%, transparent) !important; background: color-mix(in srgb, var(--rc) 5%, #fff) !important; }
+#tab-report button.rpt-risk[data-zs-toggle].is-active .ui-ic { transform: rotate(180deg); }
+#tab-report .rpt-detail { margin-bottom: 12px; border-style: dashed; }
+#tab-report button.rpt-x { display: inline-flex; align-items: center; gap: 4px; height: 26px; min-height: 0 !important; margin-left: auto; padding: 0 8px !important; border: 0 !important; background: transparent !important; box-shadow: none !important; color: var(--w-ink-soft) !important; font-size: 12px !important; transform: none !important; }
+#tab-report button.rpt-x:hover { background: rgba(28, 25, 23, 0.06) !important; color: var(--w-ink) !important; }
+
+/* 表格 */
+#tab-report .rpt-table-wrap { overflow-x: auto; margin: 0 -4px; }
+#tab-report table.rpt-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+#tab-report table.rpt-table th { padding: 6px 8px !important; text-align: left; white-space: nowrap; }
+#tab-report table.rpt-table td { padding: 7px 8px !important; font-size: 12.5px !important; vertical-align: middle; }
+#tab-report table.rpt-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#tab-report table.rpt-table tbody tr:last-child td { border-bottom: 0 !important; }
+#tab-report table.rpt-table tr.rpt-empty-row td { padding: 18px 8px !important; color: var(--w-ink-faint) !important; text-align: center; }
+#tab-report table.rpt-table tbody tr.rpt-empty-row:hover td { background: transparent !important; box-shadow: none !important; }
+#tab-report .rpt-rank { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: 8px; border-radius: 5px; background: rgba(28, 25, 23, 0.06); font: 700 10.5px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--w-ink-soft); vertical-align: 1px; }
+#tab-report .rpt-rank.is-top { background: var(--w-accent-soft); color: var(--w-accent-ink); }
+#tab-report .rpt-req { display: inline; }
+#tab-report .rpt-req code { margin-right: 6px; font-size: 11.5px; color: var(--w-ink-faint); }
+#tab-report .rpt-st { display: inline-block; padding: 1px 7px; border-radius: 6px; background: rgba(28, 25, 23, 0.05); font-size: 11.5px; color: var(--w-ink-soft); white-space: nowrap; }
+#tab-report .rpt-warn { font-weight: 700; color: #c2410c; }
+
+@media (max-width: 1180px) {
+  #tab-report .rpt-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #tab-report .rpt-grid--main, #tab-report .rpt-grid--2-1, #tab-report .rpt-grid--3, #tab-report .rpt-grid--3.rpt-grid--two-up { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #tab-report .rpt-grid--main .rpt-card--wide, #tab-report .rpt-grid--2-1 > .rpt-card:first-child { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  #tab-report .rpt-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #tab-report .rpt-grid--main, #tab-report .rpt-grid--2-1, #tab-report .rpt-grid--2, #tab-report .rpt-grid--3, #tab-report .rpt-grid--3.rpt-grid--two-up { grid-template-columns: minmax(0, 1fr); }
+  #tab-report .rpt-risks--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #tab-report .rpt-chart, #tab-report .rpt-chart--tall { height: 280px; }
+  #tab-report .rpt-chart--xl { height: 320px; }
+  #tab-report .rpt-card { padding: 12px; }
+}
+
+/* ── 活动中心 ──────────────────────────────────────────── */
+#tab-activity .act-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; margin-top: 14px; }
+#tab-activity .act-main { min-width: 0; padding: 12px 14px 10px; border: 1px solid var(--w-hairline); border-radius: 16px; background: var(--w-raised, #fff); }
+#tab-activity .act-main-h { display: flex; align-items: baseline; gap: 10px; padding: 2px 4px 8px; }
+#tab-activity .act-main-h b { font-size: 14px; color: var(--w-ink); }
+#tab-activity .act-meta { font-size: 12px; color: var(--w-ink-faint); }
+#tab-activity .act-day + .act-day { margin-top: 6px; }
+#tab-activity .act-day-label { position: sticky; top: calc(var(--w-tb-h, 56px) + 2px); z-index: 2; display: flex; align-items: baseline; gap: 8px; margin: 0 !important; padding: 8px 4px 6px; background: var(--w-raised, #fff); font-size: 12.5px !important; font-weight: 700 !important; color: var(--w-ink) !important; }
+#tab-activity .act-day-label span { font-size: 11.5px; font-weight: 500; color: var(--w-ink-faint); }
+#tab-activity .act-list { margin: 0; padding: 0; list-style: none; }
+#tab-activity li.act-row.activity-feed-item {
+  display: grid; grid-template-columns: 44px 10px minmax(0, 1fr) auto 16px; align-items: start; column-gap: 10px; margin: 0 !important; padding: 9px 8px !important;
+  border: 0 !important; border-bottom: 1px solid var(--w-hairline) !important; border-radius: 10px !important; cursor: pointer; transform: none !important;
+}
+#tab-activity li.act-row.activity-feed-item:last-child { border-bottom: 0 !important; }
+#tab-activity li.act-row.activity-feed-item:hover { background: rgba(28, 25, 23, 0.035) !important; transform: none !important; }
+#tab-activity li.act-row.activity-feed-item::before { left: 0; }
+#tab-activity li.act-row:focus-visible { outline: 2px solid rgba(var(--w-accent-rgb), 0.45); outline-offset: -2px; }
+#tab-activity .act-time { padding-top: 1px; font: 600 12px/20px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--w-ink-faint); }
+#tab-activity .act-dot, #tab-activity .act-hl .act-dot { display: inline-block; width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: var(--dot); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot) 16%, transparent); }
+#tab-activity .act-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#tab-activity .act-line1 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; line-height: 20px; }
+#tab-activity .act-mod { font-weight: 650; color: var(--w-ink-soft); }
+#tab-activity .act-action { padding: 0 6px; border-radius: 5px; background: rgba(28, 25, 23, 0.05); color: var(--w-ink-soft); }
+#tab-activity .act-row--important .act-action { background: rgba(37, 99, 235, 0.08); color: #1d4ed8; }
+#tab-activity .act-row--critical .act-action { background: rgba(220, 38, 38, 0.08); color: #b91c1c; }
+#tab-activity .act-summary { font-size: 13.5px; font-weight: 600; line-height: 1.5; color: var(--w-ink); overflow-wrap: anywhere; }
+#tab-activity .act-sub { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 12px; line-height: 1.5; color: var(--w-ink-faint); overflow-wrap: anywhere; }
+#tab-activity .act-actor { display: inline-flex; align-items: center; gap: 6px; padding-top: 1px; font-size: 12px; line-height: 20px; color: var(--w-ink-soft); white-space: nowrap; }
+#tab-activity .act-actor .fbk-avatar { width: 20px; height: 20px; font-size: 10.5px; }
+#tab-activity .act-go { width: 14px !important; height: 14px !important; margin-top: 3px; color: var(--w-ink-faint); opacity: 0; transition: opacity .15s, transform .15s; }
+#tab-activity li.act-row:hover .act-go { opacity: 1; transform: translateX(2px); }
+#tab-activity .act-empty { padding: 36px 0; }
+#tab-activity .act-pager { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--w-hairline); }
+#tab-activity .act-pager .act-meta { margin-right: auto; }
+#tab-activity .act-pager button { height: 30px; padding: 0 10px !important; font-size: 12.5px !important; }
+
+#tab-activity .act-side { position: sticky; top: calc(var(--w-tb-h, 56px) + 12px); display: flex; flex-direction: column; gap: 12px; }
+#tab-activity .act-panel { padding: 12px 14px; border: 1px solid var(--w-hairline); border-radius: 16px; background: var(--w-raised, #fff); }
+#tab-activity .act-panel-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+#tab-activity .act-panel-h b { font-size: 13.5px; color: var(--w-ink); }
+#tab-activity .act-panel-h small { font-size: 11.5px; color: var(--w-ink-faint); }
+#tab-activity #activitySummaryCards { display: block !important; margin: 0 !important; }
+#tab-activity .act-stats { display: flex; flex-direction: column; gap: 7px; margin: 0; padding: 0; list-style: none; }
+#tab-activity .act-stats li { display: grid; grid-template-columns: 84px minmax(0, 1fr) 30px; align-items: center; gap: 8px; font-size: 12px; }
+#tab-activity .act-stat-k { overflow: hidden; color: var(--w-ink-soft); text-overflow: ellipsis; white-space: nowrap; }
+#tab-activity .act-stat-bar { height: 6px; overflow: hidden; border-radius: 999px; background: rgba(28, 25, 23, 0.06); }
+#tab-activity .act-stat-bar i { display: block; height: 100%; border-radius: inherit; background: #2a78d6; }
+#tab-activity .act-stats b { font: 700 12.5px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--w-ink); text-align: right; }
+#tab-activity .act-hl { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+#tab-activity .act-hl li.activity-highlight-item { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: start; gap: 8px; margin: 0 -6px; padding: 6px !important; border: 0 !important; border-radius: 8px; font-size: 12.5px; line-height: 1.5; color: var(--w-ink); }
+#tab-activity .act-hl li.is-link { cursor: pointer; }
+#tab-activity .act-hl li.is-link:hover { background: rgba(28, 25, 23, 0.04); }
+#tab-activity .act-hl .act-dot { margin-top: 6px; }
+#tab-activity .act-hl-text { overflow-wrap: anywhere; }
+#tab-activity .act-hl time { font: 500 11px/19px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--w-ink-faint); white-space: nowrap; }
+#tab-activity .act-empty-s { padding: 10px 0; font-size: 12px; color: var(--w-ink-faint); }
+
+@media (max-width: 1080px) {
+  #tab-activity .act-layout { grid-template-columns: minmax(0, 1fr); }
+  #tab-activity .act-side { position: static; order: -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  #tab-activity .act-side { grid-template-columns: minmax(0, 1fr); }
+  #tab-activity li.act-row.activity-feed-item { grid-template-columns: 40px 8px minmax(0, 1fr); }
+  #tab-activity .act-actor { grid-column: 3; padding-top: 2px; }
+  #tab-activity .act-go { display: none; }
+  #tab-activity .act-main { padding: 10px 8px; }
+}
+
+/* ── CAD 测试统计 ──────────────────────────────────────── */
+#tab-cad-test .cad-vbar { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-bottom: 0; border-bottom: 1px solid var(--w-hairline); }
+#tab-cad-test .cad-vtabs { display: flex; flex: 1 1 auto; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+#tab-cad-test button.cad-vtab {
+  flex: 0 0 auto; max-width: 300px; height: 38px; min-height: 0 !important; margin-bottom: -1px; padding: 0 14px !important; overflow: hidden; border: 0 !important; border-bottom: 2px solid transparent !important;
+  border-radius: 8px 8px 0 0 !important; background: transparent !important; box-shadow: none !important; color: var(--w-ink-soft) !important; font-size: 13px !important; font-weight: 600 !important; text-overflow: ellipsis; white-space: nowrap; transform: none !important;
+}
+#tab-cad-test button.cad-vtab:hover { background: rgba(28, 25, 23, 0.04) !important; color: var(--w-ink) !important; }
+#tab-cad-test button.cad-vtab.is-active { border-bottom-color: var(--w-accent) !important; color: var(--w-accent-ink) !important; }
+#tab-cad-test .cad-vacts { display: flex; flex: 0 0 auto; gap: 4px; padding-bottom: 4px; }
+#tab-cad-test button.cad-icon-btn { display: inline-grid; place-items: center; width: 30px; height: 30px; min-height: 0 !important; padding: 0 !important; }
+#tab-cad-test button.cad-icon-btn--danger { color: #b91c1c !important; }
+
+#tab-cad-test .cad-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0 14px; }
+#tab-cad-test .cad-stats > button { height: 32px; margin-left: auto; padding: 0 12px !important; }
+#tab-cad-test .cad-progress { display: flex; flex-direction: column; gap: 5px; width: 220px; }
+#tab-cad-test .cad-progress-top { display: flex; align-items: baseline; gap: 8px; }
+#tab-cad-test .cad-progress-top b { font: 700 18px/1 ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--w-ink); }
+#tab-cad-test .cad-progress-top span { font-size: 12px; color: var(--w-ink-faint); }
+#tab-cad-test .cad-progress-bar { display: flex; gap: 2px; height: 6px; overflow: hidden; border-radius: 999px; background: rgba(28, 25, 23, 0.07); }
+#tab-cad-test .cad-progress-bar i { display: block; height: 100%; }
+#tab-cad-test .cad-progress-bar i.is-normal { background: #16a34a; }
+#tab-cad-test .cad-progress-bar i.is-abnormal { background: #dc2626; }
+#tab-cad-test .cad-search { flex: 0 1 220px; min-width: 160px; }
+
+#tab-cad-test .cad-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+#tab-cad-test .cad-card { --sc: #a8a29e; display: flex; flex-direction: column; gap: 9px; min-width: 0; padding: 12px 14px; border: 1px solid var(--w-hairline); border-radius: 14px; background: var(--w-raised, #fff); box-shadow: inset 3px 0 0 var(--sc); transition: border-color .15s, box-shadow .2s; }
+#tab-cad-test .cad-card:hover { border-color: var(--w-hairline-strong); box-shadow: inset 3px 0 0 var(--sc), 0 6px 16px rgba(28, 25, 23, 0.06); }
+#tab-cad-test .cad-card--normal { --sc: #16a34a; }
+#tab-cad-test .cad-card--abnormal { --sc: #dc2626; border-color: rgba(220, 38, 38, 0.28); background: linear-gradient(180deg, rgba(254, 242, 242, 0.9), #fff 70%); }
+#tab-cad-test .cad-card-h { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#tab-cad-test .cad-seq, #cadModal .cad-seq { flex: 0 0 auto; font: 700 12px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--w-ink-faint); }
+#tab-cad-test .cad-title { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 14px; color: var(--w-ink); text-overflow: ellipsis; white-space: nowrap; }
+#tab-cad-test .cad-st, #cadModal .cad-st { flex: 0 0 auto; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700; }
+#tab-cad-test .cad-st::before { content: ""; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: currentColor; }
+#tab-cad-test .cad-st--normal { background: rgba(22, 163, 74, 0.1); color: #15803d; }
+#tab-cad-test .cad-st--abnormal { background: rgba(220, 38, 38, 0.1); color: #b91c1c; }
+#tab-cad-test .cad-st--untested { background: rgba(28, 25, 23, 0.06); color: var(--w-ink-faint); }
+#tab-cad-test .cad-bug-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+#tab-cad-test .cad-bug, #cadModal .cad-bug { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: rgba(42, 120, 214, 0.1); font: 650 11px ui-monospace, SFMono-Regular, Consolas, monospace; color: #1d5fb0; white-space: nowrap; }
+#tab-cad-test .cad-shared { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+#tab-cad-test .cad-shared-k { margin-right: 2px; font-size: 11px; font-weight: 650; color: var(--w-ink-faint); }
+#tab-cad-test button.cad-file {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; min-height: 0 !important; max-width: 100%; padding: 0 8px !important; border: 1px solid var(--w-hairline-strong) !important; border-radius: 7px !important;
+  background: var(--w-surface, #fbfaf8) !important; box-shadow: none !important; color: var(--w-ink-soft) !important; font-size: 12px !important; font-weight: 500 !important; transform: none !important;
+}
+#tab-cad-test button.cad-file .ui-ic { width: 12px; height: 12px; }
+#tab-cad-test button.cad-file small { padding: 0 4px; border-radius: 4px; background: rgba(28, 25, 23, 0.07); font-size: 10.5px; }
+#tab-cad-test button.cad-file:hover { border-color: rgba(42, 120, 214, 0.45) !important; color: #1d5fb0 !important; }
+#tab-cad-test .cad-desc { margin: 0; padding: 7px 10px; border-radius: 8px; background: rgba(28, 25, 23, 0.035); font-size: 12.5px; line-height: 1.55; color: var(--w-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+#tab-cad-test .cad-card--abnormal .cad-desc { background: rgba(220, 38, 38, 0.06); }
+#tab-cad-test .cad-media { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+#tab-cad-test .cad-media img { width: 52px; height: 52px; object-fit: cover; border: 1px solid var(--w-hairline); border-radius: 8px; background: rgba(28, 25, 23, 0.04); cursor: zoom-in; }
+#tab-cad-test .cad-custom { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px 12px; margin: 0; }
+#tab-cad-test .cad-custom div { min-width: 0; }
+#tab-cad-test .cad-custom dt { font-size: 11px; color: var(--w-ink-faint); }
+#tab-cad-test .cad-custom dd { margin: 0; overflow: hidden; font-size: 12.5px; color: var(--w-ink); text-overflow: ellipsis; white-space: nowrap; }
+#tab-cad-test .cad-card-f { display: flex; justify-content: flex-end; gap: 6px; margin-top: auto; padding-top: 8px; border-top: 1px dashed var(--w-hairline); }
+#tab-cad-test .cad-card-f button { display: inline-flex; align-items: center; gap: 5px; height: 28px; min-height: 0 !important; padding: 0 10px !important; font-size: 12.5px !important; }
+#tab-cad-test .cad-card-f button .ui-ic { width: 13px; height: 13px; }
+#tab-cad-test button.cad-fill { border: 1px solid rgba(var(--w-accent-rgb), 0.28) !important; background: var(--w-accent-soft) !important; box-shadow: none !important; color: var(--w-accent-ink) !important; font-weight: 600 !important; }
+#tab-cad-test button.cad-fill:hover { background: var(--w-accent) !important; border-color: var(--w-accent) !important; color: #fff !important; }
+#tab-cad-test button.cad-ghost { border: 0 !important; background: transparent !important; box-shadow: none !important; color: var(--w-ink-soft) !important; }
+#tab-cad-test button.cad-ghost:hover { background: rgba(28, 25, 23, 0.06) !important; color: var(--w-ink) !important; }
+
+/* 版本对比矩阵 */
+#tab-cad-test .cad-matrix-wrap { overflow: auto; max-height: calc(100vh - 260px); border: 1px solid var(--w-hairline); border-radius: 14px; background: var(--w-raised, #fff); }
+#tab-cad-test table.cad-matrix { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
+#tab-cad-test table.cad-matrix th, #tab-cad-test table.cad-matrix td { padding: 6px 8px !important; border-bottom: 1px solid var(--w-hairline) !important; text-align: center; vertical-align: middle; }
+#tab-cad-test table.cad-matrix thead th { position: sticky; top: 0; z-index: 2; background: var(--w-raised, #fff) !important; color: var(--w-ink-soft) !important; font-size: 12px !important; font-weight: 650 !important; min-width: 120px; }
+#tab-cad-test table.cad-matrix .cad-m-item { position: sticky; left: 0; z-index: 1; min-width: 220px; max-width: 320px; background: var(--w-raised, #fff) !important; color: var(--w-ink) !important; font-size: 12.5px !important; font-weight: 600 !important; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tab-cad-test table.cad-matrix thead .cad-m-item { z-index: 3; }
+#tab-cad-test table.cad-matrix .cad-m-item .cad-seq { margin-right: 6px; }
+#tab-cad-test table.cad-matrix .cad-m-item .cad-bug { margin-left: 6px; }
+#tab-cad-test table.cad-matrix th.is-cur, #tab-cad-test table.cad-matrix td.is-cur { background: rgba(var(--w-accent-rgb), 0.04) !important; }
+#tab-cad-test table.cad-matrix thead th.is-cur { color: var(--w-accent-ink) !important; box-shadow: inset 0 -2px 0 var(--w-accent); }
+#tab-cad-test .cad-m-vname { display: block; }
+#tab-cad-test .cad-m-vsum { display: inline-flex; gap: 6px; margin-top: 2px; font: 600 11px ui-monospace, SFMono-Regular, Consolas, monospace; }
+#tab-cad-test .cad-m-vsum em { font-style: normal; }
+#tab-cad-test .cad-m-vsum em.is-normal { color: #15803d; }
+#tab-cad-test .cad-m-vsum em.is-abnormal { color: #b91c1c; }
+#tab-cad-test .cad-m-vsum em::before { content: "●"; margin-right: 2px; font-size: 8px; vertical-align: 1px; }
+#tab-cad-test table.cad-matrix tbody tr:hover td, #tab-cad-test table.cad-matrix tbody tr:hover th { background: rgba(28, 25, 23, 0.025) !important; }
+#tab-cad-test table.cad-matrix tbody tr:hover td:first-child { box-shadow: none; }
+#tab-cad-test button.cad-cell {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; width: 100%; max-width: 110px; height: 26px; min-height: 0 !important; padding: 0 8px !important; border: 1px solid transparent !important;
+  border-radius: 7px !important; box-shadow: none !important; font-size: 12px !important; font-weight: 650 !important; transform: none !important;
+}
+#tab-cad-test button.cad-cell .ui-ic { width: 11px; height: 11px; opacity: .7; }
+#tab-cad-test button.cad-cell--normal { background: rgba(22, 163, 74, 0.1) !important; color: #15803d !important; }
+#tab-cad-test button.cad-cell--abnormal { background: rgba(220, 38, 38, 0.1) !important; color: #b91c1c !important; }
+#tab-cad-test button.cad-cell--untested { border: 1px dashed var(--w-hairline-strong) !important; background: transparent !important; color: var(--w-ink-faint) !important; font-weight: 500 !important; }
+#tab-cad-test button.cad-cell:hover { border-color: currentColor !important; }
+#tab-cad-test .cad-hint { margin: 8px 2px 0; font-size: 12px; color: var(--w-ink-faint); }
+
+#tab-cad-test .cad-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 14px; padding: 40px 20px; border: 1px dashed var(--w-hairline-strong); border-radius: 16px; text-align: center; }
+#tab-cad-test .cad-empty--sm { padding: 28px 20px; }
+#tab-cad-test .cad-empty-ic { width: 30px; height: 30px; margin-bottom: 4px; color: var(--w-ink-faint); }
+#tab-cad-test .cad-empty b { font-size: 14px; color: var(--w-ink); }
+#tab-cad-test .cad-empty span { font-size: 12.5px; color: var(--w-ink-faint); }
+#tab-cad-test .cad-empty button { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; }
+
+/* CAD 弹窗（挂 body） */
+#cadModal.cad-modal { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(28, 25, 23, 0.38); backdrop-filter: blur(2px); animation: cadFade .18s ease-out; }
+#cadModal .cad-modal-panel { display: flex; flex-direction: column; width: min(560px, 100%); max-height: min(88vh, 900px); overflow: hidden; border: 1px solid var(--w-hairline); border-radius: 16px; background: var(--w-raised, #fff); box-shadow: 0 24px 60px rgba(28, 25, 23, 0.22); animation: cadPop .22s var(--w-swift); }
+#cadModal .cad-modal-panel--wide { width: min(680px, 100%); }
+#cadModal .cad-modal-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px 12px; border-bottom: 1px solid var(--w-hairline); }
+#cadModal .cad-modal-h h3 { margin: 0 !important; font-size: 16px !important; font-weight: 700 !important; color: var(--w-ink) !important; }
+#cadModal button.cad-x { display: inline-grid; place-items: center; width: 30px; height: 30px; min-height: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 8px !important; background: transparent !important; box-shadow: none !important; color: var(--w-ink-soft) !important; font-size: 20px !important; line-height: 1; transform: none !important; }
+#cadModal button.cad-x:hover { background: rgba(28, 25, 23, 0.06) !important; color: var(--w-ink) !important; }
+#cadModal .cad-modal-body { overflow: auto; padding: 16px 18px 0; }
+#cadModal .cad-modal-body > :last-child { margin-bottom: 16px; }
+#cadModal .cad-modal-f { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 14px -18px 0 !important; padding: 12px 18px; border-top: 1px solid var(--w-hairline); background: var(--w-raised, #fff); }
+#cadModal .cad-modal-f-r { display: inline-flex; gap: 8px; }
+#cadModal .cad-modal-f button { display: inline-flex; align-items: center; gap: 6px; }
+#cadModal button.cad-danger { color: #b91c1c !important; }
+#cadModal .cad-form { display: flex; flex-direction: column; gap: 12px; }
+#cadModal .cad-form-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; }
+#cadModal .cad-form-cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+#cadModal .cad-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; margin: 0; }
+#cadModal .cad-field > span { font-size: 12px; font-weight: 650; color: var(--w-ink-soft); }
+#cadModal .cad-field > span em { margin-left: 4px; font-style: normal; font-weight: 400; color: var(--w-ink-faint); }
+#cadModal .cad-field input, #cadModal .cad-field textarea { width: 100%; box-sizing: border-box; }
+#cadModal .cad-rec-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 9px 12px; border-radius: 10px; background: rgba(28, 25, 23, 0.04); font-size: 13px; }
+#cadModal .cad-rec-meta b { color: var(--w-ink); }
+#cadModal .cad-rec-ver { flex-basis: 100%; font-size: 11.5px; color: var(--w-ink-faint); }
+#cadModal .cad-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+#cadModal .cad-pick small { font-size: 11.5px; color: var(--w-ink-faint); }
+#cadModal .cad-pick-opt { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border: 1px solid var(--w-hairline-strong); border-radius: 9px; background: #fff; font-size: 13px; font-weight: 650; color: var(--w-ink-soft); cursor: pointer; transition: border-color .15s, background .15s, color .15s; }
+#cadModal .cad-pick-opt input { position: absolute; opacity: 0; pointer-events: none; }
+#cadModal .cad-pick-opt:hover { border-color: rgba(28, 25, 23, 0.3); }
+#cadModal .cad-pick-opt--normal:has(input:checked) { border-color: rgba(22, 163, 74, 0.55); background: rgba(22, 163, 74, 0.08); color: #15803d; }
+#cadModal .cad-pick-opt--abnormal:has(input:checked) { border-color: rgba(220, 38, 38, 0.55); background: rgba(220, 38, 38, 0.07); color: #b91c1c; }
+#cadModal .cad-pick-opt:has(input:focus-visible) { outline: 2px solid rgba(var(--w-accent-rgb), 0.45); outline-offset: 2px; }
+/* CAD 记录弹窗：附件分区 */
+#cadModal .cad-att { padding: 12px; border: 1px solid var(--w-hairline); border-radius: 12px; background: var(--w-surface, #fbfaf8); }
+#cadModal .cad-att--cad { border-color: rgba(42, 120, 214, 0.25); background: rgba(42, 120, 214, 0.04); }
+#cadModal .cad-att-h { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+#cadModal .cad-att-h b { font-size: 13px; color: var(--w-ink); }
+#cadModal .cad-att-h b em { margin-left: 4px; font-style: normal; font-weight: 400; font-size: 11.5px; color: var(--w-ink-faint); }
+#cadModal .cad-att-acts { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+#cadModal .cad-up {
+  display: inline-flex; align-items: center; gap: 5px; height: 28px; min-height: 0 !important; margin: 0; padding: 0 10px !important; border: 1px solid var(--w-hairline-strong) !important; border-radius: 8px !important;
+  background: #fff !important; box-shadow: none !important; color: var(--w-ink) !important; font-size: 12.5px !important; font-weight: 500 !important; cursor: pointer; transform: none !important;
+}
+#cadModal .cad-up:hover { border-color: rgba(28, 25, 23, 0.3) !important; }
+#cadModal .cad-up .ui-ic { width: 13px; height: 13px; }
+#cadModal .cad-att-tip { margin: 6px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--w-ink-faint); }
+#cadModal .cad-att-tip kbd { padding: 0 4px; border: 1px solid var(--w-hairline-strong); border-radius: 4px; background: #fff; font: 600 10.5px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--w-ink-soft); }
+#cadModal .cad-chips, #cadModal .cad-thumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+#cadModal .cad-chip { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; height: 28px; padding: 0 4px 0 9px; border: 1px solid var(--w-hairline-strong); border-radius: 8px; background: #fff; font-size: 12.5px; }
+#cadModal .cad-chip a { overflow: hidden; color: #1d5fb0; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+#cadModal .cad-chip a small { color: var(--w-ink-faint); }
+#cadModal .cad-chip button, #cadModal .cad-thumb button {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; min-height: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 6px !important;
+  background: transparent !important; box-shadow: none !important; color: var(--w-ink-soft) !important; font-size: 15px !important; line-height: 1; transform: none !important;
+}
+#cadModal .cad-chip button .ui-ic { width: 12px; height: 12px; }
+#cadModal .cad-chip button:hover { background: rgba(28, 25, 23, 0.06) !important; }
+#cadModal .cad-chip button.is-del:hover { background: rgba(220, 38, 38, 0.08) !important; color: #b91c1c !important; }
+#cadModal .cad-thumb { position: relative; display: inline-block; }
+#cadModal .cad-thumb img { display: block; width: 68px; height: 68px; object-fit: cover; border: 1px solid var(--w-hairline); border-radius: 8px; background: rgba(28, 25, 23, 0.04); cursor: zoom-in; }
+#cadModal .cad-thumb video { display: block; width: 240px; max-height: 160px; border-radius: 8px; background: #000; }
+#cadModal .cad-thumb button { position: absolute; top: -7px; right: -7px; width: 20px; height: 20px; border-radius: 50% !important; background: #fff !important; box-shadow: 0 1px 4px rgba(28, 25, 23, 0.25) !important; color: #b91c1c !important; font-size: 13px !important; }
+#cadModal .cad-none { font-size: 12px; color: var(--w-ink-faint); }
+@keyframes cadFade { from { opacity: 0; } }
+@keyframes cadPop { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+@media (max-width: 640px) {
+  #tab-cad-test .cad-progress { width: 100%; }
+  #tab-cad-test .cad-search { flex: 1 1 100%; }
+  #tab-cad-test .cad-stats > button { margin-left: 0; }
+  #tab-cad-test .cad-grid { grid-template-columns: minmax(0, 1fr); }
+  #cadModal.cad-modal { align-items: flex-end; padding: 0; }
+  #cadModal .cad-modal-panel { max-height: 92vh; border-radius: 16px 16px 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #cadModal.cad-modal, #cadModal .cad-modal-panel { animation: none; }
+}

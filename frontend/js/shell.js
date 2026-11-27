@@ -38,7 +38,7 @@
     feedback: "tabFeedbackBtn", "field-test": "tabFieldTestBtn",
     "build-records": "tabBuildRecordsBtn", "testcase-center": "tabTestcaseCenterBtn",
     report: "tabReportBtn", activity: "tabActivityBtn", data: "tabDataBtn",
-    dispatch: "tabDispatchBtn", "zentao-ai": "tabZentaoAiBtn", jenkins: "tabJenkinsBtn",
+    "zentao-ai": "tabZentaoAiBtn", jenkins: "tabJenkinsBtn",
     "cad-test": "tabCadTestBtn", terminal: "tabTerminalBtn", learning: "tabLearningBtn",
     tools: "tabToolsBtn", bugly: "tabBuglyBtn", "competitor-analysis": "tabCompetitorAnalysisBtn",
   };

@@ -733,14 +733,12 @@ body {
 /* Table-row SSE glow — 由 style.css 统一定义，这里只做行级微调 */
 .qa-table-zentao-sync tr.zentao-row-card.sse-glow-enter td,
 .field-test-row-card.sse-glow-enter td,
-#tab-dispatch .dispatch-row-card.sse-glow-enter td,
 #s5TableContainer tr.overall-test-row-card.sse-glow-enter td {
   transition: background 0.45s ease;
 }
 
 .qa-table-zentao-sync tr.zentao-row-card.sse-glow-exit td,
 .field-test-row-card.sse-glow-exit td,
-#tab-dispatch .dispatch-row-card.sse-glow-exit td,
 #s5TableContainer tr.overall-test-row-card.sse-glow-exit td {
   opacity: 0.65;
   transition: opacity 0.6s ease;

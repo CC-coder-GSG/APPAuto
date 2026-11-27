@@ -60,7 +60,7 @@ function isBlankHtml(html) {
 
 function getVisibleTabName() {
   const ids = ['assign', 'mine', 'task-board', 'feedback', 'field-test', 'build-records',
-    'testcase-center', 'report', 'activity', 'data', 'dispatch', 'zentao-ai', 'jenkins',
+    'testcase-center', 'report', 'activity', 'data', 'zentao-ai', 'jenkins',
     'cad-test', 'terminal', 'learning'];
   return ids.find((n) => {
     const el = document.getElementById('tab-' + n);

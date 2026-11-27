@@ -43,7 +43,6 @@ val TAB_PERMISSION_OPTIONS: List<Pair<String, String>> = listOf(
     "report" to "报表中心",
     "activity" to "活动中心",
     "data" to "数据管理台",
-    "dispatch" to "BUG特派",
     "zentao-ai" to "禅道AI用例生成",
     "cad-test" to "CAD测试统计",
 )

@@ -18,7 +18,6 @@ const TAB_PERMISSION_OPTIONS = [
   { key: 'report', label: '报表中心' },
   { key: 'activity', label: '活动中心' },
   { key: 'data', label: '数据管理台' },
-  { key: 'dispatch', label: 'BUG特派' },
   { key: 'zentao-ai', label: '禅道AI用例生成' },
   { key: 'cad-test', label: 'CAD测试统计' },
   { key: 'terminal', label: '终端控制台' },

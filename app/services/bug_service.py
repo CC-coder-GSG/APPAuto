@@ -3,7 +3,7 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import BugSourceType, BugStage5Record, BugTracking, Requirement, User, Version
+from app.models import BugSourceType, BugStage5Record, BugTracking, Requirement, User
 from app.services.audit_service import audit
 from app.services.sse_service import sse_publish
 
@@ -91,37 +91,6 @@ class BugService:
         audit(self.db, action="bug.toggle_retest_fail", target_type="bug", actor_id=actor_id, target_id=str(bug.id), detail=str(is_retest_failed))
         return {"message": "Bug retest status updated"}
 
-    def search_bug(self, bug_id: str, software_id: int | None = None) -> dict:
-        query = self.db.query(BugTracking).options(joinedload(BugTracking.requirement)).filter(BugTracking.bug_id == bug_id)
-        if software_id:
-            query = query.join(Version, BugTracking.major_version_id == Version.id).filter(Version.software_id == software_id)
-        bug = query.first()
-        if not bug:
-            raise HTTPException(status_code=404, detail="未找到该 Bug 编号")
-        return {
-            "id": bug.id,
-            "bug_id": bug.bug_id,
-            "zentao_bug_url": bug.zentao_bug_url,
-            "zentao_bug_title": bug.zentao_bug_title,
-            "req_title": bug.requirement.title if bug.requirement else "无关联需求 / 自由Bug",
-            "dispatched_to_id": bug.dispatched_to_id,
-        }
-
-    def dispatch_bug(self, bug_id: int, user_id: int, actor_id: int | None = None) -> tuple[dict, User | None, BugTracking]:
-        bug = self.db.query(BugTracking).filter(BugTracking.id == bug_id).first()
-        if not bug:
-            raise HTTPException(status_code=404, detail="Bug not found")
-        bug.dispatched_to_id = user_id
-        self.db.commit()
-        user = self.db.query(User).filter(User.id == user_id).first()
-        audit(self.db, action="bug.dispatch", target_type="bug", actor_id=actor_id, target_id=str(bug.id), detail=f"dispatch_to={user_id}")
-        sse_publish(
-            "bug_dispatch_created",
-            {"id": bug.id, "bug_id": bug.bug_id, "dispatched_to_id": user_id},
-            channels=["global", f"user:{user_id}"],
-        )
-        return {"message": "特派成功"}, user, bug
-
     def dispatched_to_me(self, major_version_id: int, current_user: User) -> list[dict]:
         # 返回与「测试工作台」大盘一致的完整行结构，以便需求工作台的「指派给我的Bug」
         # 面板可完全照搬测试工作台的行布局（编号/标题/操作/验证操作）。
@@ -187,26 +156,3 @@ class BugService:
                 }
             )
         return rows
-
-    def dispatched_all(self, software_id: int | None = None) -> list[dict]:
-        query = (
-            self.db.query(BugTracking)
-            .options(joinedload(BugTracking.dispatched_to))
-            .filter(BugTracking.dispatched_to_id.isnot(None))
-            .order_by(BugTracking.id.desc())
-        )
-        if software_id:
-            query = query.join(Version, BugTracking.major_version_id == Version.id).filter(Version.software_id == software_id)
-        bugs = query.all()
-        return [
-            {
-                "id": b.id,
-                "bug_id": b.bug_id,
-                "zentao_bug_url": b.zentao_bug_url,
-                "zentao_bug_title": b.zentao_bug_title,
-                "dispatched_to_name": b.dispatched_to.shown_name if b.dispatched_to else "未知",
-                "closed": b.closed,
-                "resolution": b.resolution,
-            }
-            for b in bugs
-        ]

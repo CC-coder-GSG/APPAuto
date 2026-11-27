@@ -24,7 +24,6 @@ ALL_TAB_KEYS = [
     "report",
     "activity",
     "data",
-    "dispatch",
     "zentao-ai",
     "cad-test",
     "terminal",

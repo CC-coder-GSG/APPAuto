@@ -42,9 +42,6 @@ class PushService:
     # Legacy alias — routes pinned to the old name keep working.
     push_stage5_status = push_overall_test_status
 
-    async def push_bug_dispatch_notice(self, bug_id: str, username: str) -> None:
-        await self.send_markdown(f"📢 **Bug 特派专项通知**\n> 缺陷 **{bug_id}** 已被管理员特派给 @{username} 进行专项验证！请前往【我的工作台】顶部处理。")
-
     async def push_case_review_failed(self, ctx: dict) -> None:
         """用例审查不通过播报：某人审查了某人负责的某个需求，某个用例审查未通过。"""
         md = "\n".join(

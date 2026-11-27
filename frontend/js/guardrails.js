@@ -14,7 +14,7 @@ const REQUIRED_NAMESPACES = {
   OmniQAReportTab: ['queryReport', 'exportReportPdf'],
   OmniQAActivityTab: ['loadActivityBoard', 'pushActivitySummary', 'openAuditTimelineModal'],
   OmniQADataTab: ['loadDataOverview', 'createUser', 'createVersion'],
-  OmniQADispatchTab: ['loadDispatchedAll', 'searchDispatchBug', 'confirmDispatchBug'],
+  OmniQAMineAssignedBugs: ['saveDispatchedBug', 'toggleDispatchedClose'],
   OmniQATaskBoardTab: ['activate', 'load', 'openCreate', 'openEdit', 'submit'],
   OmniQATerminalTab: ['loadTerminalTab', 'discoverTerminals', 'controlDevice', 'releaseDevice', 'viewDevice'],
 };
@@ -36,7 +36,6 @@ const REQUIRED_DOM_IDS = [
   'tab-report',
   'tab-activity',
   'tab-data',
-  'tab-dispatch',
   'tab-task-board',
   'taskBoardColumns',
   'assignMajorSelect',

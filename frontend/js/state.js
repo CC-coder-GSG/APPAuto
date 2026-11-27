@@ -21,7 +21,6 @@ export const state = {
   overallTestPageSize: 20,
   overallTestOptions: { reqs: [], cases: [], bugs: [] },
   pendingImportReqs: [],
-  currentDispatchBugId: null,
   charts: {
     trendChart: null,
     sourcePieChart: null,

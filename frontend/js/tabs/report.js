@@ -1,6 +1,6 @@
-﻿import { api } from '../api.js';
+import { api } from '../api.js';
 import { state } from '../state.js';
-import { renderGovernanceCharts, renderReportCharts, renderVersionBugChart } from '../components/charts.js?v=20260706-2';
+import { renderGovernanceCharts, renderReportCharts, renderVersionBugChart } from '../components/charts.js?v=20261127-rpt-1';
 import { renderBugLink, sourceTypeZh } from '../utils.js';
 
 let governanceCache = null;
@@ -29,24 +29,40 @@ function reqStatusZh(v) {
   return m[v] || v;
 }
 
+const escHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 function renderSimpleTable(tbodyId, rows, renderer, emptyText = '暂无数据') {
   const el = document.getElementById(tbodyId);
   if (!el) return;
   if (!rows || rows.length === 0) {
-    el.innerHTML = `<tr><td colspan="99" style="text-align:center; color:#94a3b8; padding:12px;">${emptyText}</td></tr>`;
+    el.innerHTML = `<tr class="rpt-empty-row"><td colspan="99">${emptyText}</td></tr>`;
     return;
   }
   el.innerHTML = rows.map(renderer).join('');
+}
+
+// 排行表首列：名次徽标 + 主文本（前三名高亮）
+function rankCell(i, html) {
+  return `<td><span class="rpt-rank${i < 3 ? ' is-top' : ''}">${i + 1}</span>${html}</td>`;
+}
+
+function reqLabel(r) {
+  return `<span class="rpt-req"><code>${escHtml(r.zentao_req_id || '')}</code>${escHtml(r.title || '')}</span>`;
+}
+
+function setRiskValue(id, val) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerText = val;
+  const tile = el.closest('.rpt-risk');
+  if (tile) tile.classList.toggle('is-zero', !Number(String(val).replace('%', '')));
 }
 
 function renderGovernanceBoard(data) {
   if (!data) return;
   governanceCache = data;
   const k = data.kpis || {};
-  const setVal = (id, val) => {
-    const el = document.getElementById(id);
-    if (el) el.innerText = val;
-  };
+  const setVal = setRiskValue;
 
   setVal('gReqOverdue', k.overdue_requirements || 0);
   setVal('gFbOverdue', k.overdue_feedbacks || 0);
@@ -60,39 +76,39 @@ function renderGovernanceBoard(data) {
     metaHintEl.innerText = data.meta?.degraded_reason || '';
   }
 
-  renderSimpleTable('gTopReqFeedbackTable', data.requirements?.top_feedback_reqs || [], (r) => `
+  renderSimpleTable('gTopReqFeedbackTable', data.requirements?.top_feedback_reqs || [], (r, i) => `
     <tr>
-      <td>${r.zentao_req_id} ${r.title || ''}</td>
-      <td>${r.major_version_no || '-'}</td>
-      <td>${reqStatusZh(r.status)}</td>
-      <td><b>${r.feedback_count || 0}</b></td>
+      ${rankCell(i, reqLabel(r))}
+      <td>${escHtml(r.major_version_no || '-')}</td>
+      <td><span class="rpt-st">${reqStatusZh(r.status)}</span></td>
+      <td class="num"><b>${r.feedback_count || 0}</b></td>
     </tr>
   `);
 
-  renderSimpleTable('gTopReqBugTable', data.requirements?.top_bug_reqs || [], (r) => `
+  renderSimpleTable('gTopReqBugTable', data.requirements?.top_bug_reqs || [], (r, i) => `
     <tr>
-      <td>${r.zentao_req_id} ${r.title || ''}</td>
-      <td>${r.major_version_no || '-'}</td>
-      <td>${reqStatusZh(r.status)}</td>
-      <td><b>${r.bug_count || 0}</b></td>
+      ${rankCell(i, reqLabel(r))}
+      <td>${escHtml(r.major_version_no || '-')}</td>
+      <td><span class="rpt-st">${reqStatusZh(r.status)}</span></td>
+      <td class="num"><b>${r.bug_count || 0}</b></td>
     </tr>
   `);
 
-  renderSimpleTable('gFeedbackVersionTopTable', data.feedback?.version_top10 || [], (r) => `
+  renderSimpleTable('gFeedbackVersionTopTable', data.feedback?.version_top10 || [], (r, i) => `
     <tr>
-      <td>${r.major_version_no || '-'} / ${r.minor_version_no || '-'}</td>
-      <td>${r.total || 0}</td>
-      <td>${r.done || 0}</td>
-      <td>${r.undone || 0}</td>
+      ${rankCell(i, `${escHtml(r.major_version_no || '-')} / ${escHtml(r.minor_version_no || '-')}`)}
+      <td class="num"><b>${r.total || 0}</b></td>
+      <td class="num">${r.done || 0}</td>
+      <td class="num">${r.undone ? `<span class="rpt-warn">${r.undone}</span>` : 0}</td>
     </tr>
   `);
 
-  renderSimpleTable('gStaleBugTopTable', data.bugs?.top_stale || [], (r) => `
+  renderSimpleTable('gStaleBugTopTable', data.bugs?.top_stale || [], (r, i) => `
     <tr>
-      <td>${renderBugLink(r)}</td>
-      <td>${r.major_version_no || '-'}</td>
-      <td>${r.dispatched_to_name || '未指派'}</td>
-      <td><b>${r.stale_days || 0}</b></td>
+      ${rankCell(i, renderBugLink(r))}
+      <td>${escHtml(r.major_version_no || '-')}</td>
+      <td>${escHtml(r.dispatched_to_name || '未指派')}</td>
+      <td class="num"><b>${r.stale_days || 0}</b></td>
     </tr>
   `);
 
@@ -105,15 +121,24 @@ function renderGovernanceDetail(headers, rows, emptyText = '暂无数据') {
   if (!headEl || !bodyEl) return;
   headEl.innerHTML = `<tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr>`;
   if (!rows || rows.length === 0) {
-    bodyEl.innerHTML = `<tr><td colspan="${headers.length}" style="text-align:center; color:#94a3b8; padding:12px;">${emptyText}</td></tr>`;
+    bodyEl.innerHTML = `<tr class="rpt-empty-row"><td colspan="${headers.length}">${emptyText}</td></tr>`;
     return;
   }
   bodyEl.innerHTML = rows.join('');
 }
 
+function markActiveRisk(type) {
+  document.querySelectorAll('#tab-report .rpt-risk[data-gov]').forEach((el) => {
+    const on = el.getAttribute('data-gov') === type;
+    el.classList.toggle('is-active', on);
+    el.setAttribute('aria-expanded', on ? 'true' : 'false');
+  });
+}
+
 export function closeGovernanceDetail() {
   const card = document.getElementById('governanceDetailCard');
   if (card) card.classList.add('hidden');
+  markActiveRisk(null);
 }
 
 export function openGovernanceDetail(type) {
@@ -167,10 +192,18 @@ export function openGovernanceDetail(type) {
       <td>${renderBugLink(r)}</td><td>${r.major_version_no || '-'}</td><td>${r.dispatched_to_name || '未指派'}</td><td>${r.updated_at ? new Date(r.updated_at).toLocaleString() : '-'}</td><td><b>${r.stale_days || 0}</b></td></tr>`);
   }
 
+  // 再点一次同一个指标 = 收起
+  if (!card.classList.contains('hidden') && card.dataset.type === type) {
+    closeGovernanceDetail();
+    return;
+  }
+  card.dataset.type = type;
   titleEl.innerText = title;
   hintEl.innerText = hint;
   renderGovernanceDetail(headers, rows);
   card.classList.remove('hidden');
+  markActiveRisk(type);
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 export async function queryReport() {
@@ -200,6 +233,7 @@ export async function queryReport() {
   state.reportLoaded = true;
   window.reportLoaded = true;
 
+  syncRangePresets();
   window.mReq.innerText = data.overview.executed_requirements || 0;
   window.mCase.innerText = data.overview.created_cases || 0;
   window.mBug.innerText = data.overview.created_bugs || 0;
@@ -624,7 +658,7 @@ bindReportSSE();
 let syncStatsCache = null;
 
 export async function loadZentaoSyncStats() {
-  const majorId = window.reportMajorFilter?.value || '';
+  const majorId = document.getElementById('reportMajorSelect')?.value || '';
   const softwareId = window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || '';
   let url = '/reports/zentao-sync-stats?stale_minutes=60';
   if (majorId && majorId !== '0') url += `&major_version_id=${majorId}`;
@@ -643,7 +677,7 @@ export async function loadZentaoSyncStats() {
 
 function renderZentaoSyncStats(data) {
   if (!data) return;
-  const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
+  const setVal = setRiskValue;
   setVal('zsStaleCount', data.stale_sync_count || 0);
   setVal('zsZtClosedNoLocalCount', data.zentao_closed_no_local_count || 0);
   setVal('zsLocalClosedNoZtCount', data.local_closed_no_zentao_count || 0);
@@ -675,13 +709,94 @@ function renderZentaoSyncTable(tbodyId, rows, fields, headers) {
     thead.innerHTML = `<tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr>`;
   }
   if (!rows || rows.length === 0) {
-    el.innerHTML = `<tr><td colspan="${fields.length}" style="text-align:center; color:#94a3b8; padding:8px;">暂无数据 ✓</td></tr>`;
+    el.innerHTML = `<tr class="rpt-empty-row"><td colspan="${fields.length}">暂无数据，一切正常</td></tr>`;
     return;
   }
   el.innerHTML = rows.map((row) =>
-    `<tr>${fields.map((f) => `<td style="font-size:13px; color:#475569;">${row[f] || '-'}</td>`).join('')}</tr>`
+    `<tr>${fields.map((f) => `<td>${escHtml(row[f] || '-')}</td>`).join('')}</tr>`
   ).join('');
 }
+
+// ── 页面交互：快捷时间范围、分区导航（滚动高亮）、同步明细展开 ────────────────
+
+function isoDay(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function syncRangePresets() {
+  const start = document.getElementById('reportStartDate')?.value;
+  const end = document.getElementById('reportEndDate')?.value;
+  const today = isoDay(new Date());
+  document.querySelectorAll('#reportRangePresets [data-rpt-days]').forEach((btn) => {
+    const days = Number(btn.getAttribute('data-rpt-days'));
+    const from = isoDay(new Date(Date.now() - (days - 1) * 86400000));
+    btn.classList.toggle('is-active', end === today && start === from);
+  });
+}
+
+function setNavActive(id) {
+  document.querySelectorAll('#reportSectionNav [data-rpt-nav]').forEach((a) => {
+    a.classList.toggle('is-active', a.getAttribute('data-rpt-nav') === id);
+  });
+}
+
+function bindReportUi() {
+  const tab = document.getElementById('tab-report');
+  if (!tab || tab.dataset.rptBound) return;
+  tab.dataset.rptBound = '1';
+
+  document.getElementById('reportRangePresets')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-rpt-days]');
+    if (!btn) return;
+    const days = Number(btn.getAttribute('data-rpt-days'));
+    const startEl = document.getElementById('reportStartDate');
+    const endEl = document.getElementById('reportEndDate');
+    if (!startEl || !endEl) return;
+    startEl.value = isoDay(new Date(Date.now() - (days - 1) * 86400000));
+    endEl.value = isoDay(new Date());
+    queryReport().catch((err) => window.showMessage && window.showMessage(err.message || '报表查询失败', 'error'));
+  });
+
+  const nav = document.getElementById('reportSectionNav');
+  nav?.addEventListener('click', (e) => {
+    const a = e.target.closest('[data-rpt-nav]');
+    if (!a) return;
+    e.preventDefault();
+    const target = document.getElementById(a.getAttribute('data-rpt-nav'));
+    if (!target) return;
+    setNavActive(a.getAttribute('data-rpt-nav'));
+    const top = target.getBoundingClientRect().top + window.scrollY - (nav.offsetHeight + 72);
+    window.scrollTo({ top, behavior: 'smooth' });
+  });
+
+  // 滚动高亮：取视口上方 35% 处所在的分区
+  let raf = 0;
+  window.addEventListener('scroll', () => {
+    if (raf || tab.classList.contains('hidden')) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      const line = (nav?.getBoundingClientRect().bottom || 0) + window.innerHeight * 0.2;
+      let current = 'rptSecOverview';
+      tab.querySelectorAll('.rpt-sec').forEach((sec) => {
+        if (sec.getBoundingClientRect().top <= line) current = sec.id;
+      });
+      setNavActive(current);
+    });
+  }, { passive: true });
+
+  tab.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-zs-toggle]');
+    if (!btn) return;
+    const detail = document.getElementById(btn.getAttribute('data-zs-toggle'));
+    if (!detail) return;
+    const open = detail.classList.toggle('hidden') === false;
+    btn.classList.toggle('is-active', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+}
+
+bindReportUi();
 
 window.OmniQAReportTab = {
   queryReport,

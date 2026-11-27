@@ -72,28 +72,3 @@ def test_create_execution_bug_allows_retest_when_test_completed(db_session):
     bug = db_session.query(BugTracking).filter(BugTracking.id == result["id"]).first()
     assert bug is not None
     assert bug.source_type == BugSourceType.RETEST
-
-
-def test_dispatch_bug_updates_target_user(db_session):
-    major = _create_major(db_session, "V4002")
-    creator = _create_user(db_session, "creator")
-    target = _create_user(db_session, "target")
-    req = _create_requirement(db_session, major.id)
-    bug = BugTracking(
-        major_version_id=major.id,
-        requirement_id=req.id,
-        source_type=BugSourceType.MANUAL,
-        bug_id="b#4003",
-        found_minor_version_id=1,
-        created_by_id=creator.id,
-    )
-    db_session.add(bug)
-    db_session.commit()
-    db_session.refresh(bug)
-
-    service = BugService(db_session)
-    result, user, updated_bug = service.dispatch_bug(bug.id, target.id, actor_id=creator.id)
-
-    assert result["message"] == "特派成功"
-    assert user.id == target.id
-    assert updated_bug.dispatched_to_id == target.id
