@@ -242,14 +242,23 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
 
   renderVersionBugChart(helpers.versionBugs || []);
 
+  const topReqs = (advancedData.top_reqs || []).slice().reverse();
+  const escTip = (v) => String(v == null ? '' : v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   initChart('topReqChart', 'topReqChart')?.setOption({
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (ps) => {
+        const r = topReqs[ps[0]?.dataIndex] || {};
+        return `<b>${escTip(r.req_id)}</b> ${escTip(r.title)}<br/>关联 Bug：<b>${r.count ?? 0}</b>`;
+      },
+    },
     grid: { top: 8, left: 8, right: 36, bottom: 8, containLabel: true },
     xAxis: { type: 'value', minInterval: 1 },
-    yAxis: { type: 'category', data: advancedData.top_reqs.map((r) => r.req_id).reverse(), axisLabel: { interval: 0, formatter: (val) => val.substring(0, 8) } },
-    series: [{ name: 'Bug数量', type: 'bar', barMaxWidth: 16, data: advancedData.top_reqs.map((r) => r.count).reverse(), label: { show: true, position: 'right', color: INK, fontWeight: 600 }, itemStyle: { color: SERIES_COLORS[0], borderRadius: [0, 4, 4, 0] } }],
-    graphic: advancedData.top_reqs.length ? [] : EMPTY_TEXT('时段内暂无需求关联 Bug'),
-  });
+    yAxis: { type: 'category', data: topReqs.map((r) => String(r.req_id || '-')), axisLabel: { interval: 0, width: 90, overflow: 'truncate' } },
+    series: [{ name: 'Bug数量', type: 'bar', barMaxWidth: 16, data: topReqs.map((r) => r.count), label: { show: true, position: 'right', color: INK, fontWeight: 600 }, itemStyle: { color: SERIES_COLORS[0], borderRadius: [0, 4, 4, 0] } }],
+    graphic: topReqs.length ? [] : EMPTY_TEXT('时段内暂无需求关联 Bug'),
+  }, { replaceMerge: ['graphic'] });
 
   // 漏测率分母=需求/用例创建的 bug，MANUAL 不计入（多为禅道整体测试场景）
   const leakageCase = Number(advancedData.leakage.case ?? 0);
@@ -319,7 +328,7 @@ export function renderReportCharts(data, advancedData, helpers = {}) {
       }),
     }],
     graphic: advancedData.executions.length ? [] : EMPTY_TEXT('时段内暂无执行记录'),
-  });
+  }, { replaceMerge: ['graphic'] });
 
   const ft = fieldTestData || { overview: {}, by_day: [], by_purpose: [], by_user: [], mode: 'personal' };
   const daySeries = (ft.by_day || []).map((x) => x.minutes || 0);

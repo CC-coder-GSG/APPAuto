@@ -16,7 +16,7 @@ import './components/ai-config-modal.js?v=20260422-3';
 import './components/entity-preview-modal.js?v=20261126-hc-1';
 import './components/effort-modal.js?v=20261126-zai-1';
 import './ai-tasks.js?v=20261126-zai-1';
-import { resizeAllCharts } from './components/charts.js?v=20261127-rpt-1';
+import { resizeAllCharts } from './components/charts.js?v=20261127-rpt-2';
 import { runGuardrails } from './guardrails.js?v=20261127-rpt-1';
 
 const OPTIONAL_TAB_MODULES = [
@@ -25,7 +25,7 @@ const OPTIONAL_TAB_MODULES = [
   { name: 'task-workbench', path: './tabs/task-workbench.js?v=20261126-hc-1' },
   { name: 'task-board', path: './tabs/task-board.js?v=20261127-tbd-1' },
   { name: 'feedback', path: './tabs/feedback.js?v=20261126-zai-1' },
-  { name: 'report', path: './tabs/report.js?v=20261127-rpt-1' },
+  { name: 'report', path: './tabs/report.js?v=20261127-rpt-2' },
   { name: 'retest', path: './tabs/retest.js?v=20261126-hc-1' },
   { name: 'overall-test', path: './tabs/overall-test.js?v=20261126-zai-1' },
   { name: 'field-test', path: './tabs/field-test.js?v=20261126-zai-1' },

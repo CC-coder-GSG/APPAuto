@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import and_, case, func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.models import (
     AuditLog,
@@ -63,6 +63,11 @@ def _not_deleted_clause():
     but hidden in the overall-test list, producing mismatched totals.
     """
     return or_(BugTracking.zentao_deleted.is_(False), BugTracking.zentao_deleted.is_(None))
+
+
+def _story_fallback_sources():
+    # 与需求详情的 Bug 计数同口径（requirement_service）：只有需求类 / 禅道同步(MANUAL)的 Bug 按 story 归集
+    return (BugSourceType.MANUAL, BugSourceType.REQUIREMENT)
 
 
 class ReportService:
@@ -219,6 +224,81 @@ class ReportService:
             prev_passed[rid] = passed
 
         return {"total": total, "by_actor": by_actor, "by_day": by_day}
+
+    def _requirement_bug_counts(
+        self,
+        sdt: datetime,
+        edt: datetime,
+        scoped_major_ids: list[int] | None,
+    ) -> dict[int, int]:
+        """
+        时段内每个需求关联的 Bug 数（未删除）。
+
+        禅道同步进来的 Bug 落库时 requirement_id 为空，只带 zentao_story_id；
+        以前只按 requirement_id 关联，线上这类 Bug 全部漏算，「需求 Bug 排行」
+        和「缺陷最多需求」因此空白。现在：有 requirement_id 用它；没有的按
+        （大版本, 禅道需求 ID）归到同大版本下的需求（有重复需求时取最早那条）。
+        """
+        if scoped_major_ids is not None and not scoped_major_ids:
+            return {}
+        rows = (
+            self.db.query(BugTracking.requirement_id, BugTracking.zentao_story_id, BugTracking.major_version_id, BugTracking.source_type)
+            .filter(
+                _bug_time_col() >= sdt,
+                _bug_time_col() <= edt,
+                _not_deleted_clause(),
+                or_(BugTracking.requirement_id.isnot(None), BugTracking.zentao_story_id.isnot(None)),
+            )
+            .all()
+        )
+        story_keys = {
+            (major_id, int(story_id))
+            for req_id, story_id, major_id, source in rows
+            if req_id is None and story_id is not None and source in _story_fallback_sources()
+        }
+        req_by_story: dict[tuple[int, int], int] = {}
+        if story_keys:
+            story_ids = sorted({sid for _, sid in story_keys})
+            for chunk_start in range(0, len(story_ids), 500):
+                chunk = story_ids[chunk_start:chunk_start + 500]
+                for rid, sid, mid in (
+                    self.db.query(Requirement.id, Requirement.zentao_story_id, Requirement.major_version_id)
+                    .filter(Requirement.zentao_story_id.in_(chunk))
+                    .order_by(Requirement.id.asc())
+                    .all()
+                ):
+                    req_by_story.setdefault((mid, int(sid)), rid)
+        direct_ids = {req_id for req_id, *_ in rows if req_id is not None}
+        req_major = {}
+        all_req_ids = direct_ids | set(req_by_story.values())
+        if all_req_ids:
+            id_list = sorted(all_req_ids)
+            for chunk_start in range(0, len(id_list), 500):
+                for rid, mid in (
+                    self.db.query(Requirement.id, Requirement.major_version_id)
+                    .filter(Requirement.id.in_(id_list[chunk_start:chunk_start + 500]))
+                    .all()
+                ):
+                    req_major[rid] = mid
+        scope = set(scoped_major_ids) if scoped_major_ids is not None else None
+        counts: dict[int, int] = {}
+        for req_id, story_id, major_id, source in rows:
+            rid = req_id
+            if rid is None and story_id is not None and source in _story_fallback_sources():
+                rid = req_by_story.get((major_id, int(story_id)))
+            if rid is None or rid not in req_major:
+                continue
+            if scope is not None and req_major[rid] not in scope:
+                continue
+            counts[rid] = counts.get(rid, 0) + 1
+        return counts
+
+    def _top_bug_requirements(self, counts: dict[int, int], limit: int) -> list[tuple[Requirement, int]]:
+        top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+        if not top:
+            return []
+        reqs = {r.id: r for r in self.db.query(Requirement).filter(Requirement.id.in_([rid for rid, _ in top])).all()}
+        return [(reqs[rid], cnt) for rid, cnt in top if rid in reqs]
 
     def _linked_requirement_ids(self, major_ids: list[int] | None = None) -> set[int]:
         """
@@ -503,70 +583,232 @@ class ReportService:
                 return q.filter(or_(*actor_clauses))
             return q.filter(False)
 
-        def metrics_for_user(uid: int) -> dict:
-            executed_req_count = self._executed_requirements_count(sdt, edt, [uid], scoped_major_ids)
-            case_count = (
-                self.db.query(func.count(TestCase.id))
-                .join(Requirement, TestCase.requirement_id == Requirement.id)
-                .filter(TestCase.creator_id == uid, TestCase.created_at >= sdt, TestCase.created_at <= edt)
-            )
-            if linked_req_ids:
-                case_count = case_count.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
-            case_count = filter_by_major_ids(case_count, Requirement.major_version_id).scalar() or 0
-            bug_count = self.db.query(func.count(BugTracking.id)).filter(
-                _bug_time_col() >= sdt,
-                _bug_time_col() <= edt,
+        # ── 2026-11-27 性能：以前趋势图每天 5 条 COUNT（90 天≈450 条）、团队对比每人 6 条，
+        # 每条都整表扫 Bug。现在每个指标只按时间范围取一次行，再在内存里按天 / 按人分桶；
+        # 归属口径与 apply_created_bug_actor_filter / closed_bug_query 完全一致。
+        def _day_of(value):
+            if value is None:
+                return None
+            if isinstance(value, str):
+                try:
+                    value = datetime.fromisoformat(value.strip().replace(" ", "T")[:26])
+                except ValueError:
+                    return None
+            return value.date() if isinstance(value, datetime) else value
+
+        def _pools(actor_ids):
+            ids = [int(uid) for uid in (actor_ids or []) if uid]
+            accounts = {a for uid in ids for a in zentao_accounts_by_user.get(uid, set())}
+            names = {n for uid in ids for n in zentao_names_by_user.get(uid, set())}
+            return set(ids), accounts, names
+
+        created_rows = filter_by_major_ids(
+            self.db.query(
+                BugTracking.id,
+                _bug_time_col().label("ts"),
+                BugTracking.zentao_bug_id,
+                BugTracking.zentao_opened_by_account,
+                BugTracking.zentao_opened_by_name,
+                BugTracking.created_by_id,
+                BugTracking.zentao_sync_message,
+            ).filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause()),
+            BugTracking.major_version_id,
+        ).all()
+        created_rows = [(row, _day_of(row.ts)) for row in created_rows]
+
+        def _created_by(row, ids, accounts, names) -> bool:
+            if row.zentao_bug_id is not None and (
+                (accounts and (row.zentao_opened_by_account or "").lower() in accounts)
+                or (names and (row.zentao_opened_by_name or "").lower() in names)
+            ):
+                return True
+            if row.created_by_id in ids:
+                if row.zentao_bug_id is None:
+                    return True
+                creator_absent = not (row.zentao_opened_by_account or "").strip(" ") and not (row.zentao_opened_by_name or "").strip(" ")
+                if creator_absent and (row.zentao_sync_message is None or row.zentao_sync_message != bulk_sync_message):
+                    return True
+            return False
+
+        closed_rows = filter_by_major_ids(
+            self.db.query(
+                BugTracking.id,
+                _bug_close_time_col().label("ts"),
+                BugTracking.closed_by_id,
+                BugTracking.zentao_closed_by_account,
+            ).filter(
                 _not_deleted_clause(),
+                _bug_close_time_col().isnot(None),
+                _bug_close_time_col() >= sdt,
+                _bug_close_time_col() <= edt,
+                func.lower(func.coalesce(BugTracking.zentao_live_status, "")) == "closed",
+            ),
+            BugTracking.major_version_id,
+        ).all()
+        closed_rows = [(row, _day_of(row.ts)) for row in closed_rows]
+
+        def _closed_by(row, ids, accounts) -> bool:
+            if row.closed_by_id in ids:
+                return True
+            return bool(accounts) and (row.zentao_closed_by_account or "").lower() in accounts
+
+        # 执行需求 = 普通执行 ∪ 最终测试勾选完成（按需求去重），与 _executed_requirements_count 同口径
+        if scoped_major_ids is not None and not scoped_major_ids:
+            exec_rows, final_rows = [], []
+        else:
+            exec_q = (
+                self.db.query(TestExecution.requirement_id, TestExecution.executed_at, TestExecution.executed_by_id)
+                .join(Requirement, TestExecution.requirement_id == Requirement.id)
+                .filter(TestExecution.executed_at >= sdt, TestExecution.executed_at <= edt)
             )
-            bug_count = apply_created_bug_actor_filter(bug_count, [uid])
-            bug_count = filter_by_major_ids(bug_count, BugTracking.major_version_id).scalar() or 0
-            retested_reqs = retest_transition_stats["by_actor"].get(uid, 0)
-            closed_bugs = closed_bug_query([uid], sdt, edt)
-            closed_bugs = filter_by_major_ids(closed_bugs, BugTracking.major_version_id).scalar() or 0
-            created_feedbacks = self.db.query(func.count(FeedbackRecord.id)).filter(
-                FeedbackRecord.creator_id == uid,
-                FeedbackRecord.created_at >= sdt,
-                FeedbackRecord.created_at <= edt,
+            if scoped_major_ids is not None:
+                exec_q = exec_q.filter(Requirement.major_version_id.in_(scoped_major_ids))
+            exec_rows = [(rid, _day_of(t), uid) for rid, t, uid in exec_q.all()]
+            final_q = self.db.query(FinalTestRecord.requirement_id, FinalTestRecord.test_completed_at, FinalTestRecord.user_id).filter(
+                FinalTestRecord.test_completed.is_(True),
+                FinalTestRecord.test_completed_at.isnot(None),
+                FinalTestRecord.test_completed_at >= sdt,
+                FinalTestRecord.test_completed_at <= edt,
             )
-            created_feedbacks = filter_by_major_ids(created_feedbacks, FeedbackRecord.major_version_id).scalar() or 0
-            processed_feedbacks = processed_feedback_stats["by_actor"].get(uid, 0)
+            if scoped_major_ids is not None:
+                final_q = final_q.join(Requirement, FinalTestRecord.requirement_id == Requirement.id).filter(
+                    Requirement.major_version_id.in_(scoped_major_ids)
+                )
+            final_rows = [(rid, _day_of(t), uid) for rid, t, uid in final_q.all()]
+
+        case_q = (
+            self.db.query(TestCase.creator_id, TestCase.created_at)
+            .join(Requirement, TestCase.requirement_id == Requirement.id)
+            .filter(TestCase.created_at >= sdt, TestCase.created_at <= edt)
+        )
+        if linked_req_ids:
+            case_q = case_q.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
+        case_rows = [(uid, _day_of(t)) for uid, t in filter_by_major_ids(case_q, Requirement.major_version_id).all()]
+
+        fb_q = self.db.query(FeedbackRecord.creator_id, FeedbackRecord.created_at).filter(
+            FeedbackRecord.created_at >= sdt,
+            FeedbackRecord.created_at <= edt,
+        )
+        fb_rows = [(uid, _day_of(t)) for uid, t in filter_by_major_ids(fb_q, FeedbackRecord.major_version_id).all()]
+
+        def _bucket_metrics(actor_ids) -> tuple[dict, dict]:
+            """返回 (区间合计, {day: 当天指标})，actor_ids 为空则全为 0。"""
+            ids, accounts, names = _pools(actor_ids)
+            by_day: dict = {}
+
+            def slot(day):
+                return by_day.setdefault(day, {"exec": set(), "case": 0, "bug": 0, "closed": 0, "fb": 0})
+
+            exec_all: set = set()
+            for rid, day, uid in exec_rows + final_rows:
+                if uid in ids:
+                    exec_all.add(rid)
+                    slot(day)["exec"].add(rid)
+            case_total = bug_total = closed_total = fb_total = 0
+            for uid, day in case_rows:
+                if uid in ids:
+                    case_total += 1
+                    slot(day)["case"] += 1
+            for row, day in created_rows:
+                if _created_by(row, ids, accounts, names):
+                    bug_total += 1
+                    slot(day)["bug"] += 1
+            for row, day in closed_rows:
+                if _closed_by(row, ids, accounts):
+                    closed_total += 1
+                    slot(day)["closed"] += 1
+            for uid, day in fb_rows:
+                if uid in ids:
+                    fb_total += 1
+                    slot(day)["fb"] += 1
+            totals = {
+                "executed_requirements": len(exec_all),
+                "created_cases": case_total,
+                "created_bugs": bug_total,
+                "closed_bugs": closed_total,
+                "created_feedbacks": fb_total,
+            }
+            return totals, by_day
+
+        per_user_cache: dict[int, dict] = {}
+
+        def _per_user_totals() -> dict[int, dict]:
+            """团队对比：一次遍历把每行记到所有归属人名下（逐人遍历在 20 人 × 上万行时很慢）。"""
+            if per_user_cache:
+                return per_user_cache
+            acct_users: dict[str, set[int]] = {}
+            name_users: dict[str, set[int]] = {}
+            for uid in actor_scope_seed:
+                for a in zentao_accounts_by_user.get(int(uid), set()):
+                    acct_users.setdefault(a, set()).add(int(uid))
+                for n in zentao_names_by_user.get(int(uid), set()):
+                    name_users.setdefault(n, set()).add(int(uid))
+
+            def bucket(uid):
+                return per_user_cache.setdefault(uid, {"exec": set(), "case": 0, "bug": 0, "closed": 0, "fb": 0})
+
+            for rid, _day, uid in exec_rows + final_rows:
+                if uid is not None:
+                    bucket(uid)["exec"].add(rid)
+            for uid, _day in case_rows:
+                if uid is not None:
+                    bucket(uid)["case"] += 1
+            for row, _day in created_rows:
+                owners: set[int] = set()
+                if row.zentao_bug_id is not None:
+                    owners |= acct_users.get((row.zentao_opened_by_account or "").lower(), set())
+                    owners |= name_users.get((row.zentao_opened_by_name or "").lower(), set())
+                if row.created_by_id is not None and row.created_by_id not in owners:
+                    creator_absent = not (row.zentao_opened_by_account or "").strip(" ") and not (row.zentao_opened_by_name or "").strip(" ")
+                    if row.zentao_bug_id is None or (
+                        creator_absent and (row.zentao_sync_message is None or row.zentao_sync_message != bulk_sync_message)
+                    ):
+                        owners.add(row.created_by_id)
+                for uid in owners:
+                    bucket(uid)["bug"] += 1
+            for row, _day in closed_rows:
+                owners = set(acct_users.get((row.zentao_closed_by_account or "").lower(), set()))
+                if row.closed_by_id is not None:
+                    owners.add(row.closed_by_id)
+                for uid in owners:
+                    bucket(uid)["closed"] += 1
+            for uid, _day in fb_rows:
+                if uid is not None:
+                    bucket(uid)["fb"] += 1
+            per_user_cache[-1] = {}  # 标记已计算（即使没有任何行）
+            return per_user_cache
+
+        def metrics_for_user(uid: int) -> dict:
+            if all_users_mode:
+                b = _per_user_totals().get(uid) or {"exec": (), "case": 0, "bug": 0, "closed": 0, "fb": 0}
+                totals = {
+                    "executed_requirements": len(b["exec"]),
+                    "created_cases": b["case"],
+                    "created_bugs": b["bug"],
+                    "closed_bugs": b["closed"],
+                    "created_feedbacks": b["fb"],
+                }
+            else:
+                totals, _ = _bucket_metrics([uid])
             return {
-                "executed_requirements": executed_req_count,
-                "created_cases": case_count,
-                "created_bugs": bug_count,
-                "retested_reqs": retested_reqs,
-                "closed_bugs": closed_bugs,
-                "created_feedbacks": created_feedbacks,
-                "processed_feedbacks": processed_feedbacks,
+                "executed_requirements": totals["executed_requirements"],
+                "created_cases": totals["created_cases"],
+                "created_bugs": totals["created_bugs"],
+                "retested_reqs": retest_transition_stats["by_actor"].get(uid, 0),
+                "closed_bugs": totals["closed_bugs"],
+                "created_feedbacks": totals["created_feedbacks"],
+                "processed_feedbacks": processed_feedback_stats["by_actor"].get(uid, 0),
             }
 
+        scope_totals, scope_by_day = _bucket_metrics(team_ids if all_users_mode else [target_user_id])
         if all_users_mode:
-            q_case = (
-                self.db.query(func.count(TestCase.id))
-                .join(Requirement, TestCase.requirement_id == Requirement.id)
-                .filter(TestCase.created_at >= sdt, TestCase.created_at <= edt, TestCase.creator_id.in_(team_ids))
-            )
-            if linked_req_ids:
-                q_case = q_case.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
-            q_bug = self.db.query(func.count(BugTracking.id)).filter(
-                _bug_time_col() >= sdt,
-                _bug_time_col() <= edt,
-                _not_deleted_clause(),
-            )
-            q_bug = apply_created_bug_actor_filter(q_bug, team_ids)
-            q_closed = closed_bug_query(team_ids, sdt, edt)
-            q_fb_created = self.db.query(func.count(FeedbackRecord.id)).filter(
-                FeedbackRecord.created_at >= sdt,
-                FeedbackRecord.created_at <= edt,
-                FeedbackRecord.creator_id.in_(team_ids),
-            )
             overview = {
-                "executed_requirements": self._executed_requirements_count(sdt, edt, team_ids, scoped_major_ids),
-                "created_cases": filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0,
-                "created_bugs": filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0,
+                "executed_requirements": scope_totals["executed_requirements"],
+                "created_cases": scope_totals["created_cases"],
+                "created_bugs": scope_totals["created_bugs"],
                 "retested_reqs": retest_transition_stats["total"],
-                "closed_bugs": filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0,
-                "created_feedbacks": filter_by_major_ids(q_fb_created, FeedbackRecord.major_version_id).scalar() or 0,
+                "closed_bugs": scope_totals["closed_bugs"],
+                "created_feedbacks": scope_totals["created_feedbacks"],
                 "processed_feedbacks": processed_feedback_stats["total"],
             }
         else:
@@ -574,72 +816,18 @@ class ReportService:
 
         trend = []
         cur = start_date
+        empty_day = {"exec": (), "case": 0, "bug": 0, "closed": 0, "fb": 0}
         while cur <= end_date:
-            day_s = datetime.combine(cur, datetime.min.time())
-            day_e = datetime.combine(cur, datetime.max.time())
-            if all_users_mode:
-                q_case = (
-                    self.db.query(func.count(TestCase.id))
-                    .join(Requirement, TestCase.requirement_id == Requirement.id)
-                    .filter(TestCase.created_at >= day_s, TestCase.created_at <= day_e, TestCase.creator_id.in_(team_ids))
-                )
-                if linked_req_ids:
-                    q_case = q_case.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
-                q_bug = self.db.query(func.count(BugTracking.id)).filter(
-                    _bug_time_col() >= day_s,
-                    _bug_time_col() <= day_e,
-                    _not_deleted_clause(),
-                )
-                q_bug = apply_created_bug_actor_filter(q_bug, team_ids)
-                q_closed = closed_bug_query(team_ids, day_s, day_e)
-                q_fb_created = self.db.query(func.count(FeedbackRecord.id)).filter(
-                    FeedbackRecord.created_at >= day_s,
-                    FeedbackRecord.created_at <= day_e,
-                    FeedbackRecord.creator_id.in_(team_ids),
-                )
-                day_exec = self._executed_requirements_count(day_s, day_e, team_ids, scoped_major_ids)
-                day_case = filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0
-                day_bug = filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0
-                day_retested = retest_transition_stats["by_day"].get(cur.isoformat(), 0)
-                day_closed = filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0
-                day_fb_created = filter_by_major_ids(q_fb_created, FeedbackRecord.major_version_id).scalar() or 0
-                day_fb_processed = processed_feedback_stats["by_day"].get(cur.isoformat(), 0)
-            else:
-                q_case = (
-                    self.db.query(func.count(TestCase.id))
-                    .join(Requirement, TestCase.requirement_id == Requirement.id)
-                    .filter(TestCase.creator_id == target_user_id, TestCase.created_at >= day_s, TestCase.created_at <= day_e)
-                )
-                if linked_req_ids:
-                    q_case = q_case.filter(~TestCase.requirement_id.in_(list(linked_req_ids)))
-                q_bug = self.db.query(func.count(BugTracking.id)).filter(
-                    _bug_time_col() >= day_s,
-                    _bug_time_col() <= day_e,
-                    _not_deleted_clause(),
-                )
-                q_bug = apply_created_bug_actor_filter(q_bug, [target_user_id])
-                q_closed = closed_bug_query([target_user_id], day_s, day_e)
-                q_fb_created = self.db.query(func.count(FeedbackRecord.id)).filter(
-                    FeedbackRecord.created_at >= day_s,
-                    FeedbackRecord.created_at <= day_e,
-                    FeedbackRecord.creator_id == target_user_id,
-                )
-                day_exec = self._executed_requirements_count(day_s, day_e, [target_user_id], scoped_major_ids)
-                day_case = filter_by_major_ids(q_case, Requirement.major_version_id).scalar() or 0
-                day_bug = filter_by_major_ids(q_bug, BugTracking.major_version_id).scalar() or 0
-                day_retested = retest_transition_stats["by_day"].get(cur.isoformat(), 0)
-                day_closed = filter_by_major_ids(q_closed, BugTracking.major_version_id).scalar() or 0
-                day_fb_created = filter_by_major_ids(q_fb_created, FeedbackRecord.major_version_id).scalar() or 0
-                day_fb_processed = processed_feedback_stats["by_day"].get(cur.isoformat(), 0)
+            day = scope_by_day.get(cur, empty_day)
             trend.append({
                 "date": cur.isoformat(),
-                "executed_requirements": day_exec,
-                "created_cases": day_case,
-                "created_bugs": day_bug,
-                "retested_reqs": day_retested,
-                "closed_bugs": day_closed,
-                "created_feedbacks": day_fb_created,
-                "processed_feedbacks": day_fb_processed,
+                "executed_requirements": len(day["exec"]),
+                "created_cases": day["case"],
+                "created_bugs": day["bug"],
+                "retested_reqs": retest_transition_stats["by_day"].get(cur.isoformat(), 0),
+                "closed_bugs": day["closed"],
+                "created_feedbacks": day["fb"],
+                "processed_feedbacks": processed_feedback_stats["by_day"].get(cur.isoformat(), 0),
             })
             cur += timedelta(days=1)
 
@@ -741,15 +929,16 @@ class ReportService:
     def advanced(self, start_date: date, end_date: date, major_version_id: int | None = None, software_id: int | None = None) -> dict:
         sdt = datetime.combine(start_date, datetime.min.time())
         edt = datetime.combine(end_date, datetime.max.time())
-        req_bugs_query = self.db.query(Requirement.zentao_req_id, Requirement.title, func.count(BugTracking.id).label("bug_count")) \
-            .join(BugTracking, BugTracking.requirement_id == Requirement.id) \
-            .filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause())
         if major_version_id:
-            req_bugs_query = req_bugs_query.filter(Requirement.major_version_id == major_version_id)
+            req_scope = [major_version_id]
         elif software_id:
-            req_bugs_query = req_bugs_query.join(Version, Requirement.major_version_id == Version.id).filter(Version.software_id == software_id)
-        req_bugs = req_bugs_query.group_by(Requirement.id).order_by(func.count(BugTracking.id).desc()).limit(7).all()
-        top_reqs = [{"req_id": r[0], "title": r[1], "count": r[2]} for r in req_bugs]
+            req_scope = [v_id for (v_id,) in self.db.query(Version.id).filter(Version.software_id == software_id).all()]
+        else:
+            req_scope = None
+        top_reqs = [
+            {"req_id": req.zentao_req_id, "title": req.title, "count": cnt}
+            for req, cnt in self._top_bug_requirements(self._requirement_bug_counts(sdt, edt, req_scope), 7)
+        ]
         bug_base_query = self.db.query(BugTracking).filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause())
         if major_version_id:
             bug_base_query = bug_base_query.filter(BugTracking.major_version_id == major_version_id)
@@ -810,12 +999,22 @@ class ReportService:
         if major_version_id:
             minor_query = minor_query.filter(Version.parent_id == major_version_id)
         minor_versions = minor_query.all()
+        # 以前每个小版本各查一次计数 + 一次父版本（几百个小版本就是几百条 SQL），这里一次分组查完
+        count_by_minor = dict(
+            self.db.query(BugTracking.found_minor_version_id, func.count(BugTracking.id))
+            .filter(BugTracking.found_minor_version_id.isnot(None))
+            .group_by(BugTracking.found_minor_version_id)
+            .all()
+        )
+        parent_ids = {mv.parent_id for mv in minor_versions if mv.parent_id and count_by_minor.get(mv.id)}
+        parent_names = (
+            dict(self.db.query(Version.id, Version.version_no).filter(Version.id.in_(parent_ids)).all()) if parent_ids else {}
+        )
         result = []
         for mv in minor_versions:
-            bug_count = self.db.query(BugTracking).filter(BugTracking.found_minor_version_id == mv.id).count()
+            bug_count = count_by_minor.get(mv.id, 0)
             if bug_count > 0:
-                parent = self.db.query(Version).filter(Version.id == mv.parent_id).first()
-                parent_name = parent.version_no if parent else "未知大版本"
+                parent_name = parent_names.get(mv.parent_id) or "未知大版本"
                 result.append({
                     # version_name 保留旧的两行格式做向后兼容
                     "version_name": f"{parent_name}\n{mv.version_no}",
@@ -1199,7 +1398,14 @@ class ReportService:
                 "undone": max(0, total - done),
             })
 
-        bug_query = self.db.query(BugTracking).filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause())
+        # 只加载治理计算用到的列（Bug 表有几十列，含禅道原始报文等大字段）
+        bug_query = self.db.query(BugTracking).options(load_only(
+            BugTracking.id, BugTracking.bug_id, BugTracking.closed, BugTracking.created_at, BugTracking.updated_at,
+            BugTracking.dispatched_to_id, BugTracking.major_version_id, BugTracking.zentao_assigned_to_name,
+            BugTracking.zentao_assigned_to_account, BugTracking.zentao_bug_title, BugTracking.zentao_bug_url,
+            BugTracking.zentao_close_date, BugTracking.zentao_live_status, BugTracking.zentao_opened_at,
+            BugTracking.zentao_remote_updated_at,
+        )).filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause())
         if scoped_major_ids is not None:
             bug_query = bug_query.filter(BugTracking.major_version_id.in_(scoped_major_ids if scoped_major_ids else [-1]))
         bug_rows = bug_query.all()
@@ -1279,25 +1485,14 @@ class ReportService:
             if close_dt and open_dt:
                 bug_closed_days.append(max(0, (close_dt - open_dt).days))
 
-        req_bug_top_query = self.db.query(
-            Requirement.id,
-            Requirement.zentao_req_id,
-            Requirement.title,
-            Requirement.major_version_id,
-            Requirement.status,
-            func.count(BugTracking.id).label("bug_count"),
-        ).join(BugTracking, BugTracking.requirement_id == Requirement.id).filter(_bug_time_col() >= sdt, _bug_time_col() <= edt, _not_deleted_clause())
-        if scoped_major_ids is not None:
-            req_bug_top_query = req_bug_top_query.filter(Requirement.major_version_id.in_(scoped_major_ids if scoped_major_ids else [-1]))
         req_bug_top = []
-        for rid, req_id, title, maj_id, status, bug_count in (
-            req_bug_top_query.group_by(Requirement.id).order_by(func.count(BugTracking.id).desc()).limit(10).all()
-        ):
+        for req, bug_count in self._top_bug_requirements(self._requirement_bug_counts(sdt, edt, scoped_major_ids), 10):
+            status = req.status
             req_bug_top.append({
-                "id": rid,
-                "zentao_req_id": req_id,
-                "title": title,
-                "major_version_no": majors.get(maj_id, "未知"),
+                "id": req.id,
+                "zentao_req_id": req.zentao_req_id,
+                "title": req.title,
+                "major_version_no": majors.get(req.major_version_id, "未知"),
                 "status": status.value if hasattr(status, "value") else str(status),
                 "bug_count": int(bug_count or 0),
             })
@@ -1418,7 +1613,18 @@ class ReportService:
                 .all()
             ]
 
-        base_q = self.db.query(BugTracking).filter(
+        # 只取用到的列（不构造 ORM 对象、不带原始报文），全量 Bug 时快很多
+        base_q = self.db.query(
+            BugTracking.id,
+            BugTracking.bug_id,
+            BugTracking.zentao_bug_id,
+            BugTracking.zentao_bug_title,
+            BugTracking.zentao_live_status,
+            BugTracking.last_zentao_synced_at,
+            BugTracking.zentao_closed_by_name,
+            BugTracking.zentao_closed_by_account,
+            BugTracking.zentao_close_date,
+        ).filter(
             BugTracking.zentao_bug_id.isnot(None),
             BugTracking.zentao_deleted.isnot(True),
         )
@@ -1443,14 +1649,18 @@ class ReportService:
             if (b.last_zentao_synced_at is None or b.last_zentao_synced_at < stale_cutoff)
         ]
 
+        # 本地闭环记录（任意人员 test_done）只查一次 id，下面两项共用；
+        # 以前第 2 项把所有已关闭 Bug 的 id 拼成超长 IN 列表再查一遍
+        local_closed_ids = {
+            bug_id
+            for (bug_id,) in self.db.query(BugStage5Record.bug_tracking_id)
+            .filter(BugStage5Record.test_done.is_(True))
+            .all()
+        }
+
         # 2. Zentao closed but no local closure record (any user)
         closed_zentao_ids = {b.id for b in all_zentao_bugs if (b.zentao_live_status or "").lower() == "closed"}
-        local_closure_bug_ids = {
-            r.bug_tracking_id
-            for r in self.db.query(BugStage5Record)
-            .filter(BugStage5Record.bug_tracking_id.in_(closed_zentao_ids), BugStage5Record.test_done.is_(True))
-            .all()
-        } if closed_zentao_ids else set()
+        local_closure_bug_ids = closed_zentao_ids & local_closed_ids
         zentao_closed_no_local = [
             {
                 "id": b.id,
@@ -1465,12 +1675,6 @@ class ReportService:
         ]
 
         # 3. Local closure but Zentao not closed
-        local_closed_ids = {
-            r.bug_tracking_id
-            for r in self.db.query(BugStage5Record)
-            .filter(BugStage5Record.test_done.is_(True))
-            .all()
-        }
         local_closed_no_zentao = [
             {
                 "id": b.id,
@@ -1485,12 +1689,12 @@ class ReportService:
         ]
 
         # 4. Deleted count
-        deleted_q = self.db.query(BugTracking).filter(BugTracking.zentao_deleted.is_(True))
+        deleted_q = self.db.query(func.count(BugTracking.id)).filter(BugTracking.zentao_deleted.is_(True))
         if scoped_major_ids is not None:
             deleted_q = deleted_q.filter(
                 BugTracking.major_version_id.in_(scoped_major_ids if scoped_major_ids else [-1])
             )
-        zentao_deleted_count = deleted_q.count()
+        zentao_deleted_count = deleted_q.scalar() or 0
 
         return {
             "stale_sync_count": len(stale_sync),

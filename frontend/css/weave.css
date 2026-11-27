@@ -8880,6 +8880,13 @@ button.ai-generate-chip.is-generating { animation: aigBreath 1.6s ease-in-out in
 #tab-report .rpt-chart--tall { height: 330px; }
 #tab-report .rpt-chart--xl { height: 380px; }
 
+/* 查询中：内容淡出 + 查询按钮转圈（结果按接口先后陆续画出） */
+#tab-report #reportContent.rpt .rpt-kpi b, #tab-report #reportContent.rpt .rpt-chart, #tab-report #reportContent.rpt .rpt-risk b, #tab-report #reportContent.rpt .rpt-table { transition: opacity .2s ease; }
+#tab-report #reportContent.rpt.is-loading .rpt-kpi b, #tab-report #reportContent.rpt.is-loading .rpt-chart, #tab-report #reportContent.rpt.is-loading .rpt-risk b, #tab-report #reportContent.rpt.is-loading .rpt-table { opacity: .45; }
+#tab-report .fb-actions button.is-busy .ui-ic { animation: rptSpin .8s linear infinite; }
+@keyframes rptSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { #tab-report .fb-actions button.is-busy .ui-ic { animation: none; } }
+
 /* 治理 / 同步：可点指标 */
 #tab-report .rpt-risks { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 12px; }
 #tab-report .rpt-risks--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }

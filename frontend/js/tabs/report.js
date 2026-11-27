@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { state } from '../state.js';
-import { renderGovernanceCharts, renderReportCharts, renderVersionBugChart } from '../components/charts.js?v=20261127-rpt-1';
+import { renderGovernanceCharts, renderReportCharts, renderVersionBugChart } from '../components/charts.js?v=20261127-rpt-2';
 import { renderBugLink, sourceTypeZh } from '../utils.js';
 
 let governanceCache = null;
@@ -206,6 +206,19 @@ export function openGovernanceDetail(type) {
   card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+let reportQuerySeq = 0;
+
+function setReportLoading(on) {
+  document.getElementById('reportContent')?.classList.toggle('is-loading', on);
+  const btn = document.querySelector('#tab-report .fb-actions button');
+  if (btn) {
+    btn.disabled = on;
+    btn.classList.toggle('is-busy', on);
+  }
+}
+
+const jsonOf = (url) => api(url).then((r) => r.json());
+
 export async function queryReport() {
   const currentUser = getCurrentUser();
   if (!currentUser) {
@@ -217,58 +230,57 @@ export async function queryReport() {
   const reportMajorSelect = document.getElementById('reportMajorSelect');
   const selectedMajorId = Number(reportMajorSelect?.value || 0);
   const currentSoftwareId = Number(window.currentSoftwareId || localStorage.getItem('currentSoftwareId') || 0);
+  const userParam = currentUser.role === 'admin' && window.reportUserSelect?.value ? `&user_id=${window.reportUserSelect.value}` : '';
+  const range = `start_date=${startDate}&end_date=${endDate}`;
+  const scope = `${selectedMajorId ? `&major_version_id=${selectedMajorId}` : ''}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}`;
 
-  let summaryUrl = `/reports/summary?start_date=${startDate}&end_date=${endDate}`;
-  if (currentUser.role === 'admin' && window.reportUserSelect?.value) {
-    summaryUrl += `&user_id=${window.reportUserSelect.value}`;
-  }
-  if (selectedMajorId) {
-    summaryUrl += `&major_version_id=${selectedMajorId}`;
-  }
-  if (currentSoftwareId) {
-    summaryUrl += `&software_id=${currentSoftwareId}`;
-  }
+  // 2026-11-27：以前 5 个接口逐个 await，总耗时是各接口之和；现在同时发出，
+  // 谁先回来先画谁。快速连续改筛选时只认最后一次查询的结果。
+  const seq = ++reportQuerySeq;
+  const isStale = () => seq !== reportQuerySeq;
+  setReportLoading(true);
+  const summaryP = jsonOf(`/reports/summary?${range}${userParam}${scope}`);
+  const versionBugsP = jsonOf(selectedMajorId ? `/reports/version-bugs?major_version_id=${selectedMajorId}` : '/reports/version-bugs');
+  const advancedP = jsonOf(`/reports/advanced?${range}${scope}`);
+  const governanceP = jsonOf(`/reports/governance?${range}${scope}`);
+  const fieldTestP = jsonOf(`/reports/field-test?${range}${scope}${userParam}`)
+    .catch(() => ({ overview: {}, by_day: [], by_purpose: [], by_user: [], mode: 'personal' }));
+  loadZentaoSyncStats().catch(() => {});
+  // 避免未等待的 Promise 在前一步失败时报 unhandled rejection
+  [versionBugsP, advancedP, governanceP].forEach((p) => p.catch(() => {}));
 
-  const data = await (await api(summaryUrl)).json();
-  state.reportLoaded = true;
-  window.reportLoaded = true;
-
-  syncRangePresets();
-  window.mReq.innerText = data.overview.executed_requirements || 0;
-  window.mCase.innerText = data.overview.created_cases || 0;
-  window.mBug.innerText = data.overview.created_bugs || 0;
-  window.mRetest.innerText = data.overview.retested_reqs || 0;
-  window.mClosed.innerText = data.overview.closed_bugs || 0;
-
-  const vbUrl = selectedMajorId ? `/reports/version-bugs?major_version_id=${selectedMajorId}` : '/reports/version-bugs';
-  const versionBugs = await (await api(vbUrl)).json();
-
-  const advUrl = selectedMajorId
-    ? `/reports/advanced?start_date=${startDate}&end_date=${endDate}&major_version_id=${selectedMajorId}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}`
-    : `/reports/advanced?start_date=${startDate}&end_date=${endDate}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}`;
-  const advancedData = await (await api(advUrl)).json();
-
-  const govUrl = selectedMajorId
-    ? `/reports/governance?start_date=${startDate}&end_date=${endDate}&major_version_id=${selectedMajorId}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}`
-    : `/reports/governance?start_date=${startDate}&end_date=${endDate}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}`;
-  const governanceData = await (await api(govUrl)).json();
-  const fieldTestUrl = selectedMajorId
-    ? `/reports/field-test?start_date=${startDate}&end_date=${endDate}&major_version_id=${selectedMajorId}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}${currentUser.role === 'admin' && window.reportUserSelect?.value ? `&user_id=${window.reportUserSelect.value}` : ''}`
-    : `/reports/field-test?start_date=${startDate}&end_date=${endDate}${currentSoftwareId ? `&software_id=${currentSoftwareId}` : ''}${currentUser.role === 'admin' && window.reportUserSelect?.value ? `&user_id=${window.reportUserSelect.value}` : ''}`;
-  let fieldTestData = null;
-  try {
-    fieldTestData = await (await api(fieldTestUrl)).json();
-  } catch (e) {
-    fieldTestData = { overview: {}, by_day: [], by_purpose: [], by_user: [], mode: 'personal' };
-  }
-
-  renderReportCharts(data, advancedData, {
-    sourceTypeZh,
-    isAllUsersMode: isAllUsersMode(),
-    versionBugs,
-    fieldTestData,
+  const governanceDone = governanceP.then((governanceData) => {
+    if (!isStale()) renderGovernanceBoard(governanceData);
+  }).catch((err) => {
+    if (!isStale()) window.showMessage && window.showMessage(`治理风险数据加载失败：${err.message || err}`, 'error');
   });
-  renderGovernanceBoard(governanceData);
+
+  try {
+    const data = await summaryP;
+    if (isStale()) return;
+    state.reportLoaded = true;
+    window.reportLoaded = true;
+
+    syncRangePresets();
+    window.mReq.innerText = data.overview.executed_requirements || 0;
+    window.mCase.innerText = data.overview.created_cases || 0;
+    window.mBug.innerText = data.overview.created_bugs || 0;
+    window.mRetest.innerText = data.overview.retested_reqs || 0;
+    window.mClosed.innerText = data.overview.closed_bugs || 0;
+
+    const [versionBugs, advancedData, fieldTestData] = await Promise.all([versionBugsP, advancedP, fieldTestP]);
+    if (isStale()) return;
+    renderReportCharts(data, advancedData, {
+      sourceTypeZh,
+      isAllUsersMode: isAllUsersMode(),
+      versionBugs,
+      fieldTestData,
+    });
+    await governanceDone;
+    if (isStale()) return;
+  } finally {
+    if (!isStale()) setReportLoading(false);
+  }
 
   // 「各发包 Bug 检出分布」独立大版本筛选：默认跟随报表选的大版本，
   // 之后可单独切换、即时重渲染该图（不重查整张报表）。
@@ -296,9 +308,6 @@ export async function queryReport() {
   if (typeof window.showMessage === 'function') {
     window.showMessage('报表查询成功', 'success');
   }
-
-  // Load Zentao sync stats alongside governance data
-  loadZentaoSyncStats().catch(() => {});
 }
 
 export function exportReportPdf() {

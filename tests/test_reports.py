@@ -293,3 +293,78 @@ def test_bug_source_distribution_includes_field_test(db_session):
     result = service.summary(date(2026, 1, 1), date.today() + timedelta(days=1), user)
     source_map = {x["source_type"]: x["count"] for x in result["bug_source_dist"]}
     assert source_map.get("field_test", 0) >= 1
+
+
+def test_requirement_bug_ranking_counts_zentao_story_linked_bugs(db_session):
+    """禅道同步的 Bug requirement_id 为空、只带 zentao_story_id，排行要按（大版本, 禅道需求）归集。"""
+    user = _create_user(db_session, "report_rank_user", role=UserRole.ADMIN)
+    major = _create_major(db_session, "V7500")
+    other_major = _create_major(db_session, "V7501")
+    minor = _create_minor(db_session, major.id, "V7500.1")
+    req_a = Requirement(zentao_req_id="r#7501", title="直接关联需求", major_version_id=major.id, zentao_story_id=7501)
+    req_b = Requirement(zentao_req_id="r#7502", title="禅道归集需求", major_version_id=major.id, zentao_story_id=7502)
+    # 同一禅道需求复制到另一个大版本：只归集同大版本的 Bug
+    req_b_other = Requirement(zentao_req_id="r#7502", title="禅道归集需求(复制)", major_version_id=other_major.id, zentao_story_id=7502)
+    db_session.add_all([req_a, req_b, req_b_other])
+    db_session.commit()
+    when = datetime(2026, 1, 3, 9, 0, 0)
+
+    def bug(no, **kw):
+        return BugTracking(major_version_id=kw.pop("major_id", major.id), bug_id=f"b#{no}", found_minor_version_id=minor.id,
+                           created_by_id=user.id, created_at=when, **kw)
+
+    db_session.add_all([
+        bug(7601, requirement_id=req_a.id, source_type=BugSourceType.REQUIREMENT),
+        bug(7602, requirement_id=None, source_type=BugSourceType.MANUAL, zentao_story_id=7502),
+        bug(7603, requirement_id=None, source_type=BugSourceType.MANUAL, zentao_story_id=7502),
+        bug(7604, requirement_id=None, source_type=BugSourceType.MANUAL, zentao_story_id=7502, zentao_deleted=True),
+        bug(7605, requirement_id=None, source_type=BugSourceType.MANUAL, zentao_story_id=7502, major_id=other_major.id),
+        bug(7606, requirement_id=None, source_type=BugSourceType.MANUAL, zentao_story_id=99999),
+    ])
+    db_session.commit()
+
+    service = ReportService(db_session)
+    top = service.advanced(date(2026, 1, 3), date(2026, 1, 3))["top_reqs"]
+    assert [(r["title"], r["count"]) for r in top[:2]] == [("禅道归集需求", 2), ("直接关联需求", 1)]
+    assert ("禅道归集需求(复制)", 1) in [(r["title"], r["count"]) for r in top]
+
+    scoped = service.advanced(date(2026, 1, 3), date(2026, 1, 3), major_version_id=major.id)["top_reqs"]
+    assert [(r["title"], r["count"]) for r in scoped] == [("禅道归集需求", 2), ("直接关联需求", 1)]
+
+    gov = service.governance(date(2026, 1, 3), date(2026, 1, 3), major_version_id=major.id)
+    assert [(r["zentao_req_id"], r["bug_count"]) for r in gov["requirements"]["top_bug_reqs"]] == [("r#7502", 2), ("r#7501", 1)]
+
+
+def test_summary_trend_and_team_buckets_by_day(db_session):
+    """趋势/团队对比改为一次取数后按天、按人分桶，结果要和逐天统计一致。"""
+    admin = _create_user(db_session, "report_trend_admin", role=UserRole.ADMIN)
+    tester = _create_user(db_session, "report_trend_tester")
+    major = _create_major(db_session, "V7600")
+    minor = _create_minor(db_session, major.id, "V7600.1")
+    req = Requirement(zentao_req_id="r#7601", title="趋势需求", major_version_id=major.id)
+    db_session.add(req)
+    db_session.commit()
+    d1, d2 = datetime(2026, 2, 1, 9, 0, 0), datetime(2026, 2, 2, 23, 30, 0)
+    db_session.add_all([
+        TestExecution(requirement_id=req.id, minor_version_id=minor.id, executed_by_id=tester.id, executed_at=d1, result_status=TestResultStatus.PASSED),
+        TestExecution(requirement_id=req.id, minor_version_id=minor.id, executed_by_id=tester.id, executed_at=d2, result_status=TestResultStatus.FAILED),
+        TestCase(requirement_id=req.id, zentao_case_id="u#7601", creator_id=admin.id, created_at=d2),
+        BugTracking(major_version_id=major.id, requirement_id=req.id, source_type=BugSourceType.REQUIREMENT, bug_id="b#7701",
+                    found_minor_version_id=minor.id, created_by_id=tester.id, created_at=d1),
+        BugTracking(major_version_id=major.id, requirement_id=req.id, source_type=BugSourceType.REQUIREMENT, bug_id="b#7702",
+                    found_minor_version_id=minor.id, created_by_id=admin.id, created_at=d2, zentao_bug_id="7702",
+                    zentao_opened_by_name="report_trend_tester", zentao_live_status="closed", zentao_close_date=d2, closed_by_id=admin.id),
+    ])
+    db_session.commit()
+
+    result = ReportService(db_session).summary(date(2026, 2, 1), date(2026, 2, 3), admin, user_id=0)
+    by_day = {row["date"]: row for row in result["trend"]}
+    assert [by_day[d]["executed_requirements"] for d in ("2026-02-01", "2026-02-02", "2026-02-03")] == [1, 1, 0]
+    assert [by_day[d]["created_bugs"] for d in ("2026-02-01", "2026-02-02", "2026-02-03")] == [1, 1, 0]
+    assert by_day["2026-02-02"]["closed_bugs"] == 1 and by_day["2026-02-02"]["created_cases"] == 1
+    assert result["overview"]["executed_requirements"] == 1 and result["overview"]["created_bugs"] == 2
+    team = {row["username"]: row for row in result["team_comparison"]}
+    # 禅道 Bug 按禅道提交人（名字匹配）归属给 tester，而不是本地创建人 admin
+    assert team["report_trend_tester"]["created_bugs"] == 2
+    assert team["report_trend_admin"]["created_bugs"] == 0
+    assert team["report_trend_admin"]["closed_bugs"] == 1 and team["report_trend_admin"]["created_cases"] == 1
