@@ -90,9 +90,41 @@ function itemMatches(item, versionId) {
   return recStatus(state.board.records[`${item.id}:${versionId}`]) === state.filter;
 }
 
+// 重绘会整块替换 DOM：横向滚动的版本页签、版本对比矩阵要记住滚动位置（同一张统计表内），
+// 否则版本多时滚到后面点一个版本，页签条会跳回最左侧。
+const SCROLL_KEEP = ['.cad-vtabs', '.cad-matrix-wrap'];
+
+function captureScroll(root) {
+  if (Number(root.dataset.boardId || 0) !== Number(state.boardId || 0)) return {};
+  const pos = {};
+  SCROLL_KEEP.forEach((sel) => {
+    const el = root.querySelector(sel);
+    if (el) pos[sel] = [el.scrollLeft, el.scrollTop];
+  });
+  return pos;
+}
+
+function restoreScroll(root, pos) {
+  root.dataset.boardId = String(state.boardId || 0);
+  Object.entries(pos).forEach(([sel, [left, top]]) => {
+    const el = root.querySelector(sel);
+    if (el) { el.scrollLeft = left; el.scrollTop = top; }
+  });
+  // 选中的版本页签被遮住一部分时，只滚动到刚好露出它（不动页面纵向滚动）
+  const tabs = root.querySelector('.cad-vtabs');
+  const active = tabs?.querySelector('.cad-vtab.is-active');
+  if (tabs && active) {
+    const box = tabs.getBoundingClientRect();
+    const r = active.getBoundingClientRect();
+    if (r.left < box.left) tabs.scrollLeft -= box.left - r.left + 24;
+    else if (r.right > box.right) tabs.scrollLeft += r.right - box.right + 24;
+  }
+}
+
 function render() {
   const root = document.getElementById('cadTestRoot');
   if (!root) return;
+  const scrollPos = captureScroll(root);
   root.innerHTML = `
     <div class="ph">
       <span class="ph-icon" aria-hidden="true"><svg><use href="#i-cad"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-cad"/></svg>
@@ -120,6 +152,7 @@ function render() {
   if (kw) {
     kw.oninput = () => { state.keyword = kw.value; renderItemsOnly(); };
   }
+  restoreScroll(root, scrollPos);
   hydrateScreenshots(root);
 }
 
@@ -128,7 +161,10 @@ function renderItemsOnly() {
   const host = document.getElementById('cadItemsHost');
   if (!host || !state.board) return;
   const ver = currentVersion();
+  const root = document.getElementById('cadTestRoot');
+  const scrollPos = root ? captureScroll(root) : {};
   host.innerHTML = state.view === 'matrix' ? renderMatrix() : renderCards(ver.id);
+  if (root) restoreScroll(root, scrollPos);
   hydrateScreenshots(host);
 }
 
