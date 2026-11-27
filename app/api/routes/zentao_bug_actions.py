@@ -42,6 +42,7 @@ from app.models.enums import VersionType
 from app.models.user_zentao_binding import UserZentaoBinding
 from app.services.audit_service import audit
 from app.services.zentao_auth_service import get_valid_token, invalidate_token
+from app.services.zentao_build_names import resolve_build_labels
 from app.services.zentao_client_service import ZentaoClient, ZentaoAPIError
 from app.services.zentao_normalizer import normalize_bug_detail
 from app.utils.time_utils import local_now
@@ -579,6 +580,17 @@ def get_bug_preview(
     preview = normalize_bug_detail(raw, base_url=base_url)
     if not preview:
         raise HTTPException(status_code=502, detail="禅道 Bug 详情解析失败")
+
+    # 发现 / 解决版本常只给构建编号（如 5432），翻译成构建版本名；原编号另存供悬停提示
+    opened_ref = preview.get("opened_build") or ""
+    resolved_ref = preview.get("resolved_build") or ""
+    preview["opened_build_ref"] = opened_ref
+    preview["resolved_build_ref"] = resolved_ref
+    if opened_ref or resolved_ref:
+        try:
+            preview["opened_build"], preview["resolved_build"] = resolve_build_labels(db, client, [opened_ref, resolved_ref])
+        except Exception as exc:  # noqa: BLE001 — 名称解析失败时保留编号，不影响预览
+            logger.warning("bug preview build name resolve failed bug=%s err=%s", zt_id, exc)
 
     # 将 steps / actions.comment / file url 里的 file-read/file-download 内联
     # 图片 URL 替换为 OmniQA 代理路径。兼容绝对路径 (http://...) 和相对路径
