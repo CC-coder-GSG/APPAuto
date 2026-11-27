@@ -61,6 +61,8 @@ class LearningContent(Base):
         cascade="all, delete-orphan",
         order_by="LearningContentAttachment.created_at",
     )
+    # 随课答题：答题活动可以挂在一门课程 / 一份资料下面，也可以单独存在（content_id 为空）
+    quizzes = relationship("LearningQuiz", back_populates="content", order_by="LearningQuiz.created_at")
 
 
 class LearningContentAttachment(Base):
@@ -89,6 +91,9 @@ class LearningQuiz(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     creator_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    content_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("learning_contents.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[LearningQuizStatus] = mapped_column(
@@ -104,6 +109,7 @@ class LearningQuiz(Base):
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     creator = relationship("User", foreign_keys=[creator_id])
+    content = relationship("LearningContent", back_populates="quizzes")
     questions = relationship(
         "LearningQuestion",
         back_populates="quiz",

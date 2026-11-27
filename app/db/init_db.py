@@ -9,6 +9,7 @@ from app.db.seed import (
     ensure_default_admin,
     ensure_default_software_and_backfill,
     ensure_feature_tree_schema_compat,
+    ensure_learning_schema_compat,
     ensure_requirement_schema_compat,
     ensure_requirement_foreign_key_compat,
     repair_software_product_mappings_from_bug_history,
@@ -85,6 +86,7 @@ def init_db() -> None:
         ensure_workbench_indexes(db)
         ensure_feature_tree_schema_compat(db)
         ensure_cad_schema_compat(db)
+        ensure_learning_schema_compat(db)
         ensure_default_admin(db)
         ensure_zentao_sync_bot(db)
         ensure_default_software_and_backfill(db)

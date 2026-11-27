@@ -845,3 +845,19 @@ def ensure_cad_schema_compat(db: Session) -> None:
             db.commit()
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_cad_item_files_folder_id ON cad_item_files (folder_id)"))
     db.commit()
+
+
+def ensure_learning_schema_compat(db: Session) -> None:
+    """给历史 learning_quizzes 表补 content_id 列（答题活动关联课程 / 资料，可为空）。"""
+    rows = db.execute(text("PRAGMA table_info(learning_quizzes)")).fetchall()
+    if not rows:
+        return  # 表尚未建立（全新库由 create_all 直接建出含该列）
+    cols = {r[1] for r in rows}
+    if "content_id" not in cols:
+        db.execute(text(
+            "ALTER TABLE learning_quizzes ADD COLUMN content_id INTEGER "
+            "REFERENCES learning_contents(id) ON DELETE SET NULL"
+        ))
+        db.commit()
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_learning_quizzes_content_id ON learning_quizzes (content_id)"))
+    db.commit()

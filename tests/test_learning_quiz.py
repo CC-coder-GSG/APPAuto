@@ -311,3 +311,69 @@ def test_content_file_permissions_and_validation(learning_client, monkeypatch, t
         f"/learning/content-files/{uploaded.json()['id']}/download", headers=student_headers
     )
     assert hidden.status_code == 404
+
+
+def _quiz_payload(**extra) -> dict:
+    return {
+        "title": "随课小测",
+        "questions": [
+            {"question_type": "single_choice", "prompt": "选 A", "score": 1, "options": ["A", "B"], "correct_answers": ["A"]}
+        ],
+        **extra,
+    }
+
+
+def test_quiz_can_belong_to_course_or_stand_alone(learning_client):
+    author = _login(learning_client, "quiz_author")
+    student = _login(learning_client, "quiz_student")
+    course = _create_content(learning_client, author)
+
+    linked = learning_client.post("/learning/quizzes", headers=author, json=_quiz_payload(content_id=course["id"]))
+    assert linked.status_code == 201, linked.text
+    assert linked.json()["content"] == {"id": course["id"], "kind": "course", "title": "附件课程", "published": True}
+    alone = learning_client.post("/learning/quizzes", headers=author, json=_quiz_payload(title="独立答题"))
+    assert alone.status_code == 201
+    assert alone.json()["content_id"] is None and alone.json()["content"] is None
+
+    quiz_id = linked.json()["id"]
+    assert learning_client.post(f"/learning/quizzes/{quiz_id}/start", headers=author).status_code == 200
+    listed = {q["id"]: q for q in learning_client.get("/learning/quizzes", headers=student).json()}
+    assert listed[quiz_id]["content_id"] == course["id"]
+    assert alone.json()["id"] not in listed  # 草稿对他人不可见
+
+    # 开始后题目锁定，但归属仍可调整：先解绑，再挂回去
+    moved = learning_client.put(f"/learning/quizzes/{quiz_id}/content", headers=author, json={"content_id": None})
+    assert moved.status_code == 200 and moved.json()["content"] is None
+    moved = learning_client.put(f"/learning/quizzes/{quiz_id}/content", headers=author, json={"content_id": course["id"]})
+    assert moved.json()["content_id"] == course["id"]
+    assert learning_client.put(f"/learning/quizzes/{quiz_id}/content", headers=student, json={"content_id": None}).status_code == 403
+
+    # 草稿编辑也能改归属
+    draft_id = alone.json()["id"]
+    edited = learning_client.put(f"/learning/quizzes/{draft_id}", headers=author, json=_quiz_payload(content_id=course["id"]))
+    assert edited.status_code == 200 and edited.json()["content_id"] == course["id"]
+
+    # 删除课程后，随课答题保留并变成独立答题
+    deleted = learning_client.delete(f"/learning/contents/{course['id']}", headers=author)
+    assert deleted.status_code == 200 and deleted.json()["unlinked_quizzes"] == 2
+    detail = learning_client.get(f"/learning/quizzes/{quiz_id}", headers=student)
+    assert detail.status_code == 200 and detail.json()["content_id"] is None
+
+
+def test_quiz_link_respects_content_visibility(learning_client):
+    author = _login(learning_client, "quiz_author")
+    student = _login(learning_client, "quiz_student")
+    draft_course = _create_content(learning_client, author, published=False)
+
+    # 别人的未发布课程不能关联，也不能借此探测标题
+    refused = learning_client.post("/learning/quizzes", headers=student, json=_quiz_payload(content_id=draft_course["id"]))
+    assert refused.status_code == 404
+    assert learning_client.post("/learning/quizzes", headers=author, json=_quiz_payload(content_id=99999)).status_code == 404
+
+    # 作者可以挂到自己的草稿课程；开始答题后，成员能看到答题但看不到未发布课程的信息
+    quiz = learning_client.post("/learning/quizzes", headers=author, json=_quiz_payload(content_id=draft_course["id"])).json()
+    assert quiz["content"]["published"] is False
+    learning_client.post(f"/learning/quizzes/{quiz['id']}/start", headers=author)
+    seen = next(q for q in learning_client.get("/learning/quizzes", headers=student).json() if q["id"] == quiz["id"])
+    assert seen["content"] is None and seen["content_id"] is None
+    assert "附件课程" not in str(seen)

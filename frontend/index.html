@@ -4,8 +4,8 @@
   <meta charset="utf-8"/>
   <title>测量软件测试平台</title>
   <link rel="stylesheet" href="/static/css/main.css?v=20261103-final-presence-ui-2">
-  <link rel="stylesheet" href="/static/css/weave.css?v=20261126-bgl-1">
-  <link rel="stylesheet" href="/static/learning.css?v=20260915-1">
+  <link rel="stylesheet" href="/static/css/weave.css?v=20261127-lrn-1">
+  <link rel="stylesheet" href="/static/learning.css?v=20261127-lrn-1">
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/vendor/html2pdf.bundle.min.js"></script>
   <script src="/static/vendor/xlsx.full.min.js"></script>
@@ -371,83 +371,146 @@
   <section id="tab-learning" class="hidden card learning-center">
     <div class="learning-head ph">
       <span class="ph-icon" aria-hidden="true"><svg><use href="#i-book"/></svg></span><svg class="ph-mark" aria-hidden="true"><use href="#i-book"/></svg>
-      <div class="ph-text"><h2>学习中心</h2><p class="muted page-desc">学习资料、课程与团队答题活动</p></div>
-      <div class="row ph-actions"><button class="secondary" onclick="showLearningContentForm()">新增资料/课程</button><button onclick="openQuizEditor()">创建答题活动</button><button class="secondary" onclick="loadLearningCenter()">刷新</button></div>
+      <div class="ph-text"><h2>学习中心</h2><p class="muted page-desc">课程、学习资料与团队答题活动；课程可以附带随课答题，也可以单独发布</p></div>
+      <div class="row ph-actions">
+        <button class="secondary lrn-icon-btn" onclick="loadLearningCenter()" title="刷新" aria-label="刷新"><svg class="ui-ic" aria-hidden="true"><use href="#i-refresh"/></svg></button>
+        <button class="secondary" onclick="openQuizEditor()"><svg class="ui-ic" aria-hidden="true"><use href="#i-check"/></svg>创建答题活动</button>
+        <button onclick="showLearningContentForm()"><svg class="ui-ic" aria-hidden="true"><use href="#i-plus"/></svg>新建课程 / 资料</button>
+      </div>
     </div>
 
-    <div id="learningHome">
-      <h3>资料与课程</h3>
-      <div id="learningContents" class="learning-grid"></div>
-      <h3 style="margin-top:24px">答题活动</h3>
-      <div id="learningQuizzes" class="learning-grid"></div>
-
-      <details class="learning-panel" style="margin-top:24px">
-        <summary><strong>历史学习主题与附件考核</strong></summary>
-        <div class="row" style="justify-content:flex-end; margin-top:12px">
-          <button id="learningNewTopicBtn" onclick="OmniQALearningTab.openCreateTopic()">+ 新建学习主题</button>
+    <div id="learningHome" class="lrn-home">
+      <div id="learningTodo" class="lrn-todo" hidden></div>
+      <div class="lrn-toolbar">
+        <div class="lrn-seg" role="tablist" aria-label="内容类型" id="learningFilterSeg">
+          <button type="button" role="tab" data-lrn-filter="all" class="is-active" aria-selected="true">全部<b data-lrn-count="all">0</b></button>
+          <button type="button" role="tab" data-lrn-filter="course" aria-selected="false">课程<b data-lrn-count="course">0</b></button>
+          <button type="button" role="tab" data-lrn-filter="material" aria-selected="false">资料<b data-lrn-count="material">0</b></button>
+          <button type="button" role="tab" data-lrn-filter="quiz" aria-selected="false">答题活动<b data-lrn-count="quiz">0</b></button>
         </div>
-        <div id="learningTopicList" style="margin-top:14px;"></div>
-        <div id="learningDetailArea" style="margin-top:14px;"></div>
+        <label class="lrn-search"><svg class="ui-ic" aria-hidden="true"><use href="#i-search"/></svg><input id="learningSearch" type="search" placeholder="搜索标题、简介或创建人" autocomplete="off" aria-label="搜索学习内容"></label>
+        <label class="lrn-check"><input id="learningMineOnly" type="checkbox">只看我创建的</label>
+      </div>
+
+      <div class="lrn-section" id="learningContentsSection">
+        <div class="lrn-section-head"><h3 id="learningContentsHeading">课程与资料</h3><span class="lrn-section-note" id="learningContentsNote"></span></div>
+        <div id="learningContents" class="lrn-grid"></div>
+      </div>
+      <div class="lrn-section" id="learningQuizzesSection">
+        <div class="lrn-section-head"><h3 id="learningQuizzesHeading">独立答题活动</h3><span class="lrn-section-note" id="learningQuizzesNote">不属于任何课程的答题</span></div>
+        <div id="learningQuizzes" class="lrn-grid"></div>
+      </div>
+
+      <details class="lrn-legacy">
+        <summary><svg class="ui-ic" aria-hidden="true"><use href="#i-layers"/></svg><strong>历史学习主题与附件考核</strong><span>旧版学习主题仍可查看和继续考核</span></summary>
+        <div class="lrn-legacy-body">
+          <div class="row" style="justify-content:flex-end">
+            <button id="learningNewTopicBtn" class="secondary" onclick="OmniQALearningTab.openCreateTopic()">+ 新建学习主题</button>
+          </div>
+          <div id="learningTopicList" style="margin-top:14px;"></div>
+          <div id="learningDetailArea" style="margin-top:14px;"></div>
+        </div>
       </details>
     </div>
 
-    <div id="learningContentForm" class="hidden learning-panel">
-      <div class="learning-panel-head"><h3 id="learningContentFormTitle">新增学习内容</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
-      <input type="hidden" id="learningContentId">
-      <div class="learning-form-grid">
-        <label>类型<select id="learningContentKind"><option value="material">学习资料</option><option value="course">课程</option></select></label>
-        <label>标题<input id="learningContentTitle" maxlength="200"></label>
-        <label class="wide">简介<textarea id="learningContentDescription" rows="2"></textarea></label>
-        <label class="wide">正文/学习说明<textarea id="learningContentBody" rows="6"></textarea></label>
-        <label class="wide">外部资源链接<input id="learningContentUrl" type="url" placeholder="https://..."></label>
-        <label class="wide">教学附件
-          <input id="learningContentFiles" type="file" multiple onchange="showLearningSelectedFiles()" accept=".ppt,.pptx,.pdf,.md,.markdown,.doc,.docx,.xls,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.gif,.webp">
-          <span class="muted" style="font-weight:400">支持一次选择多个附件（电脑按住 Ctrl 或 Shift 多选）。单个文件最大 100 MB；PPT/PPTX、PDF、Markdown 支持预览，所有文件均可下载。</span>
-        </label>
-        <label class="check"><input id="learningContentPublished" type="checkbox"> 立即向团队发布</label>
+    <div id="learningContentDetail" class="hidden lrn-detail"></div>
+
+    <div id="learningContentForm" class="hidden learning-panel lrn-editor">
+      <div class="learning-panel-head lrn-editor-head">
+        <button class="secondary lrn-back" onclick="closeLearningPanels()"><svg class="ui-ic" aria-hidden="true"><use href="#i-arrow-left"/></svg>返回</button>
+        <div class="lrn-editor-titles"><h3 id="learningContentFormTitle">新建课程 / 资料</h3><p class="muted">课程适合成体系的讲解，可以附带随课答题；资料适合单份文档、链接与参考材料</p></div>
       </div>
-      <div id="learningContentExistingFiles" class="learning-file-list"></div>
-      <div id="learningContentUploadStatus" class="muted"></div>
-      <button id="learningContentSaveBtn" onclick="saveLearningContent()">保存</button>
+      <input type="hidden" id="learningContentId">
+      <input type="hidden" id="learningContentKind" value="course">
+      <div class="lrn-kind-pick" role="radiogroup" aria-label="内容类型">
+        <button type="button" role="radio" data-lrn-kind="course" aria-checked="true" class="is-active"><svg class="ui-ic" aria-hidden="true"><use href="#i-book"/></svg><span><b>课程</b><small>讲解 + 课件，可附带随课答题</small></span></button>
+        <button type="button" role="radio" data-lrn-kind="material" aria-checked="false"><svg class="ui-ic" aria-hidden="true"><use href="#i-file"/></svg><span><b>学习资料</b><small>文档、规范、参考链接</small></span></button>
+      </div>
+      <div class="learning-form-grid lrn-form">
+        <label class="wide"><span class="lrn-lbl">标题<em>*</em></span><input id="learningContentTitle" maxlength="200" placeholder="例如：接口测试入门（第 1 课）"></label>
+        <label class="wide"><span class="lrn-lbl">简介<small>显示在卡片上，一两句话说明学什么</small></span><textarea id="learningContentDescription" rows="2"></textarea></label>
+        <label class="wide"><span class="lrn-lbl">正文 / 学习说明<small>学习目标、重点、课后要求等</small></span><textarea id="learningContentBody" rows="6"></textarea></label>
+        <label class="wide"><span class="lrn-lbl">外部资源链接<small>选填</small></span><input id="learningContentUrl" type="url" placeholder="https://..."></label>
+        <div class="wide lrn-field">
+          <span class="lrn-field-label">课件 / 附件</span>
+          <label class="lrn-drop" id="learningContentDrop">
+            <input id="learningContentFiles" type="file" multiple onchange="showLearningSelectedFiles()" accept=".ppt,.pptx,.pdf,.md,.markdown,.doc,.docx,.xls,.xlsx,.txt,.csv,.png,.jpg,.jpeg,.gif,.webp">
+            <svg class="ui-ic" aria-hidden="true"><use href="#i-upload"/></svg>
+            <b>点击选择或把文件拖到这里</b>
+            <span>可一次选择多个；单个最大 100 MB。PPT / PPTX、PDF、Markdown 支持在线预览，所有文件均可下载</span>
+          </label>
+          <div id="learningContentUploadStatus" class="muted"></div>
+          <div id="learningContentExistingFiles" class="learning-file-list"></div>
+        </div>
+      </div>
+      <div class="lrn-editor-foot">
+        <label class="lrn-switch"><input id="learningContentPublished" type="checkbox"><i aria-hidden="true"></i>立即向团队发布</label>
+        <label class="lrn-check" id="learningContentWithQuizWrap"><input id="learningContentWithQuiz" type="checkbox">保存后为这门课程创建随课答题</label>
+        <span class="lrn-grow"></span>
+        <button class="secondary" onclick="closeLearningPanels()">取消</button>
+        <button id="learningContentSaveBtn" onclick="saveLearningContent()"><svg class="ui-ic" aria-hidden="true"><use href="#i-check"/></svg>保存</button>
+      </div>
     </div>
 
-    <div id="quizEditor" class="hidden learning-panel">
-      <div class="learning-panel-head"><h3 id="quizEditorTitle">创建答题活动</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+    <div id="quizEditor" class="hidden learning-panel lrn-editor">
+      <div class="learning-panel-head lrn-editor-head">
+        <button class="secondary lrn-back" onclick="closeLearningPanels()"><svg class="ui-ic" aria-hidden="true"><use href="#i-arrow-left"/></svg>返回</button>
+        <div class="lrn-editor-titles"><h3 id="quizEditorTitle">创建答题活动</h3><p class="muted">保存为草稿后可以先试答预览；开始答题后题目对团队可见且不能再修改</p></div>
+      </div>
       <input type="hidden" id="quizEditId">
-      <div class="learning-form-grid">
-        <label>标题<input id="quizTitle" maxlength="200"></label>
-        <label class="wide">答题说明<textarea id="quizDescription" rows="2"></textarea></label>
+      <div class="learning-form-grid lrn-form">
+        <label><span class="lrn-lbl">标题<em>*</em></span><input id="quizTitle" maxlength="200" placeholder="例如：接口测试入门 · 课后小测"></label>
+        <label><span class="lrn-lbl">所属课程 / 资料<small>不选则为独立答题活动</small></span><select id="quizContentId"><option value="">不关联（独立答题活动）</option></select></label>
+        <label class="wide">答题说明<textarea id="quizDescription" rows="2" placeholder="答题范围、时间要求等"></textarea></label>
       </div>
       <div class="question-toolbar"><strong>题目</strong><button class="secondary" onclick="addQuestionEditor('single_choice')">+ 单选</button><button class="secondary" onclick="addQuestionEditor('multiple_choice')">+ 多选</button><button class="secondary" onclick="addQuestionEditor('fill_blank')">+ 填空</button><button class="secondary" onclick="addQuestionEditor('short_answer')">+ 简答</button></div>
       <div id="quizQuestionEditors"></div>
       <div class="question-toolbar"><strong>继续添加题目</strong><button class="secondary" onclick="addQuestionEditor('single_choice')">+ 单选</button><button class="secondary" onclick="addQuestionEditor('multiple_choice')">+ 多选</button><button class="secondary" onclick="addQuestionEditor('fill_blank')">+ 填空</button><button class="secondary" onclick="addQuestionEditor('short_answer')">+ 简答</button></div>
-      <div class="quiz-editor-footer"><span id="quizEditorSummary" class="muted">添加题目后保存草稿，可继续试答预览</span><button onclick="saveQuizDraft()">保存草稿</button></div>
+      <div class="quiz-editor-footer"><span id="quizEditorSummary" class="muted">添加题目后保存草稿，可继续试答预览</span><button onclick="saveQuizDraft()"><svg class="ui-ic" aria-hidden="true"><use href="#i-check"/></svg>保存草稿</button></div>
     </div>
 
-    <div id="quizTakePanel" class="hidden learning-panel">
-      <div class="learning-panel-head"><div><h3 id="takeQuizTitle"></h3><p id="takeQuizDescription" class="muted"></p></div><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+    <div id="quizTakePanel" class="hidden learning-panel lrn-take">
+      <div class="learning-panel-head lrn-editor-head">
+        <button class="secondary lrn-back" onclick="closeLearningPanels()"><svg class="ui-ic" aria-hidden="true"><use href="#i-arrow-left"/></svg>返回</button>
+        <div class="lrn-editor-titles"><h3 id="takeQuizTitle"></h3><p id="takeQuizDescription" class="muted"></p><div id="takeQuizMeta" class="lrn-take-meta"></div></div>
+      </div>
       <div id="takeQuizQuestions"></div>
-      <button id="submitQuizButton" onclick="submitCurrentQuiz()">确认提交（仅一次）</button>
+      <div class="lrn-take-foot">
+        <div class="lrn-take-progress"><span id="takeQuizProgressText">已作答 0 / 0</span><div class="lrn-bar"><span id="takeQuizProgressBar"></span></div></div>
+        <button id="submitQuizButton" onclick="submitCurrentQuiz()"><svg class="ui-ic" aria-hidden="true"><use href="#i-send"/></svg>确认提交（仅一次）</button>
+      </div>
     </div>
 
-    <div id="quizResultPanel" class="hidden learning-panel">
-      <div class="learning-panel-head"><h3>我的答卷与成绩</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+    <div id="quizResultPanel" class="hidden learning-panel lrn-take">
+      <div class="learning-panel-head lrn-editor-head">
+        <button class="secondary lrn-back" onclick="closeLearningPanels()"><svg class="ui-ic" aria-hidden="true"><use href="#i-arrow-left"/></svg>返回</button>
+        <div class="lrn-editor-titles"><h3 id="quizResultTitle">我的答卷与成绩</h3><p class="muted">提交后的作答记录；成绩发布后可以看到得分与批语</p></div>
+      </div>
       <div id="quizResultBody"></div>
     </div>
 
-    <div id="quizReviewPanel" class="hidden learning-panel">
-      <div class="learning-panel-head"><h3 id="reviewQuizTitle">批阅与统计</h3><button class="secondary" onclick="closeLearningPanels()">返回</button></div>
+    <div id="quizReviewPanel" class="hidden learning-panel lrn-review">
+      <div class="learning-panel-head lrn-editor-head">
+        <button class="secondary lrn-back" onclick="closeLearningPanels()"><svg class="ui-ic" aria-hidden="true"><use href="#i-arrow-left"/></svg>返回</button>
+        <div class="lrn-editor-titles"><h3 id="reviewQuizTitle">批阅与统计</h3><p class="muted">逐题正确率、所有人的作答，以及简答题的人工评分</p></div>
+      </div>
       <div id="quizStatsBody"></div>
       <div id="quizSubmissionsBody"></div>
     </div>
 
-    <div id="learningFilePreviewModal" class="learning-preview-modal hidden" aria-hidden="true">
-      <div class="learning-preview-dialog">
-        <div class="learning-panel-head">
-          <h3 id="learningFilePreviewTitle">附件预览</h3>
-          <button class="secondary" onclick="closeLearningFilePreview()">关闭</button>
+    <div id="learningFilePreviewModal" class="learning-preview-modal hidden" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="learningFilePreviewTitle">
+      <div class="lrn-pv-backdrop" data-lrn-pv-close></div>
+      <div class="learning-preview-dialog" tabindex="-1">
+        <header class="lrn-pv-head">
+          <span class="lrn-ficon" id="learningFilePreviewIcon" aria-hidden="true">PDF</span>
+          <div class="lrn-pv-titles"><h3 id="learningFilePreviewTitle">附件预览</h3><p id="learningFilePreviewMeta"></p></div>
+          <div class="lrn-pv-tools" id="learningFilePreviewTools"></div>
+          <button type="button" class="lrn-pv-close" data-lrn-pv-close aria-label="关闭预览" title="关闭（Esc）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+        </header>
+        <div class="lrn-pv-main">
+          <nav class="lrn-pv-files" id="learningFilePreviewNav" aria-label="课件列表"></nav>
+          <div id="learningFilePreviewBody" class="learning-preview-body"></div>
         </div>
-        <div id="learningFilePreviewBody" class="learning-preview-body"></div>
       </div>
     </div>
   </section>
@@ -2232,7 +2295,7 @@
 
 </div>
 
-<script src="/static/learning.js?v=20261126-zai-1"></script>
+<script src="/static/learning.js?v=20261127-lrn-1"></script>
 <script>
 const token=localStorage.getItem('token'); if(!token) location.href='/login';
 const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};

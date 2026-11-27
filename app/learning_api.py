@@ -106,7 +106,13 @@ class QuestionPayload(BaseModel):
 class QuizPayload(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     description: Optional[str] = None
+    # 随课答题：关联的课程 / 资料；为空表示独立答题活动
+    content_id: Optional[int] = None
     questions: list[QuestionPayload] = Field(min_length=1)
+
+
+class QuizLinkPayload(BaseModel):
+    content_id: Optional[int] = None
 
 
 class AnswerPayload(BaseModel):
@@ -203,11 +209,27 @@ def _question_dict(question: LearningQuestion, reveal_answer: bool) -> dict:
     return data
 
 
+def _content_visible(item: Optional[LearningContent], user: User) -> bool:
+    return bool(item) and (item.published or item.creator_id == user.id)
+
+
+def _quiz_content(quiz: LearningQuiz, current_user: User) -> Optional[dict]:
+    """关联的课程 / 资料摘要。对当前用户不可见（未发布且非本人）时不暴露标题。"""
+    item = quiz.content
+    if not _content_visible(item, current_user):
+        return None
+    return {"id": item.id, "kind": item.kind.value, "title": item.title, "published": item.published}
+
+
 def _quiz_base(quiz: LearningQuiz, current_user: User, my_submission: Optional[LearningSubmission] = None) -> dict:
+    content = _quiz_content(quiz, current_user)
     return {
         "id": quiz.id,
         "title": quiz.title,
         "description": quiz.description,
+        "content_id": content["id"] if content else None,
+        "content": content,
+        "created_at": quiz.created_at,
         "status": quiz.status.value,
         "creator_id": quiz.creator_id,
         "creator_name": quiz.creator.username if quiz.creator else "",
@@ -293,7 +315,11 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
     def get_quiz(db: Session, quiz_id: int) -> LearningQuiz:
         quiz = (
             db.query(LearningQuiz)
-            .options(selectinload(LearningQuiz.creator), selectinload(LearningQuiz.questions))
+            .options(
+                selectinload(LearningQuiz.creator),
+                selectinload(LearningQuiz.questions),
+                selectinload(LearningQuiz.content),
+            )
             .filter(LearningQuiz.id == quiz_id)
             .first()
         )
@@ -322,6 +348,15 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
     def require_content_access(item: LearningContent, user: User) -> None:
         if not item.published and item.creator_id != user.id:
             raise HTTPException(status_code=404, detail="学习内容不存在")
+
+    def resolve_link(db: Session, content_id: Optional[int], user: User) -> Optional[LearningContent]:
+        """答题活动可以关联任何当前用户看得到的课程 / 资料（已发布，或本人创建的草稿）。"""
+        if content_id is None:
+            return None
+        item = db.query(LearningContent).filter(LearningContent.id == content_id).first()
+        if not _content_visible(item, user):
+            raise HTTPException(status_code=404, detail="要关联的课程或资料不存在")
+        return item
 
     def get_attachment(db: Session, file_id: int) -> LearningContentAttachment:
         item = (
@@ -376,9 +411,14 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
             raise HTTPException(status_code=403, detail="仅创建人可删除")
         for attachment in item.attachments:
             _remove_attachment_files(attachment)
+        # 随课答题保留下来，变成独立答题活动（SQLite 未必开启外键约束，这里显式解除关联）
+        unlinked = 0
+        for quiz in db.query(LearningQuiz).filter(LearningQuiz.content_id == item.id).all():
+            quiz.content_id = None
+            unlinked += 1
         db.delete(item)
         db.commit()
-        return {"message": "已删除"}
+        return {"message": "已删除", "unlinked_quizzes": unlinked}
 
     @router.post("/contents/{content_id}/files", status_code=201)
     def upload_content_file(
@@ -515,7 +555,9 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
 
     @router.post("/quizzes", status_code=201)
     def create_quiz(payload: QuizPayload, current_user: CurrentUser, db: Db):
+        content = resolve_link(db, payload.content_id, current_user)
         quiz = LearningQuiz(creator_id=current_user.id, title=payload.title, description=payload.description)
+        quiz.content = content
         apply_quiz_payload(quiz, payload)
         db.add(quiz)
         db.commit()
@@ -529,6 +571,8 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
         require_creator(quiz, current_user)
         if quiz.status != QuizStatus.DRAFT:
             raise HTTPException(status_code=409, detail="只有草稿状态可以修改题目")
+        if payload.content_id != quiz.content_id:
+            quiz.content = resolve_link(db, payload.content_id, current_user)
         for preview_submission in db.query(LearningSubmission).filter(
             LearningSubmission.quiz_id == quiz.id,
             LearningSubmission.is_preview.is_(True),
@@ -539,6 +583,17 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
         db.commit()
         db.refresh(quiz)
         return {**_quiz_base(quiz, current_user), "questions": [_question_dict(q, True) for q in quiz.questions]}
+
+    @router.put("/quizzes/{quiz_id}/content")
+    def link_quiz_content(quiz_id: int, payload: QuizLinkPayload, current_user: CurrentUser, db: Db):
+        """调整随课答题的归属。只改关联关系，不涉及题目，所以任何状态都可以改。"""
+        quiz = get_quiz(db, quiz_id)
+        require_creator(quiz, current_user)
+        if payload.content_id != quiz.content_id:
+            quiz.content = resolve_link(db, payload.content_id, current_user)
+            db.commit()
+            db.refresh(quiz)
+        return _quiz_base(quiz, current_user)
 
     @router.delete("/quizzes/{quiz_id}")
     def delete_quiz(quiz_id: int, current_user: CurrentUser, db: Db):
@@ -554,7 +609,11 @@ def create_learning_router(current_user_dependency: Callable) -> APIRouter:
     def list_quizzes(current_user: CurrentUser, db: Db):
         quizzes = (
             db.query(LearningQuiz)
-            .options(selectinload(LearningQuiz.creator), selectinload(LearningQuiz.questions))
+            .options(
+                selectinload(LearningQuiz.creator),
+                selectinload(LearningQuiz.questions),
+                selectinload(LearningQuiz.content),
+            )
             .filter((LearningQuiz.status != QuizStatus.DRAFT) | (LearningQuiz.creator_id == current_user.id))
             .order_by(LearningQuiz.created_at.desc())
             .all()
