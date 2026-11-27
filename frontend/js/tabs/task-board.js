@@ -24,6 +24,36 @@ const PRIORITY_META = {
 // 平台侧遗留的 blocked 任务并入进行中列展示，避免消失。
 const STATUS_ORDER = ['todo', 'in_progress', 'done', 'done_unclosed', 'deferred'];
 
+// 2026-11-27 看板改版（weave.css R26 .tbd-*）：列 / 指标 / 成员负载统一用这组状态色
+const COL_DOT = { todo: '#a8a29e', in_progress: '#2563eb', done: '#16a34a', done_unclosed: '#0d9488', deferred: '#ca8a04' };
+const STATUS_LABEL_EXTRA = { blocked: '阻塞' };
+
+const ic = (name, cls = '') => `<svg class="ui-ic${cls ? ` ${cls}` : ''}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const pad2 = (n) => String(n).padStart(2, '0');
+
+function initialOf(name) {
+  return escapeHtml(String(name || '?').trim().slice(0, 1).toUpperCase() || '?');
+}
+
+function shortDay(v) {
+  const d = v ? String(v).slice(0, 10) : '';
+  return d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : '—';
+}
+
+function fmtDue(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  const day = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const time = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return day === todayISO() ? `今天 ${time}` : `${d.getMonth() + 1}/${d.getDate()} ${time}`;
+}
+
+function candidateName(id) {
+  const u = state.candidates.find((x) => Number(x.id) === Number(id));
+  return u ? (u.display_name || u.username) : '';
+}
+
 const state = {
   date: null,
   data: null,
@@ -145,47 +175,91 @@ function render(data) {
 
   const zt = zentaoForBoard();
   renderSummary(effective, zt);
+  renderMembers(effective, zt);
   renderColumns(effective, zt);
-  renderAssigneeSummary(effective);
   renderMonthView();
+  bindBoard();
 }
 
+// 指标条：点一下即按该状态筛选，再点「当日任务」清除
 function renderSummary(data, ztItems = []) {
   const wrap = document.getElementById('taskBoardSummary');
   if (!wrap) return;
   const s = data.summary || {};
-  // 补充列允许重复展示，但「今日任务」总数仍只统计普通日期归类，避免同一任务重复累计。
-  const ztCount = {
-    total: ztItems.filter((t) => !t._supplemental).length,
-    todo: 0,
-    in_progress: 0,
-    done: 0,
-    done_unclosed: 0,
-    deferred: 0,
-  };
+  // 补充列允许重复展示，但总数只统计普通日期归类，避免同一任务重复累计。
+  const ztCount = { total: ztItems.filter((t) => !t._supplemental).length, todo: 0, in_progress: 0, done: 0, done_unclosed: 0, deferred: 0 };
   ztItems.forEach((t) => {
     const k = t._boardCol || ZT_BOARD_MAP[t.status];
     if (k && k in ztCount) ztCount[k] += 1;
   });
-  const cards = [
-    { key: 'total', label: '今日任务', value: s.total || 0, bg: '#f1f5f9', color: '#1e293b' },
-    { key: 'todo', label: '待处理', value: s.todo || 0, bg: STATUS_META.todo.bg, color: STATUS_META.todo.color },
+  const current = document.getElementById('taskBoardStatusFilter')?.value || '';
+  const total = (s.total || 0) + ztCount.total;
+  const doneAll = (s.done || 0) + ztCount.done;
+  const rate = total ? Math.round(doneAll * 100 / total) : 0;
+  const isToday = (state.date || todayISO()) === todayISO();
+  const tiles = [
+    { key: 'todo', value: s.todo || 0 },
     // 平台侧遗留 blocked 任务并入进行中统计
-    { key: 'in_progress', label: '进行中', value: (s.in_progress || 0) + (s.blocked || 0), bg: STATUS_META.in_progress.bg, color: STATUS_META.in_progress.color },
-    { key: 'done', label: '已完成', value: s.done || 0, bg: STATUS_META.done.bg, color: STATUS_META.done.color },
-    { key: 'done_unclosed', label: '已完成但未关闭', value: 0, bg: STATUS_META.done_unclosed.bg, color: STATUS_META.done_unclosed.color },
-    { key: 'deferred', label: '延期', value: s.deferred || 0, bg: STATUS_META.deferred.bg, color: STATUS_META.deferred.color },
+    { key: 'in_progress', value: (s.in_progress || 0) + (s.blocked || 0) },
+    { key: 'done', value: s.done || 0 },
+    { key: 'done_unclosed', value: 0 },
+    { key: 'deferred', value: s.deferred || 0 },
   ];
-  wrap.innerHTML = cards.map((c) => {
-    const zt = ztCount[c.key] || 0;
-    return `
-    <div style="min-width:120px; padding:10px 14px; background:${c.bg}; color:${c.color}; border-radius:8px; border:1px solid rgba(0,0,0,.06);">
-      <div style="font-size:11px; letter-spacing:0.04em;">${c.label}</div>
-      <div style="font-size:22px; font-weight:700;">${c.value + zt}</div>
-      ${zt > 0 ? `<div style="font-size:10px; opacity:.75;">含禅道 ${zt}</div>` : ''}
-    </div>
-  `;
-  }).join('');
+  wrap.innerHTML = `
+    <button type="button" class="tbd-kpi tbd-kpi--total${current ? '' : ' is-active'}" data-tb-status="" aria-pressed="${!current}">
+      <span class="tbd-kpi-label">${isToday ? '今日任务' : `${shortDay(state.date)} 任务`}</span>
+      <b>${total}</b>
+      <span class="tbd-kpi-rate"><span class="tbd-kpi-bar"><i style="width:${rate}%"></i></span><small>完成 ${rate}%</small></span>
+    </button>
+    ${tiles.map((t) => {
+      const zt = ztCount[t.key] || 0;
+      const on = current === t.key;
+      return `<button type="button" class="tbd-kpi${on ? ' is-active' : ''}" data-tb-status="${t.key}" aria-pressed="${on}" style="--dot:${COL_DOT[t.key]}" title="${on ? '再点一次取消筛选' : '只看这一列'}">
+        <span class="tbd-kpi-label"><i class="tbd-dot"></i>${STATUS_META[t.key].label}</span>
+        <b>${t.value + zt}</b>
+        <small>${zt ? `含禅道 ${zt}` : '&nbsp;'}</small>
+      </button>`;
+    }).join('')}`;
+}
+
+// 成员负载：平台任务 + 当日归列的禅道任务（补充列不重复计）；点成员即按人筛选
+function renderMembers(data, ztItems = []) {
+  const wrap = document.getElementById('taskBoardMembers');
+  if (!wrap) return;
+  const columns = data.columns || {};
+  const buckets = new Map();
+  const add = (key, name, col, clickable) => {
+    const b = buckets.get(key) || { key, name: name || '未指派', clickable, todo: 0, in_progress: 0, done: 0, deferred: 0, total: 0 };
+    if (col in b) b[col] += 1;
+    b.total += 1;
+    buckets.set(key, b);
+  };
+  ['todo', 'in_progress', 'done', 'deferred'].forEach((k) => {
+    const items = k === 'in_progress' ? [...(columns.in_progress || []), ...(columns.blocked || [])] : (columns[k] || []);
+    items.forEach((t) => add(t.assignee_id ? `u${t.assignee_id}` : 'none', t.assignee_name, k, !!t.assignee_id));
+  });
+  ztItems.filter((t) => !t._supplemental).forEach((t) => {
+    const uid = Number(t.assignee_user_id || 0);
+    const key = uid ? `u${uid}` : (t.assigned_to ? `zt:${t.assigned_to}` : 'none');
+    add(key, (uid && candidateName(uid)) || t.assigned_to_realname || t.assigned_to, t._boardCol, !!uid);
+  });
+  const list = [...buckets.values()].sort((a, b) => b.total - a.total || String(a.name).localeCompare(String(b.name), 'zh'));
+  const filtered = document.getElementById('taskBoardAssigneeFilter')?.value || '';
+  if (!list.length) { wrap.innerHTML = ''; wrap.hidden = true; return; }
+  wrap.hidden = false;
+  wrap.innerHTML = `
+    <div class="tbd-members-head"><b>成员负载</b><small>当天的平台任务与禅道任务</small>${filtered ? `<button type="button" class="tbd-link" data-tb-member="">${ic('x-circle')}查看全部成员</button>` : ''}</div>
+    <div class="tbd-member-list">${list.map((m) => {
+      const id = m.key.startsWith('u') ? m.key.slice(1) : '';
+      const open = m.total - m.done;
+      const seg = (k) => (m[k] ? `<i style="width:${(m[k] * 100) / m.total}%; background:${COL_DOT[k]}"></i>` : '');
+      const on = id && filtered === id;
+      return `<button type="button" class="tbd-member${on ? ' is-active' : ''}" ${m.clickable ? `data-tb-member="${id}"` : 'disabled'} title="${m.clickable ? (on ? '再点一次取消筛选' : '只看这个人的任务') : '禅道账号未绑定平台用户，无法按人筛选'}">
+        <span class="tbd-avatar">${initialOf(m.name)}</span>
+        <span class="tbd-member-main"><b>${escapeHtml(m.name)}</b><span class="tbd-stack">${seg('done')}${seg('in_progress')}${seg('todo')}${seg('deferred')}</span><small>完成 ${m.done} / ${m.total}${m.deferred ? ` · 延期 ${m.deferred}` : ''}</small></span>
+        <span class="tbd-member-num"><b>${open}</b><small>未完成</small></span>
+      </button>`;
+    }).join('')}</div>`;
 }
 
 function renderColumns(data, ztItems = []) {
@@ -197,6 +271,7 @@ function renderColumns(data, ztItems = []) {
     const k = t._boardCol || ZT_BOARD_MAP[t.status];
     if (k) (ztByStatus[k] = ztByStatus[k] || []).push(t);
   });
+  const statusFilter = document.getElementById('taskBoardStatusFilter')?.value || '';
   root.innerHTML = STATUS_ORDER.map((statusKey) => {
     const meta = STATUS_META[statusKey];
     // 平台侧遗留 blocked 任务并入进行中列（阻塞列已删除）
@@ -205,95 +280,147 @@ function renderColumns(data, ztItems = []) {
       : (columns[statusKey] || []);
     const zt = ztByStatus[statusKey] || [];
     const count = items.length + zt.length;
+    const dim = statusFilter && statusFilter !== statusKey;
     return `
-      <div style="background:${meta.bg}; border:1px solid ${meta.border}; border-radius:10px; padding:10px; min-height:180px; display:flex; flex-direction:column;">
-        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <div style="font-weight:700; color:${meta.color};">${meta.label}</div>
-          <div style="font-size:12px; color:${meta.color}; background:#fff; border-radius:999px; padding:2px 8px; border:1px solid ${meta.border};">${count}</div>
-        </div>
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          ${count === 0 ? '<div class="muted" style="text-align:center; padding:16px 0; font-size:12px;">暂无任务</div>'
+      <section class="tbd-col tbd-col--${statusKey}${dim ? ' is-dim' : ''}" style="--dot:${COL_DOT[statusKey]}">
+        <header class="tbd-col-head"><i class="tbd-dot"></i><b>${meta.label}</b><span class="tbd-col-count">${count}</span></header>
+        <div class="tbd-col-body">
+          ${count === 0 ? `<div class="tbd-col-empty">${statusKey === 'done_unclosed' ? '没有待关闭的禅道任务' : '暂无任务'}</div>`
             : items.map(renderCard).join('') + zt.map(renderZentaoBoardCard).join('')}
         </div>
-      </div>
+      </section>
     `;
   }).join('');
-
-  root.querySelectorAll('[data-task-card]').forEach((el) => {
-    const idAttr = el.getAttribute('data-task-card') || '';
-    if (idAttr.startsWith('zt-')) return; // 禅道任务卡：无平台详情弹窗
-    el.addEventListener('click', () => openEdit(Number(idAttr)));
-  });
 }
 
 function renderCard(task) {
-  const priority = PRIORITY_META[task.priority] || PRIORITY_META.normal;
-  const overdueChip = task.overdue
-    ? `<span class="badge" style="background:#fee2e2; color:#991b1b; font-size:11px;">已逾期</span>`
-    : '';
-  const archivedChip = task.archived
-    ? `<span class="badge" style="background:#e2e8f0; color:#475569; font-size:11px;">已归档</span>`
-    : '';
+  const pri = PRIORITY_META[task.priority] || PRIORITY_META.normal;
   const assignee = task.assignee_name ? escapeHtml(task.assignee_name) : '未指派';
-  const due = task.due_at ? `截止 ${escapeHtml(formatDateTime(task.due_at))}` : '';
-  const targetLine = task.target_label
-    ? `<div class="muted" style="font-size:11px; margin-top:4px;">🔗 ${escapeHtml(task.target_label)}</div>`
-    : '';
   return `
-    <div data-task-card="${task.id}" style="background:#fff; border:1px solid rgba(15,23,42,.08); border-radius:8px; padding:10px; cursor:pointer; box-shadow:0 1px 2px rgba(15,23,42,.04);">
-      <div class="row" style="justify-content:space-between; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
-        <span class="badge" style="background:${priority.bg}; color:${priority.color}; font-size:11px;">${priority.label}</span>
-        ${overdueChip}
-        ${archivedChip}
+    <article data-task-card="${task.id}" class="tbd-card tbd-card--p-${task.priority || 'normal'}${task.overdue ? ' is-overdue' : ''}${task.archived ? ' is-archived' : ''}" tabindex="0" role="button" aria-label="查看任务：${escapeHtml(task.title)}">
+      ${task.priority !== 'normal' || task.overdue || task.archived ? `<div class="tbd-card-top">
+        ${task.priority !== 'normal' ? `<span class="tbd-pri tbd-pri--${task.priority}">${pri.label}优先级</span>` : ''}
+        ${task.overdue ? `<span class="tbd-chip tbd-chip--red">${ic('alert')}已逾期</span>` : ''}
+        ${task.archived ? '<span class="tbd-chip">已归档</span>' : ''}
+      </div>` : ''}
+      <div class="tbd-card-title">${escapeHtml(task.title)}</div>
+      ${task.target_label ? `<div class="tbd-card-link">${ic('external')}<span>${escapeHtml(task.target_label)}</span></div>` : ''}
+      <div class="tbd-card-meta">
+        <span class="tbd-who"><span class="tbd-avatar tbd-avatar--sm">${initialOf(task.assignee_name || '未')}</span>${assignee}</span>
+        ${task.due_at ? `<span class="tbd-due${task.overdue ? ' is-late' : ''}">${ic('clock')}${escapeHtml(fmtDue(task.due_at))}</span>` : ''}
       </div>
-      <div style="font-weight:600; color:#0f172a; line-height:1.4;">${escapeHtml(task.title)}</div>
-      ${targetLine}
-      <div class="muted" style="font-size:11px; margin-top:6px; display:flex; justify-content:space-between; gap:6px;">
-        <span>👤 ${assignee}</span>
-        <span>${due}</span>
-      </div>
-    </div>
+    </article>
   `;
 }
 
-function renderAssigneeSummary(data) {
-  const wrap = document.getElementById('taskBoardAssigneeSummary');
-  if (!wrap) return;
-  const rows = data.assignee_summary || [];
-  if (!rows.length) { wrap.innerHTML = ''; return; }
-  wrap.innerHTML = `
-    <div class="card" style="box-shadow:none; border:1px solid #e2e8f0; background:#f8fafc;">
-      <h3 style="margin-top:0; color:#1e293b;">成员任务概览</h3>
-      <table class="qa-table">
-        <thead><tr><th>成员</th><th style="width:120px;">未完成</th><th style="width:120px;">已完成</th><th style="width:120px;">合计</th></tr></thead>
-        <tbody>
-          ${rows.map((r) => `<tr>
-            <td>${escapeHtml(r.assignee_name || '未指派')}</td>
-            <td>${r.open_count}</td>
-            <td>${r.done_count}</td>
-            <td>${r.total}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>
-  `;
+// 看板交互统一委托：指标筛选 / 成员筛选 / 打开平台任务 / 月历跳转到某天
+function bindBoard() {
+  const tab = document.getElementById('tab-task-board');
+  if (!tab || tab.dataset.tbdBound) return;
+  tab.dataset.tbdBound = '1';
+  const setFilter = (id, value) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = value;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  tab.addEventListener('click', (e) => {
+    const kpi = e.target.closest('[data-tb-status]');
+    if (kpi) {
+      const current = document.getElementById('taskBoardStatusFilter')?.value || '';
+      const next = kpi.dataset.tbStatus;
+      setFilter('taskBoardStatusFilter', next && next === current ? '' : next);
+      return;
+    }
+    const member = e.target.closest('[data-tb-member]');
+    if (member) {
+      const current = document.getElementById('taskBoardAssigneeFilter')?.value || '';
+      const next = member.dataset.tbMember;
+      setFilter('taskBoardAssigneeFilter', next && next === current ? '' : next);
+      return;
+    }
+    const day = e.target.closest('[data-tb-day]');
+    if (day) {
+      const input = document.getElementById('taskBoardDate');
+      if (input) input.value = day.dataset.tbDay;
+      state.date = day.dataset.tbDay;
+      toggleViewMode('day');
+      return;
+    }
+    if (e.target.closest('button, a, input, select')) return;
+    const card = e.target.closest('[data-task-card]');
+    const idAttr = card?.getAttribute('data-task-card') || '';
+    if (card && idAttr && !idAttr.startsWith('zt-')) openEdit(Number(idAttr));
+  });
+  tab.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const card = e.target.closest?.('[data-task-card]');
+    if (!card || e.target !== card) return;
+    const idAttr = card.getAttribute('data-task-card') || '';
+    if (idAttr.startsWith('zt-')) return;
+    e.preventDefault();
+    openEdit(Number(idAttr));
+  });
 }
 
 // ─── modal ──────────────────────────────────────────────────────────────
 
+let modalCloseTimer = 0;
+
+function bindModal() {
+  const modal = document.getElementById('taskBoardModal');
+  if (!modal || modal.dataset.tbdBound) return;
+  modal.dataset.tbdBound = '1';
+  modal.addEventListener('click', (e) => {
+    if (e.target.closest('[data-tb-close]')) { closeModal(); return; }
+    const mode = e.target.closest('[data-tb-mode]');
+    if (mode) {
+      const sel = document.getElementById('taskBoardCreateMode');
+      if (sel) sel.value = mode.dataset.tbMode;
+      toggleCreateMode();
+    }
+  });
+  // 捕获阶段：组合框下拉 / 确认框打开时 Esc 先交给它们
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || modal.classList.contains('hidden')) return;
+    if (document.querySelector('.zt-combo-list:not(.hidden)')) return;
+    const dlg = document.getElementById('taskOpDialog');
+    if (dlg && dlg.offsetParent !== null) return;
+    if (document.querySelector('#omniqaSelectMenu:not([hidden]), #omniqaCalendar:not([hidden])')) return;
+    e.preventDefault();
+    closeModal();
+  }, true);
+}
+
 function openModal() {
   const modal = document.getElementById('taskBoardModal');
   if (!modal) return;
+  bindModal();
+  clearTimeout(modalCloseTimer);
+  const wasOpen = !modal.classList.contains('hidden');
   modal.classList.remove('hidden');
   modal.style.display = 'flex';
+  const html = document.documentElement;
+  if (!html.classList.contains('sd-locked')) html.classList.toggle('sd-gutter', window.innerWidth > html.clientWidth);
+  html.classList.add('sd-locked', 'tbd-locked');
+  if (!wasOpen) {
+    modal.querySelector('.tbd-modal-body')?.scrollTo(0, 0);
+    requestAnimationFrame(() => requestAnimationFrame(() => modal.classList.add('is-open')));
+    modal.querySelector('.tbd-modal-panel')?.focus({ preventScroll: true });
+  }
 }
 
 export function closeModal() {
   const modal = document.getElementById('taskBoardModal');
   if (!modal) return;
-  modal.classList.add('hidden');
-  modal.style.display = 'none';
+  modal.classList.remove('is-open');
   state.editingTaskId = null;
+  const html = document.documentElement;
+  html.classList.remove('tbd-locked');
+  if (!document.querySelector('.sd-root:not([hidden])')) html.classList.remove('sd-locked', 'sd-gutter');
+  const done = () => { modal.classList.add('hidden'); modal.style.display = 'none'; };
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) done();
+  else modalCloseTimer = setTimeout(done, 200);
 }
 
 function resetForm() {
@@ -410,6 +537,11 @@ function setCreateMode(mode) {
   if (sel) sel.value = mode;
   document.getElementById('taskBoardFormZentao')?.classList.toggle('hidden', mode !== 'zentao');
   document.getElementById('taskBoardFormPlatform')?.classList.toggle('hidden', mode === 'zentao');
+  document.querySelectorAll('#taskBoardModeSwitch [data-tb-mode]').forEach((b) => {
+    const on = b.dataset.tbMode === mode;
+    b.classList.toggle('is-active', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
 }
 
 export function toggleCreateMode() {
@@ -536,7 +668,10 @@ export async function openCreate() {
   setCreateMode('platform');
   document.getElementById('taskBoardModeSwitch')?.classList.remove('hidden');
   document.getElementById('taskBoardModalTitle').innerText = '新建任务';
+  const kicker = document.getElementById('taskBoardModalKicker');
+  if (kicker) kicker.textContent = '任务看板';
   openModal();
+  setTimeout(() => document.getElementById('taskBoardFormTitle')?.focus({ preventScroll: true }), 80);
 }
 
 export async function openEdit(taskId) {
@@ -547,7 +682,9 @@ export async function openEdit(taskId) {
     // 编辑的是平台任务：隐藏创建模式切换，固定平台表单
     setCreateMode('platform');
     document.getElementById('taskBoardModeSwitch')?.classList.add('hidden');
-    document.getElementById('taskBoardModalTitle').innerText = `任务详情 #${detail.id}`;
+    document.getElementById('taskBoardModalTitle').innerText = detail.title || `任务 #${detail.id}`;
+    const kicker = document.getElementById('taskBoardModalKicker');
+    if (kicker) kicker.textContent = `平台任务 #${detail.id} · ${STATUS_META[detail.status]?.label || STATUS_LABEL_EXTRA[detail.status] || detail.status || ''}`;
     document.getElementById('taskBoardFormTitle').value = detail.title || '';
     document.getElementById('taskBoardFormDescription').value = detail.description || '';
     document.getElementById('taskBoardFormAssignee').value = detail.assignee_id ? String(detail.assignee_id) : '';
@@ -574,15 +711,19 @@ function renderTimeline(detail) {
   if (!tl) return;
   const updates = detail.updates || [];
   if (!updates.length) {
-    tl.innerHTML = '<div class="muted">暂无进展记录。</div>';
+    tl.innerHTML = '<div class="tbd-tl-empty">暂无进展记录</div>';
     return;
   }
-  tl.innerHTML = updates.map((u) => `
-    <div style="padding:6px 0; border-bottom:1px dashed #e2e8f0;">
-      <div style="font-size:12px; color:#475569;">${escapeHtml(u.author_name || '系统')} · ${escapeHtml(formatDateTime(u.created_at))} · 状态：${escapeHtml(STATUS_META[u.status_snapshot]?.label || u.status_snapshot || '-')}</div>
-      <div style="font-size:13px; margin-top:2px;">${escapeHtml(u.content)}</div>
-    </div>
-  `).join('');
+  tl.innerHTML = `<div class="tbd-tl-title">变更时间线<small>${updates.length} 条</small></div><ol class="tbd-tl">${updates.map((u) => {
+    const label = STATUS_META[u.status_snapshot]?.label || STATUS_LABEL_EXTRA[u.status_snapshot] || u.status_snapshot || '';
+    return `<li style="--dot:${COL_DOT[u.status_snapshot] || '#a8a29e'}">
+      <i class="tbd-dot"></i>
+      <div class="tbd-tl-main">
+        <div class="tbd-tl-meta"><b>${escapeHtml(u.author_name || '系统')}</b><span>${escapeHtml(formatDateTime(u.created_at))}</span>${label ? `<span class="tbd-tl-status">${escapeHtml(label)}</span>` : ''}</div>
+        <p>${escapeHtml(u.content)}</p>
+      </div>
+    </li>`;
+  }).join('')}</ol>`;
 }
 
 function readForm() {
@@ -698,15 +839,22 @@ export function shiftDate(days) {
 // 日视图 ⇄ 月视图切换：月视图隐藏分列看板与成员概览，显示月历
 export function toggleViewMode(mode) {
   state.viewMode = mode === 'month' ? 'month' : 'day';
-  const sel = document.getElementById('taskBoardViewMode');
-  if (sel && sel.value !== state.viewMode) sel.value = state.viewMode;
   const isMonth = state.viewMode === 'month';
+  document.querySelectorAll('#taskBoardViewMode [data-tb-view]').forEach((b) => {
+    const on = b.dataset.tbView === state.viewMode;
+    b.classList.toggle('is-active', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  const prev = document.getElementById('taskBoardPrevBtn');
+  const next = document.getElementById('taskBoardNextBtn');
+  if (prev) { prev.title = isMonth ? '上个月' : '上一天'; prev.setAttribute('aria-label', prev.title); }
+  if (next) { next.title = isMonth ? '下个月' : '下一天'; next.setAttribute('aria-label', next.title); }
   document.getElementById('taskBoardSummary')?.classList.toggle('hidden', isMonth);
-  document.getElementById('taskBoardColumns')?.classList.toggle('hidden', isMonth);
-  document.getElementById('taskBoardAssigneeSummary')?.classList.toggle('hidden', isMonth);
+  document.getElementById('taskBoardMembers')?.classList.toggle('hidden', isMonth);
+  document.querySelector('#tab-task-board .tbd-board-wrap')?.classList.toggle('hidden', isMonth);
   document.getElementById('taskBoardMonthView')?.classList.toggle('hidden', !isMonth);
-  if (state.data) render(state.data);
-  else load();
+  // 日期可能被月历点选改过：重新按当前日期拉取
+  load();
 }
 
 export function gotoToday() {
@@ -947,11 +1095,7 @@ function monthTaskEntry(t, markKey) {
     tone: { wait: 'gray', doing: 'blue', changed: 'blue', done: 'green', pause: 'amber', cancel: 'gray', closed: 'gray' }[t.status] || 'gray',
     rows: [['指派', person || '未指派'], ['当天', `${meta.label}${hours}`], ['计划', [dayOf(t.est_started), dayOf(t.deadline)].filter(Boolean).join(' → ')]],
   };
-  return `
-    <div data-hc="${escapeHtml(JSON.stringify(card))}" style="display:flex; align-items:center; gap:4px; font-size:11px; padding:2px 4px; border-radius:4px; background:${meta.bg}; color:${meta.color}; overflow:hidden;">
-      <span style="flex-shrink:0; font-weight:600;">${meta.label}${hours}</span>
-      <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">#${t.task_id} ${escapeHtml(t.name || '')}</span>
-    </div>`;
+  return `<div class="tbd-mentry tbd-mentry--${markKey}" data-hc="${escapeHtml(JSON.stringify(card))}"><b>${meta.label}${hours}</b><span>${escapeHtml(t.name || '')}</span></div>`;
 }
 
 // 月视图沿用看板顶部筛选（成员/只看我的/状态），但不按看板日期过滤
@@ -994,36 +1138,33 @@ function renderMonthView() {
   // 网格：周一开头；月首前置空白补齐
   const lead = (first.getDay() + 6) % 7;
   const cells = [];
-  for (let i = 0; i < lead; i++) cells.push('<div></div>');
+  for (let i = 0; i < lead; i++) cells.push('<div class="tbd-mday is-blank" aria-hidden="true"></div>');
   for (let d = 1; d <= daysInMonth; d++) {
-    const day = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const day = `${year}-${pad2(month + 1)}-${pad2(d)}`;
     const entries = byDay[day] || [];
-    const isToday = day === today;
-    const shown = entries.slice(0, 8);
+    const weekday = (lead + d - 1) % 7;
+    const shown = entries.slice(0, 5);
     const more = entries.length - shown.length;
+    const cls = ['tbd-mday', day === today ? 'is-today' : '', day < today ? 'is-past' : '', weekday >= 5 ? 'is-weekend' : '', day === state.date ? 'is-picked' : ''].filter(Boolean).join(' ');
     cells.push(`
-      <div style="border:1px solid ${isToday ? '#3b82f6' : '#e2e8f0'}; ${isToday ? 'box-shadow: inset 0 0 0 1px #3b82f6;' : ''} border-radius:8px; padding:6px; min-height:96px; background:#fff; display:flex; flex-direction:column; gap:3px;">
-        <div style="font-size:12px; font-weight:700; color:${isToday ? '#1d4ed8' : '#475569'}; display:flex; justify-content:space-between;">
-          <span>${d}</span>${entries.length ? `<span style="font-weight:400; color:#94a3b8;">${entries.length}项</span>` : ''}
-        </div>
+      <div class="${cls}">
+        <button type="button" class="tbd-mday-head" data-tb-day="${day}" title="查看 ${month + 1} 月 ${d} 日的看板"><b>${d}</b>${day === today ? '<span class="tbd-mday-today">今天</span>' : ''}${entries.length ? `<small>${entries.length} 项</small>` : ''}</button>
         ${shown.map(({ t, mark }) => monthTaskEntry(t, mark)).join('')}
-        ${more > 0 ? `<div class="muted" style="font-size:10px;">还有 ${more} 项…</div>` : ''}
+        ${more > 0 ? `<button type="button" class="tbd-mday-more" data-tb-day="${day}">还有 ${more} 项</button>` : ''}
       </div>`);
   }
 
   const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
   const legend = Object.entries(MONTH_MARK_META)
-    .map(([, m]) => `<span class="badge" style="background:${m.bg}; color:${m.color}; font-size:11px;">${m.label}</span>`)
-    .join(' ');
+    .map(([k, m]) => `<span class="tbd-mlegend tbd-mentry--${k}"><i></i>${m.label}</span>`)
+    .join('');
   root.innerHTML = `
-    <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
-      <strong style="font-size:16px; color:#0f172a;">${year} 年 ${month + 1} 月 · 禅道任务月历</strong>
-      <span class="row" style="gap:6px; align-items:center;">${legend}</span>
+    <div class="tbd-month-head">
+      <div><b>${year} 年 ${month + 1} 月</b><small>禅道任务月历 · 按实际 / 计划起止时间铺排，点日期查看当天看板</small></div>
+      <div class="tbd-month-legend">${legend}</div>
     </div>
-    <div style="display:grid; grid-template-columns:repeat(7, minmax(0,1fr)); gap:6px; margin-bottom:4px;">
-      ${weekdays.map((w) => `<div style="text-align:center; font-size:12px; color:#64748b; font-weight:600;">周${w}</div>`).join('')}
-    </div>
-    <div style="display:grid; grid-template-columns:repeat(7, minmax(0,1fr)); gap:6px;">${cells.join('')}</div>
+    <div class="tbd-month-grid tbd-month-week">${weekdays.map((w, i) => `<div class="${i >= 5 ? 'is-weekend' : ''}">周${w}</div>`).join('')}</div>
+    <div class="tbd-month-grid">${cells.join('')}</div>
   `;
 }
 
@@ -1035,31 +1176,28 @@ function ztActionsHtml(t) {
   const mine = ztIsMine(t);
   const isAdmin = !!(window.currentUser && window.currentUser.role === 'admin');
   const id = t.task_id;
-  const btn = (label, action, style) =>
-    `<button style="padding:2px 8px; font-size:11px; ${style}" data-op-key="task:${id}" onclick="event.stopPropagation(); window.OmniQATaskBoardTab.ztOperate(${id}, '${action}')">${label}</button>`;
+  const op = (label, action, tone, icon) =>
+    `<button type="button" class="tbd-op tbd-op--${tone}" data-op-key="task:${id}" onclick="event.stopPropagation(); window.OmniQATaskBoardTab.ztOperate(${id}, '${action}')">${ic(icon)}${label}</button>`;
   const parts = [];
   if (mine) {
-    if (t.status === 'wait') parts.push(btn('▶ 开始', 'start', 'background:#16a34a;'));
+    if (t.status === 'wait') parts.push(op('开始', 'start', 'green', 'play'));
     if (t.status === 'doing' || t.status === 'changed') {
-      parts.push(btn('⏸ 暂停', 'pause', 'background:#d97706;'));
-      parts.push(btn('✅ 完成', 'finish', 'background:#0d9488;'));
+      parts.push(op('完成', 'finish', 'teal', 'check'));
+      parts.push(op('暂停', 'pause', 'amber', 'pause'));
     }
     if (t.status === 'pause') {
-      parts.push(btn('▶ 继续', 'start', 'background:#16a34a;'));
-      parts.push(btn('✅ 完成', 'finish', 'background:#0d9488;'));
+      parts.push(op('继续', 'start', 'green', 'play'));
+      parts.push(op('完成', 'finish', 'teal', 'check'));
     }
-    if (t.status === 'done' || t.status === 'closed' || t.status === 'cancel') {
-      parts.push(btn('♻ 重新激活', 'reactivate', 'background:#0ea5e9;'));
-    }
+    if (t.status === 'done' || t.status === 'closed' || t.status === 'cancel') parts.push(op('重新激活', 'reactivate', 'sky', 'rotate'));
   }
-  if ((mine || isAdmin) && t.status === 'done') parts.push(btn('⛔ 关闭', 'close', 'background:#fff; color:#b91c1c; border:1px solid #fca5a5;'));
-  // 工时记录（查看对所有人开放；本人的记录可在弹窗里修改或删除）
-  parts.push(`<button class="secondary" style="padding:2px 8px; font-size:11px; color:#0f766e; border:1px solid #99f6e4;"
-    onclick="event.stopPropagation(); window.openTaskEffortModal(${id})" title="查看、修改或删除该任务已提交的禅道工时记录">🕒 工时</button>`);
-  // 指派面向所有用户开放（复用任务工作台的指派弹窗，来源标记 board 以便回刷看板）
-  parts.push(`<button class="secondary" style="padding:2px 8px; font-size:11px; color:#7c3aed; border:1px solid #ddd6fe;" data-op-key="task:${id}"
-    onclick="event.stopPropagation(); window.OmniQATaskWorkbenchTab && window.OmniQATaskWorkbenchTab.openTaskAssign(${id}, 'board')">👤 指派</button>`);
-  return `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${parts.join('')}</div>`;
+  if ((mine || isAdmin) && t.status === 'done') parts.push(op('关闭', 'close', 'red', 'ban'));
+  // 工时记录（查看对所有人开放；本人的记录可在弹窗里修改或删除）与指派（复用任务工作台的指派弹窗）
+  const ghost = `<span class="tbd-op-ghosts">
+    <button type="button" class="tbd-op tbd-op--ghost" onclick="event.stopPropagation(); window.openTaskEffortModal(${id})" title="查看、修改或删除该任务已提交的禅道工时记录">${ic('timer')}工时</button>
+    <button type="button" class="tbd-op tbd-op--ghost" data-op-key="task:${id}" onclick="event.stopPropagation(); window.OmniQATaskWorkbenchTab && window.OmniQATaskWorkbenchTab.openTaskAssign(${id}, 'board')" title="改派给其他人">${ic('user')}指派</button>
+  </span>`;
+  return `<div class="tbd-acts">${parts.join('')}${ghost}</div>`;
 }
 
 // 指派完成后的轻量回刷：只读镜像缓存重渲染，不触发禅道全量同步
@@ -1089,40 +1227,42 @@ export async function ztOperate(taskId, action) {
 
 // 看板列中的禅道任务卡
 function renderZentaoBoardCard(t) {
-  const meta = ZT_STATUS_META[t.status] || { label: t.status || '', bg: '#f1f5f9', color: '#475569' };
-  const person = escapeHtml(t.assigned_to_realname || t.assigned_to || '未指派');
-  const span = (t.est_started || t.deadline) ? `${t.est_started || '—'} → ${t.deadline || '—'}` : '';
+  const meta = ZT_STATUS_META[t.status] || { label: t.status || '' };
+  const personName = t.assigned_to_realname || t.assigned_to || '未指派';
   const preview = window.OmniQAUtils && window.OmniQAUtils.renderPreviewBtn
     ? window.OmniQAUtils.renderPreviewBtn('task', t.task_id)
     : '';
-  const actions = ztActionsHtml(t);
-  // 延期列的卡片标注截至看板日期已延期的天数；
-  // 逾期完成的任务在已完成/已关闭列同样带「已延期」标签（完成日与截止日对齐口径）
+  // 延期列标注截至看板日期已延期的天数；逾期完成的任务在已完成列同样带「延期完成」标签
   let delayChip = '';
   const finishedDayChip = dayOf(t.finished_date);
   if (t._boardCol === 'deferred' && t.deadline) {
     const boardDate = state.date || todayISO();
     const days = Math.max(1, Math.round((new Date(boardDate) - new Date(dayOf(t.deadline))) / 86400000));
-    delayChip = `<span class="badge" style="background:#fef9c3; color:#a16207; border:1px solid #fde68a; font-size:11px;">⏰ 已延期 ${days} 天</span>`;
+    delayChip = `<span class="tbd-chip tbd-chip--amber">${ic('clock')}已延期 ${days} 天</span>`;
   } else if ((t._boardCol === 'done' || t._boardCol === 'done_unclosed') && t.deadline && finishedDayChip && finishedDayChip > dayOf(t.deadline)) {
     const days = Math.max(1, Math.round((new Date(finishedDayChip) - new Date(dayOf(t.deadline))) / 86400000));
-    delayChip = `<span class="badge" style="background:#fef9c3; color:#a16207; border:1px solid #fde68a; font-size:11px;"
-      title="截止 ${dayOf(t.deadline)}，实际 ${finishedDayChip} 完成">⏰ 已延期 ${days} 天完成</span>`;
+    delayChip = `<span class="tbd-chip tbd-chip--amber" data-hc="${escapeHtml(JSON.stringify({ k: '延期完成', t: `截止 ${dayOf(t.deadline)}，实际 ${finishedDayChip} 完成`, tone: 'amber' }))}">${ic('clock')}延期 ${days} 天完成</span>`;
   }
+  // 列名已经表达了状态；只有和列含义不一致的状态（暂停 / 延期列里的真实状态）才单独标出
+  const showStatus = t.status === 'pause' || t._boardCol === 'deferred';
+  const est = Number(t.estimate || 0);
+  const used = Number(t.consumed || 0);
+  const pct = est > 0 ? Math.min(100, Math.round((used * 100) / est)) : 0;
   return `
-    <div data-task-card="zt-${t.task_id}" style="background:#fff; border:1px solid rgba(15,23,42,.08); border-left:3px solid ${meta.color}; border-radius:8px; padding:10px; box-shadow:0 1px 2px rgba(15,23,42,.04);">
-      <div class="row" style="justify-content:space-between; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
-        <span class="badge" style="background:#f0fdfa; color:#0f766e; border:1px solid #99f6e4; font-size:11px;">🐲 禅道 #${t.task_id}</span>
+    <article data-task-card="zt-${t.task_id}" class="tbd-card tbd-card--zt tbd-zst--${t.status}">
+      <div class="tbd-card-top">
+        <span class="tbd-zt-id">禅道 #${t.task_id}</span>
+        ${showStatus ? `<span class="tbd-zst tbd-zst--${t.status}">${meta.label}</span>` : ''}
         ${delayChip}
-        <span class="badge" style="background:${meta.bg}; color:${meta.color}; font-size:11px;">${meta.label}</span>
       </div>
-      <div style="font-weight:600; color:#0f172a; line-height:1.4;">${escapeHtml(t.name || '')} ${preview}</div>
-      <div class="muted" style="font-size:11px; margin-top:6px; display:flex; justify-content:space-between; gap:6px; flex-wrap:wrap;">
-        <span>👤 ${person}</span>
-        ${span ? `<span>🗓️ ${escapeHtml(span)}</span>` : ''}
+      <div class="tbd-card-title">${escapeHtml(t.name || '')}${preview ? ` ${preview}` : ''}</div>
+      <div class="tbd-card-meta">
+        <span class="tbd-who"><span class="tbd-avatar tbd-avatar--sm">${initialOf(personName)}</span>${escapeHtml(personName)}</span>
+        ${(t.est_started || t.deadline) ? `<span class="tbd-span">${ic('clock')}${shortDay(t.est_started)} → ${shortDay(t.deadline)}</span>` : ''}
       </div>
-      ${actions ? `<div style="margin-top:8px;">${actions}</div>` : ''}
-    </div>
+      ${est > 0 ? `<div class="tbd-hours${used > est ? ' is-over' : ''}"><span class="tbd-hours-bar"><i style="width:${pct}%"></i></span><small>${used || 0} / ${est} h</small></div>` : ''}
+      ${ztActionsHtml(t)}
+    </article>
   `;
 }
 
@@ -1225,7 +1365,7 @@ function renderZentaoTasks(tasks) {
   const root = document.getElementById('taskBoardZentaoList');
   if (!root) return;
   if (!tasks.length) {
-    root.innerHTML = '<div class="muted" style="padding:16px 0; text-align:center; font-size:13px;">暂无禅道任务（可点「⟳ 同步禅道」刷新缓存）</div>';
+    root.innerHTML = `<div class="tbd-empty">${ic('layers')}<b>没有符合条件的禅道任务</b><span>换个筛选条件，或点「同步禅道」刷新缓存</span></div>`;
     return;
   }
   // 按指派人分组
@@ -1235,21 +1375,15 @@ function renderZentaoTasks(tasks) {
     (groups[key] = groups[key] || []).push(t);
   });
   root.innerHTML = Object.entries(groups).map(([person, items]) => `
-    <div style="margin-bottom:14px;">
-      <div style="font-weight:700; color:#334155; margin-bottom:6px;">👤 ${escapeHtml(person)} <span class="muted" style="font-weight:400; font-size:12px;">(${items.length})</span></div>
-      <div style="display:flex; flex-direction:column; gap:6px;">
-        ${items.map(renderZentaoTaskRow).join('')}
-      </div>
+    <div class="tbd-zgroup">
+      <div class="tbd-zgroup-head"><span class="tbd-avatar">${initialOf(person)}</span><b>${escapeHtml(person)}</b><small>${items.length} 个任务</small></div>
+      <div class="tbd-zrows">${items.map(renderZentaoTaskRow).join('')}</div>
     </div>
   `).join('');
 }
 
 function renderZentaoTaskRow(t) {
-  const meta = ZT_STATUS_META[t.status] || { label: t.status || '', bg: '#f1f5f9', color: '#475569' };
-  // 持续多天：显示日期跨度
-  const span = (t.est_started || t.deadline)
-    ? `${t.est_started || '—'} → ${t.deadline || '—'}`
-    : '';
+  const meta = ZT_STATUS_META[t.status] || { label: t.status || '' };
   const spanIsMultiDay = t.est_started && t.deadline && t.est_started !== t.deadline;
   const hours = [];
   if (t.estimate != null) hours.push(`预计 ${t.estimate}h`);
@@ -1258,21 +1392,18 @@ function renderZentaoTaskRow(t) {
   const preview = window.OmniQAUtils && window.OmniQAUtils.renderPreviewBtn
     ? window.OmniQAUtils.renderPreviewBtn('task', t.task_id)
     : '';
-  const actions = ztActionsHtml(t);
   return `
-    <div style="background:#fff; border:1px solid #e2e8f0; border-left:3px solid ${meta.color}; border-radius:8px; padding:8px 10px;">
-      <div class="row" style="justify-content:space-between; gap:6px; flex-wrap:wrap;">
-        <div style="font-weight:600; color:#0f172a;">${escapeHtml(t.name)} ${preview}</div>
-        <div class="row" style="gap:6px; flex-wrap:wrap; align-items:center;">
-          ${actions}
-          <span class="badge" style="background:${meta.bg}; color:${meta.color};">${meta.label}</span>
+    <div class="tbd-zrow">
+      <span class="tbd-zst tbd-zst--${t.status}">${meta.label}</span>
+      <div class="tbd-zrow-main">
+        <div class="tbd-zrow-title"><span class="tbd-zt-id">#${t.task_id}</span><b>${escapeHtml(t.name)}</b>${preview}</div>
+        <div class="tbd-zrow-meta">
+          ${t.execution_name ? `<span>${escapeHtml(t.execution_name)}</span>` : ''}
+          ${(t.est_started || t.deadline) ? `<span class="${spanIsMultiDay ? 'is-multi' : ''}">${ic('clock')}${escapeHtml(`${t.est_started || '—'} → ${t.deadline || '—'}`)}${spanIsMultiDay ? '（多日）' : ''}</span>` : ''}
+          ${hours.length ? `<span>${ic('timer')}${hours.join(' · ')}</span>` : ''}
         </div>
       </div>
-      <div class="muted" style="font-size:11px; margin-top:4px; display:flex; gap:10px; flex-wrap:wrap;">
-        <span>🏷️ ${escapeHtml(t.execution_name || '')}</span>
-        ${span ? `<span style="${spanIsMultiDay ? 'color:#1d4ed8; font-weight:600;' : ''}">🗓️ ${escapeHtml(span)}${spanIsMultiDay ? '（多日）' : ''}</span>` : ''}
-        ${hours.length ? `<span>⏱ ${hours.join(' · ')}</span>` : ''}
-      </div>
+      ${ztActionsHtml(t)}
     </div>
   `;
 }
